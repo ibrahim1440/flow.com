@@ -11,7 +11,9 @@ export type SettingsAction =
   | "SETTINGS_UPDATED" | "ROASTER_CREATED" | "ROASTER_UPDATED" | "ROASTER_STATUS_CHANGED"
   | "MAINTENANCE_CREATED" | "MAINTENANCE_UPDATED" | "OPERATOR_ASSIGNED" | "OPERATOR_UNASSIGNED"
   // Small-fixes batch (migration 20261024090000_small_fixes): the one-time order status recompute.
-  | "ORDER_STATUS_RECOMPUTED";
+  | "ORDER_STATUS_RECOMPUTED"
+  // Unified inventory phase 1 (migration 20261112090000_item_categories): the item categories page.
+  | "CATEGORY_CREATED" | "CATEGORY_UPDATED" | "CATEGORY_REORDERED" | "CATEGORY_ARCHIVED" | "CATEGORY_RESTORED";
 
 type Tx = { settingsAuditLog: { create(args: { data: Prisma.SettingsAuditLogUncheckedCreateInput }): Promise<unknown> } };
 type Plain = Record<string, unknown>;

@@ -18,6 +18,8 @@ export type LedgerFilter = {
   q?: string;
   entityId?: string;
   sourceDocId?: string;
+  /** An item category (unified inventory): its movements, a root's sub-categories included. */
+  itemCategoryId?: string;
   from?: Date;
   to?: Date;
   page: number;
@@ -44,6 +46,7 @@ export function parseLedgerFilter(sp: URLSearchParams): LedgerFilter {
     source: pick(sp.get("source"), MOVEMENT_SOURCES),
     q: q || undefined,
     entityId: sp.get("entityId")?.slice(0, 64) || undefined,
+    itemCategoryId: sp.get("itemCategory")?.slice(0, 64) || undefined,
     sourceDocId: sp.get("sourceDocId")?.slice(0, 64) || undefined,
     from: date(sp.get("from")),
     to: date(sp.get("to")),

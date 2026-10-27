@@ -6,13 +6,21 @@ import { hasSubPrivilege } from "@/lib/auth";
 import { auditInventoryReceipt } from "@/lib/services/inventory-receiving";
 import { parseStockQuantity } from "@/lib/services/stock-quantity";
 import { handlePrismaError } from "@/lib/api-error";
+import { randomBytes } from "node:crypto";
+import { resolveMaterialCategory, categoryDbRefusal } from "@/lib/services/item-categories";
+import { refusal } from "@/lib/inventory/category-response";
+import { ITEM_UNITS } from "@/lib/inventory/item-categories";
 
 // Stocked packaging materials: bags, labels, cartons. These are what a BOM's MATERIAL
 // components consume. Before this existed, PurchaseType.PACKAGING recorded the cost of
 // buying bags and nothing recorded holding them, so a BOM had nothing real to point at.
 
+// Unified inventory phase 1 (20261112090000_item_categories): an item belongs to an item category
+// (`categoryId`). A client that only knows the legacy enum (`category`) is placed in that enum's seeded
+// category, and one that sends neither in the PACKAGING one (the old default). The enum stays stored and in step
+// (trigger) for every consumer.
 const MATERIAL_CATEGORIES = ["PACKAGING", "LABEL", "CONSUMABLE", "OTHER"] as const;
-const UNITS_OF_MEASURE = ["UNIT", "KG", "GRAM", "PIECE"] as const;
+const UNITS_OF_MEASURE = ITEM_UNITS;
 
 const isCategory = (v: unknown): v is (typeof MATERIAL_CATEGORIES)[number] =>
   typeof v === "string" && (MATERIAL_CATEGORIES as readonly string[]).includes(v);
@@ -26,11 +34,14 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const activeOnly = searchParams.get("activeOnly") !== "false";
   const q = (searchParams.get("q") ?? "").trim();
+  const categoryId = (searchParams.get("categoryId") ?? "").slice(0, 64);
 
   try {
     const items = await prisma.materialItem.findMany({
       where: {
         ...(activeOnly ? { isActive: true } : {}),
+        // A root covers its sub-categories too.
+        ...(categoryId ? { OR: [{ categoryId }, { itemCategory: { parentId: categoryId } }] } : {}),
         ...(q
           ? {
               OR: [
@@ -53,6 +64,7 @@ export async function GET(request: Request) {
         name: m.name,
         nameAr: m.nameAr,
         category: m.category,
+        categoryId: m.categoryId,
         unitOfMeasure: m.unitOfMeasure,
         quantityOnHand: m.quantityOnHand,
         reorderPoint: m.reorderPoint,
@@ -79,8 +91,8 @@ export async function POST(request: Request) {
   }
   const b = (body ?? {}) as Record<string, unknown>;
 
-  const code = typeof b.code === "string" ? b.code.trim() : "";
-  if (!code) return NextResponse.json({ error: "code is required." }, { status: 400 });
+  // The code is optional (the accountant names items in words): one is generated when it is left out.
+  const code = (typeof b.code === "string" ? b.code.trim() : "") || `ITM-${randomBytes(4).toString("hex").toUpperCase()}`;
 
   const name = typeof b.name === "string" ? b.name.trim() : "";
   if (!name) return NextResponse.json({ error: "name is required." }, { status: 400 });
@@ -96,8 +108,14 @@ export async function POST(request: Request) {
       { status: 400 }
     );
 
-  // Strict (re-review P3-B): the opening stock is a receipt, parsed like one.
-  const uom = isUom(b.unitOfMeasure) ? b.unitOfMeasure : "PIECE";
+  // Every new item gets a category. A client that names neither (the older API contract: `category` was optional
+  // and defaulted to PACKAGING) gets that same default — the seeded «أكياس وتغليف».
+  const cat = await resolveMaterialCategory(prisma, b.categoryId === undefined && b.category === undefined ? { category: "PACKAGING" } : b);
+  if (!cat.ok) return refusal(cat);
+
+  // Strict (re-review P3-B): the opening stock is a receipt, parsed like one. The unit defaults to the category's.
+  const catUnit = isUom(cat.data.defaultUnit) ? cat.data.defaultUnit : "PIECE";
+  const uom = isUom(b.unitOfMeasure) ? b.unitOfMeasure : catUnit;
   const opening = b.quantityOnHand === undefined ? ({ ok: true, value: 0 } as const) : parseStockQuantity(b.quantityOnHand, { allowZero: true, unitOfMeasure: uom });
   if (!opening.ok)
     return NextResponse.json({ error: `quantityOnHand ${opening.message}.`, code: "OPENING_QUANTITY_INVALID" }, { status: 400 });
@@ -127,8 +145,9 @@ export async function POST(request: Request) {
           code,
           name,
           nameAr: typeof b.nameAr === "string" && b.nameAr.trim() ? b.nameAr.trim() : null,
-          category: isCategory(b.category) ? b.category : "PACKAGING",
-          unitOfMeasure: isUom(b.unitOfMeasure) ? b.unitOfMeasure : "PIECE",
+          categoryId: cat.data.id,
+          category: cat.data.legacyMaterialCategory as (typeof MATERIAL_CATEGORIES)[number],
+          unitOfMeasure: uom,
           quantityOnHand,
           reorderPoint,
           isActive: b.isActive === undefined ? true : b.isActive === true,
@@ -162,6 +181,8 @@ export async function POST(request: Request) {
     });
     return NextResponse.json(item, { status: 201 });
   } catch (err) {
+    const r = categoryDbRefusal(err);
+    if (r) return refusal(r);
     return handlePrismaError(err);
   }
 }

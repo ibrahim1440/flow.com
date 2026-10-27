@@ -20,6 +20,21 @@ async function matchingEntityIds(q: string): Promise<string[]> {
   return [...beans, ...mats, ...lots, ...batches].map((x) => x.id);
 }
 
+/** The movements of an item category: green / roasted / finished by their ledger category, materials by item. */
+async function itemCategoryWhere(id: string): Promise<Prisma.InventoryMovementWhereInput> {
+  const cats = await prisma.itemCategory.findMany({ where: { OR: [{ id }, { parentId: id }] }, select: { id: true, template: true } });
+  const or: Prisma.InventoryMovementWhereInput[] = [];
+  if (cats.some((c) => c.template === "GREEN_COFFEE")) or.push({ category: "RAW_MATERIAL" });
+  if (cats.some((c) => c.template === "ROASTED_COFFEE")) or.push({ category: "ROASTED_COFFEE" });
+  if (cats.some((c) => c.template === "FINISHED")) or.push({ category: "FINISHED_GOODS" });
+  const matCats = cats.filter((c) => c.template === "PACKAGING" || c.template === "GENERAL").map((c) => c.id);
+  if (matCats.length) {
+    const mats = await prisma.materialItem.findMany({ where: { categoryId: { in: matCats } }, select: { id: true } });
+    if (mats.length) or.push({ category: "PACKAGING_MATERIAL", referenceEntityId: { in: mats.map((m) => m.id) } });
+  }
+  return or.length ? { OR: or } : { id: "__none__" };
+}
+
 export async function ledgerWhere(f: LedgerFilter): Promise<Prisma.InventoryMovementWhereInput> {
   const and: Prisma.InventoryMovementWhereInput[] = [];
   if (f.type) and.push({ type: f.type });
@@ -27,6 +42,7 @@ export async function ledgerWhere(f: LedgerFilter): Promise<Prisma.InventoryMove
   if (f.source) and.push({ sourceDocType: f.source });
   if (f.entityId) and.push({ referenceEntityId: f.entityId });
   if (f.sourceDocId) and.push({ sourceDocId: f.sourceDocId });
+  if (f.itemCategoryId) and.push(await itemCategoryWhere(f.itemCategoryId));
   if (f.from) and.push({ timestamp: { gte: f.from } });
   if (f.to) and.push({ timestamp: { lte: f.to } });
   if (f.q) {

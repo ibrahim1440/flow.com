@@ -8,7 +8,11 @@ import { CAT_LABELS, DownloadIcon, MovementType, QtyChange, SRC_LABELS, TYPE_MAP
 
 const PAGE_SIZE = 25;
 
-export function LedgerTab({ refreshKey, initial }: { refreshKey: number; initial?: { category?: string; type?: string; source?: string } }) {
+/** `itemCategories` (unified inventory): the «التصنيف» chip filters by item category (a main category covers its sub-categories). */
+export function LedgerTab({ refreshKey, initial, itemCategories, initialItemCategory }: {
+  refreshKey: number; initial?: { category?: string; type?: string; source?: string };
+  itemCategories?: { id: string; nameAr: string; nameEn: string | null; parentId: string | null }[]; initialItemCategory?: string;
+}) {
   const { t, lang } = useI18n();
   const L = useL();
   const [q, setQ] = useState("");
@@ -16,6 +20,7 @@ export function LedgerTab({ refreshKey, initial }: { refreshKey: number; initial
   const [category, setCategory] = useState(initial?.category ?? "");
   const [type, setType] = useState(initial?.type ?? "");
   const [source, setSource] = useState(initial?.source ?? "");
+  const [itemCategory, setItemCategory] = useState(initialItemCategory ?? "");
   const [page, setPage] = useState(1);
   const [data, setData] = useState<{ total: number; rows: EnrichedMovement[] } | null>(null);
   const [error, setError] = useState(false);
@@ -27,9 +32,10 @@ export function LedgerTab({ refreshKey, initial }: { refreshKey: number; initial
     if (category) p.set("category", category);
     if (type) p.set("type", type);
     if (source) p.set("source", source);
+    if (itemCategory) p.set("itemCategory", itemCategory);
     if (qDebounced) p.set("q", qDebounced);
     return p;
-  }, [category, type, source, qDebounced]);
+  }, [category, type, source, itemCategory, qDebounced]);
 
   // A filter change goes back to page 1 (set by the handlers below, never from an effect).
   const reset = <T,>(set: (v: T) => void) => (v: T) => { set(v); setPage(1); };
@@ -69,7 +75,15 @@ export function LedgerTab({ refreshKey, initial }: { refreshKey: number; initial
       <div className="stk-tool">
         <input type="search" className="hr-input hr-search" placeholder={L("الصنف أو رقم المستند", "Item or document number")} aria-label={L("الصنف أو رقم المستند", "Item or document number")}
           value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
-        <FilterChip label={L("الفئة", "Category")} value={category} onChange={reset(setCategory)} options={Object.keys(CAT_LABELS).map((k) => ({ value: k, label: pair(CAT_LABELS, k, 1) }))} />
+        {itemCategories && itemCategories.length ? (
+          <FilterChip label={L("التصنيف", "Category")} value={itemCategory} onChange={reset(setItemCategory)}
+            options={itemCategories.map((c) => {
+              const p = c.parentId ? itemCategories.find((x) => x.id === c.parentId) : undefined;
+              const n = (x: { nameAr: string; nameEn: string | null }) => (lang === "ar" ? x.nameAr : x.nameEn || x.nameAr);
+              return { value: c.id, label: p ? `${n(p)} › ${n(c)}` : n(c) };
+            })} />
+        ) : null}
+        <FilterChip label={L("نوع المخزون", "Stock kind")} value={category} onChange={reset(setCategory)} options={Object.keys(CAT_LABELS).map((k) => ({ value: k, label: pair(CAT_LABELS, k, 1) }))} />
         <FilterChip label={L("النوع", "Type")} value={type} onChange={reset(setType)} options={Object.keys(TYPE_MAP).map((k) => ({ value: k, label: pair(TYPE_MAP, k, 2) }))} />
         <FilterChip label={L("المصدر", "Source")} value={source} onChange={reset(setSource)} options={Object.keys(SRC_LABELS).map((k) => ({ value: k, label: pair(SRC_LABELS, k, 1) }))} />
         <span className="stk-end">

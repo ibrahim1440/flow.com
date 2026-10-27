@@ -15,6 +15,7 @@ import { postEntry, type PostEntryInput, type PostEntryResult, type PostingLineI
 import { riyadhDay, dayText } from "../dates";
 import { roundMoney, ZERO, Decimal } from "../money";
 import { issue, receive, revalue, unitCost, type Holder } from "./costing";
+import { materialInventoryRole } from "@/lib/inventory/item-categories";
 
 type Tx = Prisma.TransactionClient;
 
@@ -28,13 +29,19 @@ export const ITEM_DIM: Partial<Record<CostKind, "GREEN_BEAN" | "MATERIAL">> = { 
 export type Src = { module: EngineModule; type: string; id: string; event: string };
 export type HolderRow = { id: string; kind: CostKind; entityId: string; role: InventoryRole; qty: Decimal; value: Decimal; avgCost: Decimal; lastInCost: Decimal | null };
 
-/** The default role of a holder: materials by category (packaging / labels → packaging; consumables / other → café). */
+/**
+ * The default role of a holder. A material takes its item category's inventory role (unified inventory phase 1,
+ * 20261112090000_item_categories); without a category, the legacy enum rule (packaging / labels → packaging;
+ * consumables / other → café). Identical for every material that existed before categories (the back-fill maps
+ * each enum to a category of that same role): tests/ops/unit/item-categories.test.ts. A holder's role is fixed
+ * when it is first costed; a later move to a category of another role is refused (trigger + API).
+ */
 export async function roleFor(tx: Tx, kind: CostKind, entityId: string): Promise<InventoryRole> {
   if (kind === "GREEN_BEAN") return "INVENTORY_GREEN";
   if (kind === "ROASTED_BATCH") return "INVENTORY_ROASTED";
   if (kind === "FG_LOT") return "INVENTORY_PACKED";
-  const m = await tx.materialItem.findUnique({ where: { id: entityId }, select: { category: true } });
-  return m && (m.category === "CONSUMABLE" || m.category === "OTHER") ? "INVENTORY_CAFE" : "INVENTORY_PACKAGING";
+  const m = await tx.materialItem.findUnique({ where: { id: entityId }, select: { category: true, itemCategory: { select: { inventoryRole: true } } } });
+  return materialInventoryRole(m ?? {});
 }
 
 /** Lock (creating it on first use) the cost holder of an entity. */

@@ -1183,7 +1183,8 @@ model SettingsAuditLog {
   section    String
   /// SETTINGS_UPDATED | ROASTER_CREATED | ROASTER_UPDATED | ROASTER_STATUS_CHANGED |
   /// MAINTENANCE_CREATED | MAINTENANCE_UPDATED | OPERATOR_ASSIGNED | OPERATOR_UNASSIGNED |
-  /// ORDER_STATUS_RECOMPUTED (20261024090000_small_fixes)
+  /// ORDER_STATUS_RECOMPUTED (20261024090000_small_fixes) | CATEGORY_CREATED | CATEGORY_UPDATED |
+  /// CATEGORY_REORDERED | CATEGORY_ARCHIVED | CATEGORY_RESTORED (20261112090000_item_categories)
   action     String
   entityType String
   entityId   String
@@ -1738,6 +1739,8 @@ enum UnitOfMeasure {
   KG
   GRAM
   PIECE
+  /// Litre (café stock such as milk). Added by 20261112090000_item_categories.
+  LITER
 }
 
 enum MaterialCategory {
@@ -1766,11 +1769,54 @@ model MaterialItem {
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
+  /// The user-defined inventory category (20261112090000_item_categories). Nullable in the database for
+  /// safety; the API requires it for new items and a trigger fills it from `category` when a writer omits
+  /// it. `category` (the legacy enum) is kept in step with it by the same trigger: BOM, packaging, labels,
+  /// receiving, counts and the cost ledger read the enum unchanged.
+  categoryId   String?
+  itemCategory ItemCategory? @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
   bomComponents BomComponent[]
   purchases     PurchaseRecord[]
 
   @@index([isActive])
   @@index([category, isActive])
+  @@index([categoryId])
+}
+
+/// Unified inventory — user-defined item categories (phase 1, 20261112090000_item_categories). At most two
+/// levels: a root («المحمصة», «المقهى», «المنتجات الجاهزة») and its children (a DB trigger refuses a third).
+/// A category says WHAT the stock is, never where it is (locations are a later phase).
+///   template       — which form and which backing table an item uses: GREEN_COFFEE (GreenBean lots),
+///                    ROASTED_COFFEE / FINISHED (view only: they come from roasting / packaging),
+///                    PACKAGING / GENERAL (MaterialItem). A child created in the app inherits its root's.
+///   inventoryRole  — the accounting posting role of its items (derived from the template; never picked by
+///                    the user, never changed after creation). The cost ledger costs a material by it.
+///   legacyMaterialCategory — the MaterialCategory enum its MaterialItems carry (kept for every existing
+///                    consumer); a CHECK keeps it consistent with inventoryRole.
+///   defaultUnit    — TEXT (UnitOfMeasure names) so the migration can seed LITER while adding that value.
+model ItemCategory {
+  id                     String            @id @default(cuid())
+  nameAr                 String
+  nameEn                 String?
+  parentId               String?
+  parent                 ItemCategory?     @relation("ItemCategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children               ItemCategory[]    @relation("ItemCategoryTree")
+  template               String
+  defaultUnit            String            @default("PIECE")
+  inventoryRole          String
+  legacyMaterialCategory MaterialCategory?
+  isSystem               Boolean           @default(false)
+  isActive               Boolean           @default(true)
+  archivedAt             DateTime?
+  sortOrder              Int               @default(0)
+  updatedByName          String?
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+
+  materials MaterialItem[]
+
+  @@index([parentId, sortOrder])
 }
 
 enum BomComponentType {

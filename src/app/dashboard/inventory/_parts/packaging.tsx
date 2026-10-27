@@ -6,8 +6,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Btn, FilterChip, useL } from "@/components/ops/ui";
 import { useI18n } from "@/lib/i18n/context";
 import { PACK_WINDOW_DAYS } from "@/lib/inventory/metrics";
-import { MaterialsPanel, type Material } from "../../_components/stock-materials";
-import { MATERIAL_CATEGORY, RecentMovements, SortControl, int } from "./shared";
+import { MaterialsPanel, type Material, type MaterialCategoryOption } from "../../_components/stock-materials";
+import { RecentMovements, SortControl, int } from "./shared";
 
 type Usage = { used: number; rate: number | null; coverage: number | "INF" | null };
 type PackOverview = {
@@ -17,8 +17,14 @@ type PackOverview = {
 };
 type Sort = "coverage" | "stock" | "name";
 
-export function PackagingTab({ materials, onChanged, onError, onOpenLedger, refreshKey }: {
+/**
+ * Unified inventory phase 1: mounted per item category — `materials` arrive already limited to the selected
+ * category (a root with its sub-categories); `subCategories` (a root's children) become the filter chip, and the
+ * packing metrics (7-day usage, packs coverable) show only where they mean something (packaging categories).
+ */
+export function PackagingTab({ materials, onChanged, onError, onOpenLedger, refreshKey, categories, subCategories, packMetrics = true, title, itemCategoryId }: {
   materials: Material[]; onChanged: () => void; onError: (m: string) => void; onOpenLedger: () => void; refreshKey: number;
+  categories?: MaterialCategoryOption[]; subCategories?: MaterialCategoryOption[]; packMetrics?: boolean; title?: string; itemCategoryId?: string;
 }) {
   const { lang } = useI18n();
   const L = useL();
@@ -34,10 +40,9 @@ export function PackagingTab({ materials, onChanged, onError, onOpenLedger, refr
     return () => { off = true; };
   }, [refreshKey]);
 
-  const catLabel = (c: string) => (MATERIAL_CATEGORY[c] ? (lang === "ar" ? MATERIAL_CATEGORY[c][0] : MATERIAL_CATEGORY[c][1]) : c);
   const shown = useMemo(() => {
     const s = q.trim().toLowerCase();
-    const rows = materials.filter((m) => (showInactive || m.isActive) && (!cat || m.category === cat) && (!s || `${m.code} ${m.name} ${m.nameAr ?? ""}`.toLowerCase().includes(s)));
+    const rows = materials.filter((m) => (showInactive || m.isActive) && (!cat || m.categoryId === cat) && (!s || `${m.code} ${m.name} ${m.nameAr ?? ""}`.toLowerCase().includes(s)));
     // «الأقل تغطية»: days of stock at the 7-day usage; a material not used in the window (or with too
     // little history) sorts after the ones that are, below-reorder first among equals.
     const cov = (m: Material) => { const u = ov?.usage[m.id]; return u?.coverage === "INF" || u?.coverage == null ? 1e9 : u.coverage; };
@@ -53,18 +58,19 @@ export function PackagingTab({ materials, onChanged, onError, onOpenLedger, refr
   const size = (g: number) => (g >= 1000 ? `${g / 1000} ${lang === "ar" ? "كغ" : "kg"}` : `${g} ${lang === "ar" ? "غ" : "g"}`);
 
   return (
-    <section className="hr-stack" aria-label={L("مواد التعبئة", "Packaging materials")}>
-      <div className="stk-metrics">
+    <section className="hr-stack" aria-label={title ?? L("مواد التعبئة", "Packaging materials")}>
+      <div className="stk-metrics" style={packMetrics ? undefined : { ["--stk-cols" as string]: 2 }}>
         <div>
           <span className="stk-lbl">{L("مواد نشطة", "Active materials")}</span>
           <span className="stk-mid">{activeMats.length}</span>
-          <span className="stk-d">{L("تعبئة · ملصقات · مستهلكات", "Packaging · labels · consumables")}</span>
+          <span className="stk-d">{title ?? L("تعبئة · ملصقات · مستهلكات", "Packaging · labels · consumables")}</span>
         </div>
         <div>
           <span className="stk-lbl">{L("تحت حد إعادة الطلب", "Below reorder point")}</span>
           <span className={`stk-mid${low.length ? " tone-warning" : ""}`}>{low.length}</span>
           <span className="stk-d">{low.map((m) => (lang === "ar" && m.nameAr ? m.nameAr : m.name)).join(lang === "ar" ? "، " : ", ") || "—"}</span>
         </div>
+        {packMetrics ? <>
         <div>
           <span className="stk-lbl">{L(`مستهلك آخر ${PACK_WINDOW_DAYS} أيام`, `Used in the last ${PACK_WINDOW_DAYS} days`)}</span>
           <span className="stk-mid">{ov?.total == null ? "—" : int(ov.total)}{ov?.total == null ? null : <span className="stk-unit">{L("قطعة", "pieces")}</span>}</span>
@@ -75,18 +81,23 @@ export function PackagingTab({ materials, onChanged, onError, onOpenLedger, refr
           <span className="stk-mid">{head ? int(head.units) : "—"}{head ? <span className="stk-unit">{L("عبوة", "packs")}</span> : null}</span>
           <span className="stk-d">{head ? `${size(head.weightGrams)} · ${L("تحدّها", "limited by")} ${lang === "ar" && head.limiting.nameAr ? head.limiting.nameAr : head.limiting.name}` : L("لا منتج بمكوّنات تعبئة", "No product with packaging components")}</span>
         </div>
+        </> : null}
       </div>
 
       <MaterialsPanel
         materials={shown}
+        categories={categories}
+        showUsage={packMetrics}
         onChanged={onChanged}
         onError={onError}
         search={
           <div className="stk-tool">
             <input type="search" className="hr-input hr-search" placeholder={L("رمز المادة أو اسمها", "Material code or name")}
               aria-label={L("رمز المادة أو اسمها", "Material code or name")} value={q} onChange={(e) => setQ(e.target.value)} />
-            <FilterChip label={L("الفئة", "Category")} value={cat} onChange={setCat}
-              options={Object.keys(MATERIAL_CATEGORY).map((c) => ({ value: c, label: catLabel(c) }))} />
+            {subCategories && subCategories.length > 1 ? (
+              <FilterChip label={L("التصنيف الفرعي", "Sub-category")} value={cat} onChange={setCat}
+                options={subCategories.map((c) => ({ value: c.id, label: lang === "ar" ? c.nameAr : c.nameEn || c.nameAr }))} />
+            ) : null}
             <Btn size="sm" className="stk-toggle" aria-pressed={showInactive} onClick={() => setShowInactive((p) => !p)}>
               {L("إظهار غير النشطة", "Show inactive")}
             </Btn>
@@ -101,7 +112,9 @@ export function PackagingTab({ materials, onChanged, onError, onOpenLedger, refr
         }
       />
 
-      <RecentMovements category="PACKAGING_MATERIAL" withDoc title={L("آخر حركات مواد التعبئة", "Latest packaging movements")} onOpenLedger={onOpenLedger} refreshKey={refreshKey} />
+      <RecentMovements category="PACKAGING_MATERIAL" withDoc itemCategoryId={itemCategoryId}
+        title={title ? L(`آخر الحركات · ${title}`, `Latest movements · ${title}`) : L("آخر حركات مواد التعبئة", "Latest packaging movements")}
+        onOpenLedger={onOpenLedger} refreshKey={refreshKey} />
     </section>
   );
 }

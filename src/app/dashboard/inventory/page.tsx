@@ -10,19 +10,24 @@
 // the ledger's filters, pages and CSV export. Every figure is derived from the ledger
 // (src/lib/inventory/metrics.ts); «—» where the history cannot support it. The tabs live in ./_parts.
 import { localizeApiError } from "@/lib/i18n/api-errors";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
-import { Languages } from "lucide-react";
+import Link from "next/link";
 import {
   Btn, Field, Notice, OpsBanner, OpsLoading, OpsRoot, PageHeader, Tabs, useL,
 } from "@/components/ops/ui";
+import { canEdit } from "@/lib/auth-shared";
+import { SEED } from "@/lib/inventory/item-categories";
 import { Dialog } from "@/components/hr/ui";
 import "@/components/ops/stock.css";
 import { useUser } from "../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
-import { CheckIcon, MaterialForm, PlusIcon, type Material } from "../_components/stock-materials";
-import { GreenTab, type GreenBean } from "./_parts/green";
+import { CheckIcon, PlusIcon, type Material } from "../_components/stock-materials";
+import { GreenTab, LOW_KG, type GreenBean } from "./_parts/green";
+import { BeanForm, type FormState } from "./_parts/bean-form";
+import { AddItemFlow, type CategoryNode } from "./_parts/add-item";
+import { AllItemsView, CategoryChips, CategoryRail } from "./_parts/categories";
 import { PackagingTab } from "./_parts/packaging";
 import { FinishedTab } from "./_parts/finished";
 import { LedgerTab } from "./_parts/ledger";
@@ -32,156 +37,16 @@ import { CountsTab, StartCountDialog } from "./_parts/counts";
 const fmtQty = (v: number | null | undefined, digits: number): string =>
   typeof v === "number" && Number.isFinite(v) ? v.toFixed(digits) : "—";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Views ────────────────────────────────────────────────────────────────────
 
-type Tab = "raw" | "pack" | "finished" | "ledger" | "counts";
-const TABS: readonly Tab[] = ["raw", "pack", "finished", "ledger", "counts"];
-
-type FormState = {
-  serialNumber: string; beanType: string; beanTypeAr: string;
-  country: string; countryAr: string; region: string; regionAr: string;
-  variety: string; process: string; processAr: string;
-  altitude: string; location: string; quantityKg: number;
+/** Page-level views: the items (by category), the movement ledger and the counts. */
+type View = "stock" | "ledger" | "counts";
+/** The former tabs (?tab=…) still open where they used to: green → «بن أخضر», pack → «المحمصة» (its bags,
+ *  labels and other supplies), finished → «المنتجات الجاهزة», ledger / counts → those views. */
+const LEGACY_TAB: Record<string, { view: View; cat?: string }> = {
+  raw: { view: "stock", cat: SEED.green }, pack: { view: "stock", cat: SEED.roastery }, finished: { view: "stock", cat: SEED.finished },
+  ledger: { view: "ledger" }, counts: { view: "counts" },
 };
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function generateSerial() {
-  const d = new Date();
-  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-  const rand = Math.floor(Math.random() * 900 + 100);
-  return `GB-${ymd}-${rand}`;
-}
-
-function emptyForm(): FormState {
-  return {
-    serialNumber: generateSerial(), beanType: "", beanTypeAr: "",
-    country: "", countryAr: "", region: "", regionAr: "",
-    variety: "", process: "", processAr: "", altitude: "", location: "", quantityKg: 0,
-  };
-}
-
-async function callTranslate(text: string, target: "ar" | "en"): Promise<string | null> {
-  if (!text.trim()) return null;
-  const res = await fetch("/api/translate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, target }),
-  });
-  if (!res.ok) return null;
-  const j = await res.json();
-  return j.translated ?? null;
-}
-
-// ─── BeanForm (Add / Edit) ───────────────────────────────────────────────────
-
-function BeanForm({
-  title, initial, onSave, onClose, saving,
-}: {
-  title: string;
-  initial: FormState;
-  onSave: (f: FormState) => Promise<void>;
-  onClose: () => void;
-  saving: boolean;
-}) {
-  const { t } = useI18n();
-  const L = useL();
-  const [form, setForm] = useState<FormState>(initial);
-  const [translating, setTranslating] = useState<Record<string, boolean>>({});
-
-  const set = (key: keyof FormState, val: string | number) =>
-    setForm((p) => ({ ...p, [key]: val }));
-
-  async function translate(
-    sourceKey: keyof FormState,
-    targetKey: keyof FormState,
-    targetLang: "ar" | "en",
-  ) {
-    const text = form[sourceKey] as string;
-    if (!text.trim()) return;
-    setTranslating((p) => ({ ...p, [targetKey]: true }));
-    const result = await callTranslate(text, targetLang);
-    setTranslating((p) => ({ ...p, [targetKey]: false }));
-    if (result) set(targetKey, result);
-  }
-
-  const bilingualFields: {
-    enKey: keyof FormState; arKey: keyof FormState;
-    labelEn: string; labelAr: string; required?: boolean;
-  }[] = [
-    { enKey: "beanType", arKey: "beanTypeAr", labelEn: `${t("beanType")} (EN)`, labelAr: `${t("beanType")} (AR)`, required: true },
-    { enKey: "country",  arKey: "countryAr",  labelEn: `${t("country")} (EN)`,  labelAr: `${t("country")} (AR)`,  required: true },
-    { enKey: "region",   arKey: "regionAr",   labelEn: `${t("region")} (EN)`,   labelAr: `${t("region")} (AR)` },
-    { enKey: "process",  arKey: "processAr",  labelEn: `${t("process")} (EN)`,  labelAr: `${t("process")} (AR)` },
-  ];
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    await onSave(form);
-  }
-
-  function TranslateBtn({ sourceKey, targetKey, targetLang }: { sourceKey: keyof FormState; targetKey: keyof FormState; targetLang: "ar" | "en" }) {
-    const busy = translating[targetKey];
-    const hasSource = !!(form[sourceKey] as string)?.trim();
-    const label = targetLang === "ar" ? t("translateToAr") : L("ترجمة إلى الإنجليزية", "Translate to English");
-    return (
-      <Btn size="sm" variant="ghost" className="hr-iconbtn" title={label} aria-label={label}
-        onClick={() => translate(sourceKey, targetKey, targetLang)} disabled={busy || !hasSource}>
-        {busy ? "…" : <Languages size={16} />}
-      </Btn>
-    );
-  }
-
-  return (
-    <Dialog
-      open
-      title={title}
-      className="stk-wide"
-      onClose={onClose}
-      actions={
-        <>
-          <Btn variant="primary" type="submit" form="bean-form" disabled={saving}>{saving ? t("saving") : t("save")}</Btn>
-          <Btn onClick={onClose}>{t("cancel")}</Btn>
-        </>
-      }
-    >
-      <form id="bean-form" onSubmit={handleSubmit} className="hr-form">
-        <Field label={t("serialNumber")} help={L("يُولَّد تلقائيًا", "Auto-generated")}>
-          <input className="hr-input hr-id" dir="ltr" value={form.serialNumber} onChange={(e) => set("serialNumber", e.target.value)} placeholder="GB-20260511-142" />
-        </Field>
-        <Field label={`${t("quantityKg")} *`}>
-          <input className="hr-input" type="number" step="0.01" min="0" value={form.quantityKg} required
-            onChange={(e) => set("quantityKg", parseFloat(e.target.value) || 0)} />
-        </Field>
-        {bilingualFields.map(({ enKey, arKey, labelEn, labelAr, required }) => (
-          <div key={enKey} style={{ display: "contents" }}>
-            <Field label={`${labelEn}${required ? " *" : ""}`}>
-              <span className="stk-pair">
-                <input className="hr-input" dir="ltr" value={form[enKey] as string} onChange={(e) => set(enKey, e.target.value)} required={required} />
-                <TranslateBtn sourceKey={arKey} targetKey={enKey} targetLang="en" />
-              </span>
-            </Field>
-            <Field label={labelAr}>
-              <span className="stk-pair">
-                <input className="hr-input" dir="rtl" placeholder={L("اختياري", "Optional")} value={form[arKey] as string} onChange={(e) => set(arKey, e.target.value)} />
-                <TranslateBtn sourceKey={enKey} targetKey={arKey} targetLang="ar" />
-              </span>
-            </Field>
-          </div>
-        ))}
-        {([
-          { key: "variety", label: t("variety") },
-          { key: "altitude", label: t("altitude") },
-          { key: "location", label: t("storageLocation") },
-        ] as const).map(({ key, label }) => (
-          <Field key={key} label={label}>
-            <input className="hr-input" value={form[key] as string} onChange={(e) => set(key, e.target.value)} />
-          </Field>
-        ))}
-      </form>
-    </Dialog>
-  );
-}
 
 // ─── Delete Confirmation ──────────────────────────────────────────────────────
 
@@ -304,16 +169,23 @@ export default function InventoryPage() {
   // (owner decision, inventory Option A). The count (a stock adjustment) stays adjust-only; a count
   // SHEET may be started and filled in by either duty, and only adjust posts it.
   const canMaintain = canReceive || canAdjust;
+  // «إضافة صنف»: a green lot needs receive; a stock item needs inventory edit access (POST /api/materials).
+  const canAdd = canReceive || (!!user && canEdit(user.permissions, "inventory"));
 
-  const [activeTab, setActiveTab] = useState<Tab>(() => {
-    const q = sp.get("tab");
-    return (TABS as readonly string[]).includes(q ?? "") ? (q as Tab) : "raw";
+  const [view, setView] = useState<View>(() => {
+    const legacy = LEGACY_TAB[sp.get("tab") ?? ""];
+    const v = sp.get("view");
+    if (v === "ledger" || v === "counts") return v;
+    if (sp.get("count")) return "counts";
+    return legacy?.view ?? "stock";
   });
+  const [sel, setSel] = useState<string>(() => sp.get("cat") || LEGACY_TAB[sp.get("tab") ?? ""]?.cat || "all");
   const [countId, setCountId] = useState<string | null>(() => sp.get("count"));
   const [refreshKey, setRefreshKey] = useState(0);
 
   const [beans, setBeans]         = useState<GreenBean[] | null>(null);
   const [materials, setMaterials] = useState<Material[] | null>(null);
+  const [categories, setCategories] = useState<CategoryNode[] | null>(null);
 
   const [search, setSearch]             = useState("");
   const [showInactive, setShowInactive] = useState(false);
@@ -323,7 +195,6 @@ export default function InventoryPage() {
   const [editTarget, setEditTarget]     = useState<GreenBean | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<GreenBean | null>(null);
   const [adjustTarget, setAdjustTarget] = useState<GreenBean | null>(null);
-  const [materialFormOpen, setMaterialFormOpen] = useState(false);
   const [startCount, setStartCount] = useState(false);
   const [saving, setSaving]   = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -341,41 +212,49 @@ export default function InventoryPage() {
     const res = await fetch("/api/materials?activeOnly=false");
     if (res.ok) setMaterials(await res.json());
   }, []);
-  /** After any stock change: lists, metrics and recent movements reload. */
-  const refreshAll = useCallback(() => { loadBeans(); loadMaterials(); setRefreshKey((k) => k + 1); }, [loadBeans, loadMaterials]);
+  const loadCategories = useCallback(async () => {
+    const res = await fetch("/api/inventory/categories");
+    if (res.ok) setCategories(await res.json());
+  }, []);
+  /** After any stock change: lists, categories, metrics and recent movements reload. */
+  const refreshAll = useCallback(() => { loadBeans(); loadMaterials(); loadCategories(); setRefreshKey((k) => k + 1); }, [loadBeans, loadMaterials, loadCategories]);
 
-  // First load: beans and materials (the count picker and both stock tabs use them), state set after the await.
+  // First load: beans, materials and the categories (state set after the await).
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [b, m] = await Promise.all([fetch("/api/green-beans?all=1"), fetch("/api/materials?activeOnly=false")]);
-      const [bj, mj] = await Promise.all([b.ok ? b.json() : [], m.ok ? m.json() : []]);
+      const [b, m, c] = await Promise.all([fetch("/api/green-beans?all=1"), fetch("/api/materials?activeOnly=false"), fetch("/api/inventory/categories")]);
+      const [bj, mj, cj] = await Promise.all([b.ok ? b.json() : [], m.ok ? m.json() : [], c.ok ? c.json() : []]);
       if (cancelled) return;
       setBeans(bj);
       setMaterials(mj);
+      setCategories(cj);
     })();
     return () => { cancelled = true; };
   }, []);
 
-  function openTab(tab: Tab) {
-    setActiveTab(tab);
-    if (tab !== "counts") setCountId(null);
+  // The address follows the view and the category, so a link opens the same place.
+  useEffect(() => {
+    try {
+      const p = new URLSearchParams();
+      if (view !== "stock") p.set("view", view);
+      if (sel !== "all") p.set("cat", sel);
+      if (view === "counts" && countId) p.set("count", countId);
+      const qs = p.toString();
+      window.history.replaceState(window.history.state, "", qs ? `?${qs}` : window.location.pathname);
+    } catch { /* the address is a convenience */ }
+  }, [view, sel, countId]);
+
+  function openView(v: View) {
+    setView(v);
+    if (v !== "counts") setCountId(null);
+  }
+  function openCategory(id: string) {
+    setSel(id);
+    setView("stock");
   }
 
   // ── CRUD handlers (unchanged logic) ──────────────────────────────────────
-
-  async function handleAdd(f: FormState) {
-    setSaving(true);
-    const res = await fetch("/api/green-beans", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(f) });
-    setSaving(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      showToast(localizeApiError(j) || L("تعذّرت إضافة البن.", "Failed to add bean"), "err");
-      return;
-    }
-    setAddOpen(false);
-    refreshAll();
-  }
 
   async function handleEdit(f: FormState) {
     if (!editTarget) return;
@@ -413,27 +292,98 @@ export default function InventoryPage() {
 
   const activeBeans = (beans ?? []).filter((b) => b.isActive);
   const activeMaterials = (materials ?? []).filter((m) => m.isActive);
-  const loading = beans === null || materials === null;
+  const loading = beans === null || materials === null || categories === null;
+
+  // ── The selected category ───────────────────────────────────────────────
+  const cats = useMemo(() => categories ?? [], [categories]);
+  const current = sel === "all" ? null : cats.find((c) => c.id === sel) ?? null;
+  const subtree = useMemo(() => (current ? cats.filter((c) => c.id === current.id || c.parentId === current.id) : []), [cats, current]);
+  const subtreeIds = useMemo(() => new Set(subtree.map((c) => c.id)), [subtree]);
+  const scopedMaterials = useMemo(() => (materials ?? []).filter((m) => !!m.categoryId && subtreeIds.has(m.categoryId)), [materials, subtreeIds]);
+  const greenLow = activeBeans.filter((b) => b.quantityKg > 0 && b.quantityKg < LOW_KG).length;
+  const nameOf = (c: { nameAr: string; nameEn: string | null }) => (lang === "ar" ? c.nameAr : c.nameEn || c.nameAr);
+  const isMaterialCat = (c: CategoryNode) => c.template === "PACKAGING" || c.template === "GENERAL";
 
   const headerAction = (
     <>
+      <Link className="hr-btn is-ghost" href="/dashboard/inventory/categories" data-testid="inventory-categories-link">{L("التصنيفات", "Categories")}</Link>
       {canMaintain ? (
         <Btn onClick={() => setStartCount(true)} data-testid="start-count"><CheckIcon />{L("إجراء جرد", "Start a count")}</Btn>
       ) : null}
-      {activeTab === "pack" ? (
-        <Btn variant="primary" onClick={() => setMaterialFormOpen(true)}><PlusIcon />{t("newMaterialBtn")}</Btn>
-      ) : canReceive ? (
-        <Btn variant="primary" onClick={() => setAddOpen(true)}><PlusIcon />{L("إضافة مخزون", "Add stock")}</Btn>
+      {canAdd ? (
+        <Btn variant="primary" onClick={() => setAddOpen(true)} disabled={!categories} data-testid="add-item"><PlusIcon />{L("إضافة صنف", "Add item")}</Btn>
       ) : null}
     </>
   );
+
+  let content: React.ReactNode = null;
+  if (loading) content = <OpsLoading />;
+  else if (!current) {
+    content = (
+      <AllItemsView beans={beans!} materials={materials!} categories={cats} onOpenCategory={openCategory} />
+    );
+  } else if (current.template === "GREEN_COFFEE") {
+    content = (
+      <GreenTab
+        beans={beans!} search={search} onSearch={setSearch} showInactive={showInactive} onToggleInactive={() => setShowInactive((p) => !p)}
+        canAdjust={canAdjust} canMaintain={canMaintain} canReceive={canReceive}
+        onCount={setAdjustTarget} onEdit={setEditTarget} onToggleActive={handleToggleActive} onDelete={setDeleteTarget}
+        onOpenLedger={() => openView("ledger")} refreshKey={refreshKey}
+      />
+    );
+  } else if (current.template === "ROASTED_COFFEE") {
+    content = (
+      <>
+        <p className="inv-note">{L("يأتي من دفعات التحميص ويخرج عند التعبئة — لا يُضاف يدويًا.", "Comes from roasting batches and leaves when packed — never added by hand.")}</p>
+        <FinishedTab refreshKey={refreshKey} part="roasted" />
+      </>
+    );
+  } else if (current.template === "FINISHED") {
+    content = (
+      <>
+        <p className="inv-note">{L("وحدات المنتجات الجاهزة تأتي من التعبئة والإنتاج؛ يُعرَّف المنتج في ", "Finished units come from packing and production; the product is set up under ")}<Link className="ops-link" href="/dashboard/products">{L("المنتجات", "Products")}</Link>.</p>
+        <FinishedTab refreshKey={refreshKey} part="finished" />
+      </>
+    );
+  } else {
+    // A materials category, or a root: its items and its sub-categories' items.
+    const others = !current.parentId ? cats.filter((c) => c.parentId === current.id && !isMaterialCat(c)) : [];
+    const subMaterialCats = subtree.filter(isMaterialCat);
+    content = (
+      <>
+        {others.length ? (
+          <div className="inv-shortcuts">
+            {others.map((c) => (
+              <a key={c.id} href={`?cat=${c.id}`} onClick={(e) => { e.preventDefault(); openCategory(c.id); }} data-testid={`shortcut-${c.id}`}>
+                {nameOf(c)} <span className="hr-num">{c.itemCount}</span>
+              </a>
+            ))}
+          </div>
+        ) : null}
+        <PackagingTab
+          materials={scopedMaterials} categories={cats} subCategories={!current.parentId ? subMaterialCats : undefined}
+          packMetrics={current.inventoryRole === "INVENTORY_PACKAGING"} title={nameOf(current)} itemCategoryId={current.id}
+          onChanged={refreshAll} onError={(m) => showToast(m, "err")} onOpenLedger={() => openView("ledger")} refreshKey={refreshKey}
+        />
+      </>
+    );
+  }
+
+  const countMaterials = current && isMaterialCat(current) ? scopedMaterials : materials ?? [];
 
   return (
     <OpsRoot className="stk-inventory">
     <div className="hr-page">
 
-      {addOpen && (
-        <BeanForm title={t("registerNewStock")} initial={emptyForm()} onSave={handleAdd} onClose={() => setAddOpen(false)} saving={saving} />
+      {addOpen && categories && (
+        <AddItemFlow
+          categories={categories}
+          initialCategoryId={current && current.template !== "FINISHED" && current.template !== "ROASTED_COFFEE" ? current.id : null}
+          canReceive={canReceive}
+          onClose={() => setAddOpen(false)}
+          onError={() => undefined /* shown inside the dialog */}
+          onSaved={(msg) => { setAddOpen(false); showToast(msg, "ok"); refreshAll(); }}
+        />
       )}
       {editTarget && (
         <BeanForm
@@ -467,63 +417,48 @@ export default function InventoryPage() {
           }}
         />
       )}
-      {materialFormOpen && (
-        <MaterialForm
-          onClose={() => setMaterialFormOpen(false)}
-          onSaved={() => { setMaterialFormOpen(false); refreshAll(); }}
-          onError={(m) => showToast(m, "err")}
-        />
-      )}
       {startCount && beans && materials && (
         <StartCountDialog
           beans={beans}
-          materials={materials}
-          defaultCategory={activeTab === "pack" ? "PACKAGING_MATERIAL" : "RAW_MATERIAL"}
+          materials={countMaterials}
+          defaultCategory={current && current.template !== "GREEN_COFFEE" && isMaterialCat(current) ? "PACKAGING_MATERIAL" : "RAW_MATERIAL"}
           onClose={() => setStartCount(false)}
-          onCreated={(id) => { setStartCount(false); setCountId(id); setActiveTab("counts"); }}
+          onCreated={(id) => { setStartCount(false); setCountId(id); setView("counts"); }}
         />
       )}
 
       <PageHeader title={t("inventory")} actions={headerAction}>
         <span className="hr-caption">
           {lang === "ar"
-            ? `${activeBeans.length} لوت بن أخضر · ${activeMaterials.length} مادة تعبئة`
-            : `${activeBeans.length} green coffee lots · ${activeMaterials.length} packaging materials`}
+            ? `${activeBeans.length} لوت بن أخضر · ${activeMaterials.length} صنف`
+            : `${activeBeans.length} green coffee lots · ${activeMaterials.length} items`}
         </span>
       </PageHeader>
 
-      {toast ? <OpsBanner tone={toast.type === "ok" ? "success" : "danger"} onClose={() => setToast(null)}>{toast.msg}</OpsBanner> : null}
+      {toast ? <OpsBanner tone={toast.type === "ok" ? "success" : "danger"} onClose={() => setToast(null)}><span data-testid="inventory-toast">{toast.msg}</span></OpsBanner> : null}
 
-      {/* 251:2482: البن الأخضر · مواد التعبئة · المخزون التام · سجل الحركات · الجرد والتسويات */}
       <Tabs
         label={t("inventory")}
-        value={activeTab}
-        onChange={openTab}
+        value={view}
+        onChange={openView}
         items={[
-          { key: "raw", label: L("البن الأخضر", "Green coffee"), count: beans ? activeBeans.length : undefined },
-          { key: "pack", label: t("tabMaterials"), count: materials ? activeMaterials.length : undefined },
-          { key: "finished", label: t("finishedGoods") },
+          { key: "stock", label: L("الأصناف", "Items"), count: categories ? activeBeans.length + activeMaterials.length : undefined },
           { key: "ledger", label: t("movementLedger") },
           { key: "counts", label: L("الجرد والتسويات", "Counts and adjustments") },
         ]}
       />
 
-      {loading && (activeTab === "raw" || activeTab === "pack") ? <OpsLoading /> : null}
-
-      {activeTab === "raw" && beans ? (
-        <GreenTab
-          beans={beans} search={search} onSearch={setSearch} showInactive={showInactive} onToggleInactive={() => setShowInactive((p) => !p)}
-          canAdjust={canAdjust} canMaintain={canMaintain} canReceive={canReceive}
-          onCount={setAdjustTarget} onEdit={setEditTarget} onToggleActive={handleToggleActive} onDelete={setDeleteTarget}
-          onOpenLedger={() => openTab("ledger")} refreshKey={refreshKey}
-        />
+      {view === "stock" ? (
+        <div className="inv-layout">
+          {categories ? <CategoryRail categories={cats} value={sel} onChange={openCategory} totalItems={activeBeans.length + activeMaterials.length} greenLow={greenLow} canManage={canMaintain} /> : <div />}
+          <div className="inv-main hr-stack">
+            {categories ? <CategoryChips categories={cats} value={sel} onChange={openCategory} totalItems={activeBeans.length + activeMaterials.length} greenLow={greenLow} /> : null}
+            {content}
+          </div>
+        </div>
       ) : null}
-      {activeTab === "pack" && materials ? (
-        <PackagingTab materials={materials} onChanged={refreshAll} onError={(m) => showToast(m, "err")} onOpenLedger={() => openTab("ledger")} refreshKey={refreshKey} />
-      ) : null}
-      {activeTab === "finished" ? <FinishedTab refreshKey={refreshKey} /> : null}
-      {activeTab === "ledger" ? <LedgerTab refreshKey={refreshKey} /> : null}
-      {activeTab === "counts" ? (
+      {view === "ledger" ? <LedgerTab refreshKey={refreshKey} itemCategories={cats} initialItemCategory={sel !== "all" ? sel : ""} /> : null}
+      {view === "counts" ? (
         <CountsTab openId={countId} onOpen={setCountId} canEdit={canMaintain} canPost={canAdjust} onStart={() => setStartCount(true)} onPosted={refreshAll} />
       ) : null}
     </div>

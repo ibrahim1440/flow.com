@@ -32,7 +32,12 @@ const LOT_STATUS: Record<string, [string, "success" | "warning" | "neutral", str
 const LOT_ROWS = 3;
 const SKU_CATEGORY: Record<string, [string, string]> = { ROASTED_COFFEE: ["بن محمص", "Roasted coffee"], GREEN_COFFEE: ["بن أخضر", "Green coffee"], MERCHANDISE: ["منتجات", "Merchandise"], OTHER: ["أخرى", "Other"] };
 
-export function FinishedTab({ refreshKey }: { refreshKey: number }) {
+/**
+ * `part` (unified inventory phase 1): "finished" — the units per SKU and the kilogram lots (the «المنتجات
+ * الجاهزة» category); "roasted" — only the roasted coffee not yet packed (the «بن محمص» category); "all" — both,
+ * as the former «المخزون التام» tab.
+ */
+export function FinishedTab({ refreshKey, part = "all" }: { refreshKey: number; part?: "all" | "finished" | "roasted" }) {
   const { lang } = useI18n();
   const L = useL();
   const [ov, setOv] = useState<FinishedOverview | null>(null);
@@ -68,8 +73,9 @@ export function FinishedTab({ refreshKey }: { refreshKey: number }) {
   const kgU = lang === "ar" ? "كغ" : "kg";
 
   return (
-    <section className="hr-stack" aria-label={L("المخزون التام", "Finished stock")}>
-      <div className="stk-metrics">
+    <section className="hr-stack" aria-label={part === "roasted" ? L("بن محمص غير معبأ", "Roasted coffee not yet packed") : L("المخزون التام", "Finished stock")}>
+      {part !== "roasted" ? <>
+      <div className="stk-metrics" style={part === "finished" ? { ["--stk-cols" as string]: 3 } : undefined}>
         <div>
           <span className="stk-lbl">{L("وحدات متاحة", "Units available")}</span>
           <span className="stk-mid">{int(T.available)}</span>
@@ -85,11 +91,11 @@ export function FinishedTab({ refreshKey }: { refreshKey: number }) {
           <span className="stk-mid">{int(T.free)}</span>
           <span className="stk-d">{T.partial ? (lang === "ar" ? `${T.partial === 2 ? "عبوتان جزئيتان" : T.partial === 1 ? "عبوة جزئية" : `${T.partial} عبوات جزئية`} خارج البيع` : `${T.partial} partial package(s) not for sale`) : L("لا عبوات جزئية", "No partial packages")}</span>
         </div>
-        <div>
+        {part === "all" ? <div>
           <span className="stk-lbl">{L("بن محمص غير معبأ", "Roasted, not packed")}</span>
           <span className="stk-mid">{kg(T.unpackedPackableKg)}<span className="stk-unit">{kgU}</span></span>
           <span className="stk-d">{L("قابل للتعبئة", "Ready to pack")} · {kg(T.unpackedPendingKg)} {kgU} {L("بانتظار الجودة", "awaiting QC")}</span>
-        </div>
+        </div> : null}
       </div>
 
       <div className="stk-tool">
@@ -192,8 +198,24 @@ export function FinishedTab({ refreshKey }: { refreshKey: number }) {
         </div>
       )}
 
+      </> : (
+        <div className="stk-metrics" style={{ ["--stk-cols" as string]: 2 }}>
+          <div>
+            <span className="stk-lbl">{L("قابل للتعبئة", "Ready to pack")}</span>
+            <span className="stk-mid">{kg(T.unpackedPackableKg)}<span className="stk-unit">{kgU}</span></span>
+            <span className="stk-d">{L("بعد قرار الجودة", "after the QC decision")}</span>
+          </div>
+          <div>
+            <span className="stk-lbl">{L("بانتظار الجودة", "Awaiting QC")}</span>
+            <span className="stk-mid">{kg(T.unpackedPendingKg)}<span className="stk-unit">{kgU}</span></span>
+            <span className="stk-d">{L("يأتي من التحميص", "Comes from roasting")}</span>
+          </div>
+        </div>
+      )}
+
+      {part !== "finished" ? <>
       {/* بن محمص غير معبأ — RoastingBatch.roastedAvailableKg > 0 (packable only after QC acceptance). */}
-      <div className="ops-sechead" style={{ marginTop: 20 }}>
+      <div className="ops-sechead" style={{ marginTop: part === "roasted" ? 0 : 20 }}>
         <h2>{L("بن محمص غير معبأ", "Roasted coffee not yet packed")}</h2>
         <p className="hr-caption">{L("كغ · يُعبأ بعد قرار الجودة فقط", "kg · packed only after the QC decision")}</p>
       </div>
@@ -242,7 +264,9 @@ export function FinishedTab({ refreshKey }: { refreshKey: number }) {
         </div>
       )}
 
-      {ov.legacy.length ? (
+      </> : null}
+
+      {part !== "roasted" && ov.legacy.length ? (
         <>
           <div className="ops-sechead" style={{ marginTop: 20 }}>
             <h2>{L("لوتات بالكيلو (قبل تتبع الوحدات)", "Kilogram lots (before unit tracking)")}</h2>

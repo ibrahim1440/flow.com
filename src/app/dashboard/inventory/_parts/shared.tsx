@@ -39,7 +39,8 @@ export const CAT_LABELS: Record<string, [string, string]> = {
   RAW_MATERIAL: ["مواد خام", "Raw material"],
   FINISHED_GOODS: ["منتج تام", "Finished goods"],
   ROASTED_COFFEE: ["بن محمص", "Roasted coffee"],
-  PACKAGING_MATERIAL: ["مواد تعبئة", "Packaging material"],
+  // Every MaterialItem movement: packaging, labels and (unified inventory) café supplies.
+  PACKAGING_MATERIAL: ["مواد ومستلزمات", "Materials and supplies"],
 };
 
 export const MATERIAL_CATEGORY: Record<string, [string, string]> = {
@@ -49,11 +50,12 @@ export const MATERIAL_CATEGORY: Record<string, [string, string]> = {
   OTHER: ["أخرى", "Other"],
 };
 
-/** The unit word after a quantity: كغ / قطعة / وحدة. */
+/** The unit word after a quantity: كغ / قطعة / وحدة / لتر. */
 export function unitWord(unit: string | null | undefined, lang: "ar" | "en", n?: number): string {
   if (unit === "KG" || unit === "kg") return lang === "ar" ? "كغ" : "kg";
   if (unit === "GRAM") return lang === "ar" ? "غ" : "g";
   if (unit === "UNIT") return lang === "ar" ? "وحدة" : n === 1 ? "unit" : "units";
+  if (unit === "LITER") return lang === "ar" ? "لتر" : n === 1 ? "litre" : "litres";
   return lang === "ar" ? (n !== undefined && n > 2 && n < 11 ? "قطع" : "قطعة") : n === 1 ? "piece" : "pieces";
 }
 
@@ -114,19 +116,21 @@ export function MovementType({ type }: { type: string }) {
  * «آخر حركات …» (251:2482, 253:2987): the five newest movements of one category, from the
  * paginated ledger endpoint, with a link to the full ledger tab.
  */
-export function RecentMovements({ category, title, onOpenLedger, refreshKey, withDoc }: {
+export function RecentMovements({ category, title, onOpenLedger, refreshKey, withDoc, itemCategoryId }: {
   category: "RAW_MATERIAL" | "PACKAGING_MATERIAL"; title: string; onOpenLedger: () => void; refreshKey?: number; withDoc?: boolean;
+  /** Unified inventory: only this item category's movements (a main category covers its sub-categories). */
+  itemCategoryId?: string;
 }) {
   const { lang } = useI18n();
   const L = useL();
   const [rows, setRows] = useState<EnrichedMovement[] | null>(null);
   useEffect(() => {
     let off = false;
-    fetch(`/api/inventory-movements?page=1&pageSize=10&category=${category}`)
+    fetch(`/api/inventory-movements?page=1&pageSize=10&category=${category}${itemCategoryId ? `&itemCategory=${encodeURIComponent(itemCategoryId)}` : ""}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => { if (!off) setRows(j ? (j.rows as EnrichedMovement[]).slice(0, 5) : []); });
     return () => { off = true; };
-  }, [category, refreshKey]);
+  }, [category, refreshKey, itemCategoryId]);
   const disp = (en: string | null, ar: string | null) => (lang === "ar" && ar ? ar : en ?? "—");
   return (
     <section className="hr-stack stk-recent" aria-label={title}>
@@ -145,7 +149,7 @@ export function RecentMovements({ category, title, onOpenLedger, refreshKey, wit
               <tr>
                 <th>{L("الوقت", "Time")}</th>
                 <th>{L("النوع", "Type")}</th>
-                <th>{category === "RAW_MATERIAL" ? L("الصنف", "Item") : L("المادة", "Material")}</th>
+                <th>{category === "RAW_MATERIAL" || itemCategoryId ? L("الصنف", "Item") : L("المادة", "Material")}</th>
                 <th>{L("المصدر", "Source")}</th>
                 {withDoc ? <th className="hr-hide-compact">{L("المستند", "Document")}</th> : null}
                 <th className="num">{L("الكمية", "Quantity")}</th>

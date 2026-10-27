@@ -4,6 +4,9 @@ import { prisma } from "@/lib/db";
 import { requireAnyModule, requireEdit, stockChangeGate } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { applyInventoryAdjustment, normalizeAdjustmentReason } from "@/lib/services/inventory-adjustment";
+import { categoryDbRefusal, checkMaterialMove, resolveMaterialCategory } from "@/lib/services/item-categories";
+import { refusal } from "@/lib/inventory/category-response";
+import type { Refusal } from "@/lib/inventory/item-categories";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -74,13 +77,19 @@ export async function PATCH(request: Request, { params }: Params) {
   if (b.notes !== undefined)
     data.notes = typeof b.notes === "string" && b.notes.trim() ? b.notes.trim() : null;
   if (b.isActive !== undefined) data.isActive = b.isActive === true;
-  if (b.category !== undefined) {
-    if (!isCategory(b.category))
-      return NextResponse.json(
-        { error: `category must be one of: ${MATERIAL_CATEGORIES.join(", ")}.` },
-        { status: 400 }
-      );
-    data.category = b.category;
+  if (b.category !== undefined && b.categoryId === undefined && !isCategory(b.category))
+    return NextResponse.json(
+      { error: `category must be one of: ${MATERIAL_CATEGORIES.join(", ")}.` },
+      { status: 400 }
+    );
+  // Unified inventory phase 1: a move between item categories (`categoryId`, or the legacy enum mapped to its
+  // seeded category). Within one inventory role always; across roles only while the item has no stock and no
+  // cost (checked under the row lock below, and by the database trigger).
+  const moving = b.categoryId !== undefined || b.category !== undefined;
+  let target: Awaited<ReturnType<typeof resolveMaterialCategory>> | null = null;
+  if (moving) {
+    target = await resolveMaterialCategory(prisma, b.categoryId !== undefined ? { categoryId: b.categoryId } : { category: b.category });
+    if (!target.ok) return refusal(target);
   }
   if (b.reorderPoint !== undefined) {
     const rp = Number(b.reorderPoint);
@@ -110,7 +119,7 @@ export async function PATCH(request: Request, { params }: Params) {
     if (refused) return refused;
   }
 
-  if (!adjusting && Object.keys(data).length === 0)
+  if (!adjusting && !moving && Object.keys(data).length === 0)
     return NextResponse.json({ error: "No editable fields supplied." }, { status: 400 });
 
   // Counting packaging material is the same act as counting coffee, and carries the same
@@ -130,10 +139,20 @@ export async function PATCH(request: Request, { params }: Params) {
       // packaging draw committing between the read and the write would otherwise vanish inside the
       // count, and the audited delta would be wrong. Every writer of quantityOnHand serialises on
       // this row lock (receive and count take it explicitly; packaging draws update atomically).
-      const locked = await tx.$queryRaw<{ id: string; quantityOnHand: number; unitOfMeasure: string }[]>`
-        SELECT "id", "quantityOnHand", "unitOfMeasure"::text AS "unitOfMeasure" FROM "MaterialItem" WHERE "id" = ${id} FOR UPDATE`;
+      const locked = await tx.$queryRaw<{ id: string; quantityOnHand: number; unitOfMeasure: string; category: string; categoryId: string | null }[]>`
+        SELECT "id", "quantityOnHand", "unitOfMeasure"::text AS "unitOfMeasure", "category"::text AS "category", "categoryId" FROM "MaterialItem" WHERE "id" = ${id} FOR UPDATE`;
       const item = locked[0];
       if (!item) throw { _appCode: 404, message: "Material not found." };
+
+      // A legacy enum write that names the enum the item already has is not a move.
+      if (target && target.ok && !(b.categoryId === undefined && b.category === item.category)) {
+        // Judged on the balance BEFORE any count in this same request.
+        const refused = await checkMaterialMove(tx, item, target.data);
+        if (refused) throw { _refusal: refused };
+        data.categoryId = target.data.id;
+        // The legacy enum follows the category (the trigger keeps CONSUMABLE / OTHER as written).
+        data.category = b.category !== undefined && isCategory(b.category) && b.categoryId === undefined ? b.category : target.data.legacyMaterialCategory;
+      }
 
       if (adjusting) {
         // The shared adjustment service (src/lib/services/inventory-adjustment.ts) — the same code a
@@ -156,6 +175,9 @@ export async function PATCH(request: Request, { params }: Params) {
 
     return NextResponse.json(result);
   } catch (err: unknown) {
+    if (err && typeof err === "object" && "_refusal" in err) return refusal((err as { _refusal: Refusal })._refusal);
+    const dbRefusal = categoryDbRefusal(err);
+    if (dbRefusal) return refusal(dbRefusal);
     if (err && typeof err === "object" && "_appCode" in err) {
       const e = err as { _appCode: number; message: string };
       return NextResponse.json({ error: e.message }, { status: e._appCode });

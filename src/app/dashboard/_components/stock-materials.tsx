@@ -8,11 +8,12 @@
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select } from "@/components/ui/Select";
 import { useState } from "react";
-import { Btn, Field, useL } from "@/components/ops/ui";
+import { Btn, Field, Notice, useL } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../user-context";
-import { hasSubPrivilege } from "@/lib/auth-shared";
+import { unitWord } from "../inventory/_parts/shared";
+import { canEdit, hasSubPrivilege } from "@/lib/auth-shared";
 
 export type Material = {
   id: string;
@@ -26,6 +27,8 @@ export type Material = {
   isActive: boolean;
   usedInProductCount: number;
   belowReorderPoint: boolean;
+  /** The item category (unified inventory, 20261112090000_item_categories). */
+  categoryId?: string | null;
 };
 
 const CATEGORY_AR: Record<string, string> = { PACKAGING: "تعبئة", LABEL: "ملصق", CONSUMABLE: "مستهلك", OTHER: "أخرى" };
@@ -46,11 +49,17 @@ export function MaterialsPanel({
   search,
   onChanged,
   onError,
+  categories,
+  showUsage = true,
 }: {
   materials: Material[];
   search?: React.ReactNode;
   onChanged: () => void;
   onError: (m: string) => void;
+  /** The item categories: the category column names them, and «نقل» moves an item between them. */
+  categories?: MaterialCategoryOption[];
+  /** The «مستخدم في» (BOM usage) column — meaningful for packaging only; hidden for general / café stock. */
+  showUsage?: boolean;
 }) {
   const { t, lang } = useI18n();
   const L = useL();
@@ -67,6 +76,26 @@ export function MaterialsPanel({
   const [adjusting, setAdjusting] = useState<Material | null>(null);
   const [value, setValue] = useState("");
   const [reason, setReason] = useState("");
+  // Moving an item to another category (PATCH categoryId). Within one inventory account always; to another
+  // account only while it has no stock or cost — the server refuses otherwise and the reason shows here.
+  const canMove = !!categories && canEdit(user?.permissions ?? {}, "inventory");
+  const [moving, setMoving] = useState<Material | null>(null);
+  const [moveTo, setMoveTo] = useState("");
+  const [moveError, setMoveError] = useState("");
+  const [moveBusy, setMoveBusy] = useState(false);
+
+  async function saveMove(m: Material) {
+    setMoveBusy(true);
+    setMoveError("");
+    const res = await fetch(`/api/materials/${m.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ categoryId: moveTo }) });
+    setMoveBusy(false);
+    if (!res.ok) {
+      setMoveError(localizeApiError(await res.json().catch(() => ({})), lang) ?? L("تعذّر نقل الصنف.", "Could not move the item."));
+      return;
+    }
+    setMoving(null);
+    onChanged();
+  }
 
   async function saveCount(m: Material) {
     const n = Number(value);
@@ -106,7 +135,9 @@ export function MaterialsPanel({
   }
 
   const low = materials.filter((m) => m.belowReorderPoint).length;
-  const cat = (c: string) => (lang === "ar" ? CATEGORY_AR[c] ?? c : c.charAt(0) + c.slice(1).toLowerCase());
+  const legacyCat = (c: string) => (lang === "ar" ? CATEGORY_AR[c] ?? c : c.charAt(0) + c.slice(1).toLowerCase());
+  const catOf = (m: Material) => (categories && m.categoryId ? categoryPath(categories.find((c) => c.id === m.categoryId), categories, lang) : legacyCat(m.category));
+  const moveOptions = (categories ?? []).filter((c) => c.isActive && (c.template === "PACKAGING" || c.template === "GENERAL"));
   const used = (n: number) => (n === 0 ? L("غير مستخدمة", "Not used") : lang === "ar" ? (n === 1 ? "منتج واحد" : `${n} منتجات`) : `${n} ${n === 1 ? "product" : "products"}`);
   const delta = adjusting ? Number(value) - adjusting.quantityOnHand : NaN;
 
@@ -121,10 +152,10 @@ export function MaterialsPanel({
             <thead>
               <tr>
                 <th>{L("المادة", "Material")}</th>
-                <th>{t("categoryLabel")}</th>
+                <th>{categories ? L("التصنيف", "Category") : t("categoryLabel")}</th>
                 <th className="num">{t("onHandLabel")}</th>
                 <th className="num">{t("reorderPointLabel")}</th>
-                <th className="hr-hide-compact">{t("usedInLabel")}</th>
+                {showUsage ? <th className="hr-hide-compact">{t("usedInLabel")}</th> : null}
                 <th aria-label={L("التنبيه", "Flag")} />
                 <th aria-label={t("actions")} />
               </tr>
@@ -136,13 +167,13 @@ export function MaterialsPanel({
                     <span className="strong">{lang === "ar" && m.nameAr ? m.nameAr : m.name}</span>
                     <span className="stk-sub hr-id hr-desktop-only">{m.code}</span>
                     <span className="hr-msub">
-                      <span className="hr-id">{m.code}</span> · {cat(m.category)} · {t("onHandLabel")} <span className="hr-num">{m.quantityOnHand}</span>
+                      <span className="hr-id">{m.code}</span> · {catOf(m)} · {t("onHandLabel")} <span className="hr-num">{m.quantityOnHand}</span>
                     </span>
                   </td>
-                  <td className="hr-caption" style={{ color: "var(--text-secondary)" }}>{cat(m.category)}</td>
-                  <td className={`num${m.belowReorderPoint ? " is-low" : ""}`}><span className="hr-num">{m.quantityOnHand}</span></td>
+                  <td className="hr-caption" style={{ color: "var(--text-secondary)" }}>{catOf(m)}</td>
+                  <td className={`num${m.belowReorderPoint ? " is-low" : ""}`}><span className="hr-num">{m.quantityOnHand}</span> <span className="hr-caption">{unitWord(m.unitOfMeasure, lang, m.quantityOnHand)}</span></td>
                   <td className="num"><span className="hr-num">{m.reorderPoint || "—"}</span></td>
-                  <td className="hr-hide-compact hr-caption" style={{ color: "var(--text-secondary)" }}>{used(m.usedInProductCount)}</td>
+                  {showUsage ? <td className="hr-hide-compact hr-caption" style={{ color: "var(--text-secondary)" }}>{used(m.usedInProductCount)}</td> : null}
                   <td className="m-end" style={{ textAlign: "end" }}>
                     {m.belowReorderPoint ? <span className="stk-flag">{t("lowStockLabel")}</span> : null}
                   </td>
@@ -151,6 +182,12 @@ export function MaterialsPanel({
                       <Btn size="sm" data-testid="material-receive"
                         onClick={() => { setAdjusting(null); setReceiving(m); setRqty(""); setRref(""); }}>
                         {t("receiveStockLabel")}
+                      </Btn>
+                    )}
+                    {canMove && (
+                      <Btn size="sm" variant="ghost" data-testid="material-move"
+                        onClick={() => { setMoving(m); setMoveTo(m.categoryId ?? ""); setMoveError(""); }}>
+                        {L("نقل", "Move")}
                       </Btn>
                     )}
                     {canCount && (
@@ -168,14 +205,34 @@ export function MaterialsPanel({
                 <td colSpan={2}>
                   {lang === "ar" ? `${materials.length} مواد · ${low} تحت حد إعادة الطلب` : `${materials.length} materials · ${low} below reorder point`}
                 </td>
-                <td colSpan={5} style={{ textAlign: "end", fontSize: 12 }}>
-                  {L("لا يدعم النظام شراء مواد التعبئة بعد · يُصحَّح الرصيد بالجرد أو الاستلام", "Packaging purchases are not supported yet · the balance is corrected by a count or a receipt")}
+                <td colSpan={showUsage ? 5 : 4} style={{ textAlign: "end", fontSize: 12 }}>
+                  {L("يزيد الرصيد بالاستلام أو الشراء · ويُصحَّح بالجرد", "Stock is added by a receipt or a purchase · corrected by a count")}
                 </td>
               </tr>
             </tfoot>
           </table>
         </div>
       )}
+
+      <Dialog
+        open={!!moving}
+        title={L("نقل إلى تصنيف آخر", "Move to another category")}
+        sub={moving ? <><span>{lang === "ar" && moving.nameAr ? moving.nameAr : moving.name}</span> · <span className="hr-id">{moving.code}</span></> : undefined}
+        onClose={() => setMoving(null)}
+        actions={moving ? (
+          <>
+            <Btn variant="primary" busy={moveBusy} disabled={!moveTo || moveTo === moving.categoryId} onClick={() => saveMove(moving)} data-testid="material-move-save">{L("نقل الصنف", "Move item")}</Btn>
+            <Btn onClick={() => setMoving(null)}>{t("cancel")}</Btn>
+          </>
+        ) : undefined}
+      >
+        {moveError ? <Notice tone="danger"><span data-testid="move-refusal">{moveError}</span></Notice> : null}
+        <Field label={L("التصنيف الجديد", "New category")} help={L("النقل بين تصنيفين على حساب مخزون مختلف يحتاج تحويل مخزون إن كان للصنف رصيد أو تكلفة.", "Moving between categories booked to different inventory accounts needs a stock transfer once the item has stock or cost.")}>
+          <Select className="hr-select" data-testid="material-move-to" value={moveTo} onChange={(e) => setMoveTo(e.target.value)}>
+            {moveOptions.map((c) => <option key={c.id} value={c.id}>{categoryPath(c, categories ?? [], lang)}</option>)}
+          </Select>
+        </Field>
+      </Dialog>
 
       <Dialog
         open={!!receiving}
@@ -240,31 +297,63 @@ export function MaterialsPanel({
   );
 }
 
-export function MaterialForm({ onClose, onSaved, onError }: { onClose: () => void; onSaved: () => void; onError: (m: string) => void }) {
+/** An item category a material can be created in or moved to (GET /api/inventory/categories). */
+export type MaterialCategoryOption = { id: string; nameAr: string; nameEn: string | null; parentId: string | null; template: string; defaultUnit: string; inventoryRole: string; isActive: boolean };
+
+const UNIT_OPTIONS: [string, string, string][] = [["PIECE", "قطعة", "Piece"], ["UNIT", "وحدة", "Unit"], ["KG", "كيلوغرام", "Kilogram"], ["GRAM", "غرام", "Gram"], ["LITER", "لتر", "Litre"]];
+
+/** «الأب › الابن» in the viewer's language. */
+export function categoryPath(c: MaterialCategoryOption | undefined, all: MaterialCategoryOption[], lang: "ar" | "en"): string {
+  if (!c) return "—";
+  const name = (x: MaterialCategoryOption) => (lang === "ar" ? x.nameAr : x.nameEn || x.nameAr);
+  const p = c.parentId ? all.find((x) => x.id === c.parentId) : undefined;
+  return p ? `${name(p)} › ${name(c)}` : name(c);
+}
+
+/**
+ * New stock item (MaterialItem) in an item category — the PACKAGING / GENERAL step of the smart «إضافة صنف»
+ * flow. The category arrives preselected (and may be changed among the categories that hold such items); the
+ * unit defaults to the category's. Plain names first: the Arabic name is required, the English one and the code
+ * are optional (a code is generated). POST /api/materials with categoryId.
+ */
+export function MaterialForm({ category, categories, onClose, onSaved, onError, onBack }: {
+  category: MaterialCategoryOption; categories: MaterialCategoryOption[];
+  onClose: () => void; onSaved: (m: { id: string; name: string; nameAr: string | null }) => void; onError: (m: string) => void; onBack?: () => void;
+}) {
   const { t, lang } = useI18n();
   const L = useL();
-  const [form, setForm] = useState({ code: "", name: "", category: "PACKAGING", quantityOnHand: "0", reorderPoint: "0" });
+  const user = useUser();
+  const canReceive = hasSubPrivilege(user?.permissions ?? {}, "inventory", "receive");
+  const options = categories.filter((c) => c.isActive && (c.template === "PACKAGING" || c.template === "GENERAL"));
+  const [form, setForm] = useState({ categoryId: category.id, nameAr: "", nameEn: "", code: "", unitOfMeasure: category.defaultUnit || "PIECE", quantityOnHand: "0", reorderPoint: "0" });
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const chosen = options.find((c) => c.id === form.categoryId) ?? category;
 
   async function submit() {
     setSaving(true);
+    setError("");
     try {
       const res = await fetch("/api/materials", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          code: form.code,
-          name: form.name,
-          category: form.category,
+          categoryId: form.categoryId,
+          code: form.code.trim() || undefined,
+          name: form.nameEn.trim() || form.nameAr.trim(),
+          nameAr: form.nameAr.trim() || null,
+          unitOfMeasure: form.unitOfMeasure,
           quantityOnHand: Number(form.quantityOnHand),
           reorderPoint: Number(form.reorderPoint),
         }),
       });
       if (!res.ok) {
-        onError(localizeApiError(await res.json().catch(() => ({})), lang) ?? L("تعذّر إنشاء المادة.", "Failed to create material."));
+        const msg = localizeApiError(await res.json().catch(() => ({})), lang) ?? L("تعذّر إنشاء الصنف.", "Could not create the item.");
+        setError(msg);
+        onError(msg);
         return;
       }
-      onSaved();
+      onSaved(await res.json());
     } finally {
       setSaving(false);
     }
@@ -273,35 +362,44 @@ export function MaterialForm({ onClose, onSaved, onError }: { onClose: () => voi
   return (
     <Dialog
       open
-      title={t("newMaterialBtn")}
+      title={L("صنف جديد", "New item")}
+      sub={categoryPath(chosen, categories, lang)}
       onClose={onClose}
       actions={
         <>
-          <Btn variant="primary" busy={saving} disabled={!form.code || !form.name} onClick={submit}>{t("newMaterialBtn")}</Btn>
+          <Btn variant="primary" busy={saving} disabled={!form.nameAr.trim()} onClick={submit} data-testid="item-save">{L("حفظ الصنف", "Save item")}</Btn>
+          {onBack ? <Btn onClick={onBack}>{L("رجوع", "Back")}</Btn> : null}
           <Btn onClick={onClose}>{t("cancel")}</Btn>
         </>
       }
     >
-      <div className="hr-form">
-        <Field label={t("materialCodeLabel")}>
-          <input className="hr-input" dir="ltr" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="BAG-1KG" />
+      {error ? <Notice tone="danger">{error}</Notice> : null}
+      <div className="hr-form" data-testid="material-form">
+        <Field label={`${L("اسم الصنف", "Arabic name")} *`} wide>
+          <input className="hr-input" dir="rtl" data-testid="item-name-ar" value={form.nameAr} onChange={(e) => setForm({ ...form, nameAr: e.target.value })} placeholder={L("مثال: حليب كامل الدسم", "e.g. حليب كامل الدسم")} />
+        </Field>
+        <Field label={L("الاسم بالإنجليزية", "English name")} help={L("اختياري", "Optional")}>
+          <input className="hr-input" dir="ltr" data-testid="item-name-en" value={form.nameEn} onChange={(e) => setForm({ ...form, nameEn: e.target.value })} placeholder="Full-fat milk" />
         </Field>
         <Field label={t("categoryLabel")}>
-          <Select className="hr-select" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-            <option value="PACKAGING">{L("تغليف", "Packaging")}</option>
-            <option value="LABEL">{L("ملصق", "Label")}</option>
-            <option value="CONSUMABLE">{L("مستهلكات", "Consumable")}</option>
-            <option value="OTHER">{L("أخرى", "Other")}</option>
+          <Select className="hr-select" data-testid="item-category" value={form.categoryId}
+            onChange={(e) => { const c = options.find((x) => x.id === e.target.value); setForm({ ...form, categoryId: e.target.value, unitOfMeasure: c?.defaultUnit || form.unitOfMeasure }); }}>
+            {options.map((c) => <option key={c.id} value={c.id}>{categoryPath(c, categories, lang)}</option>)}
           </Select>
         </Field>
-        <Field label={t("materialNameLabel")} wide>
-          <input className="hr-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={L("كيس قهوة 1 كغ", "1KG Coffee Bag")} />
+        <Field label={L("وحدة القياس", "Unit")}>
+          <Select className="hr-select" data-testid="item-unit" value={form.unitOfMeasure} onChange={(e) => setForm({ ...form, unitOfMeasure: e.target.value })}>
+            {UNIT_OPTIONS.map(([v, ar, en]) => <option key={v} value={v}>{lang === "ar" ? ar : en}</option>)}
+          </Select>
         </Field>
-        <Field label={t("onHandLabel")}>
-          <input className="hr-input" type="number" min={0} value={form.quantityOnHand} onChange={(e) => setForm({ ...form, quantityOnHand: e.target.value })} />
+        <Field label={t("onHandLabel")} help={canReceive ? L("رصيد افتتاحي يُسجَّل كاستلام", "An opening balance, recorded as a receipt") : L("ابدأ بصفر واستلم التوريد لاحقًا", "Start at zero and receive the delivery later")}>
+          <input className="hr-input" type="number" min={0} step="any" data-testid="item-qty" value={form.quantityOnHand} disabled={!canReceive} onChange={(e) => setForm({ ...form, quantityOnHand: e.target.value })} />
         </Field>
         <Field label={t("reorderPointLabel")}>
-          <input className="hr-input" type="number" min={0} value={form.reorderPoint} onChange={(e) => setForm({ ...form, reorderPoint: e.target.value })} />
+          <input className="hr-input" type="number" min={0} step="any" value={form.reorderPoint} onChange={(e) => setForm({ ...form, reorderPoint: e.target.value })} />
+        </Field>
+        <Field label={L("الرمز", "Code")} help={L("اختياري — يُولَّد تلقائيًا", "Optional — generated if left empty")}>
+          <input className="hr-input" dir="ltr" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="MILK-1L" />
         </Field>
       </div>
     </Dialog>

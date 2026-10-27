@@ -6,6 +6,7 @@
  * on the server either way (B-9).
  */
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useUser } from "../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { Btn, Flag, Notice, OpsBanner, OpsEmpty, OpsError, OpsLoading, OpsRoot, PageHeader, countNoun, useL } from "@/components/ops/ui";
@@ -49,7 +50,11 @@ function LabelsInner() {
   const canProfiles = canPrint || user?.role === "admin" || hasSubPrivilege(user?.permissions ?? {}, "labels", "profile_manage");
   const [products, setProducts] = useState<Product[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+  // ?q= opens the page already searched (the inventory «اطبع الملصق» after a green lot is added: origin labels
+  // print from the coffee product, so the page opens on the bean's name); ?lot= names the lot in a note.
+  const sp = useSearchParams();
+  const [search, setSearch] = useState(() => (sp.get("q") ?? "").slice(0, 80));
+  const fromLot = (sp.get("lot") ?? "").slice(0, 40);
   const [selected, setSelected] = useState<string[]>([]);
   const [dialog, setDialog] = useState(false);
   const [printed, setPrinted] = useState<string | null>(null);
@@ -91,6 +96,8 @@ function LabelsInner() {
       {!canPrint ? <Notice tone="info"><span data-testid="labels-no-print">{L("لا تملك صلاحية الطباعة (labels.print): تستطيع استعراض الملصقات فقط.", "You don’t have print permission (labels.print): you can view labels only.")}</span></Notice> : null}
       {canPrint && certified === false ? <PrintNotCertifiedNotice /> : null}
       {printed ? <OpsBanner tone="success" onClose={() => setPrinted(null)}><span data-testid="labels-printed">{L("سُجّلت مهمة الطباعة وفُتحت نافذة الطباعة في المتصفح.", "The print job was recorded and the browser’s print dialog opened.")}</span></OpsBanner> : null}
+
+      {fromLot ? <Notice tone="info"><span data-testid="labels-from-lot">{L(`اللوت ${fromLot}: اختر منتج القهوة الذي يُعبّأ منه هذا البن ثم اطبع ملصقه.`, `Lot ${fromLot}: select the coffee product this bean is packed as, then print its label.`)}</span></Notice> : null}
 
       <input className="hr-input" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={L("ابحث في المنتجات…", "Search products…")} aria-label={L("ابحث في المنتجات", "Search products")} style={{ maxWidth: 420 }} />
 

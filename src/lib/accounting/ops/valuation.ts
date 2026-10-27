@@ -15,6 +15,7 @@ import { qty4, unitCost } from "./costing";
 import { costSet, lockHolder, type CostKind, type InventoryRole } from "./cost-ledger";
 import { opsRefuse } from "./refusals";
 import { apAging, openReceipts } from "./ap";
+import { materialInventoryRole } from "@/lib/inventory/item-categories";
 
 export const INVENTORY_ROLES: InventoryRole[] = ["INVENTORY_GREEN", "INVENTORY_PACKAGING", "INVENTORY_CAFE", "INVENTORY_ROASTED", "INVENTORY_PACKED"];
 const f2 = (d: Decimal | Prisma.Decimal | number) => new Decimal(d).toFixed(2);
@@ -190,7 +191,7 @@ export type OpeningRow = { kind: CostKind; entityId: string; label: string; sub:
 export async function openingPreview() {
   const [greens, mats, batches, lots, owner, items] = await Promise.all([
     prisma.greenBean.findMany({ where: { quantityKg: { gt: 0 } }, select: { id: true } }),
-    prisma.materialItem.findMany({ where: { quantityOnHand: { gt: 0 } }, select: { id: true, category: true } }),
+    prisma.materialItem.findMany({ where: { quantityOnHand: { gt: 0 } }, select: { id: true, category: true, itemCategory: { select: { inventoryRole: true } } } }),
     prisma.roastingBatch.findMany({ where: { roastedAvailableKg: { gt: 0.0005 } }, select: { id: true } }),
     prisma.finishedGoodsLot.findMany({ where: { status: { not: "SHIPPED" } }, select: { id: true } }),
     prisma.inventoryOpeningCost.findMany(),
@@ -198,7 +199,8 @@ export async function openingPreview() {
   ]);
   const list: { kind: CostKind; entityId: string; role: InventoryRole }[] = [
     ...greens.map((g) => ({ kind: "GREEN_BEAN" as CostKind, entityId: g.id, role: "INVENTORY_GREEN" as InventoryRole })),
-    ...mats.map((m) => ({ kind: "MATERIAL" as CostKind, entityId: m.id, role: (m.category === "CONSUMABLE" || m.category === "OTHER" ? "INVENTORY_CAFE" : "INVENTORY_PACKAGING") as InventoryRole })),
+    // A material by its item category's role (legacy enum rule as the fallback) — the same rule as roleFor.
+    ...mats.map((m) => ({ kind: "MATERIAL" as CostKind, entityId: m.id, role: materialInventoryRole(m) as InventoryRole })),
     ...batches.map((b) => ({ kind: "ROASTED_BATCH" as CostKind, entityId: b.id, role: "INVENTORY_ROASTED" as InventoryRole })),
     ...lots.map((l) => ({ kind: "FG_LOT" as CostKind, entityId: l.id, role: "INVENTORY_PACKED" as InventoryRole })),
   ];
