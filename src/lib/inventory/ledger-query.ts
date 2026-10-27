@@ -6,7 +6,7 @@ export const MOVEMENT_TYPES = ["IN", "OUT", "ADJUSTMENT", "LOSS"] as const;
 export const MOVEMENT_CATEGORIES = ["RAW_MATERIAL", "FINISHED_GOODS", "ROASTED_COFFEE", "PACKAGING_MATERIAL"] as const;
 export const MOVEMENT_SOURCES = [
   "PURCHASE", "ROASTING_BATCH", "DELIVERY", "BLEND", "MANUAL_ADJUSTMENT", "PACKING", "BOM_CONSUMPTION",
-  "PRODUCTION_ORDER", "OPENING_BALANCE", "RECEIVING",
+  "PRODUCTION_ORDER", "OPENING_BALANCE", "RECEIVING", "STOCK_TRANSFER",
 ] as const;
 export const LEDGER_PAGE_SIZES = [10, 25, 50, 100] as const;
 export const LEDGER_EXPORT_MAX = 10_000;
@@ -20,6 +20,8 @@ export type LedgerFilter = {
   sourceDocId?: string;
   /** An item category (unified inventory): its movements, a root's sub-categories included. */
   itemCategoryId?: string;
+  /** Phase 3 (stock locations): the movements AT one location. */
+  locationId?: string;
   from?: Date;
   to?: Date;
   page: number;
@@ -47,6 +49,7 @@ export function parseLedgerFilter(sp: URLSearchParams): LedgerFilter {
     q: q || undefined,
     entityId: sp.get("entityId")?.slice(0, 64) || undefined,
     itemCategoryId: sp.get("itemCategory")?.slice(0, 64) || undefined,
+    locationId: sp.get("location")?.slice(0, 64) || undefined,
     sourceDocId: sp.get("sourceDocId")?.slice(0, 64) || undefined,
     from: date(sp.get("from")),
     to: date(sp.get("to")),

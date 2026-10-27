@@ -9,12 +9,17 @@
  *     maintenance duty, as for bean records): entering a counted quantity changes no stock;
  *   · post                         — inventory › adjust through stockChangeGate (privileged:
  *     verified individual, username + PIN, fresh step-up; SIMPLE MODE as elsewhere).
+ *
+ * Phase 3 (20261115090000_stock_locations): a session counts ONE location (InventoryCountSession.locationId, chosen
+ * when it is started; default: the default site). Its lines' system quantities are that location's balances, and
+ * posting adjusts that location's balance (and the company-wide total by the same variance).
  */
 import { flushPostings } from "@/lib/accounting/ops/cost-ledger";
 import { prisma } from "@/lib/db";
 import type { Db } from "@/lib/hr/core";
 import { parseStockQuantity } from "./stock-quantity";
 import { applyInventoryAdjustment, type AdjustmentUser } from "./inventory-adjustment";
+import { activeLocation, defaultLocationId } from "./stock-locations";
 import {
   MAX_COUNT_LINES, isBookable, isCountCategory, lineVariance, postBlocker, postedBalance, summarizeCount,
   type CountCategory,
@@ -25,8 +30,8 @@ const fail = (status: number, code: string, message: string): AppError => ({ _ap
 
 export type CountItemRef = { category: CountCategory; entityId: string };
 
-/** Current balances, names and units of the items on a sheet (green coffee in kg). */
-async function itemsOf(db: Db, refs: CountItemRef[]) {
+/** Current balances (at `locationId`, else the company-wide total), names and units of the items on a sheet (green coffee in kg). */
+async function itemsOf(db: Db, refs: CountItemRef[], locationId?: string | null) {
   const beanIds = refs.filter((r) => r.category === "RAW_MATERIAL").map((r) => r.entityId);
   const matIds = refs.filter((r) => r.category === "PACKAGING_MATERIAL").map((r) => r.entityId);
   const [beans, mats] = await Promise.all([
@@ -36,11 +41,16 @@ async function itemsOf(db: Db, refs: CountItemRef[]) {
   const map = new Map<string, { name: string; nameAr: string | null; code: string; sub: string | null; subAr: string | null; unit: string; qty: number; isActive: boolean }>();
   for (const b of beans) map.set(`RAW_MATERIAL:${b.id}`, { name: b.beanType, nameAr: b.beanTypeAr, code: b.serialNumber, sub: b.location, subAr: b.location, unit: "KG", qty: b.quantityKg, isActive: b.isActive });
   for (const m of mats) map.set(`PACKAGING_MATERIAL:${m.id}`, { name: m.name, nameAr: m.nameAr, code: m.code, sub: m.category, subAr: m.category, unit: m.unitOfMeasure, qty: m.quantityOnHand, isActive: m.isActive });
+  if (locationId && refs.length) {
+    const bal = await db.stockBalance.findMany({ where: { locationId, OR: [{ itemKind: "GREEN_BEAN", entityId: { in: beanIds } }, { itemKind: "MATERIAL", entityId: { in: matIds } }] }, select: { itemKind: true, entityId: true, qty: true } });
+    const at = new Map(bal.map((b) => [`${b.itemKind === "GREEN_BEAN" ? "RAW_MATERIAL" : "PACKAGING_MATERIAL"}:${b.entityId}`, b.qty]));
+    for (const [k, v] of map) v.qty = at.get(k) ?? 0;
+  }
   return map;
 }
 
 /** Validate and de-duplicate requested items; every one must exist. */
-async function resolveItems(db: Db, raw: unknown): Promise<CountItemRef[]> {
+async function resolveItems(db: Db, raw: unknown, locationId?: string | null): Promise<CountItemRef[]> {
   if (!Array.isArray(raw)) throw fail(400, "COUNT_ITEMS_INVALID", "items must be an array of { category, entityId }.");
   const seen = new Set<string>();
   const refs: CountItemRef[] = [];
@@ -54,7 +64,7 @@ async function resolveItems(db: Db, raw: unknown): Promise<CountItemRef[]> {
     seen.add(k);
     refs.push({ category: r.category, entityId: r.entityId });
   }
-  const found = await itemsOf(db, refs);
+  const found = await itemsOf(db, refs, locationId);
   const missing = refs.filter((r) => !found.has(`${r.category}:${r.entityId}`));
   if (missing.length) throw fail(404, "COUNT_ITEM_NOT_FOUND", `Item not found: ${missing.map((m) => m.entityId).join(", ")}.`);
   return refs;
@@ -70,7 +80,7 @@ export async function listCountSessions(limit = 50) {
   const sessions = await prisma.inventoryCountSession.findMany({
     orderBy: { createdAt: "desc" },
     take: limit,
-    include: { lines: { select: { category: true, systemQty: true, countedQty: true } } },
+    include: { lines: { select: { category: true, systemQty: true, countedQty: true } }, location: { select: { id: true, code: true, nameAr: true, nameEn: true } } },
   });
   const userIds = [...new Set(sessions.flatMap((s) => [s.createdById, s.postedById]).filter((x): x is string => !!x))];
   const emps = userIds.length ? await prisma.employee.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }) : [];
@@ -84,9 +94,9 @@ export async function listCountSessions(limit = 50) {
 }
 
 export async function getCountSession(id: string, db: Db = prisma) {
-  const s = await db.inventoryCountSession.findUnique({ where: { id }, include: { lines: { orderBy: { createdAt: "asc" } } } });
+  const s = await db.inventoryCountSession.findUnique({ where: { id }, include: { lines: { orderBy: { createdAt: "asc" } }, location: { select: { id: true, code: true, nameAr: true, nameEn: true, isActive: true } } } });
   if (!s) return null;
-  const items = await itemsOf(db, s.lines.map((l) => ({ category: l.category as CountCategory, entityId: l.entityId })));
+  const items = await itemsOf(db, s.lines.map((l) => ({ category: l.category as CountCategory, entityId: l.entityId })), s.locationId);
   const userIds = [...new Set([s.createdById, s.postedById, s.cancelledById, ...s.lines.map((l) => l.countedById)].filter((x): x is string => !!x))];
   const emps = userIds.length ? await db.employee.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }) : [];
   const name = new Map(emps.map((e) => [e.id, e.name]));
@@ -116,12 +126,15 @@ export async function getCountSession(id: string, db: Db = prisma) {
 /** Start a session with the chosen items; each line snapshots the balance it starts from. */
 export async function createCountSession(user: { id: string }, body: Record<string, unknown>) {
   return prisma.$transaction(async (tx) => {
-    const refs = await resolveItems(tx, body.items);
+    // The location counted: an active one, or the default site.
+    const locationId = body.locationId ? (await activeLocation(tx, body.locationId)).id : await defaultLocationId(tx);
+    const refs = await resolveItems(tx, body.items, locationId);
     if (refs.length === 0) throw fail(400, "COUNT_EMPTY", "Choose at least one item to count.");
     if (refs.length > MAX_COUNT_LINES) throw fail(400, "COUNT_TOO_LARGE", `At most ${MAX_COUNT_LINES} items per count.`);
-    const items = await itemsOf(tx, refs);
+    const items = await itemsOf(tx, refs, locationId);
     const s = await tx.inventoryCountSession.create({
       data: {
+        locationId,
         title: cleanText(body.title, 120),
         notes: cleanText(body.notes, 500),
         createdById: user.id,
@@ -140,9 +153,10 @@ export async function createCountSession(user: { id: string }, body: Record<stri
 export async function updateCountSession(user: { id: string }, id: string, body: Record<string, unknown>) {
   return prisma.$transaction(async (tx) => {
     // Serialise against a concurrent post / cancel of the same sheet.
-    const locked = await tx.$queryRaw<{ status: string }[]>`SELECT "status"::text AS "status" FROM "InventoryCountSession" WHERE "id" = ${id} FOR UPDATE`;
+    const locked = await tx.$queryRaw<{ status: string; locationId: string }[]>`SELECT "status"::text AS "status", "locationId" FROM "InventoryCountSession" WHERE "id" = ${id} FOR UPDATE`;
     if (!locked[0]) throw fail(404, "COUNT_NOT_FOUND", "Count not found.");
     if (locked[0].status !== "OPEN") throw fail(409, "COUNT_NOT_OPEN", "This count is no longer open.");
+    const at = locked[0].locationId;
 
     if (body.title !== undefined || body.notes !== undefined) {
       await tx.inventoryCountSession.update({ where: { id }, data: { ...(body.title !== undefined ? { title: cleanText(body.title, 120) } : {}), ...(body.notes !== undefined ? { notes: cleanText(body.notes, 500) } : {}) } });
@@ -154,10 +168,10 @@ export async function updateCountSession(user: { id: string }, id: string, body:
     }
 
     if (body.add !== undefined) {
-      const refs = await resolveItems(tx, body.add);
+      const refs = await resolveItems(tx, body.add, at);
       const existing = await tx.inventoryCountLine.count({ where: { sessionId: id } });
       if (existing + refs.length > MAX_COUNT_LINES) throw fail(400, "COUNT_TOO_LARGE", `At most ${MAX_COUNT_LINES} items per count.`);
-      const items = await itemsOf(tx, refs);
+      const items = await itemsOf(tx, refs, at);
       await tx.inventoryCountLine.createMany({
         data: refs.map((r) => ({ sessionId: id, category: r.category, entityId: r.entityId, systemQty: items.get(`${r.category}:${r.entityId}`)!.qty })),
         skipDuplicates: true,
@@ -169,7 +183,7 @@ export async function updateCountSession(user: { id: string }, id: string, body:
       const ids = body.lines.map((l) => (l as Record<string, unknown>)?.id).filter((x): x is string => typeof x === "string");
       const rows = await tx.inventoryCountLine.findMany({ where: { sessionId: id, id: { in: ids } } });
       const byId = new Map(rows.map((r) => [r.id, r]));
-      const items = await itemsOf(tx, rows.map((r) => ({ category: r.category as CountCategory, entityId: r.entityId })));
+      const items = await itemsOf(tx, rows.map((r) => ({ category: r.category as CountCategory, entityId: r.entityId })), at);
       for (const raw of body.lines) {
         const l = (raw ?? {}) as Record<string, unknown>;
         const row = typeof l.id === "string" ? byId.get(l.id) : undefined;
@@ -214,7 +228,7 @@ export async function cancelCountSession(user: { id: string }, id: string) {
  */
 export async function postCountSession(user: AdjustmentUser, id: string, reason: string) {
   return prisma.$transaction(async (tx) => {
-    const locked = await tx.$queryRaw<{ status: string; number: number }[]>`SELECT "status"::text AS "status", "number" FROM "InventoryCountSession" WHERE "id" = ${id} FOR UPDATE`;
+    const locked = await tx.$queryRaw<{ status: string; number: number; locationId: string }[]>`SELECT "status"::text AS "status", "number", "locationId" FROM "InventoryCountSession" WHERE "id" = ${id} FOR UPDATE`;
     if (!locked[0]) throw fail(404, "COUNT_NOT_FOUND", "Count not found.");
     const lines = await tx.inventoryCountLine.findMany({ where: { sessionId: id }, orderBy: [{ category: "asc" }, { entityId: "asc" }] });
     const summary = summarizeCount(lines.map((l) => ({ ...l, category: l.category as CountCategory })));
@@ -236,6 +250,7 @@ export async function postCountSession(user: AdjustmentUser, id: string, reason:
         target: (current) => postedBalance(current, variance),
         reason: note,
         sourceDocId: id,
+        locationId: locked[0].locationId,
         details: { countSessionId: id, countNumber: locked[0].number, countLineId: l.id, systemQtyAtCount: l.systemQty, countedQty: l.countedQty, variance },
       });
       await tx.inventoryCountLine.update({

@@ -14,6 +14,9 @@ import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../user-context";
 import { unitWord } from "../inventory/_parts/shared";
 import { canEdit, hasSubPrivilege } from "@/lib/auth-shared";
+import { PrintLabelButton } from "@/components/print/QuickPrint";
+import { ScanInput, lookupScanCode } from "@/components/scan/ScanInput";
+import { OpeningSiteField } from "../inventory/_parts/locations";
 
 export type Material = {
   id: string;
@@ -29,6 +32,8 @@ export type Material = {
   belowReorderPoint: boolean;
   /** The item category (unified inventory, 20261112090000_item_categories). */
   categoryId?: string | null;
+  /** The shelf label's barcode payload «MT-00007» (20261114090000_green_lot_labels). */
+  labelCode?: string;
 };
 
 const CATEGORY_AR: Record<string, string> = { PACKAGING: "تعبئة", LABEL: "ملصق", CONSUMABLE: "مستهلك", OTHER: "أخرى" };
@@ -51,6 +56,9 @@ export function MaterialsPanel({
   onError,
   categories,
   showUsage = true,
+  site,
+  receiveSite,
+  whereOf,
 }: {
   materials: Material[];
   search?: React.ReactNode;
@@ -60,8 +68,15 @@ export function MaterialsPanel({
   categories?: MaterialCategoryOption[];
   /** The «مستخدم في» (BOM usage) column — meaningful for packaging only; hidden for general / café stock. */
   showUsage?: boolean;
+  /** Phase 3 (stock locations): the location a receipt / a count here is booked at, and its balance of an item. */
+  site?: { id: string; name: string; qtyOf: (id: string) => number };
+  /** Phase 3: where a receipt here goes when it differs from the count site (unfiltered: the default receiving site). */
+  receiveSite?: { id: string; name: string };
+  /** Phase 3: where an item's balance is (the per-location breakdown under its name). */
+  whereOf?: (id: string) => React.ReactNode;
 }) {
   const { t, lang } = useI18n();
+  const recvSite = receiveSite ?? site;
   const L = useL();
   const user = useUser();
   // A count changes the on-hand quantity: an inventory adjustment (privileged, SOD.md §20). Offered
@@ -107,7 +122,7 @@ export function MaterialsPanel({
       method: "PATCH",
       headers: { "content-type": "application/json" },
       // The reason is required (it is the only document behind a count).
-      body: JSON.stringify({ newActualQuantity: n, reason: reason.trim() }),
+      body: JSON.stringify({ newActualQuantity: n, reason: reason.trim(), ...(site ? { locationId: site.id } : {}) }),
     });
     if (!res.ok) onError(localizeApiError(await res.json().catch(() => ({})), lang) ?? L("تعذّرت تسوية المخزون.", "Failed to adjust stock."));
     setAdjusting(null);
@@ -125,7 +140,7 @@ export function MaterialsPanel({
     const res = await fetch(`/api/materials/${m.id}/receive`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ quantity: n, reference: rref.trim() }),
+      body: JSON.stringify({ quantity: n, reference: rref.trim(), ...(recvSite ? { locationId: recvSite.id } : {}) }),
     });
     if (!res.ok) onError(localizeApiError(await res.json().catch(() => ({})), lang) ?? L("تعذّر استلام المخزون.", "Failed to receive stock."));
     setReceiving(null);
@@ -139,11 +154,24 @@ export function MaterialsPanel({
   const catOf = (m: Material) => (categories && m.categoryId ? categoryPath(categories.find((c) => c.id === m.categoryId), categories, lang) : legacyCat(m.category));
   const moveOptions = (categories ?? []).filter((c) => c.isActive && (c.template === "PACKAGING" || c.template === "GENERAL"));
   const used = (n: number) => (n === 0 ? L("غير مستخدمة", "Not used") : lang === "ar" ? (n === 1 ? "منتج واحد" : `${n} منتجات`) : `${n} ${n === 1 ? "product" : "products"}`);
-  const delta = adjusting ? Number(value) - adjusting.quantityOnHand : NaN;
+  const systemQty = (m: Material) => (site ? site.qtyOf(m.id) : m.quantityOnHand);
+  const delta = adjusting ? Number(value) - systemQty(adjusting) : NaN;
+
+  // Receiving by scan: the shelf label's barcode opens that item's receipt (20261114090000_green_lot_labels).
+  async function scanReceive(code: string) {
+    const r = await lookupScanCode<{ id: string; name: string; nameAr: string | null; itemCode: string; unit: string; quantityOnHand: number; isActive: boolean; categoryId: string | null; code: string }>(code, lang, { only: "MATERIAL" });
+    if (!r.ok) return { tone: "danger" as const, text: r.message };
+    const h = r.hit;
+    if (!h.isActive) return { tone: "danger" as const, text: L(`الصنف ${h.itemCode} غير نشط — لا يُستلم عليه.`, `Item ${h.itemCode} is inactive — nothing is received on it.`) };
+    const m = materials.find((x) => x.id === h.id) ?? { id: h.id, code: h.itemCode, name: h.name, nameAr: h.nameAr, category: "", unitOfMeasure: h.unit, quantityOnHand: h.quantityOnHand, reorderPoint: 0, isActive: true, usedInProductCount: 0, belowReorderPoint: false, categoryId: h.categoryId, labelCode: h.code };
+    setAdjusting(null); setReceiving(m); setRqty(""); setRref("");
+    return { tone: "success" as const, text: L(`استلام: ${h.nameAr ?? h.name} · ${h.itemCode}`, `Receiving: ${h.name} · ${h.itemCode}`) };
+  }
 
   return (
     <>
       {search}
+      {canReceive ? <ScanInput testId="material-scan" compact onCode={scanReceive} placeholder={L("امسح ملصق الرف لاستلام الصنف", "Scan a shelf label to receive the item")} /> : null}
       {materials.length === 0 ? (
         <div className="hr-state"><h3>{t("noMaterialsYet")}</h3></div>
       ) : (
@@ -169,6 +197,7 @@ export function MaterialsPanel({
                     <span className="hr-msub">
                       <span className="hr-id">{m.code}</span> · {catOf(m)} · {t("onHandLabel")} <span className="hr-num">{m.quantityOnHand}</span>
                     </span>
+                    {whereOf ? whereOf(m.id) : null}
                   </td>
                   <td className="hr-caption" style={{ color: "var(--text-secondary)" }}>{catOf(m)}</td>
                   <td className={`num${m.belowReorderPoint ? " is-low" : ""}`}><span className="hr-num">{m.quantityOnHand}</span> <span className="hr-caption">{unitWord(m.unitOfMeasure, lang, m.quantityOnHand)}</span></td>
@@ -178,6 +207,9 @@ export function MaterialsPanel({
                     {m.belowReorderPoint ? <span className="stk-flag">{t("lowStockLabel")}</span> : null}
                   </td>
                   <td className="stk-acts stk-macts">
+                    <PrintLabelButton template="MATERIAL_SHELF" variant="ghost" iconOnly label={L("ملصق رف", "Shelf label")} testId={`material-print-${m.code}`}
+                      subtitle={`${lang === "ar" && m.nameAr ? m.nameAr : m.name} · ${m.code}`}
+                      items={[{ kind: "material", materialId: m.id, label: `${lang === "ar" && m.nameAr ? m.nameAr : m.name} · ${m.code}` }]} />
                     {canReceive && m.isActive && (
                       <Btn size="sm" data-testid="material-receive"
                         onClick={() => { setAdjusting(null); setReceiving(m); setRqty(""); setRref(""); }}>
@@ -192,7 +224,7 @@ export function MaterialsPanel({
                     )}
                     {canCount && (
                       <Btn size="sm" variant="ghost" title={t("adjustStockLabel")}
-                        onClick={() => { setReceiving(null); setAdjusting(m); setValue(String(m.quantityOnHand)); setReason(""); }}>
+                        onClick={() => { setReceiving(null); setAdjusting(m); setValue(String(systemQty(m))); setReason(""); }}>
                         <CheckIcon />{L("جرد", "Count")}
                       </Btn>
                     )}
@@ -246,6 +278,7 @@ export function MaterialsPanel({
           </>
         ) : undefined}
       >
+        {recvSite ? <p className="hr-caption" style={{ margin: 0 }} data-testid="material-receive-site">{L("موقع الاستلام", "Receiving location")}: <span className="strong">{recvSite.name}</span></p> : null}
         <div className="hr-form">
           <Field label={t("receivedQtyLabel")}>
             <input className="hr-input" data-testid="material-receive-qty" type="number" min={0} value={rqty}
@@ -273,8 +306,8 @@ export function MaterialsPanel({
         {adjusting ? (
           <>
             <div className="hr-form">
-              <Field label={L("الكمية في النظام", "System quantity")}>
-                <input className="hr-input" value={adjusting.quantityOnHand} disabled readOnly />
+              <Field label={site ? `${L("الكمية في النظام", "System quantity")} · ${site.name}` : L("الكمية في النظام", "System quantity")}>
+                <input className="hr-input" value={systemQty(adjusting)} disabled readOnly />
               </Field>
               <Field label={t("adjustStockLabel")}>
                 <input className="hr-input" type="number" min={0} value={value} onChange={(e) => setValue(e.target.value)} placeholder={t("adjustStockLabel")} />
@@ -327,7 +360,7 @@ export function MaterialForm({ category, categories, onClose, onSaved, onError, 
   const user = useUser();
   const canReceive = hasSubPrivilege(user?.permissions ?? {}, "inventory", "receive");
   const options = categories.filter((c) => c.isActive && (c.template === "PACKAGING" || c.template === "GENERAL"));
-  const [form, setForm] = useState({ categoryId: category.id, nameAr: "", nameEn: "", code: "", unitOfMeasure: category.defaultUnit || "PIECE", quantityOnHand: "0", reorderPoint: "0" });
+  const [form, setForm] = useState({ categoryId: category.id, nameAr: "", nameEn: "", code: "", unitOfMeasure: category.defaultUnit || "PIECE", quantityOnHand: "0", reorderPoint: "0", locationId: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const chosen = options.find((c) => c.id === form.categoryId) ?? category;
@@ -346,6 +379,7 @@ export function MaterialForm({ category, categories, onClose, onSaved, onError, 
           nameAr: form.nameAr.trim() || null,
           unitOfMeasure: form.unitOfMeasure,
           quantityOnHand: noOpening ? 0 : Number(form.quantityOnHand),
+          ...(!noOpening && Number(form.quantityOnHand) > 0 && form.locationId ? { locationId: form.locationId } : {}),
           reorderPoint: Number(form.reorderPoint),
         }),
       });
@@ -397,6 +431,7 @@ export function MaterialForm({ category, categories, onClose, onSaved, onError, 
         {noOpening ? null : <Field label={t("onHandLabel")} help={canReceive ? L("رصيد افتتاحي يُسجَّل كاستلام", "An opening balance, recorded as a receipt") : L("ابدأ بصفر واستلم التوريد لاحقًا", "Start at zero and receive the delivery later")}>
           <input className="hr-input" type="number" min={0} step="any" data-testid="item-qty" value={form.quantityOnHand} disabled={!canReceive} onChange={(e) => setForm({ ...form, quantityOnHand: e.target.value })} />
         </Field>}
+        {noOpening || !canReceive ? null : <OpeningSiteField qty={Number(form.quantityOnHand)} value={form.locationId} onChange={(v) => setForm({ ...form, locationId: v })} />}
         <Field label={t("reorderPointLabel")}>
           <input className="hr-input" type="number" min={0} step="any" value={form.reorderPoint} onChange={(e) => setForm({ ...form, reorderPoint: e.target.value })} />
         </Field>

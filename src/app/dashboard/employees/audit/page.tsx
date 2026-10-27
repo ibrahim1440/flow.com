@@ -59,7 +59,7 @@ export default function PermissionAuditPage() {
   }
   if (error?.status === 403) return <UsersFrame><NoAccess /></UsersFrame>;
 
-  const segs: [string, string][] = [["", L("آخر 30 يومًا", "Last 30 days")], ["permissions", L("الصلاحيات", "Permissions")], ["signin", L("الدخول", "Sign-ins")], ["accounts", L("الحسابات", "Accounts")], ["purchases", L("المشتريات", "Purchases")]];
+  const segs: [string, string][] = [["", L("آخر 30 يومًا", "Last 30 days")], ["permissions", L("الصلاحيات", "Permissions")], ["signin", L("الدخول", "Sign-ins")], ["accounts", L("الحسابات", "Accounts")], ["purchases", L("المشتريات", "Purchases")], ["inventory", L("المخزون والمواقع", "Inventory & locations")], ["labels", L("الملصقات", "Labels")]];
   return (
     <UsersFrame testId="ur-audit">
       <SectionHead tab="audit" isAdmin counts={counts}
@@ -67,7 +67,7 @@ export default function PermissionAuditPage() {
         actions={<Btn onClick={() => setExporting(true)} data-testid="ur-audit-export"><Ico name="dl" small />{L("تصدير", "Export")} <SensFlag lang={lang} /></Btn>} />
       <div className="ur-tool ur-hide-phone">
         <input className="hr-input hr-search" type="search" placeholder={L("المنفّذ أو الهدف", "Actor or target")} aria-label={L("بحث", "Search")} value={q} onChange={(e) => setQ(e.target.value)} data-testid="ur-audit-search" />
-        <FilterChip label={L("الإجراء", "Action")} value={cat} onChange={setCat} options={[{ value: "permissions", label: L("الصلاحيات والأدوار", "Permissions & roles") }, { value: "accounts", label: L("الحسابات وبيانات الدخول", "Accounts & credentials") }, { value: "signin", label: L("الدخول", "Sign-ins") }, { value: "purchases", label: L("فواتير المشتريات والاستلام", "Purchase invoices & receipts") }]} />
+        <FilterChip label={L("الإجراء", "Action")} value={cat} onChange={setCat} options={[{ value: "permissions", label: L("الصلاحيات والأدوار", "Permissions & roles") }, { value: "accounts", label: L("الحسابات وبيانات الدخول", "Accounts & credentials") }, { value: "signin", label: L("الدخول", "Sign-ins") }, { value: "purchases", label: L("فواتير المشتريات والاستلام", "Purchase invoices & receipts") }, { value: "inventory", label: L("مواقع المخزون والتحويلات", "Stock locations & transfers") }, { value: "labels", label: L("طباعة الملصقات", "Label printing") }]} />
         <FilterChip label={L("الفترة", "Period")} value={days === "30" ? "" : days} onChange={(v) => setDays(v || "30")} allLabel={L("آخر 30 يومًا", "Last 30 days")} options={[{ value: "7", label: L("آخر 7 أيام", "Last 7 days") }, { value: "90", label: L("آخر 90 يومًا", "Last 90 days") }, { value: "365", label: L("آخر سنة", "Last year") }, { value: "all", label: L("كل السجل", "All") }]} />
         <span className="ur-hide-rail"><FilterChip label={L("المصدر", "Source")} value={source} onChange={setSource} options={[{ value: "web", label: L("ويب", "Web") }, { value: "station", label: L("محطة", "Station") }, { value: "system", label: L("النظام", "System") }]} /></span>
       </div>

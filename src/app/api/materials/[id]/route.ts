@@ -1,4 +1,5 @@
 import { flushPostings } from "@/lib/accounting/ops/cost-ledger";
+import { activeLocation } from "@/lib/services/stock-locations";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireAnyModule, requireEdit, stockChangeGate } from "@/lib/auth-server";
@@ -165,6 +166,8 @@ export async function PATCH(request: Request, { params }: Params) {
           target: newActualQuantity,
           reason: explained && explained.ok ? explained.reason : "",
           sourceDocId: null,
+          // Phase 3: a count at one location (b.locationId, active) sets that location's quantity.
+          locationId: b.locationId ? (await activeLocation(tx, b.locationId)).id : null,
         });
       }
 

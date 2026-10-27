@@ -6,12 +6,17 @@ import { Languages } from "lucide-react";
 import { Btn, Field, Notice, useL } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
 import { useI18n } from "@/lib/i18n/context";
+import { OpeningSiteField } from "./locations";
 
 export type FormState = {
   serialNumber: string; beanType: string; beanTypeAr: string;
   country: string; countryAr: string; region: string; regionAr: string;
   variety: string; process: string; processAr: string;
   altitude: string; location: string; quantityKg: number;
+  /** The sacks it came in (per-sack labels «كيس 3 من 15»): optional, as typed. */
+  sackCount?: string; sackWeightKg?: string;
+  /** Phase 3: where the opening quantity is received ("" / absent = the default receiving site). */
+  locationId?: string;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -46,8 +51,10 @@ async function callTranslate(text: string, target: "ar" | "en"): Promise<string 
 // ─── BeanForm (Add / Edit) ───────────────────────────────────────────────────
 
 export function BeanForm({
-  title, initial, onSave, onClose, saving, error, hideQuantity, saveLabel,
+  title, initial, onSave, onClose, saving, error, hideQuantity, saveLabel, openingSite,
 }: {
+  /** A new lot with a starting quantity: offer «موقع الرصيد الافتتاحي» (the add flow; never the edit form). */
+  openingSite?: boolean;
   title: string;
   /** The purchase invoice's «لوط جديد»: the quantity is the invoice line's, not the form's. */
   hideQuantity?: boolean;
@@ -131,6 +138,7 @@ export function BeanForm({
               onChange={(e) => set("quantityKg", parseFloat(e.target.value) || 0)} />
           </Field>
         )}
+        {openingSite && !hideQuantity ? <OpeningSiteField qty={form.quantityKg} value={form.locationId ?? ""} onChange={(v) => set("locationId", v)} /> : null}
         {bilingualFields.map(({ enKey, arKey, labelEn, labelAr, required }) => (
           <div key={enKey} style={{ display: "contents" }}>
             <Field label={`${labelEn}${required ? " *" : ""}`}>
@@ -156,8 +164,30 @@ export function BeanForm({
             <input className="hr-input" value={form[key] as string} onChange={(e) => set(key, e.target.value)} />
           </Field>
         ))}
+        <SackFields form={form} set={set} hideQuantity={hideQuantity} />
       </form>
     </Dialog>
   );
 }
 
+
+/** «الأكياس»: how many sacks and the weight of one — for one numbered label per sack. Optional. */
+function SackFields({ form, set, hideQuantity }: { form: FormState; set: (k: keyof FormState, v: string | number) => void; hideQuantity?: boolean }) {
+  const L = useL();
+  const n = Number(form.sackCount), w = Number(form.sackWeightKg);
+  const total = Number.isInteger(n) && n > 0 && w > 0 ? Math.round(n * w * 1000) / 1000 : null;
+  const off = total !== null && !hideQuantity && form.quantityKg > 0 && Math.abs(total - form.quantityKg) > 0.001;
+  return (
+    <>
+      <Field label={L("عدد الأكياس", "Number of sacks")} help={L("اختياري: يُطبع ملصق مرقّم لكل كيس «كيس 3 من 15».", "Optional: one numbered label per sack, «Sack 3 of 15».")}>
+        <input className="hr-input" inputMode="numeric" type="number" min={1} max={999} step={1} data-testid="bean-sack-count"
+          value={form.sackCount ?? ""} onChange={(e) => set("sackCount", e.target.value)} placeholder="15" />
+      </Field>
+      <Field label={L("وزن الكيس · كغ", "Sack weight · kg")}
+        help={total !== null ? (off ? L(`${n} × ${w} = ${total} كغ — لا يطابق الكمية ${form.quantityKg} كغ`, `${n} × ${w} = ${total} kg — not the quantity ${form.quantityKg} kg`) : L(`${n} × ${w} = ${total} كغ`, `${n} × ${w} = ${total} kg`)) : L("اختياري", "Optional")}>
+        <input className="hr-input" inputMode="decimal" type="number" min={0} max={1000} step="0.01" data-testid="bean-sack-weight"
+          value={form.sackWeightKg ?? ""} onChange={(e) => set("sackWeightKg", e.target.value)} placeholder="60" />
+      </Field>
+    </>
+  );
+}

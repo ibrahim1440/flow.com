@@ -16,6 +16,7 @@ import { notify } from "@/lib/notifications/notify";
 import { managerAccountOf, dueTexts, type Db } from "./context";
 import { getSettings } from "./settings";
 import { taskPlan, OPEN } from "../plan";
+import { checkGreenReadiness } from "@/lib/services/green-readiness";
 
 const MIN = 60_000;
 export const MAX_ATTEMPTS = 5;
@@ -169,7 +170,9 @@ export async function maybeRunReminders(now = Date.now()): Promise<void> {
 export async function runWorkspaceJobs(trigger: "cron" | "request" | "manual", now = new Date()) {
   const startedAt = new Date();
   const reminders = trigger === "request" ? await runReminders(now, 25, 4_000) : await runReminders(now);
-  const summary = { reminders };
+  // The daily floor of «جاهزية البن الأخضر»: coming roasts whose green is at another site → the supervisor's alert.
+  const greenReadiness = trigger === "request" ? null : await checkGreenReadiness(prisma, now);
+  const summary = { reminders, ...(greenReadiness ? { greenReadiness } : {}) };
   // A scheduled or manual run is always recorded (the settings screen shows the last one); a bell-poll run
   // only when it did something, so the table does not grow by a row a minute.
   if (trigger !== "request" || reminders.claimed > 0) {

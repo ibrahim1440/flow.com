@@ -1,5 +1,6 @@
 import { NextResponse } from "@/lib/api-response";
 import { withArabicError } from "@/lib/i18n/api-errors";
+import { locationDbRefusal } from "@/lib/inventory/locations";
 import { MANUAL_JOURNALS_DISABLED, MANUAL_JOURNALS_DISABLED_AR, MANUAL_JOURNALS_DISABLED_EN } from "@/lib/accounting/manual-journals-messages";
 import { ledgerDbRefusal } from "@/lib/accounting/refusals";
 import { AccountingError, accountingErrorJson } from "@/lib/accounting/errors";
@@ -18,11 +19,11 @@ import { opsDbRefusal } from "@/lib/accounting/ops/refusals";
  */
 export function handleDomainError(err: unknown): NextResponse {
   if (err && typeof err === "object" && "_appCode" in err) {
-    const e = err as { _appCode: number; message?: string; errorEn?: string; errorAr?: string; code?: string; problems?: unknown };
+    const e = err as { _appCode: number; message?: string; errorEn?: string; errorAr?: string; code?: string; problems?: unknown; location?: unknown };
     const status = Number.isInteger(e._appCode) && e._appCode >= 400 && e._appCode < 600 ? e._appCode : 400;
     // A coded refusal (e.g. REAUTH_REQUIRED, IDENTITY_NOT_VERIFIED) keeps its code, so the client can act on it.
     // DEF-08/09: an English refusal also carries its Arabic (`errorAr`) when it is known.
-    return NextResponse.json(withArabicError({ error: e.message ?? "Refused.", ...(e.errorEn ? { errorEn: e.errorEn } : {}), ...(e.errorAr ? { errorAr: e.errorAr } : {}), ...(e.code ? { code: e.code } : {}), ...(Array.isArray(e.problems) ? { problems: e.problems } : {}) }), { status });
+    return NextResponse.json(withArabicError({ error: e.message ?? "Refused.", ...(e.errorEn ? { errorEn: e.errorEn } : {}), ...(e.errorAr ? { errorAr: e.errorAr } : {}), ...(e.code ? { code: e.code } : {}), ...(Array.isArray(e.problems) ? { problems: e.problems } : {}), ...(e.location && typeof e.location === "object" ? { location: e.location } : {}) }), { status });
   }
   return handlePrismaError(err);
 }
@@ -49,6 +50,10 @@ export function handlePrismaError(err: unknown): NextResponse {
   // Accounting A3 (20261104090000): a posting refused inside an operation (an unmapped role, a closed period …) is
   // a coded refusal of the operation, never a crash; so are the cost / AP sub-ledger guards.
   if (err instanceof AccountingError) return NextResponse.json(accountingErrorJson(err), { status: err.status });
+  // Phase 3 (20261115090000_stock_locations): a location guard of the database (not enough stock at the location, a
+  // closed site, a site still holding stock) is a coded, bilingual 409 — never a crash.
+  const loc = locationDbRefusal(msg);
+  if (loc) return NextResponse.json({ error: loc.error, errorEn: loc.errorEn, code: loc.code, ...(loc.locationId ? { locationId: loc.locationId } : {}), ...(loc.available !== undefined ? { available: loc.available, requested: loc.requested, itemKind: loc.itemKind, entityId: loc.entityId } : {}) }, { status: loc.status });
   const ops = opsDbRefusal(msg);
   if (ops) return NextResponse.json(accountingErrorJson(ops), { status: ops.status });
   if (/a journal posted by HR is (reversed|changed)|journal posted by HR/i.test(msg)) {

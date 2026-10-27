@@ -1,4 +1,5 @@
 import { Prisma } from "@/generated/prisma/client";
+import { productionLocation, productionSiteBalances, setStockLocation } from "./stock-locations";
 import { explodeBom, roundKg } from "./finished-products";
 import { onPackaging, type PackedLot } from "@/lib/accounting/ops/inventory-events";
 
@@ -369,9 +370,11 @@ export async function previewPackaging(
       select: { id: true, name: true, quantityOnHand: true },
     });
     const byId = new Map(items.map((i) => [i.id, i]));
+    // Phase 3 (stock locations): what the production site holds — packaging draws its materials there.
+    const here = await productionSiteBalances(tx, [...materialNeed.keys()]);
     for (const [materialItemId, required] of materialNeed) {
       const item = byId.get(materialItemId);
-      const available = item?.quantityOnHand ?? 0;
+      const available = here ? here.get(materialItemId) ?? 0 : item?.quantityOnHand ?? 0;
       const missing = Math.max(0, required - available);
       materials.push({ materialItemId, label: item?.name ?? materialItemId, required, available, missing });
       if (missing > 0) {
@@ -438,6 +441,8 @@ export async function commitPackaging(
 ): Promise<CommitResult> {
   const { batch, preview, skus, userId, operationId } = args;
   const costLots: PackedLot[] = [];
+  // Phase 3 (stock locations): materials are drawn and the finished lots made AT the production site.
+  await setStockLocation(tx, (await productionLocation(tx)).id);
 
   if (preview.problems.length > 0) {
     throw { _appCode: 409, message: preview.problems[0] };

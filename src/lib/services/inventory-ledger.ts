@@ -43,6 +43,7 @@ export async function ledgerWhere(f: LedgerFilter): Promise<Prisma.InventoryMove
   if (f.entityId) and.push({ referenceEntityId: f.entityId });
   if (f.sourceDocId) and.push({ sourceDocId: f.sourceDocId });
   if (f.itemCategoryId) and.push(await itemCategoryWhere(f.itemCategoryId));
+  if (f.locationId) and.push({ locationId: f.locationId });
   if (f.from) and.push({ timestamp: { gte: f.from } });
   if (f.to) and.push({ timestamp: { lte: f.to } });
   if (f.q) {

@@ -122,6 +122,24 @@
 .pl-large .pl-head { padding-bottom: 3mm; margin-bottom: 3mm; }
 .pl-large .pl-rows { gap: 1.5mm; }
 
+/* ── Record labels: green-coffee lot and shelf label (20261114090000_green_lot_labels) ─────────────── */
+.pl-record .pl-inner { gap: var(--pl-gap, 0.8mm); }
+.pl-record .pl-head { margin-bottom: 0; }
+.pl-rec-body { display: flex; gap: 2mm; align-items: flex-start; min-height: 0; flex: none; }
+.pl-rec-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--pl-gap, 0.8mm); }
+.pl-rec-cells { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 3mm; row-gap: 0.4mm; }
+.pl-rec-cell { display: flex; flex-direction: column; min-width: 0; line-height: 1.15; }
+.pl-rec-cell .pl-v { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.pl-rec-cell .pl-k { font-size: var(--pl-label-en); }
+.pl-mono { font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+.pl-qr { display: block; flex: none; }
+.pl-qr svg { display: block; }
+.pl-sack { flex: none; display: flex; flex-wrap: wrap; justify-content: center; column-gap: 4mm; border: 0.3mm solid #000; padding: 0.4mm 1.5mm; font-weight: 700; font-size: calc(var(--pl-value) * 1.15); text-align: center; line-height: 1.25; }
+.pl-sack-part { unicode-bidi: isolate; }
+.pl-codes { margin-top: auto; flex: none; display: flex; justify-content: center; }
+.pl-barcode { display: block; }
+.pl-large .pl-rec-cells { row-gap: 2mm; }
+
 /* ── Pages ─────────────────────────────────────────────────────────────────── */
 .pl-page { position: relative; background: #fff; overflow: hidden; flex: none; }
 .pl-slot { position: absolute; overflow: hidden; }
@@ -220,6 +238,12 @@
 .pd-seg button[aria-pressed="true"] { background: var(--hr-surface); border-color: var(--hr-text); color: var(--hr-text); font-weight: 600; }
 .pd-seg button:disabled { cursor: not-allowed; color: var(--hr-disabled); }
 .pd-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; }
+/* «الأكياس» of a green lot (20261114090000_green_lot_labels). */
+.pd-sacks { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--hr-border-subtle); border-radius: var(--hr-r-md); }
+.pd-sack-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pd-sacks .pd-row { justify-content: flex-start; flex-wrap: wrap; gap: 8px; }
+.pd-sack-n { width: 72px; text-align: center; font-variant-numeric: tabular-nums; }
+.pd-warn-text { color: var(--status-warning, #95651E); font-weight: 600; }
 .pd-row > span:first-child { min-width: 0; overflow-wrap: anywhere; }
 .pd-stepper { display: inline-flex; align-items: center; border: 1px solid var(--hr-border-control); border-radius: var(--hr-r-sm); height: 34px; flex: none; }
 .pd-stepper button { appearance: none; border: 0; background: transparent; width: 34px; height: 32px; font: inherit; cursor: pointer; color: var(--hr-text); }
@@ -289,3 +313,6 @@
   .pd-audit { display: none; }
   .pd-guide-mobile { display: list-item; }
 }
+/* Labels page · record sources (20261114090000_green_lot_labels): search, scan and print on one wrapping row. */
+.lbl-rec-tool { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-start; }
+.lbl-rec-tool > .hr-btn.is-primary { margin-inline-start: auto; }

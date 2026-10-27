@@ -22,9 +22,11 @@ type Sort = "coverage" | "stock" | "name";
  * category (a root with its sub-categories); `subCategories` (a root's children) become the filter chip, and the
  * packing metrics (7-day usage, packs coverable) show only where they mean something (packaging categories).
  */
-export function PackagingTab({ materials, onChanged, onError, onOpenLedger, refreshKey, categories, subCategories, packMetrics = true, title, itemCategoryId }: {
+export function PackagingTab({ materials, onChanged, onError, onOpenLedger, refreshKey, categories, subCategories, packMetrics = true, title, itemCategoryId, site, receiveSite, whereOf }: {
   materials: Material[]; onChanged: () => void; onError: (m: string) => void; onOpenLedger: () => void; refreshKey: number;
   categories?: MaterialCategoryOption[]; subCategories?: MaterialCategoryOption[]; packMetrics?: boolean; title?: string; itemCategoryId?: string;
+  /** Phase 3 (stock locations): passed to the materials panel (where receipts / counts book; the breakdown). */
+  site?: { id: string; name: string; qtyOf: (id: string) => number }; receiveSite?: { id: string; name: string }; whereOf?: (id: string) => React.ReactNode;
 }) {
   const { lang } = useI18n();
   const L = useL();
@@ -88,6 +90,9 @@ export function PackagingTab({ materials, onChanged, onError, onOpenLedger, refr
         materials={shown}
         categories={categories}
         showUsage={packMetrics}
+        site={site}
+        receiveSite={receiveSite}
+        whereOf={whereOf}
         onChanged={onChanged}
         onError={onError}
         search={

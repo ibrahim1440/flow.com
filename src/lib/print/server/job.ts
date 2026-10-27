@@ -66,7 +66,7 @@ export async function parseJobRequest(req: Request) {
   if (bodyErr) return { error: bodyErr } as const;
   const b = body!;
   const template = (TEMPLATE_KEYS as readonly string[]).includes(b.template as string) ? (b.template as TemplateKey) : null;
-  if (!template) return { error: badRequest("TEMPLATE_INVALID", "template must be COFFEE_ORIGIN or CUPPING_RESULTS.") } as const;
+  if (!template) return { error: badRequest("TEMPLATE_INVALID", "template must be COFFEE_ORIGIN, CUPPING_RESULTS, GREEN_LOT or MATERIAL_SHELF.") } as const;
   const denied = requireTemplateAccess(user, template);
   if (denied) return { error: denied } as const;
   const language = (PRINT_LANGS as string[]).includes(b.language as string) ? (b.language as PrintLang) : null;
@@ -142,6 +142,16 @@ export async function buildJob(parsed: ParsedJob) {
   const warnings = contentWarnings(data, parsed.template, parsed.fields, parsed.language, { wMm: layoutProfile.labelWidthMm * s, hMm: layoutProfile.labelHeightMm * s }, { notesLines: parsed.notesLines });
   if (parsed.namedIgnored) warnings.push({ code: "NAMED_SCORERS_IGNORED" });
   return { data, totals, warnings, maxLabelsPerJob: settings.maxLabelsPerJob, blocked: warnings.filter((w) => BLOCKING_CODES.includes(w.code)) } as const;
+}
+
+/** One job item as the audit records it: references and counts only, never label text. */
+export function auditItem(it: ItemIn) {
+  switch (it.kind) {
+    case "product": return { kind: "product", productId: it.productId, batchId: it.batchId ?? null, lotId: it.lotId ?? null, copies: it.copies, ref: itemRef(it) };
+    case "cup": return { kind: "cup", sessionId: it.sessionId, cupId: it.cupId, copies: it.copies, ref: itemRef(it) };
+    case "green": return { kind: "green", greenBeanId: it.greenBeanId, sackNo: it.sackNo, copies: it.copies, ref: itemRef(it) };
+    case "material": return { kind: "material", materialId: it.materialId, copies: it.copies, ref: itemRef(it) };
+  }
 }
 
 /** The audit snapshot of a profile: geometry only. */

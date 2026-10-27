@@ -96,20 +96,18 @@ model Employee {
   /// The custom role this account follows (role = "custom"); null = a system template or none.
   /// The account's `permissions` document stays the one the session applies; a role save
   /// rewrites the documents of its members (role template plus their explicit overrides).
-  accessRoleId          String?
-  accessRole            AccessRole?          @relation("AccessRoleMembers", fields: [accessRoleId], references: [id], onDelete: SetNull)
+  accessRoleId           String?
+  accessRole             AccessRole?                  @relation("AccessRoleMembers", fields: [accessRoleId], references: [id], onDelete: SetNull)
   /// Explicit per-user exceptions to the role (grant or deny, reason, optional expiry).
-  permissionOverrides   PermissionOverride[] @relation("PermissionOverrideAccount")
+  permissionOverrides    PermissionOverride[]         @relation("PermissionOverrideAccount")
   /// An administrator issued a temporary password: every request is refused until the person
   /// sets their own (PUT /api/profile/password), and the temporary one stops working at
   /// passwordTempExpiresAt if it was never used.
-  passwordMustChange    Boolean              @default(false)
-  passwordTempExpiresAt DateTime?
+  passwordMustChange     Boolean                      @default(false)
+  passwordTempExpiresAt  DateTime?
   /// An administrator cleared the station PIN: the person sets a new one themselves from their
   /// profile after confirming their identity with the password (no current PIN needed then).
-  pinResetRequired      Boolean              @default(false)
-
-  @@index([accessRoleId])
+  pinResetRequired       Boolean                      @default(false)
   /// «مساحة عملي» (additive, 20261108090000_my_workspace): relation fields only.
   workTasksAssigned      WorkTask[]                   @relation("WorkTaskAssignee")
   workTasksCreated       WorkTask[]                   @relation("WorkTaskCreator")
@@ -120,6 +118,8 @@ model Employee {
   workAppointments       WorkAppointment[]            @relation("WorkAppointmentOrganizer")
   workAppointmentInvites WorkAppointmentParticipant[] @relation("WorkAppointmentParticipant")
   workReminders          WorkReminder[]               @relation("WorkReminderRecipient")
+
+  @@index([accessRoleId])
 }
 
 /// A custom access role (Figma UR-05 / UR-06): a named permission template. The system templates
@@ -295,7 +295,7 @@ model Customer {
   /// negotiation before the salesperson started (commission policy, section A). No such flag
   /// existed on the customer or on deal assignment, so it is a manual decision by a sales
   /// manager. While true, the order-sequence component pays the plan's existing-client rate.
-  newClientCommissionExcluded Boolean   @default(false)
+  newClientCommissionExcluded Boolean           @default(false)
   /// Why (required while excluded; CHECK).
   newClientExclusionReason    String?
   newClientExclusionById      String?
@@ -305,11 +305,11 @@ model Customer {
   /// sequence. NULL = not set: a customer created before the activation date is then an EXISTING
   /// client (existing-client rate); a customer created after it follows the new-client rules.
   commissionPriorOrders       Int?
+  /// «مساحة عملي» (additive, 20261108090000_my_workspace): relation fields only.
+  workTasks                   WorkTask[]        @relation("WorkTaskCustomer")
+  workAppointments            WorkAppointment[] @relation("WorkAppointmentCustomer")
 
   @@index([accountOwnerId])
-  /// «مساحة عملي» (additive, 20261108090000_my_workspace): relation fields only.
-  workTasks        WorkTask[]        @relation("WorkTaskCustomer")
-  workAppointments WorkAppointment[] @relation("WorkAppointmentCustomer")
 }
 
 /// «إيقاف البيع» — a manual sales hold, placed by a person holding customers › sales_hold (never
@@ -468,6 +468,12 @@ model GreenBean {
   quantityKg       Float                     @default(0)
   isActive         Boolean                   @default(true)
   receivedDate     DateTime                  @default(now())
+  /// The label's barcode payload (20261114090000_green_lot_labels): 'GL-00042', from a sequence, never reused. The
+  /// serial number stays free text; this is what a scanner reads.
+  labelCode        String                    @unique @default(dbgenerated("('GL-'::text || lpad((nextval('\"GreenBean_labelCode_seq\"'::regclass))::text, 5, '0'::text))"))
+  /// Per-sack labels: «كيس 3 من 15» (1–999 sacks; the weight only with a count). Both nullable.
+  sackCount        Int?
+  sackWeightKg     Float?
   createdAt        DateTime                  @default(now())
   updatedAt        DateTime                  @updatedAt
   orderItems       OrderItem[]
@@ -862,7 +868,12 @@ model Delivery {
   /// sourceDocId = this id), and readers fall back to it (services/delivery-lots.ts).
   lines DeliveryLine[]
 
+  /// Phase 3: the site the dispatch shipped from (the production site; FG lots are not moved between sites yet).
+  locationId String        @default(dbgenerated("stock_location_current()"))
+  location   StockLocation @relation(fields: [locationId], references: [id])
+
   @@index([date])
+  @@index([locationId])
 }
 
 /// One lot's share of one Delivery. Written in the same transaction as the Delivery and the
@@ -1032,6 +1043,12 @@ model SystemConfig {
   /// CHECK 1–10. Fewer than this is an exceptional approval (qc › finalize_override, D2).
   qcMinEvaluators Int?
 
+  // ─── Roasting station (additive, migration 20261116090000_station_lot_scan) ─────────────
+  /// «تأكيد الكيس بالمسح في محطة التحميص». false (default): the station shows no scan — the server picks the lot
+  /// (default, else FIFO at the production site) and the station shows «اسحب من». true: the scan is offered as an
+  /// override (a different sack from the suggested one), never a mandatory step.
+  stationLotScanRequired Boolean @default(false)
+
   // ─── Sales invoicing A2 (additive, migration 20261103090000_sales_invoicing) ─────────────
   /// «بادئة سلسلة الفواتير»: the series of a tax invoice number (INV → INV-000001). NULL = "INV".
   /// Each series has its own gapless counter (SalesDocumentCounter); a new prefix starts a new series.
@@ -1056,8 +1073,8 @@ model SystemConfig {
   // ─── Sign-in line (additive, migration 20261110090000_i18n_preferences) ──────────────────
   /// The line under the brand on the sign-in screen, per language (owner decision 1). NULL = the
   /// built-in line (src/lib/login-tagline.ts). CHECK 1–120 characters after trimming.
-  loginTaglineAr          String?
-  loginTaglineEn          String?
+  loginTaglineAr String?
+  loginTaglineEn String?
 }
 
 /// Settings › Production & roasting › Roasters (Figma 377:2, ROASTERS.md §4; RM1–RM5). Machine
@@ -1259,7 +1276,6 @@ model CoffeeProduct {
   mktPosts     MktPost[]
   mktEconomics MktProductEconomics?
 
-
   // BOM lines that consume this coffee as roasted/intermediate stock.
   bomComponents BomComponent[]
 
@@ -1319,9 +1335,9 @@ model Supplier {
   /// Default credit terms in days (the due date a new supplier invoice proposes). NULL = 30.
   paymentTermsDays Int?
   /// Phase 2 (20261113090000_purchase_invoice_phase2): a non-resident supplier — its services are reverse-charged (P-RC15).
-  isNonResident    Boolean          @default(false)
+  isNonResident    Boolean           @default(false)
   /// GOODS_SERVICES (default) | CUSTOMS | CLEARING_AGENT — import VAT (P-IMP15) is billed by customs / a clearing agent only.
-  kind             String           @default("GOODS_SERVICES")
+  kind             String            @default("GOODS_SERVICES")
   supplierInvoices SupplierInvoice[]
   supplierPayments SupplierPayment[]
 }
@@ -1342,14 +1358,18 @@ model PurchaseRecord {
 
   // Typed link for PACKAGING purchases. `itemId` above stays as-is for the existing
   // untyped rows; this is the FK that lets a purchase actually restock a MaterialItem.
-  materialItemId String?
-  materialItem   MaterialItem? @relation(fields: [materialItemId], references: [id])
+  materialItemId  String?
+  materialItem    MaterialItem?         @relation(fields: [materialItemId], references: [id])
   /// Phase 2: landed-cost lines (freight, duty, clearance, insurance) capitalised onto this receipt.
   landedCostLines SupplierInvoiceLine[] @relation("LandedCostTarget")
+  /// Phase 3: the site the goods were received at (its reversal takes them back from there).
+  locationId      String                @default(dbgenerated("stock_location_current()"))
+  location        StockLocation         @relation(fields: [locationId], references: [id])
 
   @@index([purchaseDate])
   @@index([supplierId, purchaseDate])
   @@index([materialItemId])
+  @@index([locationId])
 }
 
 // ─── Inventory Ledger ─────────────────────────────────────────────────────────
@@ -1379,6 +1399,7 @@ enum SourceDocType {
   PRODUCTION_ORDER
   OPENING_BALANCE // the stock a new green bean / packaging material is created with (IN)
   RECEIVING // a packaging-material delivery received under inventory › receive (IN, audited)
+  STOCK_TRANSFER // phase 3: a transfer between two locations (an OUT and an IN, same transfer id)
 }
 
 model InventoryMovement {
@@ -1395,12 +1416,25 @@ model InventoryMovement {
   timestamp         DateTime          @default(now())
   notes             String?
 
+  /// Phase 3 (20261115090000_stock_locations): WHERE the movement happened. Default: the transaction's location
+  /// (stock_location_current() — the hiqbah.stock_location setting, else the default site). A transfer's two rows
+  /// name the other site as counterpartLocationId and carry the transfer's id; their previous / new quantities are
+  /// that location's balance (every other movement keeps the company-wide total there, as before).
+  locationId            String         @default(dbgenerated("stock_location_current()"))
+  location              StockLocation  @relation("MovementLocation", fields: [locationId], references: [id])
+  counterpartLocationId String?
+  counterpartLocation   StockLocation? @relation("MovementCounterpart", fields: [counterpartLocationId], references: [id], onDelete: Restrict)
+  transferId            String?
+  transfer              StockTransfer? @relation(fields: [transferId], references: [id], onDelete: Restrict)
+
   @@index([timestamp])
   @@index([category, timestamp])
   @@index([referenceEntityId])
   // 20261020100000_inventory_counts: the movements of one source document (a count session's
   // adjustments, a roast's draws) for the count review and the lot traceability page.
   @@index([sourceDocType, sourceDocId])
+  @@index([locationId, timestamp])
+  @@index([transferId])
 }
 
 // ─── Inventory count sessions (migration 20261020100000_inventory_counts) ─────
@@ -1440,7 +1474,12 @@ model InventoryCountSession {
 
   lines InventoryCountLine[]
 
+  /// Phase 3: the location counted. Its lines' system quantities and the variances posted are that location's.
+  locationId String        @default(dbgenerated("stock_location_current()"))
+  location   StockLocation @relation(fields: [locationId], references: [id])
+
   @@index([status, createdAt])
+  @@index([locationId])
 }
 
 model InventoryCountLine {
@@ -1582,11 +1621,16 @@ model FinishedGoodsLot {
   /// Deliveries that drew from this lot (Phase D; empty for dispatches before DeliveryLine).
   deliveryLines DeliveryLine[]
 
+  /// Phase 3: where the lot is (the production site that packed it; a lot is not split across locations).
+  locationId String        @default(dbgenerated("stock_location_current()"))
+  location   StockLocation @relation(fields: [locationId], references: [id])
+
   @@index([status])
   @@index([createdAt])
   @@index([productSkuId, status])
   @@index([isUnitTracked, status])
   @@index([packedFromBatchId])
+  @@index([locationId])
 }
 
 /// One roast's contribution to one packaged lot.
@@ -1772,6 +1816,8 @@ model MaterialItem {
   reorderPoint   Float            @default(0)
   isActive       Boolean          @default(true)
   notes          String?
+  /// The shelf label's barcode payload (20261114090000_green_lot_labels): 'MT-00007', from a sequence.
+  labelCode      String           @unique @default(dbgenerated("('MT-'::text || lpad((nextval('\"MaterialItem_labelCode_seq\"'::regclass))::text, 5, '0'::text))"))
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
@@ -1788,6 +1834,117 @@ model MaterialItem {
   @@index([isActive])
   @@index([category, isActive])
   @@index([categoryId])
+}
+
+/// Unified inventory phase 3 — stock locations (20261115090000_stock_locations). WHERE stock is: a roasting plant, a
+/// warehouse, a café, a branch. Owner-managed (inventory › adjust): added, renamed, reordered, made the default receiving
+/// site, deactivated when a site closes (refused while it holds stock, and for the default — trigger
+/// stock_location_guard) and reactivated. Exactly one default and one production site (partial unique indexes + a deferred check). Never deleted
+/// once anything refers to it (every reference is RESTRICT). Seeded with «مصنع التحميص» (default), «المستودع», «المقهى».
+model StockLocation {
+  id                 String    @id @default(cuid())
+  /// Short upper-case code (RST, WH, CAFE …), unique. CHECK ^[A-Z0-9][A-Z0-9-]{0,15}$.
+  code               String    @unique
+  nameAr             String
+  nameEn             String?
+  /// ROASTERY | WAREHOUSE | CAFE | BRANCH | OTHER (CHECK).
+  type               String
+  address            String?
+  notes              String?
+  isActive           Boolean   @default(true)
+  isDefault          Boolean   @default(false)
+  /// The production site (exactly one; seeded on the plant): roasting draws green there, packing draws materials and makes
+  /// finished lots there, and a writer that names no site books there (stock_location_current()). Not deactivated.
+  isProduction       Boolean   @default(false)
+  sortOrder          Int       @default(0)
+  deactivatedAt      DateTime?
+  deactivatedBy      String?
+  deactivationReason String?
+  createdBy          String?
+  updatedBy          String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @default(now()) @updatedAt
+
+  balances         StockBalance[]
+  movements        InventoryMovement[]     @relation("MovementLocation")
+  counterpartMoves InventoryMovement[]     @relation("MovementCounterpart")
+  finishedLots     FinishedGoodsLot[]
+  purchases        PurchaseRecord[]
+  countSessions    InventoryCountSession[]
+  deliveries       Delivery[]
+  supplierInvoices SupplierInvoice[]
+  transfersOut     StockTransfer[]         @relation("TransferFrom")
+  transfersIn      StockTransfer[]         @relation("TransferTo")
+
+  @@index([isActive, sortOrder])
+}
+
+/// The quantity of one green lot (GREEN_BEAN) or one material (MATERIAL) at one location. Σ over the locations = the
+/// company-wide total ("GreenBean"."quantityKg" / "MaterialItem"."quantityOnHand"), kept so by ONE place in the
+/// database: trigger stock_balance_sync routes every change of a total to the transaction's location (refusing what
+/// that location cannot cover), and the deferred stock_balance_total_check refuses a commit where they differ.
+model StockBalance {
+  locationId String
+  location   StockLocation @relation(fields: [locationId], references: [id])
+  /// GREEN_BEAN | MATERIAL (CHECK).
+  itemKind   String
+  /// GreenBean.id or MaterialItem.id (untyped, like InventoryMovement.referenceEntityId).
+  entityId   String
+  qty        Float         @default(0)
+  updatedAt  DateTime      @default(now()) @updatedAt
+
+  @@id([locationId, itemKind, entityId])
+  @@index([itemKind, entityId])
+}
+
+/// «تحويل مخزون» — stock moved from one location to another. One step («تحويل فوري»): both balances move in one
+/// transaction, an OUT and an IN movement per line sharing this id, and TRANSFER_OUT / TRANSFER_IN cost moves on the
+/// item's one holder (same quantity and value, glState NONE: no journal entry — same company, same inventory account).
+/// CANCELLED reverses them, only while the goods are still at the destination. Never deleted.
+model StockTransfer {
+  id              String        @id @default(cuid())
+  /// «تحويل #12»
+  number          Int           @unique @default(autoincrement())
+  fromLocationId  String
+  fromLocation    StockLocation @relation("TransferFrom", fields: [fromLocationId], references: [id])
+  toLocationId    String
+  toLocation      StockLocation @relation("TransferTo", fields: [toLocationId], references: [id])
+  transferDate    DateTime      @db.Date
+  /// POSTED | CANCELLED (CHECK).
+  status          String        @default("POSTED")
+  notes           String?
+  /// Client idempotency key: the same request twice returns the first transfer.
+  requestKey      String?       @unique
+  createdBy       String
+  createdByName   String?
+  cancelledAt     DateTime?
+  cancelledBy     String?
+  cancelledByName String?
+  cancelReason    String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @default(now()) @updatedAt
+
+  lines     StockTransferLine[]
+  movements InventoryMovement[]
+
+  @@index([transferDate])
+  @@index([fromLocationId])
+  @@index([toLocationId])
+}
+
+model StockTransferLine {
+  id         String        @id @default(cuid())
+  transferId String
+  transfer   StockTransfer @relation(fields: [transferId], references: [id], onDelete: Restrict)
+  lineNo     Int
+  /// GREEN_BEAN | MATERIAL (CHECK).
+  itemKind   String
+  entityId   String
+  qty        Float
+  notes      String?
+
+  @@unique([transferId, lineNo])
+  @@index([itemKind, entityId])
 }
 
 /// Unified inventory — user-defined item categories (phase 1, 20261112090000_item_categories). At most two
@@ -2492,7 +2649,7 @@ model TaxCategory {
 
   // ── Unified inventory phase 2 (20261113090000_purchase_invoice_phase2): purchase VAT categories ──
   /// SALES | PURCHASES | BOTH (CHECK). The seeded purchase codes P-S15 … P-RC15 are PURCHASES.
-  appliesTo            String          @default("BOTH")
+  appliesTo            String                @default("BOTH")
   /// RECOVERABLE | NON_RECOVERABLE | NONE | IMPORT | REVERSE_CHARGE (CHECK); null for a sales-only category.
   inputVatTreatment    String?
   /// The purchases box of the VAT return: '7' | '8' | '9' | '10' | '11' (CHECK); null = not on the return.
@@ -2652,21 +2809,21 @@ model JournalEntryLine {
 
 /// A Gregorian fiscal year and its twelve monthly periods (src/lib/accounting/fiscal-years.ts).
 model FiscalYear {
-  id        String         @id @default(cuid())
-  tenantId  String         @default("hiqbah")
-  year      Int
-  startDate DateTime
-  endDate   DateTime
+  id             String         @id @default(cuid())
+  tenantId       String         @default("hiqbah")
+  year           Int
+  startDate      DateTime
+  endDate        DateTime
   /// OPEN | CLOSED (year-end close is A5).
-  status    String         @default("OPEN")
+  status         String         @default("OPEN")
   /// Accounting A5: the year-end close (P&L closed to retained earnings by the CLOSING entry).
   closedAt       DateTime?
   closedBy       String?
   closingEntryId String?
-  createdAt DateTime       @default(now())
-  createdBy String?
-  updatedAt DateTime       @updatedAt
-  periods   FiscalPeriod[]
+  createdAt      DateTime       @default(now())
+  createdBy      String?
+  updatedAt      DateTime       @updatedAt
+  periods        FiscalPeriod[]
 
   @@unique([tenantId, year])
 }
@@ -2856,17 +3013,17 @@ model Lead {
   conversion LeadConversion?
   activities Activity[]
 
-  createdById String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdById      String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  /// «مساحة عملي» (additive, 20261108090000_my_workspace): relation fields only.
+  workTasks        WorkTask[]        @relation("WorkTaskLead")
+  workAppointments WorkAppointment[] @relation("WorkAppointmentLead")
 
   @@index([ownerId, status])
   @@index([status, nextFollowUpAt])
   @@index([normalizedCompany])
   @@index([normalizedPhone])
-  /// «مساحة عملي» (additive, 20261108090000_my_workspace): relation fields only.
-  workTasks        WorkTask[]        @relation("WorkTaskLead")
-  workAppointments WorkAppointment[] @relation("WorkAppointmentLead")
 }
 
 /// The proof that a lead became a customer and an opportunity.
@@ -2981,14 +3138,14 @@ model Opportunity {
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   salesCollections SalesCollection[]
+  /// «مساحة عملي» (additive, 20261108090000_my_workspace): relation fields only.
+  workTasks        WorkTask[]        @relation("WorkTaskOpportunity")
+  workAppointments WorkAppointment[] @relation("WorkAppointmentOpportunity")
 
   @@index([ownerId, outcome])
   @@index([stageId, outcome])
   @@index([outcome, closedAt])
   @@index([nextFollowUpAt])
-  /// «مساحة عملي» (additive, 20261108090000_my_workspace): relation fields only.
-  workTasks        WorkTask[]        @relation("WorkTaskOpportunity")
-  workAppointments WorkAppointment[] @relation("WorkAppointmentOpportunity")
 }
 
 /// Split attribution. Percentages are stored, not inferred, and the service requires
@@ -4835,15 +4992,15 @@ model WhatsAppSendAttempt {
 
 /// Singleton (id "singleton"), like SystemConfig.
 model AutomationSettings {
-  id          String           @id @default("singleton")
-  sendMode    WhatsAppSendMode @default(OFF)
+  id                  String           @id @default("singleton")
+  sendMode            WhatsAppSendMode @default(OFF)
   /// Where every message goes in TEST mode.
-  testPhone   String?
+  testPhone           String?
   /// Last time the dispatcher looked for tasks falling due. Doubles as the guard that
   /// stops two dispatchers sweeping at once.
-  lastSweepAt DateTime?
-  updatedById String?
-  updatedAt   DateTime         @updatedAt
+  lastSweepAt         DateTime?
+  updatedById         String?
+  updatedAt           DateTime         @updatedAt
   /// The language of automation messages to EMPLOYEES who have not chosen one ("ar" | "en", CHECK).
   /// NULL = Arabic. Migration 20261110090000_i18n_preferences (additive).
   employeeMessageLang String?
@@ -6556,7 +6713,7 @@ model PrintProfile {
 model PrintTemplatePreset {
   id                        String        @id @default(cuid())
   name                      String
-  /// COFFEE_ORIGIN | CUPPING_RESULTS
+  /// COFFEE_ORIGIN | CUPPING_RESULTS | GREEN_LOT | MATERIAL_SHELF
   templateKey               String
   /// AR | EN | BI
   language                  String
@@ -7257,16 +7414,16 @@ model CostMove {
 /// Costing policy (singleton). abnormalRoastLossPct: a roast's loss (green − roasted, % of green) above it is
 /// ABNORMAL and its cost is expensed to ROAST_LOSS; NULL = every loss is normal and absorbed into roasted cost.
 model CostingSettings {
-  id                   String    @id @default("singleton")
-  abnormalRoastLossPct Decimal?  @db.Decimal(5, 2)
+  id                      String    @id @default("singleton")
+  abnormalRoastLossPct    Decimal?  @db.Decimal(5, 2)
   /// true: a roast's abnormal boundary is its product's expected loss + 5 points (CoffeeProduct.expectedRoastLoss —
   /// the boundary the roasting station already flags «فوق الحد»); abnormalRoastLossPct is then the fallback.
-  abnormalUseProductLimit Boolean @default(false)
-  openingAppliedAt     DateTime?
-  openingAppliedBy     String?
-  updatedBy            String?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  abnormalUseProductLimit Boolean   @default(false)
+  openingAppliedAt        DateTime?
+  openingAppliedBy        String?
+  updatedBy               String?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 }
 
 /// The opening inventory valuation: the unit cost the owner entered for a holder (else the last known cost is
@@ -7303,91 +7460,95 @@ model ExpenseCategory {
 /// A supplier invoice (bill): DRAFT → SUBMITTED → POSTED (approve = post, by an AP holder other than the
 /// submitter) → CANCELLED (reversed, only while nothing is paid). Totals are the sums of the lines (VAT per line).
 model SupplierInvoice {
-  id             String    @id @default(cuid())
-  tenantId       String    @default("hiqbah")
+  id                     String         @id @default(cuid())
+  tenantId               String         @default("hiqbah")
   /// «SINV-2026-000001», gapless per year among issued numbers (assigned at creation).
-  number         String    @unique
-  supplierId     String
-  supplier       Supplier  @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  number                 String         @unique
+  supplierId             String
+  supplier               Supplier       @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   /// The supplier's own invoice number; unique per supplier among live invoices.
-  supplierRef    String
-  invoiceDate    DateTime  @db.Date
-  dueDate        DateTime  @db.Date
+  supplierRef            String
+  invoiceDate            DateTime       @db.Date
+  dueDate                DateTime       @db.Date
   /// DRAFT | SUBMITTED | POSTED | CANCELLED
-  status         String    @default("DRAFT")
-  netTotal       Decimal   @default(0) @db.Decimal(18, 2)
-  vatTotal       Decimal   @default(0) @db.Decimal(18, 2)
-  grossTotal     Decimal   @default(0) @db.Decimal(18, 2)
-  paidTotal      Decimal   @default(0) @db.Decimal(18, 2)
-  notes          String?
-  createdBy      String
+  status                 String         @default("DRAFT")
+  netTotal               Decimal        @default(0) @db.Decimal(18, 2)
+  vatTotal               Decimal        @default(0) @db.Decimal(18, 2)
+  grossTotal             Decimal        @default(0) @db.Decimal(18, 2)
+  paidTotal              Decimal        @default(0) @db.Decimal(18, 2)
+  notes                  String?
+  createdBy              String
   /// The last person who changed the draft (SoD: neither preparer, last editor nor submitter posts it).
-  lastEditedBy   String?
-  submittedBy    String?
-  submittedAt    DateTime?
-  postedBy       String?
-  postedAt       DateTime?
-  journalEntryId String?
-  cancelledBy    String?
-  cancelledAt    DateTime?
-  cancelReason   String?
+  lastEditedBy           String?
+  submittedBy            String?
+  submittedAt            DateTime?
+  postedBy               String?
+  postedAt               DateTime?
+  journalEntryId         String?
+  cancelledBy            String?
+  cancelledAt            DateTime?
+  cancelReason           String?
   /// Phase 2: the customs declaration import VAT (P-IMP15) is claimed on — both or neither (CHECK).
   customsDeclarationNo   String?
-  customsDeclarationDate DateTime? @db.Date
+  customsDeclarationDate DateTime?      @db.Date
   /// PURCHASES = the one-step purchase invoice (src/lib/accounting/ops/purchase-invoice.ts); AP = a bill entered through
   /// the legacy accounts-payable API (whose STOCK line capitalises value without a receipt). CHECK; frozen once posted.
-  origin         String    @default("AP")
+  origin                 String         @default("AP")
   /// The day the invoice's goods were received (its receipts' and cost moves' day); NULL when it received nothing.
-  receivedDate   DateTime? @db.Date
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  receivedDate           DateTime?      @db.Date
+  /// Phase 3 (20261115090000_stock_locations): «موقع الاستلام» — the site its goods are received at (NULL: the default).
+  receivingLocationId    String?
+  receivingLocation      StockLocation? @relation(fields: [receivingLocationId], references: [id], onDelete: Restrict)
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
 
   lines       SupplierInvoiceLine[]
   allocations SupplierPaymentAllocation[]
 
   @@index([supplierId, status])
   @@index([status, dueDate])
+  @@index([receivingLocationId])
 }
 
 /// GRN: matched to one receipt (PurchaseRecord) — Dr GRNI at the receipt's value, the difference is a price
 /// variance. STOCK: a stock line without a costed receipt (stockKind + stockItemId) — capitalised into the holder.
 /// EXPENSE: a non-stock line (expenseCategoryId → its account).
 model SupplierInvoiceLine {
-  id                String           @id @default(cuid())
-  invoiceId         String
-  invoice           SupplierInvoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  lineNo            Int
-  kind              String
+  id                     String           @id @default(cuid())
+  invoiceId              String
+  invoice                SupplierInvoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  lineNo                 Int
+  kind                   String
   /// PurchaseRecord.id (no FK: the receipt register is operational data).
-  purchaseRecordId  String?
-  stockKind         String?
-  stockItemId       String?
-  expenseCategoryId String?
-  expenseCategory   ExpenseCategory? @relation(fields: [expenseCategoryId], references: [id], onDelete: Restrict)
-  description       String
-  quantity          Decimal?         @db.Decimal(18, 4)
-  net               Decimal          @db.Decimal(18, 2)
-  vatRate           Decimal          @default(15) @db.Decimal(5, 2)
-  vat               Decimal          @db.Decimal(18, 2)
-  gross             Decimal          @db.Decimal(18, 2)
+  purchaseRecordId       String?
+  stockKind              String?
+  stockItemId            String?
+  expenseCategoryId      String?
+  expenseCategory        ExpenseCategory? @relation(fields: [expenseCategoryId], references: [id], onDelete: Restrict)
+  description            String
+  quantity               Decimal?         @db.Decimal(18, 4)
+  net                    Decimal          @db.Decimal(18, 2)
+  vatRate                Decimal          @default(15) @db.Decimal(5, 2)
+  vat                    Decimal          @db.Decimal(18, 2)
+  gross                  Decimal          @db.Decimal(18, 2)
   /// Filled when posted: the receipt's value (GRN), the price variance, and the part of it capitalised.
-  matchedValue      Decimal?         @db.Decimal(18, 2)
-  variance          Decimal?         @db.Decimal(18, 2)
-  capitalized       Decimal?         @db.Decimal(18, 2)
+  matchedValue           Decimal?         @db.Decimal(18, 2)
+  variance               Decimal?         @db.Decimal(18, 2)
+  capitalized            Decimal?         @db.Decimal(18, 2)
   // ── Phase 2 (20261113090000_purchase_invoice_phase2): the purchase VAT category of the line ──
-  taxCategoryId     String?
-  taxCategory       TaxCategory?     @relation(fields: [taxCategoryId], references: [id], onDelete: Restrict)
+  taxCategoryId          String?
+  taxCategory            TaxCategory?     @relation(fields: [taxCategoryId], references: [id], onDelete: Restrict)
   /// Written when the invoice is posted (buildPurchaseTaxSnapshot); never changed afterwards.
-  taxSnapshot       Json?
+  taxSnapshot            Json?
   /// IMPORT_VAT lines: the customs value the import VAT is computed on (net is 0).
-  customsValue      Decimal?         @db.Decimal(18, 2)
+  customsValue           Decimal?         @db.Decimal(18, 2)
   /// P-RC15 lines: the self-assessed VAT (not payable to the supplier; Dr VAT_INPUT / Cr VAT_OUTPUT).
-  selfAssessedVat   Decimal?         @db.Decimal(18, 2)
+  selfAssessedVat        Decimal?         @db.Decimal(18, 2)
   /// LANDED_COST lines: the receipt (of any supplier) the freight / duty / clearance / insurance is capitalised onto.
   targetPurchaseRecordId String?
-  targetPurchaseRecord   PurchaseRecord? @relation("LandedCostTarget", fields: [targetPurchaseRecordId], references: [id], onDelete: Restrict)
+  targetPurchaseRecord   PurchaseRecord?  @relation("LandedCostTarget", fields: [targetPurchaseRecordId], references: [id], onDelete: Restrict)
   /// LANDED_COST lines: FREIGHT | DUTY | CLEARANCE | INSURANCE.
-  landedCostType    String?
+  landedCostType         String?
 
   @@unique([invoiceId, lineNo])
   @@index([purchaseRecordId])
@@ -7642,145 +7803,145 @@ model PeriodCloseReview {
 
 /// The single settings row (id "default"): kill switches, approval policy, messaging limits.
 model MktSettings {
-  id                   String   @id @default("default")
+  id                             String   @id @default("default")
   /// Emergency stops. Each is read by the worker before every external write; ALL stops everything.
-  killAll              Boolean  @default(false)
-  killPublishing       Boolean  @default(false)
-  killAds              Boolean  @default(false)
-  killMessaging        Boolean  @default(false)
+  killAll                        Boolean  @default(false)
+  killPublishing                 Boolean  @default(false)
+  killAds                        Boolean  @default(false)
+  killMessaging                  Boolean  @default(false)
   /// IANA zone the company reports in (platform timestamps are stored UTC and converted for display).
-  timezone             String   @default("Asia/Riyadh")
-  currency             String   @default("SAR")
+  timezone                       String   @default("Asia/Riyadh")
+  currency                       String   @default("SAR")
   /// Which actions need a second person: { publish, aiPublish, campaignCreate, budgetIncrease,
   /// campaignPause, trackingChange, sensitiveReply, messageCampaign } → boolean. Missing = required.
-  approvalPolicy       Json     @default("{}")
+  approvalPolicy                 Json     @default("{}")
   /// Messaging guard rails.
-  maxMessagesPerDay    Int      @default(500)
-  maxMarketingPerCustomerPerWeek Int @default(2)
-  quietHoursStart      Int      @default(22) // hour, company timezone
-  quietHoursEnd        Int      @default(9)
+  maxMessagesPerDay              Int      @default(500)
+  maxMarketingPerCustomerPerWeek Int      @default(2)
+  quietHoursStart                Int      @default(22) // hour, company timezone
+  quietHoursEnd                  Int      @default(9)
   /// Attribution defaults.
-  attributionModel     String   @default("LAST_TOUCH")
-  attributionWindowDays Int     @default(7)
-  updatedById          String?
-  updatedAt            DateTime @updatedAt
+  attributionModel               String   @default("LAST_TOUCH")
+  attributionWindowDays          Int      @default(7)
+  updatedById                    String?
+  updatedAt                      DateTime @updatedAt
 }
 
 /// Brand kit: what generated or reviewed content must respect. One row per brand (id "default").
 model MktBrandKit {
-  id            String   @id @default("default")
-  brandNameAr   String   @default("حقبة")
-  brandNameEn   String   @default("Hiqbah")
+  id          String   @id @default("default")
+  brandNameAr String   @default("حقبة")
+  brandNameEn String   @default("Hiqbah")
   /// [{ name, hex }]
-  colors        Json     @default("[]")
+  colors      Json     @default("[]")
   /// [{ role, family }]
-  fonts         Json     @default("[]")
-  toneAr        String?
-  toneEn        String?
+  fonts       Json     @default("[]")
+  toneAr      String?
+  toneEn      String?
   /// Approved phrasing, banned words, claims that need evidence.
-  doList        String[] @default([])
-  dontList      String[] @default([])
+  doList      String[] @default([])
+  dontList    String[] @default([])
   /// Approved example captions / posts.
-  examples      String[] @default([])
-  logoAssetId   String?
-  updatedById   String?
-  updatedAt     DateTime @updatedAt
+  examples    String[] @default([])
+  logoAssetId String?
+  updatedById String?
+  updatedAt   DateTime @updatedAt
 }
 
 /// Product economics for marketing decisions (break-even ROAS, target CAC). Entered, never guessed.
 model MktProductEconomics {
-  productId               String        @id
-  product                 CoffeeProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId            String        @id
+  product              CoffeeProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
   /// Average selling price per order in SAR (incl. or excl. VAT is stated by vatIncluded).
-  avgOrderValue           Decimal?      @db.Decimal(18, 2)
-  vatIncluded             Boolean       @default(false)
+  avgOrderValue        Decimal?      @db.Decimal(18, 2)
+  vatIncluded          Boolean       @default(false)
   /// Gross margin as a fraction 0–1 (price minus cost of goods).
-  grossMarginPct          Decimal?      @db.Decimal(6, 4)
+  grossMarginPct       Decimal?      @db.Decimal(6, 4)
   /// Variable cost per order besides COGS (shipping subsidy, payment fee, packaging) in SAR.
-  variableCostPerOrder    Decimal?      @db.Decimal(18, 2)
+  variableCostPerOrder Decimal?      @db.Decimal(18, 2)
   /// The owner's target acquisition cost for a new customer of this product, SAR.
-  targetCac               Decimal?      @db.Decimal(18, 2)
+  targetCac            Decimal?      @db.Decimal(18, 2)
   /// Typical days between repeat purchases (for replenishment reminders).
-  repurchaseCycleDays     Int?
-  updatedById             String?
-  updatedAt               DateTime      @updatedAt
+  repurchaseCycleDays  Int?
+  updatedById          String?
+  updatedAt            DateTime      @updatedAt
 }
 
 /// A marketing campaign — the spine every post, ad, message, budget line and order links to.
 model MktCampaign {
-  id              String         @id @default(cuid())
-  name            String
+  id                        String              @id @default(cuid())
+  name                      String
   /// AWARENESS | ENGAGEMENT | TRAFFIC | LEADS | CONVERSIONS | SALES | RETENTION (CHECK)
-  objective       String
+  objective                 String
   /// DRAFT | PLANNED | ACTIVE | PAUSED | COMPLETED | ARCHIVED (CHECK)
-  status          String         @default("DRAFT")
+  status                    String              @default("DRAFT")
   /// Channels this campaign runs on (platform keys, see lib/marketing/platforms.ts).
-  channels        String[]       @default([])
-  productId       String?
-  product         CoffeeProduct? @relation(fields: [productId], references: [id], onDelete: SetNull)
-  audience        String?
-  offer           String?
-  landingUrl      String?
+  channels                  String[]            @default([])
+  productId                 String?
+  product                   CoffeeProduct?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  audience                  String?
+  offer                     String?
+  landingUrl                String?
   /// utm_campaign value; unique so an order's UTM resolves to exactly one campaign.
-  utmCampaign     String         @unique
-  startAt         DateTime?
-  endAt           DateTime?
-  plannedBudget   Decimal?       @db.Decimal(18, 2)
-  currency        String         @default("SAR")
+  utmCampaign               String              @unique
+  startAt                   DateTime?
+  endAt                     DateTime?
+  plannedBudget             Decimal?            @db.Decimal(18, 2)
+  currency                  String              @default("SAR")
   /// Decision targets (NULL = use the product economics; none at all = «بيانات غير كافية»).
-  targetCac       Decimal?       @db.Decimal(18, 2)
-  targetRoas      Decimal?       @db.Decimal(8, 3)
+  targetCac                 Decimal?            @db.Decimal(18, 2)
+  targetRoas                Decimal?            @db.Decimal(8, 3)
   /// Minimum evidence before the decision engine judges: spend and conversions.
-  minSpendForDecision   Decimal? @db.Decimal(18, 2)
+  minSpendForDecision       Decimal?            @db.Decimal(18, 2)
   minConversionsForDecision Int?
   /// Ids of this campaign on each ad platform: { META: "...", TIKTOK: "..." }.
-  externalRefs    Json           @default("{}")
-  notes           String?
-  ownerId         String?
-  createdById     String?
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
-  posts           MktPost[]
-  assets          MktAsset[]
-  budgets         MktBudget[]
-  metrics         MktMetricSnapshot[]
-  decisions       MktDecision[]
-  messages        MktMessage[]
-  storeOrders     MktStoreOrder[]
+  externalRefs              Json                @default("{}")
+  notes                     String?
+  ownerId                   String?
+  createdById               String?
+  createdAt                 DateTime            @default(now())
+  updatedAt                 DateTime            @updatedAt
+  posts                     MktPost[]
+  assets                    MktAsset[]
+  budgets                   MktBudget[]
+  metrics                   MktMetricSnapshot[]
+  decisions                 MktDecision[]
+  messages                  MktMessage[]
+  storeOrders               MktStoreOrder[]
+  /// «مساحة عملي» (additive): occasions linked to this campaign.
+  workOccasions             WorkOccasion[]      @relation("WorkOccasionCampaign")
 
   @@index([status])
   @@index([productId])
-  /// «مساحة عملي» (additive): occasions linked to this campaign.
-  workOccasions WorkOccasion[] @relation("WorkOccasionCampaign")
 }
 
 /// A content asset (design, photo, video, source file, copy). Versions keep every upload; the
 /// original is never overwritten.
 model MktAsset {
-  id               String            @id @default(cuid())
-  title            String
+  id          String            @id @default(cuid())
+  title       String
   /// IMAGE | VIDEO | DESIGN_SOURCE | DOCUMENT | COPY (CHECK)
-  kind             String
-  tags             String[]          @default([])
-  campaignId       String?
-  campaign         MktCampaign?      @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  productId        String?
-  product          CoffeeProduct?    @relation(fields: [productId], references: [id], onDelete: SetNull)
+  kind        String
+  tags        String[]          @default([])
+  campaignId  String?
+  campaign    MktCampaign?      @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  productId   String?
+  product     CoffeeProduct?    @relation(fields: [productId], references: [id], onDelete: SetNull)
   /// Usage rights: OWNED | LICENSED | UGC_PERMISSION | STOCK | UNKNOWN (CHECK).
-  rights           String            @default("UNKNOWN")
-  rightsNote       String?
+  rights      String            @default("UNKNOWN")
+  rightsNote  String?
   /// COPY assets carry their text here instead of a file.
-  text             String?
+  text        String?
   /// The brief this asset answers (objective, audience, message, offer, cta, size, platform).
-  brief            Json?
+  brief       Json?
   /// True when the content was produced by the AI studio (approval policy may differ).
-  aiGenerated      Boolean           @default(false)
-  archived         Boolean           @default(false)
-  createdById      String?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  versions         MktAssetVersion[]
-  postLinks        MktPostAsset[]
+  aiGenerated Boolean           @default(false)
+  archived    Boolean           @default(false)
+  createdById String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  versions    MktAssetVersion[]
+  postLinks   MktPostAsset[]
 
   @@index([campaignId])
   @@index([productId])
@@ -7789,58 +7950,58 @@ model MktAsset {
 
 /// One uploaded file of an asset. Immutable once written.
 model MktAssetVersion {
-  id            String    @id @default(cuid())
-  assetId       String
-  asset         MktAsset  @relation(fields: [assetId], references: [id], onDelete: Cascade)
-  version       Int
+  id           String   @id @default(cuid())
+  assetId      String
+  asset        MktAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  version      Int
   /// The first version is the original and is kept forever.
-  isOriginal    Boolean   @default(false)
-  fileName      String
+  isOriginal   Boolean  @default(false)
+  fileName     String
   /// Proven from the file signature, never the browser's claim.
-  mimeType      String
-  sizeBytes     Int
-  sha256        String
-  width         Int?
-  height        Int?
+  mimeType     String
+  sizeBytes    Int
+  sha256       String
+  width        Int?
+  height       Int?
   /// Bytes in the row (no Blob store configured) — exactly one of content / blobPathname (CHECK).
-  content       Bytes?
-  blobPathname  String?   @unique
-  note          String?
-  createdById   String?
-  createdAt     DateTime  @default(now())
+  content      Bytes?
+  blobPathname String?  @unique
+  note         String?
+  createdById  String?
+  createdAt    DateTime @default(now())
 
   @@unique([assetId, version])
 }
 
 /// A planned or published piece of organic content. One post, one or more platform variants.
 model MktPost {
-  id            String          @id @default(cuid())
-  title         String
-  campaignId    String?
-  campaign      MktCampaign?    @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  productId     String?
-  product       CoffeeProduct?  @relation(fields: [productId], references: [id], onDelete: SetNull)
+  id          String           @id @default(cuid())
+  title       String
+  campaignId  String?
+  campaign    MktCampaign?     @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  productId   String?
+  product     CoffeeProduct?   @relation(fields: [productId], references: [id], onDelete: SetNull)
   /// AWARENESS | ENGAGEMENT | TRAFFIC | CONVERSIONS | SALES (CHECK)
-  objective     String
-  audience      String?
+  objective   String
+  audience    String?
   /// POST | REEL | STORY | VIDEO | CAROUSEL | SHORT | ARTICLE | PIN (CHECK)
-  contentType   String          @default("POST")
-  caption       String          @default("")
-  hashtags      String[]        @default([])
-  link          String?
-  cta           String?
+  contentType String           @default("POST")
+  caption     String           @default("")
+  hashtags    String[]         @default([])
+  link        String?
+  cta         String?
   /// UTC instant; displayed in MktSettings.timezone.
-  scheduledAt   DateTime?
+  scheduledAt DateTime?
   /// DRAFT | IN_REVIEW | APPROVED | SCHEDULED | PUBLISHING | PUBLISHED | PARTIAL | FAILED | CANCELLED (CHECK)
-  status        String          @default("DRAFT")
-  brief         Json?
-  aiGenerated   Boolean         @default(false)
-  createdById   String?
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  variants      MktPostVariant[]
-  assets        MktPostAsset[]
-  changes       MktPostChange[]
+  status      String           @default("DRAFT")
+  brief       Json?
+  aiGenerated Boolean          @default(false)
+  createdById String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  variants    MktPostVariant[]
+  assets      MktPostAsset[]
+  changes     MktPostChange[]
 
   @@index([scheduledAt])
   @@index([status])
@@ -7849,36 +8010,36 @@ model MktPost {
 
 /// The post as it goes to one platform: its own caption/hashtags and its own publishing result.
 model MktPostVariant {
-  id              String        @id @default(cuid())
-  postId          String
-  post            MktPost       @relation(fields: [postId], references: [id], onDelete: Cascade)
-  platform        String
+  id                  String          @id @default(cuid())
+  postId              String
+  post                MktPost         @relation(fields: [postId], references: [id], onDelete: Cascade)
+  platform            String
   /// NULL = use the post's caption / hashtags.
-  caption         String?
-  hashtags        String[]      @default([])
+  caption             String?
+  hashtags            String[]        @default([])
   /// PENDING | QUEUED | PUBLISHING | PUBLISHED | FAILED | MANUAL_REQUIRED | MANUAL_DONE | CANCELLED (CHECK)
-  status          String        @default("PENDING")
-  externalPostId  String?
-  externalUrl     String?
-  publishedAt     DateTime?
+  status              String          @default("PENDING")
+  externalPostId      String?
+  externalUrl         String?
+  publishedAt         DateTime?
   /// Who confirmed a manual publication, and the URL they gave as evidence.
   manualConfirmedById String?
-  lastError       String?
-  updatedAt       DateTime      @updatedAt
-  jobs            MktPublishJob[]
+  lastError           String?
+  updatedAt           DateTime        @updatedAt
+  jobs                MktPublishJob[]
 
   @@unique([postId, platform])
   @@index([status])
 }
 
 model MktPostAsset {
-  postId     String
-  post       MktPost         @relation(fields: [postId], references: [id], onDelete: Cascade)
-  assetId    String
-  asset      MktAsset        @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  postId    String
+  post      MktPost  @relation(fields: [postId], references: [id], onDelete: Cascade)
+  assetId   String
+  asset     MktAsset @relation(fields: [assetId], references: [id], onDelete: Restrict)
   /// Pinned version; NULL = the asset's latest at publish time.
-  versionId  String?
-  position   Int             @default(0)
+  versionId String?
+  position  Int      @default(0)
 
   @@id([postId, assetId])
 }
@@ -7921,25 +8082,25 @@ model MktPublishJob {
 
 /// Two-person approval of a marketing action. Requester can never decide (service + CHECK).
 model MktApproval {
-  id            String    @id @default(cuid())
+  id              String    @id @default(cuid())
   /// POST | CAMPAIGN | BUDGET_CHANGE | AD_CHANGE | MESSAGE_CAMPAIGN | TRACKING_CHANGE | SENSITIVE_REPLY (CHECK)
-  subjectType   String
-  subjectId     String
+  subjectType     String
+  subjectId       String
   /// The action approved: publish, ai_publish, create, increase, pause, send …
-  action        String
+  action          String
   /// PENDING | APPROVED | REJECTED | CANCELLED (CHECK)
-  status        String    @default("PENDING")
+  status          String    @default("PENDING")
   /// What exactly is being approved (a snapshot, so a later edit cannot ride on an old approval).
-  payload       Json      @default("{}")
-  payloadHash   String
-  requestedById String
+  payload         Json      @default("{}")
+  payloadHash     String
+  requestedById   String
   requestedByName String?
-  requestNote   String?
-  decidedById   String?
-  decidedByName String?
-  decisionNote  String?
-  decidedAt     DateTime?
-  createdAt     DateTime  @default(now())
+  requestNote     String?
+  decidedById     String?
+  decidedByName   String?
+  decisionNote    String?
+  decidedAt       DateTime?
+  createdAt       DateTime  @default(now())
 
   @@index([status, createdAt])
   @@index([subjectType, subjectId])
@@ -7968,23 +8129,23 @@ model MktConnection {
 
 /// A budget line for a period (YYYY-MM month or YYYY-Qn quarter).
 model MktBudget {
-  id            String       @id @default(cuid())
-  period        String
+  id                 String       @id @default(cuid())
+  period             String
   /// TOTAL | PLATFORM | CAMPAIGN | PRODUCT (CHECK)
-  scope         String
+  scope              String
   /// Platform key / product id when scope says so (campaign uses campaignId).
-  scopeRef      String?
-  campaignId    String?
-  campaign      MktCampaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  planned       Decimal      @db.Decimal(18, 2)
-  dailyCap      Decimal?     @db.Decimal(18, 2)
+  scopeRef           String?
+  campaignId         String?
+  campaign           MktCampaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  planned            Decimal      @db.Decimal(18, 2)
+  dailyCap           Decimal?     @db.Decimal(18, 2)
   /// The most an automatic rule may add in one step, as a fraction (0.2 = +20%).
-  maxAutoIncreasePct Decimal? @db.Decimal(6, 4)
-  currency      String       @default("SAR")
-  note          String?
-  createdById   String?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  maxAutoIncreasePct Decimal?     @db.Decimal(6, 4)
+  currency           String       @default("SAR")
+  note               String?
+  createdById        String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
 
   @@unique([period, scope, scopeRef, campaignId])
   @@index([period])
@@ -8030,21 +8191,21 @@ model MktMetricSnapshot {
 
 /// Store customers mirrored from the e-commerce platform — read-only copy.
 model MktStoreCustomer {
-  id             String    @id @default(cuid())
-  source         String    @default("STORE")
-  externalId     String
-  name           String?
+  id            String          @id @default(cuid())
+  source        String          @default("STORE")
+  externalId    String
+  name          String?
   /// E.164 without "+", normalised (9665…).
-  phone          String?
-  email          String?
-  firstOrderAt   DateTime?
-  ordersCount    Int       @default(0)
+  phone         String?
+  email         String?
+  firstOrderAt  DateTime?
+  ordersCount   Int             @default(0)
   /// Optional link to the ERP B2B customer when the same party buys both ways.
-  erpCustomerId  String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  orders         MktStoreOrder[]
-  carts          MktCart[]
+  erpCustomerId String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  orders        MktStoreOrder[]
+  carts         MktCart[]
 
   @@unique([source, externalId])
   @@index([phone])
@@ -8052,45 +8213,45 @@ model MktStoreCustomer {
 
 /// Store orders mirrored from the e-commerce platform — the revenue truth for attribution.
 model MktStoreOrder {
-  id               String            @id @default(cuid())
-  source           String            @default("STORE")
-  externalId       String
-  orderNumber      String?
-  customerId       String?
-  customer         MktStoreCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  id           String            @id @default(cuid())
+  source       String            @default("STORE")
+  externalId   String
+  orderNumber  String?
+  customerId   String?
+  customer     MktStoreCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
   /// Platform status as received, and the normalised one:
   /// PENDING | PAID | FULFILLED | CANCELLED | REFUNDED | PARTIALLY_REFUNDED (CHECK)
-  rawStatus        String?
-  status           String
-  currency         String            @default("SAR")
-  subtotal         Decimal?          @db.Decimal(18, 2)
-  discount         Decimal?          @db.Decimal(18, 2)
-  shipping         Decimal?          @db.Decimal(18, 2)
-  tax              Decimal?          @db.Decimal(18, 2)
-  total            Decimal           @db.Decimal(18, 2)
-  refunded         Decimal           @default(0) @db.Decimal(18, 2)
-  couponCode       String?
-  placedAt         DateTime
-  cancelledAt      DateTime?
+  rawStatus    String?
+  status       String
+  currency     String            @default("SAR")
+  subtotal     Decimal?          @db.Decimal(18, 2)
+  discount     Decimal?          @db.Decimal(18, 2)
+  shipping     Decimal?          @db.Decimal(18, 2)
+  tax          Decimal?          @db.Decimal(18, 2)
+  total        Decimal           @db.Decimal(18, 2)
+  refunded     Decimal           @default(0) @db.Decimal(18, 2)
+  couponCode   String?
+  placedAt     DateTime
+  cancelledAt  DateTime?
   /// First order of this customer at this store (new-customer acquisition).
-  isFirstOrder     Boolean?
-  utmSource        String?
-  utmMedium        String?
-  utmCampaign      String?
-  utmContent       String?
-  utmTerm          String?
-  landingUrl       String?
-  referrer         String?
+  isFirstOrder Boolean?
+  utmSource    String?
+  utmMedium    String?
+  utmCampaign  String?
+  utmContent   String?
+  utmTerm      String?
+  landingUrl   String?
+  referrer     String?
   /// Resolved from utmCampaign (or a message click) by the attribution job.
-  campaignId       String?
-  campaign         MktCampaign?      @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  campaignId   String?
+  campaign     MktCampaign?      @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   /// Product lines: [{ sku, name, qty, price }]
-  lines            Json              @default("[]")
+  lines        Json              @default("[]")
   /// SHA-256 of the last payload applied (an identical webhook is a no-op).
-  payloadHash      String?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  touches          MktTouch[]
+  payloadHash  String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  touches      MktTouch[]
 
   @@unique([source, externalId])
   @@index([placedAt])
@@ -8099,18 +8260,18 @@ model MktStoreOrder {
 
 /// A marketing touch on a customer's path (click, message, visit) — the input of attribution.
 model MktTouch {
-  id           String         @id @default(cuid())
+  id         String         @id @default(cuid())
   /// The phone or store customer id the touch belongs to.
-  subjectKey   String
-  at           DateTime
+  subjectKey String
+  at         DateTime
   /// UTM | WHATSAPP | AD_CLICK | ORGANIC | REFERRAL (CHECK)
-  channel      String
-  platform     String?
-  campaignId   String?
-  messageId    String?
-  orderId      String?
-  order        MktStoreOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  detail       Json           @default("{}")
+  channel    String
+  platform   String?
+  campaignId String?
+  messageId  String?
+  orderId    String?
+  order      MktStoreOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  detail     Json           @default("{}")
 
   @@index([subjectKey, at])
   @@index([orderId])
@@ -8118,24 +8279,24 @@ model MktTouch {
 
 /// Abandoned carts mirrored from the store.
 model MktCart {
-  id               String            @id @default(cuid())
-  source           String            @default("STORE")
-  externalId       String
-  customerId       String?
-  customer         MktStoreCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  phone            String?
-  value            Decimal?          @db.Decimal(18, 2)
-  currency         String            @default("SAR")
+  id                       String            @id @default(cuid())
+  source                   String            @default("STORE")
+  externalId               String
+  customerId               String?
+  customer                 MktStoreCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  phone                    String?
+  value                    Decimal?          @db.Decimal(18, 2)
+  currency                 String            @default("SAR")
   /// Link back to the cart, only if the store supplied one.
-  recoveryUrl      String?
-  lines            Json              @default("[]")
-  abandonedAt      DateTime
+  recoveryUrl              String?
+  lines                    Json              @default("[]")
+  abandonedAt              DateTime
   /// OPEN | CONVERTED | EXPIRED (CHECK)
-  status           String            @default("OPEN")
+  status                   String            @default("OPEN")
   convertedOrderExternalId String?
-  convertedAt      DateTime?
-  updatedAt        DateTime          @updatedAt
-  createdAt        DateTime          @default(now())
+  convertedAt              DateTime?
+  updatedAt                DateTime          @updatedAt
+  createdAt                DateTime          @default(now())
 
   @@unique([source, externalId])
   @@index([status, abandonedAt])
@@ -8144,84 +8305,84 @@ model MktCart {
 /// The central consent ledger for a channel. The latest event decides; nothing is deleted.
 model MktConsent {
   /// E.164 digits (9665…) — one row per phone and channel.
-  phone        String
-  channel      String   @default("WHATSAPP")
+  phone     String
+  channel   String            @default("WHATSAPP")
   /// OPTED_IN | OPTED_OUT (CHECK)
-  status       String
+  status    String
   /// CHECKOUT | FORM | IN_STORE | REPLY_STOP | ADMIN | IMPORT (CHECK)
-  source       String
-  evidence     String?
-  updatedAt    DateTime @updatedAt
-  events       MktConsentEvent[]
+  source    String
+  evidence  String?
+  updatedAt DateTime          @updatedAt
+  events    MktConsentEvent[]
 
   @@id([phone, channel])
 }
 
 model MktConsentEvent {
-  id        String     @id @default(cuid())
-  phone     String
-  channel   String
-  consent   MktConsent @relation(fields: [phone, channel], references: [phone, channel], onDelete: Cascade)
-  status    String
-  source    String
-  evidence  String?
-  actorId   String?
-  at        DateTime   @default(now())
+  id       String     @id @default(cuid())
+  phone    String
+  channel  String
+  consent  MktConsent @relation(fields: [phone, channel], references: [phone, channel], onDelete: Cascade)
+  status   String
+  source   String
+  evidence String?
+  actorId  String?
+  at       DateTime   @default(now())
 
   @@index([phone, channel, at])
 }
 
 /// WhatsApp message templates as approved by Meta (synced or entered).
 model MktWaTemplate {
-  id          String   @id @default(cuid())
-  name        String
-  language    String   @default("ar")
+  id        String   @id @default(cuid())
+  name      String
+  language  String   @default("ar")
   /// MARKETING | UTILITY | AUTHENTICATION (CHECK)
-  category    String
+  category  String
   /// APPROVED | PENDING | REJECTED | PAUSED | DISABLED | LOCAL_DRAFT (CHECK)
-  status      String   @default("LOCAL_DRAFT")
-  body        String
+  status    String   @default("LOCAL_DRAFT")
+  body      String
   /// Ordered variable names the body's {{1}}, {{2}} … stand for.
-  variables   String[] @default([])
+  variables String[] @default([])
   /// What the template is for: ABANDONED_CART, WELCOME, ORDER_UPDATE, PROMOTION …
-  purpose     String?
-  updatedAt   DateTime @updatedAt
-  createdAt   DateTime @default(now())
+  purpose   String?
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
 
   @@unique([name, language])
 }
 
 /// A lifecycle journey (abandoned cart, welcome, win-back …): trigger, steps, exits.
 model MktJourney {
-  id          String   @id @default(cuid())
+  id          String                 @id @default(cuid())
   /// ABANDONED_CART | WELCOME | POST_PURCHASE | REVIEW_REQUEST | REPLENISH | WINBACK | CROSS_SELL (CHECK)
-  kind        String   @unique
+  kind        String                 @unique
   name        String
-  active      Boolean  @default(false)
+  active      Boolean                @default(false)
   /// { steps: [{ waitMinutes, templateId, discountAllowed }], maxMessages, minCartValue, … }
-  config      Json     @default("{}")
+  config      Json                   @default("{}")
   updatedById String?
-  updatedAt   DateTime @updatedAt
+  updatedAt   DateTime               @updatedAt
   enrollments MktJourneyEnrollment[]
 }
 
 /// One subject (a cart, an order, a customer) going through a journey. Unique per journey and
 /// subject, so a repeated webhook can never enrol the same cart twice.
 model MktJourneyEnrollment {
-  id          String     @id @default(cuid())
-  journeyId   String
-  journey     MktJourney @relation(fields: [journeyId], references: [id], onDelete: Cascade)
-  subjectKey  String
-  phone       String?
+  id         String       @id @default(cuid())
+  journeyId  String
+  journey    MktJourney   @relation(fields: [journeyId], references: [id], onDelete: Cascade)
+  subjectKey String
+  phone      String?
   /// ACTIVE | COMPLETED | STOPPED | FAILED (CHECK)
-  status      String     @default("ACTIVE")
-  stepIndex   Int        @default(0)
-  nextRunAt   DateTime?
-  stopReason  String?
-  context     Json       @default("{}")
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  messages    MktMessage[]
+  status     String       @default("ACTIVE")
+  stepIndex  Int          @default(0)
+  nextRunAt  DateTime?
+  stopReason String?
+  context    Json         @default("{}")
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  messages   MktMessage[]
 
   @@unique([journeyId, subjectKey])
   @@index([status, nextRunAt])
@@ -8229,39 +8390,39 @@ model MktJourneyEnrollment {
 
 /// An outbound marketing / service message (WhatsApp Cloud API).
 model MktMessage {
-  id            String                @id @default(cuid())
-  channel       String                @default("WHATSAPP")
-  phone         String
-  enrollmentId  String?
-  enrollment    MktJourneyEnrollment? @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
-  campaignId    String?
-  campaign      MktCampaign?          @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  templateId    String?
+  id           String                @id @default(cuid())
+  channel      String                @default("WHATSAPP")
+  phone        String
+  enrollmentId String?
+  enrollment   MktJourneyEnrollment? @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+  campaignId   String?
+  campaign     MktCampaign?          @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  templateId   String?
   /// MARKETING | UTILITY | SERVICE (CHECK) — consent rules differ.
-  category      String
+  category     String
   /// Rendered preview of what the customer sees.
-  preview       String
-  variables     Json                  @default("[]")
+  preview      String
+  variables    Json                  @default("[]")
   /// One message per purpose and subject, ever: retries reuse the row.
-  dedupeKey     String                @unique
+  dedupeKey    String                @unique
   /// QUEUED | SENDING | SENT | DELIVERED | READ | FAILED | SKIPPED | CANCELLED (CHECK)
-  status        String                @default("QUEUED")
-  statusNote    String?
-  attempts      Int                   @default(0)
-  scheduledAt   DateTime
+  status       String                @default("QUEUED")
+  statusNote   String?
+  attempts     Int                   @default(0)
+  scheduledAt  DateTime
   /// The WhatsApp message id (wamid) returned by the Cloud API.
-  providerId    String?               @unique
-  sentAt        DateTime?
-  deliveredAt   DateTime?
-  readAt        DateTime?
-  failedAt      DateTime?
+  providerId   String?               @unique
+  sentAt       DateTime?
+  deliveredAt  DateTime?
+  readAt       DateTime?
+  failedAt     DateTime?
   /// Cost as billed/estimated, in currency.
-  cost          Decimal?              @db.Decimal(18, 4)
-  currency      String                @default("SAR")
+  cost         Decimal?              @db.Decimal(18, 4)
+  currency     String                @default("SAR")
   /// The tracked link in the message (carries utm_campaign + a message id).
-  trackedUrl    String?
-  createdAt     DateTime              @default(now())
-  updatedAt     DateTime              @updatedAt
+  trackedUrl   String?
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
 
   @@index([status, scheduledAt])
   @@index([phone, createdAt])
@@ -8293,19 +8454,19 @@ model MktDecision {
 
 /// Alerts raised by jobs and rules. dedupeKey keeps one open alert per condition.
 model MktAlert {
-  id          String    @id @default(cuid())
-  kind        String
+  id           String    @id @default(cuid())
+  kind         String
   /// INFO | WARNING | CRITICAL (CHECK)
-  severity    String
-  title       String
-  detail      String?
-  subjectType String?
-  subjectId   String?
+  severity     String
+  title        String
+  detail       String?
+  subjectType  String?
+  subjectId    String?
   /// OPEN | ACKNOWLEDGED | RESOLVED (CHECK)
-  status      String    @default("OPEN")
-  dedupeKey   String    @unique
-  createdAt   DateTime  @default(now())
-  resolvedAt  DateTime?
+  status       String    @default("OPEN")
+  dedupeKey    String    @unique
+  createdAt    DateTime  @default(now())
+  resolvedAt   DateTime?
   resolvedById String?
 
   @@index([status, createdAt])
@@ -8313,33 +8474,33 @@ model MktAlert {
 
 /// Every run of a marketing job (publisher, sync, journeys, alerts) and what it did.
 model MktJobRun {
-  id          String    @id @default(cuid())
-  job         String
-  trigger     String
+  id         String    @id @default(cuid())
+  job        String
+  trigger    String
   /// RUNNING | SUCCEEDED | FAILED | SKIPPED (CHECK)
-  status      String
-  startedAt   DateTime  @default(now())
-  finishedAt  DateTime?
-  summary     Json      @default("{}")
-  error       String?
+  status     String
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  summary    Json      @default("{}")
+  error      String?
 
   @@index([job, startedAt])
 }
 
 /// Append-only audit trail of everything that changes marketing state or reaches outside.
 model MktAuditLog {
-  id          String   @id @default(cuid())
+  id         String   @id @default(cuid())
   /// USER | RULE | SYSTEM | WEBHOOK (CHECK)
-  actorKind   String
-  actorId     String?
-  actorName   String?
-  action      String
-  entityType  String
-  entityId    String?
-  before      Json?
-  after       Json?
-  note        String?
-  at          DateTime @default(now())
+  actorKind  String
+  actorId    String?
+  actorName  String?
+  action     String
+  entityType String
+  entityId   String?
+  before     Json?
+  after      Json?
+  note       String?
+  at         DateTime @default(now())
 
   @@index([entityType, entityId, at])
   @@index([at])
@@ -8439,8 +8600,8 @@ model WorkTask {
   comments    WorkTaskComment[]
   watchers    WorkTaskWatcher[]
   attachments WorkTaskAttachment[]
-  events    WorkTaskEvent[]
-  reminders WorkReminder[]
+  events      WorkTaskEvent[]
+  reminders   WorkReminder[]
 
   @@unique([seriesId, occurrence])
   @@index([assigneeId, status, dueAt])

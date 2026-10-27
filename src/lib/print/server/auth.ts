@@ -61,9 +61,13 @@ export async function requirePrint() {
   return { user, error: null };
 }
 
-/** Cupping results are cupping data: the Cupping Results template also needs the cupping module. */
+/**
+ * Cupping results are cupping data: the Cupping Results template also needs the cupping module. A green lot or a
+ * material is inventory data: those two labels also need the inventory module.
+ */
 export function requireTemplateAccess(user: User, template: TemplateKey): NextResponse | null {
   if (template === "CUPPING_RESULTS" && !canReadCupping(user)) return forbidden();
+  if ((template === "GREEN_LOT" || template === "MATERIAL_SHELF") && !hasModuleAccess(user.permissions, "inventory")) return forbidden();
   return null;
 }
 

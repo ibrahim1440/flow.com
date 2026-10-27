@@ -11,7 +11,7 @@
 // (src/lib/inventory/metrics.ts); «—» where the history cannot support it. The tabs live in ./_parts.
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   Btn, Field, Notice, OpsBanner, OpsLoading, OpsRoot, PageHeader, Tabs, useL,
@@ -32,6 +32,10 @@ import { PackagingTab } from "./_parts/packaging";
 import { FinishedTab } from "./_parts/finished";
 import { LedgerTab } from "./_parts/ledger";
 import { CountsTab, StartCountDialog } from "./_parts/counts";
+import { LocationBreakdown, LocationSelect, useBalances, useLocations } from "./_parts/locations";
+import { locationName } from "@/lib/inventory/locations";
+import { ScanInput, lookupScanCode, type ScanFeedback } from "@/components/scan/ScanInput";
+import { lotPagePath } from "@/lib/scan/codes";
 
 /** A stored quantity for display: "—" when it is not a finite number (Infinity arrives as JSON null), so one bad row cannot crash the screen. */
 const fmtQty = (v: number | null | undefined, digits: number): string =>
@@ -77,20 +81,23 @@ function DeleteConfirmModal({
 // ─── Adjustment (count) dialog — Figma 278:4772 ──────────────────────────────
 
 function AdjustmentModal({
-  bean, onClose, onSuccess,
+  bean, onClose, onSuccess, site,
 }: {
   bean: GreenBean;
   onClose: () => void;
   onSuccess: (noChange: boolean) => void;
+  /** Phase 3: the location counted (its balance is the system quantity; the variance moves that balance). */
+  site?: { id: string; name: string; qty: number } | null;
 }) {
   const { t, lang } = useI18n();
   const L = useL();
-  const [actualQty, setActualQty] = useState(String(bean.quantityKg));
+  const systemQty = site ? site.qty : bean.quantityKg;
+  const [actualQty, setActualQty] = useState(String(systemQty));
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const delta = parseFloat(actualQty) - bean.quantityKg;
+  const delta = parseFloat(actualQty) - systemQty;
   const deltaValid = !isNaN(parseFloat(actualQty));
 
   async function handleSubmit(e: React.FormEvent) {
@@ -104,6 +111,7 @@ function AdjustmentModal({
         entityId: bean.id,
         newActualQuantity: parseFloat(actualQty),
         notes: notes.trim() || null,
+        ...(site ? { locationId: site.id } : {}),
       }),
     });
     setSaving(false);
@@ -133,8 +141,8 @@ function AdjustmentModal({
       {error ? <Notice tone="danger">{error}</Notice> : null}
       <form id="adjust-form" onSubmit={handleSubmit} className="hr-stack" style={{ gap: 14 }}>
         <div className="hr-form">
-          <Field label={t("systemQtyLabel")}>
-            <input className="hr-input hr-num" value={fmtQty(bean.quantityKg, 3)} disabled readOnly />
+          <Field label={site ? `${t("systemQtyLabel")} · ${site.name}` : t("systemQtyLabel")}>
+            <input className="hr-input hr-num" value={fmtQty(systemQty, 3)} disabled readOnly />
           </Field>
           <Field label={`${t("actualQtyLabel")} *`}>
             <input className="hr-input" type="number" step="0.001" min="0" value={actualQty}
@@ -163,6 +171,7 @@ export default function InventoryPage() {
   const { t, lang } = useI18n();
   const L = useL();
   const sp = useSearchParams();
+  const router = useRouter();
   const canReceive = !!user && hasSubPrivilege(user.permissions, "inventory", "receive");
   const canAdjust  = !!user && hasSubPrivilege(user.permissions, "inventory", "adjust");
   // Bean record edit / (de)activate / delete is catalogue maintenance: the receiving duty or adjust
@@ -181,6 +190,8 @@ export default function InventoryPage() {
   });
   const [sel, setSel] = useState<string>(() => sp.get("cat") || LEGACY_TAB[sp.get("tab") ?? ""]?.cat || "all");
   const [countId, setCountId] = useState<string | null>(() => sp.get("count"));
+  // Phase 3 (stock locations): «كل المواقع» or one location — the quantities shown, counted and received are its.
+  const [locFilter, setLocFilter] = useState<string>(() => sp.get("loc") ?? "");
   const [refreshKey, setRefreshKey] = useState(0);
 
   const [beans, setBeans]         = useState<GreenBean[] | null>(null);
@@ -203,6 +214,23 @@ export default function InventoryPage() {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
   }
+
+  const { state: locState } = useLocations(false);
+  const balances = useBalances(refreshKey);
+  const locations = locState?.locations ?? [];
+  // A count with no site filter is at the production site (where the server books one with no site named); a receipt
+  // with no filter goes to the default receiving site (council SA1: the two are different roles).
+  const siteId = locFilter || locState?.productionId || locState?.defaultId || "";
+  const recvRow = locations.find((l) => l.id === (locFilter || locState?.defaultId || ""));
+  const siteRow = locations.find((l) => l.id === siteId);
+  const siteName = siteRow ? locationName(siteRow, lang) : "";
+  const greenAt = (id: string, loc = siteId) => (balances?.green[id] ?? []).find((r) => r.locationId === loc)?.qty ?? 0;
+  const matAt = (id: string, loc = siteId) => (balances?.material[id] ?? []).find((r) => r.locationId === loc)?.qty ?? 0;
+  const multiSite = locations.length > 1;
+  const greenWhere = multiSite && balances ? (id: string) => <LocationBreakdown rows={balances.green[id]} locations={locations} testId={`where-green-${id}`} /> : undefined;
+  const matWhere = multiSite && balances ? (id: string) => <LocationBreakdown rows={balances.material[id]} locations={locations} digits={3} testId={`where-mat-${id}`} /> : undefined;
+  const site = siteRow && balances ? { id: siteRow.id, name: siteName, qtyOf: (id: string) => matAt(id) } : undefined;
+  const receiveSite = recvRow ? { id: recvRow.id, name: locationName(recvRow, lang) } : undefined;
 
   const loadBeans = useCallback(async () => {
     const res = await fetch("/api/green-beans?all=1");
@@ -240,10 +268,11 @@ export default function InventoryPage() {
       if (view !== "stock") p.set("view", view);
       if (sel !== "all") p.set("cat", sel);
       if (view === "counts" && countId) p.set("count", countId);
+      if (locFilter) p.set("loc", locFilter);
       const qs = p.toString();
       window.history.replaceState(window.history.state, "", qs ? `?${qs}` : window.location.pathname);
     } catch { /* the address is a convenience */ }
-  }, [view, sel, countId]);
+  }, [view, sel, countId, locFilter]);
 
   function openView(v: View) {
     setView(v);
@@ -259,7 +288,10 @@ export default function InventoryPage() {
   async function handleEdit(f: FormState) {
     if (!editTarget) return;
     setSaving(true);
-    const res = await fetch(`/api/green-beans/${editTarget.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(f) });
+    // The record's fields only: a quantity is never edited here (the API refuses it; counts and receipts move stock).
+    const { quantityKg: _qty, ...fields } = f;
+    void _qty;
+    const res = await fetch(`/api/green-beans/${editTarget.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(fields) });
     setSaving(false);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
@@ -290,6 +322,10 @@ export default function InventoryPage() {
     loadBeans();
   }
 
+  // One location chosen: each item at its quantity THERE, and only the items it holds (low-stock then reads that
+  // location — the per-location view; «كل المواقع» keeps the company-wide totals and alerts).
+  const viewBeans = useMemo(() => (beans && locFilter && balances ? beans.map((b) => ({ ...b, quantityKg: greenAt(b.id, locFilter) })).filter((b) => b.quantityKg > 0) : beans), [beans, locFilter, balances]); // eslint-disable-line react-hooks/exhaustive-deps
+  const viewMaterials = useMemo(() => (materials && locFilter && balances ? materials.map((m) => ({ ...m, quantityOnHand: matAt(m.id, locFilter) })).filter((m) => m.quantityOnHand > 0) : materials), [materials, locFilter, balances]); // eslint-disable-line react-hooks/exhaustive-deps
   const activeBeans = (beans ?? []).filter((b) => b.isActive);
   const activeMaterials = (materials ?? []).filter((m) => m.isActive);
   const loading = beans === null || materials === null || categories === null;
@@ -299,7 +335,7 @@ export default function InventoryPage() {
   const current = sel === "all" ? null : cats.find((c) => c.id === sel) ?? null;
   const subtree = useMemo(() => (current ? cats.filter((c) => c.id === current.id || c.parentId === current.id) : []), [cats, current]);
   const subtreeIds = useMemo(() => new Set(subtree.map((c) => c.id)), [subtree]);
-  const scopedMaterials = useMemo(() => (materials ?? []).filter((m) => !!m.categoryId && subtreeIds.has(m.categoryId)), [materials, subtreeIds]);
+  const scopedMaterials = useMemo(() => (viewMaterials ?? []).filter((m) => !!m.categoryId && subtreeIds.has(m.categoryId)), [viewMaterials, subtreeIds]);
   const greenLow = activeBeans.filter((b) => b.quantityKg > 0 && b.quantityKg < LOW_KG).length;
   const nameOf = (c: { nameAr: string; nameEn: string | null }) => (lang === "ar" ? c.nameAr : c.nameEn || c.nameAr);
   const isMaterialCat = (c: CategoryNode) => c.template === "PACKAGING" || c.template === "GENERAL";
@@ -307,6 +343,8 @@ export default function InventoryPage() {
   const headerAction = (
     <>
       <Link className="hr-btn is-ghost" href="/dashboard/inventory/categories" data-testid="inventory-categories-link">{L("التصنيفات", "Categories")}</Link>
+      <Link className="hr-btn is-ghost" href="/dashboard/inventory/locations" data-testid="inventory-locations-link">{L("المواقع", "Locations")}</Link>
+      <Link className="hr-btn is-ghost" href="/dashboard/inventory/transfers" data-testid="inventory-transfers-link">{L("التحويلات", "Transfers")}</Link>
       {canMaintain ? (
         <Btn onClick={() => setStartCount(true)} data-testid="start-count"><CheckIcon />{L("إجراء جرد", "Start a count")}</Btn>
       ) : null}
@@ -320,12 +358,13 @@ export default function InventoryPage() {
   if (loading) content = <OpsLoading />;
   else if (!current) {
     content = (
-      <AllItemsView beans={beans!} materials={materials!} categories={cats} onOpenCategory={openCategory} />
+      <AllItemsView beans={viewBeans!} materials={viewMaterials!} categories={cats} onOpenCategory={openCategory} />
     );
   } else if (current.template === "GREEN_COFFEE") {
     content = (
       <GreenTab
-        beans={beans!} search={search} onSearch={setSearch} showInactive={showInactive} onToggleInactive={() => setShowInactive((p) => !p)}
+        beans={viewBeans!} search={search} onSearch={setSearch} showInactive={showInactive} onToggleInactive={() => setShowInactive((p) => !p)}
+        whereOf={greenWhere}
         canAdjust={canAdjust} canMaintain={canMaintain} canReceive={canReceive}
         onCount={setAdjustTarget} onEdit={setEditTarget} onToggleActive={handleToggleActive} onDelete={setDeleteTarget}
         onOpenLedger={() => openView("ledger")} refreshKey={refreshKey}
@@ -364,12 +403,28 @@ export default function InventoryPage() {
           materials={scopedMaterials} categories={cats} subCategories={!current.parentId ? subMaterialCats : undefined}
           packMetrics={current.inventoryRole === "INVENTORY_PACKAGING"} title={nameOf(current)} itemCategoryId={current.id}
           onChanged={refreshAll} onError={(m) => showToast(m, "err")} onOpenLedger={() => openView("ledger")} refreshKey={refreshKey}
+          site={site} receiveSite={receiveSite} whereOf={matWhere}
         />
       </>
     );
   }
 
   const countMaterials = current && isMaterialCat(current) ? scopedMaterials : materials ?? [];
+
+  // The inventory search by scan (20261114090000_green_lot_labels): a lot label opens the lot's page, a shelf label its
+  // category, a product barcode the finished stock.
+  async function scanJump(code: string): Promise<ScanFeedback> {
+    const r = await lookupScanCode<{ kind: string; id: string; code?: string; serialNumber?: string; beanType?: string; beanTypeAr?: string | null; name?: string; nameAr?: string | null; itemCode?: string; categoryId?: string | null; skuCode?: string }>(code, lang === "en" ? "en" : "ar");
+    if (!r.ok) return { tone: "danger", text: r.message };
+    const h = r.hit;
+    if (h.kind === "GREEN_LOT" && h.code) { router.push(lotPagePath(h.code)); return { tone: "success", text: L(`يفتح اللوت ${h.serialNumber}…`, `Opening lot ${h.serialNumber}…`) }; }
+    if (h.kind === "MATERIAL") {
+      if (h.categoryId) openCategory(h.categoryId);
+      return { tone: "success", text: L(`${h.nameAr || h.name} · ${h.itemCode}`, `${h.name} · ${h.itemCode}`) };
+    }
+    openCategory(SEED.finished);
+    return { tone: "success", text: L(`منتج جاهز: ${h.nameAr || h.name} · ${h.skuCode}`, `Finished product: ${h.name} · ${h.skuCode}`) };
+  }
 
   return (
     <OpsRoot className="stk-inventory">
@@ -397,6 +452,8 @@ export default function InventoryPage() {
             process:  editTarget.process  ?? "",   processAr:  editTarget.processAr  ?? "",
             altitude: editTarget.altitude ?? "",   location:   editTarget.location   ?? "",
             quantityKg: editTarget.quantityKg,
+            sackCount: editTarget.sackCount ? String(editTarget.sackCount) : "",
+            sackWeightKg: editTarget.sackWeightKg ? String(editTarget.sackWeightKg) : "",
           }}
           onSave={handleEdit}
           onClose={() => setEditTarget(null)}
@@ -409,6 +466,7 @@ export default function InventoryPage() {
       {adjustTarget && (
         <AdjustmentModal
           bean={adjustTarget}
+          site={siteRow && balances ? { id: siteRow.id, name: siteName, qty: greenAt(adjustTarget.id) } : null}
           onClose={() => setAdjustTarget(null)}
           onSuccess={(noChange) => {
             showToast(noChange ? t("adjustNoChange") : t("adjustSuccess"), "ok");
@@ -422,6 +480,7 @@ export default function InventoryPage() {
           beans={beans}
           materials={countMaterials}
           defaultCategory={current && current.template !== "GREEN_COFFEE" && isMaterialCat(current) ? "PACKAGING_MATERIAL" : "RAW_MATERIAL"}
+          locations={locations} defaultLocationId={siteId || null} balances={balances}
           onClose={() => setStartCount(false)}
           onCreated={(id) => { setStartCount(false); setCountId(id); setView("counts"); }}
         />
@@ -437,6 +496,8 @@ export default function InventoryPage() {
 
       {toast ? <OpsBanner tone={toast.type === "ok" ? "success" : "danger"} onClose={() => setToast(null)}><span data-testid="inventory-toast">{toast.msg}</span></OpsBanner> : null}
 
+      {view === "stock" ? <div className="inv-scan"><ScanInput compact listen={!addOpen && !editTarget && !adjustTarget && !startCount && !deleteTarget} onCode={scanJump} testId="inventory-scan" placeholder={L("امسح ملصق لوت أو رف للانتقال إليه", "Scan a lot or shelf label to go to it")} /></div> : null}
+
       <Tabs
         label={t("inventory")}
         value={view}
@@ -448,6 +509,16 @@ export default function InventoryPage() {
         ]}
       />
 
+      {view === "stock" && locations.length ? (
+        <div className="loc-filter" data-testid="inventory-location-filter">
+          <div className="loc-filter-pick"><LocationSelect locations={locations} value={locFilter} onChange={setLocFilter} allOption={L("كل المواقع", "All locations")} label={L("الموقع", "Location")} testId="inventory-location" /></div>
+          <span className="loc-scope" data-testid="inventory-location-scope">
+            {locFilter
+              ? L(`الكميات المعروضة في «${siteName}» فقط؛ الجرد والاستلام هنا يُسجَّلان في هذا الموقع.`, `Quantities at «${siteName}» only; a count or a receipt here is booked at this location.`)
+              : L(`الكميات للشركة كلها. الجرد والاستلام من هنا يُسجَّلان في «${siteName}» (الافتراضي).`, `Company-wide quantities. A count or a receipt from here is booked at «${siteName}» (the default).`)}
+          </span>
+        </div>
+      ) : null}
       {view === "stock" ? (
         <div className="inv-layout">
           {categories ? <CategoryRail categories={cats} value={sel} onChange={openCategory} totalItems={activeBeans.length + activeMaterials.length} greenLow={greenLow} canManage={canMaintain} /> : <div />}
@@ -457,7 +528,7 @@ export default function InventoryPage() {
           </div>
         </div>
       ) : null}
-      {view === "ledger" ? <LedgerTab refreshKey={refreshKey} itemCategories={cats} initialItemCategory={sel !== "all" ? sel : ""} /> : null}
+      {view === "ledger" ? <LedgerTab refreshKey={refreshKey} itemCategories={cats} initialItemCategory={sel !== "all" ? sel : ""} locations={locations} initialLocation={locFilter} /> : null}
       {view === "counts" ? (
         <CountsTab openId={countId} onOpen={setCountId} canEdit={canMaintain} canPost={canAdjust} onStart={() => setStartCount(true)} onPosted={refreshAll} />
       ) : null}

@@ -5,6 +5,7 @@ import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { parseStockQuantity } from "@/lib/services/stock-quantity";
 import { receiveMaterial } from "@/lib/services/purchase-receipts";
+import { receivingLocationId } from "@/lib/services/stock-locations";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -56,7 +57,9 @@ export async function POST(request: Request, { params }: Params) {
     const result = await prisma.$transaction(async (tx) => {
       // The shared receive service (src/lib/services/purchase-receipts.ts): the row lock, the whole-number rule, the
       // IN movement, the balance, the costed GRN when a supplier and a unit cost are given, and the receipt audit.
-      const { material: updated, movement } = await receiveMaterial(tx, user, { materialItemId: id, quantity, rawQuantity: b.quantity, supplierId, reference, notes, unitCost });
+      // Phase 3: the receiving location (b.locationId, an active site; else the default).
+      const locationId = await receivingLocationId(tx, b.locationId);
+      const { material: updated, movement } = await receiveMaterial(tx, user, { materialItemId: id, quantity, rawQuantity: b.quantity, supplierId, reference, notes, unitCost, locationId });
       await flushPostings(tx);
       return { material: updated, movement };
     });

@@ -7,7 +7,7 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { moduleLabel, subLabel, LEVEL_AR, LEVEL_EN, SYSTEM_ROLES, NO_ACCESS_ROLE } from "./catalog";
 
-export type AuditCategory = "all" | "permissions" | "accounts" | "signin" | "purchases";
+export type AuditCategory = "all" | "permissions" | "accounts" | "signin" | "purchases" | "inventory" | "labels";
 type Def = { ar: string; en: string; cat: Exclude<AuditCategory, "all"> };
 
 /** Every action the log shows, with its words (UR-12 «الإجراء»). Anything else is not listed here. */
@@ -52,6 +52,8 @@ export const AUDIT_ACTIONS: Record<string, Def> = {
   STATION_PIN_FAILED: { ar: "رمز محطة غير صحيح", en: "Wrong station PIN", cat: "signin" },
   STATION_PIN_LOCKED: { ar: "قُفل رمز المحطة", en: "Station PIN locked", cat: "signin" },
   // Unified inventory phase 2: the purchase invoice's activity (src/lib/accounting/ops/purchase-activity.ts).
+  // Green-coffee lot labels (20261114090000_green_lot_labels): every authorized print job — the reprint history.
+  LABELS_PRINTED: { ar: "طبع ملصقات", en: "Printed labels", cat: "labels" },
   PURCHASE_INVOICE_SAVED: { ar: "حفظ فاتورة مشتريات كمسودة", en: "Saved a purchase invoice as draft", cat: "purchases" },
   PURCHASE_INVOICE_SUBMITTED: { ar: "قدّم فاتورة مشتريات للاعتماد", en: "Submitted a purchase invoice", cat: "purchases" },
   PURCHASE_INVOICE_RECEIVED: { ar: "استلم بضاعة فاتورة مشتريات وقدّمها", en: "Received a purchase invoice's goods and submitted it", cat: "purchases" },
@@ -65,6 +67,17 @@ export const AUDIT_ACTIONS: Record<string, Def> = {
   PURCHASE_LOT_CREATED: { ar: "أنشأ لوط بن أخضر من فاتورة", en: "Created a green lot from an invoice", cat: "purchases" },
   PURCHASE_LOT_RETIRED: { ar: "أوقف لوطًا بلا رصيد بعد الإلغاء", en: "Deactivated an empty lot after the cancel", cat: "purchases" },
   PURCHASE_ACTION_DENIED: { ar: "رُفض إجراء على فاتورة مشتريات", en: "A purchase invoice action was refused", cat: "purchases" },
+  // Unified inventory phase 3 (20261115090000_stock_locations): the location master and the transfers.
+  STOCK_LOCATION_CREATED: { ar: "أضاف موقع مخزون", en: "Added a stock location", cat: "inventory" },
+  STOCK_LOCATION_UPDATED: { ar: "عدّل موقع مخزون", en: "Changed a stock location", cat: "inventory" },
+  STOCK_LOCATION_REORDERED: { ar: "رتّب مواقع المخزون", en: "Reordered the stock locations", cat: "inventory" },
+  STOCK_LOCATION_DEFAULT_SET: { ar: "غيّر موقع الاستلام الافتراضي", en: "Changed the default receiving location", cat: "inventory" },
+  STOCK_LOCATION_PRODUCTION_SET: { ar: "غيّر موقع الإنتاج", en: "Changed the production site", cat: "inventory" },
+  STOCK_LOCATION_DEACTIVATED: { ar: "أوقف موقع مخزون", en: "Deactivated a stock location", cat: "inventory" },
+  STOCK_LOCATION_REACTIVATED: { ar: "أعاد تفعيل موقع مخزون", en: "Reactivated a stock location", cat: "inventory" },
+  STOCK_LOCATION_DELETED: { ar: "حذف موقعًا لم يُستخدم", en: "Deleted an unused location", cat: "inventory" },
+  STOCK_TRANSFER_CREATED: { ar: "حوّل مخزونًا بين موقعين", en: "Transferred stock between locations", cat: "inventory" },
+  STOCK_TRANSFER_CANCELLED: { ar: "ألغى تحويل مخزون", en: "Cancelled a stock transfer", cat: "inventory" },
 };
 
 const SOURCE: Record<string, { ar: string; en: string }> = { WEB: { ar: "ويب", en: "Web" }, STATION: { ar: "محطة", en: "Station" }, SYSTEM: { ar: "النظام", en: "System" } };
@@ -80,7 +93,7 @@ export function parseFilters(sp: URLSearchParams | Record<string, unknown>): Aud
   const source = get("source");
   return {
     q: (get("q") ?? "").trim().slice(0, 80),
-    cat: cat === "permissions" || cat === "accounts" || cat === "signin" || cat === "purchases" ? cat : "all",
+    cat: cat === "permissions" || cat === "accounts" || cat === "signin" || cat === "purchases" || cat === "inventory" || cat === "labels" ? cat : "all",
     days: days === "all" ? null : [7, 30, 90, 365].includes(Number(days)) ? Number(days) : 30,
     source: source === "web" || source === "station" || source === "system" ? source : "all",
     before: get("before"),
@@ -223,6 +236,30 @@ export function describe(r: Row, names: Map<string, string>, lang: "ar" | "en" =
         if (Array.isArray(m.reversedReceipts) && m.reversedReceipts.length) parts.push(T(`عُكس ${m.reversedReceipts.length} استلام`, `${m.reversedReceipts.length} receipt(s) reversed`));
       }
       details = parts.join(" · ");
+      break;
+    }
+    case "STOCK_LOCATION_CREATED": case "STOCK_LOCATION_UPDATED": case "STOCK_LOCATION_DEFAULT_SET": case "STOCK_LOCATION_PRODUCTION_SET": case "STOCK_LOCATION_DEACTIVATED":
+    case "STOCK_LOCATION_REACTIVATED": case "STOCK_LOCATION_DELETED": case "STOCK_LOCATION_REORDERED":
+      target = m.targetName ? T(`موقع «${m.targetName}»`, `location “${m.nameEn || m.targetName}”`) : T("المواقع", "Locations");
+      details = m.code ? String(m.code) : Array.isArray(m.order) ? (m.order as string[]).join(" · ") : "";
+      break;
+    case "STOCK_TRANSFER_CREATED": case "STOCK_TRANSFER_CANCELLED": {
+      target = m.targetName ? T(`تحويل ${m.targetName}`, `transfer ${m.targetName}`) : T("تحويل مخزون", "stock transfer");
+      const from = (m.from ?? null) as { name?: string } | null, to = (m.to ?? null) as { name?: string } | null;
+      const n = Array.isArray(m.lines) ? m.lines.length : 0;
+      details = [from?.name && to?.name ? (lang === "en" ? `${from.name} → ${to.name}` : `${from.name} ← ${to.name}`) : null, n ? T(`${n} سطر`, `${n} lines`) : null].filter(Boolean).join(" · ");
+      break;
+    }
+    case "LABELS_PRINTED": {
+      const TPL: Record<string, [string, string]> = { GREEN_LOT: ["لوت بن أخضر", "green lot"], MATERIAL_SHELF: ["ملصق رف", "shelf label"], COFFEE_ORIGIN: ["منشأ القهوة", "coffee origin"], CUPPING_RESULTS: ["نتائج التذوق", "cupping results"] };
+      const items = (Array.isArray(m.items) ? m.items : []) as { code?: string; sackNo?: number | null }[];
+      const codes = [...new Set(items.map((i) => i.code).filter((c): c is string => !!c))];
+      const sacks = items.map((i) => i.sackNo).filter((n): n is number => typeof n === "number").sort((a, b) => a - b);
+      const t = TPL[String(m.template)] ?? [String(m.template ?? "—"), String(m.template ?? "—")];
+      target = codes.length ? codes.slice(0, 3).join(sep) + (codes.length > 3 ? ` +${codes.length - 3}` : "") : T(t[0], t[1]);
+      const n = Number(m.totalLabels) || 0;
+      details = [T(t[0], t[1]), T(`${n} ملصق`, `${n} label${n === 1 ? "" : "s"}`),
+        sacks.length ? T(`الأكياس ${sacks[0]}–${sacks[sacks.length - 1]}`, `sacks ${sacks[0]}–${sacks[sacks.length - 1]}`) : null].filter(Boolean).join(" · ");
       break;
     }
     case "STATION_ACCESS_CHANGED": {

@@ -16,6 +16,7 @@ import {
   Confirm, Option, Chips, LogRows, DoneMark, Bid, Num,
 } from "../../_ui/blocks";
 import { BatchLabelPrint } from "@/components/print/BatchLabelPrint";
+import { StationLotScan, type ScannedLot } from "./LotScan";
 
 type Batch = { id: string; batchNumber: string; productId?: string | null; greenBeanQuantity: number; roastedBeanQuantity: number; wasteQuantity: number; createdAt: string; greenBean?: { serialNumber: string } | null };
 type View =
@@ -23,7 +24,7 @@ type View =
   | { v: "done"; batch: Batch; item: QueueItem | null; lossTone: string; at: string }
   | { v: "problem" } | { v: "problemDone"; at: string; kind: ProblemKind; reason: string; item: QueueItem | null }
   | { v: "recovery"; back: string; asked: string; found: Batch | null; at: string };
-type Draft = { green: string; roasted: string; lossReason: string | null; ack: boolean; pendingKey: string | null };
+type Draft = { green: string; roasted: string; lossReason: string | null; ack: boolean; pendingKey: string | null; lot?: ScannedLot | null };
 
 const TZ = "Asia/Riyadh";
 const EMPTY_DRAFT: Draft = { green: "", roasted: "", lossReason: null, ack: false, pendingKey: null };
@@ -128,6 +129,8 @@ export function RoastingStation() {
   }, [draftKey]);
   const clearDraft = useCallback(() => { try { if (draftKey) sessionStorage.removeItem(draftKey); } catch { /* */ } setDraftState(EMPTY_DRAFT); }, [draftKey]);
   const [focus, setFocus] = useState<"green" | "roasted">("green");
+  // ON mode only (Settings › Production «تأكيد الكيس بالمسح»): the roaster opened «كيس غير المقترح».
+  const [scanOpen, setScanOpen] = useState(false);
   const [stage, setStage] = useState<"entry" | "wait" | "loss">("entry");
   const [needAck, setNeedAck] = useState(false);
 
@@ -229,6 +232,9 @@ export function RoastingStation() {
         ...(item.itemType === "RoastCoffee" ? { productId: item.productId, allocate: "oldest" } : { productId: item.productId, productionOrderId: item.itemId }),
         greenBeanQuantity: +g.toFixed(3), roastedBeanQuantity: +rq.toFixed(3),
         roasterId: roaster?.id ?? null, claimId: mine.id, ack: draft.ack, lossReason: draft.lossReason,
+        // The sack the roaster scanned (LotScan.tsx); without a scan, the «اسحب من» lot the station showed: the server
+        // records exactly that lot or refuses (409 GREEN_LOT_CHANGED) — it never switches lots silently (council F1).
+        ...(draft.lot ? { greenBeanId: draft.lot.id } : item.green ? { expectedGreenBeanId: item.green.lotId } : {}),
         // Started from a slot of today's schedule: the batch links to it (the slot becomes recorded).
         ...(mine.slot ? { scheduledSlotId: mine.slot.id } : {}),
       };
@@ -247,6 +253,8 @@ export function RoastingStation() {
       setDraft({ pendingKey: null });
       setStage(r.body?.code === "LOSS_REASON_REQUIRED" ? "loss" : "entry");
       if (r.body?.code === "ACK_REQUIRED") { setNeedAck(true); setDraft({ ack: false, pendingKey: null }); }
+      // The suggested lot changed since the screen showed it: the suggestion is refreshed («اسحب من» shows the new one).
+      if (r.body?.code === "GREEN_LOT_CHANGED") void load(true);
       setErr(refusal(r.body));
     } catch {
       // Nothing came back: the roast may or may not have committed. The key is kept; nothing is
@@ -315,14 +323,29 @@ export function RoastingStation() {
   const hhmm = (d: string) => time(d, false);
   const whyText = (i: QueueItem): string => {
     switch (i.blocked) {
-      case "GREEN_SHORT": return t("whyGreenShort", { have: k2(i.greenAvailableKg), need: k2(i.plannedGreenKg ?? 0) });
-      case "NO_GREEN_SOURCE": return t("whyNoGreen");
+      case "AWAITING_TRANSFER": return L("بانتظار تحويل البن إلى موقع الإنتاج", "Waiting for the green to be transferred to the production site");
+      case "GREEN_SHORT": return `${L("تواصل مع المشرف", "Contact the supervisor")} · ${t("whyGreenShort", { have: k2(i.greenAvailableKg), need: k2(i.plannedGreenKg ?? 0) })}`;
+      case "NO_GREEN_SOURCE": return `${L("تواصل مع المشرف", "Contact the supervisor")} · ${t("whyNoGreen")}`;
       case "WAITING_ORDER": return t("whyWaitingOrder");
       case "STOCK_NOT_ALLOWED": return t("whyStock");
       case "CLAIMED": return t("whyClaimed", { name: i.claim?.claimedByName ?? "", time: i.claim ? time(i.claim.claimedAt, false) : "" });
       default: return "";
     }
   };
+  const drawFromLine = (i: QueueItem): ReactNode => {
+    const g0 = i.green!;
+    const site = lang === "ar" ? g0.siteNameAr : g0.siteNameEn || g0.siteNameAr;
+    return <>{L("اسحب من: ", "Draw from: ")}<bdi>{lang === "ar" ? g0.nameAr || g0.nameEn : g0.nameEn}</bdi> · <Bid>{g0.code || g0.serial}</Bid>{site ? <> · {site}</> : null}</>;
+  };
+  const drawFromSub = (i: QueueItem): ReactNode => {
+    const g0 = i.green!;
+    const sacks = g0.sacks ? (g0.sacks.from === g0.sacks.to ? L(`الكيس ${g0.sacks.from} من ${g0.sacks.of}`, `Sack ${g0.sacks.from} of ${g0.sacks.of}`) : L(`الأكياس ${g0.sacks.from}–${g0.sacks.to} من ${g0.sacks.of}`, `Sacks ${g0.sacks.from}–${g0.sacks.to} of ${g0.sacks.of}`)) : null;
+    return <>{[sacks, g0.code ? g0.serial : null, t("cardGreenS", { kg: k2(g0.availableKg) }), g0.fallback ? L("اللوت الافتراضي لا يكفي: الأقدم من نفس البن", "The default lot is short: the oldest of the same coffee") : null].filter(Boolean).join(" · ")}</>;
+  };
+  const greenWaitBody = (i: QueueItem): ReactNode => i.greenWait ? <>
+    {lang === "ar" ? i.greenWait.ar : i.greenWait.en}
+    {i.greenWait.transferHref ? <> <a className="ops-link" href={i.greenWait.transferHref} target="_blank" rel="noreferrer" data-testid="station-transfer-link">{L("حوّل الآن", "Transfer now")}</a></> : null}
+  </> : whyText(i);
   const stateLabel = (s: string) => s === "PAUSED" ? t("paused") : s === "STOPPED_MALFUNCTION" ? t("malfunction") : s === "RELEASE_REQUESTED" ? t("releaseRequested") : t("roasting");
 
   // ── R1 queue ────────────────────────────────────────────────────────────────────────────
@@ -417,7 +440,7 @@ export function RoastingStation() {
         head={<Head title={<bdi>{name(i)}</bdi>} sub={itemSub(i, true)} steps={{ items: steps, cur: 0 }} status={blocked ? { tone: "er", label: t("rowBlocked") } : { tone: "", label: i.slot?.status === "IN_PROGRESS" ? t("slotInProgress") : t("planned") }} since={i.slot ? t("slotPlannedAt", { time: hhmm(i.slot.startsAt) }) : t("inQueueSince")} />}
         foot={<>
           {blocked
-            ? <Primary disabled testId="start-blocked">{why === "GREEN_SHORT" ? t("cannotStartGreen") : t("cannotStart")}</Primary>
+            ? <Primary disabled testId="start-blocked">{why === "AWAITING_TRANSFER" ? L("بانتظار تحويل", "Waiting for a transfer") : why === "GREEN_SHORT" || why === "NO_GREEN_SOURCE" ? L("تواصل مع المشرف", "Contact the supervisor") : t("cannotStart")}</Primary>
             : <Primary onClick={() => void start(i)} wait={busy} disabled={!online} testId="start-roast">{t("startBtn")}</Primary>}
           <Secondary onClick={() => { setErr(""); setView({ v: "queue" }); }} testId="start-back">{t("backToQueue")}</Secondary>
           <Note>{t("startNote")}</Note>
@@ -427,8 +450,8 @@ export function RoastingStation() {
             ? <Confirm ok={!roasterOff && !notOperator} title={t("cardRoaster", { name: roaster.name })} sub={roasterOff ? t("cardRoasterOff") : t("cardRoasterOk", { kg: k2(roaster.defaultTargetKg) })} />
             : <Confirm ok title={t("cardNoRoaster")} sub={t("cardNoRoasterS")} />}
           <Confirm ok={!i.blocked}
-            title={i.green ? <>{t("cardGreen", { name: lang === "ar" ? i.green.nameAr || i.green.nameEn : i.green.nameEn, serial: "" }).replace(/ · $/, "")} · <Bid>{i.green.serial}</Bid></> : t("cardGreenNone")}
-            sub={t("cardGreenS", { kg: k2(i.green?.availableKg ?? i.greenAvailableKg) })} />
+            title={i.green ? drawFromLine(i) : t("cardGreenNone")}
+            sub={i.green ? drawFromSub(i) : t("cardGreenS", { kg: k2(i.greenAvailableKg) })} />
           <div style={{ marginTop: 8 }}>
             <Facts plain items={[
               [t("factPlanned"), i.plannedGreenKg ? t("factPlannedV", { kg: k2(i.plannedGreenKg) }) : "—"],
@@ -436,7 +459,8 @@ export function RoastingStation() {
               [t("factOperator"), user.name],
             ]} />
           </div>
-          {why === "GREEN_SHORT" ? <Info tone="err" title={t("startBlockedGreen")} testId="start-why">{t("startBlockedGreenB", { need: k2(i.plannedGreenKg ?? 0), have: k2(i.greenAvailableKg) })}</Info>
+          {why === "AWAITING_TRANSFER" ? <Info tone="warn" title={L("بانتظار تحويل", "Waiting for a transfer")} testId="start-why">{greenWaitBody(i)}</Info>
+            : why === "GREEN_SHORT" || why === "NO_GREEN_SOURCE" ? <Info tone="err" title={L("تواصل مع المشرف", "Contact the supervisor")} testId="start-why">{greenWaitBody(i)}</Info>
             : why === "OPERATOR" ? <Info tone="err" title={t("startBlockedOperator")} testId="start-why">{L("اطلب من المسؤول ربطك بها من إعدادات الحمّاصات.", "Ask the administrator to assign you in the roaster settings.")}</Info>
             : why === "ROASTER" ? <Info tone="err" title={t("startBlockedRoaster")} testId="start-why">{roasterStatus(roaster).label}{roaster?.statusReason ? ` · ${roaster.statusReason}` : ""}</Info>
             : why ? <Info tone="err" title={t("startBlockedOther")} testId="start-why">{why === "ONE_ACTIVE" ? L("لديك دفعة نشطة. أنهِها أو حرّرها قبل بدء أخرى.", "You already have an active roast. Finish or release it first.") : whyText(i)}</Info>
@@ -455,10 +479,16 @@ export function RoastingStation() {
   const nextItem = startable[0] ?? null;
   const rFacts: [ReactNode, ReactNode][] = [
     [t("factRoaster"), roaster?.name ?? "—"],
-    [t("factGreen"), item?.green ? <>{lang === "ar" ? item.green.nameAr || item.green.nameEn : item.green.nameEn} · <Bid>{item.green.serial}</Bid></> : "—"],
     [t("factPlanned"), item?.plannedGreenKg ? t("factPlannedV", { kg: k2(item.plannedGreenKg) }) : "—"],
     [t("factOperator"), user.name],
   ];
+
+  // «اسحب من»: the server's own pick (the same function the roast POST applies), or the scanned override.
+  const drawFrom = draft.lot
+    ? <Info tone="info" title={<>{L("اسحب من: ", "Draw from: ")}{lang === "ar" ? draft.lot.nameAr || draft.lot.nameEn : draft.lot.nameEn} · <Bid>{draft.lot.code || draft.lot.serial}</Bid></>} testId="station-draw-from">{L("الكيس الممسوح (بدل المقترح)", "The scanned sack (instead of the suggested one)")}</Info>
+    : item?.green ? <Info tone="info" title={drawFromLine(item)} testId="station-draw-from">{drawFromSub(item)}</Info>
+    : item?.greenWait ? <Info tone="warn" title={L("بانتظار البن", "Waiting for the green")} testId="station-draw-from">{greenWaitBody(item)}</Info>
+    : null;
 
   // ── R3 active ───────────────────────────────────────────────────────────────────────────
   if (view.v === "active" && mine) {
@@ -482,6 +512,7 @@ export function RoastingStation() {
           <Note>{nextItem ? t("nextOnRoaster", { name: name(nextItem) }) : t("noNext")}</Note>
         </>}>
         <div className="ws-col" style={{ gap: 20 }}>
+          {drawFrom}
           <Facts items={rFacts} />
           <div className="ws-timer">
             <div className="lbl">{t("sinceStart")}</div>
@@ -562,7 +593,16 @@ export function RoastingStation() {
         </>}>
         <div className="ws-split">
           <div className="ws-col">
-            {!online ? <div style={{ marginBottom: 16 }}>{offlineBox}</div> : <Facts items={rFacts} />}
+            {!online ? <div style={{ marginBottom: 16 }}>{offlineBox}</div> : <>{drawFrom}<div style={{ marginTop: 12 }}><Facts items={rFacts} /></div></>}
+            {/* The sack scan only when the owner turned it on (Settings › Production, «تأكيد الكيس بالمسح»), and then only as
+                an override — «كيس غير المقترح» — never a step: without it the server's pick is recorded. */}
+            {online && !wait && q.lotScan ? (
+              scanOpen || draft.lot
+                ? <div style={{ marginTop: 12 }}><StationLotScan lang={lang} productId={item?.productId ?? null} greenKg={g}
+                    auto={item?.green ? { serial: item.green.serial, nameAr: item.green.nameAr, nameEn: item.green.nameEn } : null}
+                    lot={draft.lot ?? null} onLot={(l) => setDraft({ lot: l })} /></div>
+                : <div style={{ marginTop: 12 }}><Secondary onClick={() => setScanOpen(true)} testId="station-lot-override">{L("كيس غير المقترح؟ امسحه", "A different sack? Scan it")}</Secondary></div>
+            ) : null}
             <div style={!online ? undefined : undefined}>{fields}</div>
             {online ? lossBox : null}
             <div style={{ marginTop: 16, display: "grid", gap: 12 }}>

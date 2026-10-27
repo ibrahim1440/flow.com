@@ -1,5 +1,6 @@
 import { flushPostings } from "@/lib/accounting/ops/cost-ledger";
 import { onDelivery } from "@/lib/accounting/ops/inventory-events";
+import { productionLocation, setStockLocation } from "@/lib/services/stock-locations";
 import { autoCloseAfterDelivery, autoPrepareOrder } from "@/lib/services/orders/preparation";
 import { settleProductionOrders } from "@/lib/services/production-schedule";
 import { assertLotsNotHeld } from "@/lib/services/qc/hold-guard";
@@ -115,6 +116,9 @@ export async function POST(request: Request) {
 
   try {
     const outcome: DeliveryOutcome = await prisma.$transaction(async (tx) => {
+      // Phase 3 (stock locations): a dispatch ships from the production site, where the finished lots are
+      // (Delivery.locationId and its movements take it; finished lots are not moved between sites yet).
+      await setStockLocation(tx, (await productionLocation(tx)).id);
       const orderItem = await tx.orderItem.findUnique({
         where: { id: orderItemId },
         include: {

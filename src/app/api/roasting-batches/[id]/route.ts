@@ -1,4 +1,5 @@
 import { flushPostings } from "@/lib/accounting/ops/cost-ledger";
+import { drawSiteOf, setStockLocation } from "@/lib/services/stock-locations";
 import { assertBatchesNotHeld } from "@/lib/services/qc/hold-guard";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
@@ -160,6 +161,8 @@ export async function DELETE(request: Request, { params }: Params) {
         select: { quantityKg: true },
       });
       const previousQuantity = bean!.quantityKg;
+      // Phase 3: the coffee goes back to the site the roast drew it from (the production site if that one has closed).
+      await setStockLocation(tx, await drawSiteOf(tx, "ROASTING_BATCH", id));
 
       await tx.greenBean.update({
         where: { id: batch.greenBeanId },

@@ -7,8 +7,8 @@ import { operatorRefusal, operatorVerdict } from "@/lib/services/roaster-control
 import { isAssignedOperator } from "@/lib/services/roaster-operators";
 import { scheduleCan, startSlot, ScheduleError } from "@/lib/services/schedule/schedule-db";
 import type { Permissions } from "@/lib/auth-shared";
-import { greenSourceFacts } from "@/lib/services/green-source";
-import { pickGreenLot } from "@/lib/green-source";
+import { greenRefusal } from "@/lib/green-source";
+import { greenSourceFacts, pickFromFacts } from "@/lib/services/green-source";
 
 /**
  * The roasting station's coordination records (Workstations W1; owner decision D10 adopts
@@ -162,7 +162,12 @@ export async function startRoast(args: { user: Actor; item: { type: StationItemT
 
     // J-13: the green has to be there for the usual charge before anything is claimed.
     const facts = await greenSourceFacts(tx, { productId });
-    const pick = pickGreenLot(facts?.defaultLot ?? null, facts?.candidates ?? [], plannedGreenKg ?? 0);
+    const pick = pickFromFacts(facts, plannedGreenKg ?? 0);
+    if (!pick.ok && pick.reason === "AT_OTHER_SITE") {
+      // Enough in the company, not at the production site: it waits for the supervisor's transfer.
+      const m = greenRefusal(pick, plannedGreenKg ?? 0);
+      throw AR(m.ar, m.en, 409, "GREEN_AT_OTHER_SITE");
+    }
     if (!pick.ok) {
       throw AR(
         `لا يمكن البدء: البن الأخضر غير كافٍ. المطلوب ${(plannedGreenKg ?? 0).toFixed(2)} كغ والمتاح ${pick.availableKg.toFixed(2)} كغ.`,

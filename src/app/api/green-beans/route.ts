@@ -2,8 +2,9 @@ import { onOpeningStock } from "@/lib/accounting/ops/inventory-events";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireAnyModule, requireSub } from "@/lib/auth-server";
-import { handlePrismaError } from "@/lib/api-error";
-import { greenLotFields } from "@/lib/services/green-lots";
+import { handleDomainError } from "@/lib/api-error";
+import { greenLotFields, sackFields, sackMismatch } from "@/lib/services/green-lots";
+import { receivingLocationId, setStockLocation } from "@/lib/services/stock-locations";
 
 export async function GET(request: Request) {
   // Production workers need to see bean names and stock when creating roasting batches
@@ -33,6 +34,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "quantityKg must be a non-negative number." }, { status: 400 });
   }
 
+  const sacks = sackFields(raw);
+  if ("error" in sacks) return NextResponse.json({ ...sacks, code: "SACKS_INVALID" }, { status: 400 });
+
   // The lot form's fields, mapped once (src/lib/services/green-lots.ts) — the one-step purchase invoice uses the same.
   const data = { ...greenLotFields(raw), quantityKg };
 
@@ -40,6 +44,10 @@ export async function POST(request: Request) {
     let bean;
     if (quantityKg > 0) {
       bean = await prisma.$transaction(async (tx) => {
+        // Phase 3: the opening stock is received at a site, named explicitly (raw.locationId, active; else the
+        // default receiving site) — this transaction is that one receipt.
+        const locationId = await receivingLocationId(tx, raw.locationId);
+        await setStockLocation(tx, locationId);
         const created = await tx.greenBean.create({ data });
         const movement = await tx.inventoryMovement.create({
           data: {
@@ -54,6 +62,7 @@ export async function POST(request: Request) {
             sourceDocId:       created.id,
             userId:            user.id,
             notes:             "Opening balance",
+            locationId,
           },
         });
         // Accounting A3: an opening balance carries no cost; the opening valuation costs it.
@@ -63,8 +72,10 @@ export async function POST(request: Request) {
     } else {
       bean = await prisma.greenBean.create({ data });
     }
-    return NextResponse.json(bean, { status: 201 });
+    // A soft warning only (the lot is saved): the sacks do not add up to the quantity received.
+    const sackWarning = sackMismatch(bean.sackCount, bean.sackWeightKg, bean.quantityKg);
+    return NextResponse.json(sackWarning ? { ...bean, sackWarning } : bean, { status: 201 });
   } catch (err) {
-    return handlePrismaError(err);
+    return handleDomainError(err);
   }
 }

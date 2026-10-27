@@ -5,6 +5,7 @@ import { requireModule, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { parsePeriod, periodStart } from "@/lib/inventory/purchases-query";
 import { receiveGreen } from "@/lib/services/purchase-receipts";
+import { receivingLocationId } from "@/lib/services/stock-locations";
 
 /**
  * The purchase register. Without parameters: the newest 200 (unchanged). With `period` (30 | 90 |
@@ -52,7 +53,9 @@ export async function POST(request: Request) {
     const result = await prisma.$transaction(async (tx) => {
       // The shared receive service (src/lib/services/purchase-receipts.ts): the lock, the purchase record, the IN
       // movement, the lot's balance and the GRN (cost + entry), exactly as this route always booked them.
-      const { purchase, updatedBean } = await receiveGreen(tx, user, { supplierId, greenBeanId: itemId, quantity, costPerUnit, purchaseDate: new Date(purchaseDate), notes: notes ?? null });
+      // Phase 3: the receiving location (body.locationId, an active site; else the default).
+      const locationId = await receivingLocationId(tx, body.locationId);
+      const { purchase, updatedBean } = await receiveGreen(tx, user, { supplierId, greenBeanId: itemId, quantity, costPerUnit, purchaseDate: new Date(purchaseDate), notes: notes ?? null, locationId });
       await flushPostings(tx);
       return { purchase, updatedBean };
     });

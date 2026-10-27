@@ -3,8 +3,9 @@ import { prisma } from "@/lib/db";
 import { hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 import { roastQueue } from "@/lib/services/roast-queue";
 import { productionProgressMany } from "@/lib/services/production-planning";
-import { greenSourceFacts } from "@/lib/services/green-source";
-import { pickGreenLot } from "@/lib/green-source";
+import { greenSourceFacts, pickFromFacts } from "@/lib/services/green-source";
+import { greenRefusal, sackRange } from "@/lib/green-source";
+import { readStationSettings } from "@/lib/services/settings/sections";
 import { ROASTING_STATION } from "@/lib/station/shared";
 import { assignedRoasterIds } from "@/lib/services/roaster-operators";
 import { todaySlotsFor } from "@/lib/services/schedule/schedule-db";
@@ -56,10 +57,22 @@ export type QueueItem = {
   /** The roaster's usual charge (default target), when a roaster is selected. Reference only. */
   plannedGreenKg: number | null;
   expectedLossPct: number;
-  green: { lotId: string; serial: string; nameAr: string | null; nameEn: string; availableKg: number; fallback: boolean } | null;
+  /**
+   * «اسحب من»: the lot the roast will draw on — the SAME choice the roast POST makes (pickFromFacts at the production
+   * site): its label code, the site, and the sacks to open when they are known.
+   */
+  green: {
+    lotId: string; serial: string; nameAr: string | null; nameEn: string; availableKg: number; fallback: boolean;
+    code: string | null; siteNameAr: string | null; siteNameEn: string | null; sacks: { from: number; to: number; of: number } | null;
+  } | null;
   greenAvailableKg: number;
+  /**
+   * Why the green is not ready, in both languages (AWAITING_TRANSFER: enough in the company, not at the production site;
+   * GREEN_SHORT / NO_GREEN_SOURCE: ask the supervisor). `transferHref` only for a viewer who may move stock.
+   */
+  greenWait: { ar: string; en: string; transferHref: string | null } | null;
   /** null when it can start; otherwise the reason code (R5). */
-  blocked: null | "GREEN_SHORT" | "NO_GREEN_SOURCE" | "WAITING_ORDER" | "STOCK_NOT_ALLOWED" | "CLAIMED";
+  blocked: null | "GREEN_SHORT" | "NO_GREEN_SOURCE" | "AWAITING_TRANSFER" | "WAITING_ORDER" | "STOCK_NOT_ALLOWED" | "CLAIMED";
   claim: ClaimView | null;
   /** A row of today's schedule (key `Slot:<id>`): the slot it starts. Absent on a demand row. */
   slot?: StationSlot | null;
@@ -82,6 +95,8 @@ export type StationQueue = {
   /** The caller's active roast; `slot` is the slot it was started from (IN_PROGRESS), if any. */
   mine: (ClaimView & { item: QueueItem | null; slot: StationSlot | null }) | null;
   today: { batches: number; rejected: number; greenKg: number; roastedKg: number };
+  /** «تأكيد الكيس بالمسح» (Settings › Production, 20261116090000_station_lot_scan): off → the station shows no scan. */
+  lotScan: boolean;
 };
 
 const r3 = (n: number) => +n.toFixed(3);
@@ -113,6 +128,7 @@ export async function stationQueue(user: Actor, opts: { roasterId?: string | nul
   const plannedGreenKg = roaster ? roaster.defaultTargetKg : null;
 
   const canStock = hasSubPrivilege(user.permissions, "production", "roast_to_stock");
+  const canMove = hasSubPrivilege(user.permissions, "inventory", "receive") || hasSubPrivilege(user.permissions, "inventory", "adjust");
   const [coffees, stockPos, claims] = await Promise.all([
     roastQueue(prisma),
     prisma.productionOrder.findMany({
@@ -129,11 +145,21 @@ export async function stationQueue(user: Actor, opts: { roasterId?: string | nul
   // Green for the usual charge, per coffee (the same choice the roast will make).
   const greenFor = async (productId: string, chargeKg: number | null = plannedGreenKg) => {
     const facts = await greenSourceFacts(prisma, { productId });
-    const pick = pickGreenLot(facts?.defaultLot ?? null, facts?.candidates ?? [], chargeKg ?? 0);
+    const kg = chargeKg ?? 0;
+    const pick = pickFromFacts(facts, kg);
     if (pick.ok) {
-      return { green: { lotId: pick.lot.id, serial: pick.lot.serialNumber, nameAr: pick.lot.beanTypeAr ?? null, nameEn: pick.lot.beanType, availableKg: pick.lot.quantityKg, fallback: pick.source === "fifo_fallback" }, availableKg: pick.lot.quantityKg, reason: null };
+      const at = pick.site ? pick.lot.siteKg ?? 0 : pick.lot.quantityKg;
+      return {
+        green: {
+          lotId: pick.lot.id, serial: pick.lot.serialNumber, nameAr: pick.lot.beanTypeAr ?? null, nameEn: pick.lot.beanType, availableKg: at, fallback: pick.source === "fifo_fallback",
+          code: pick.lot.labelCode ?? null, siteNameAr: pick.site?.nameAr ?? null, siteNameEn: pick.site?.nameEn ?? null, sacks: sackRange(pick.lot, kg),
+        },
+        availableKg: at, reason: null, wait: null,
+      };
     }
-    return { green: null, availableKg: pick.availableKg, reason: pick.reason === "NO_DEFAULT" ? ("NO_GREEN_SOURCE" as const) : ("GREEN_SHORT" as const) };
+    const m = greenRefusal(pick, kg);
+    const wait = { ar: m.ar, en: m.en, transferHref: pick.reason === "AT_OTHER_SITE" && canMove ? pick.transferHref : null };
+    return { green: null, availableKg: pick.availableKg, reason: pick.reason === "NO_DEFAULT" ? ("NO_GREEN_SOURCE" as const) : pick.reason === "AT_OTHER_SITE" ? ("AWAITING_TRANSFER" as const) : ("GREEN_SHORT" as const), wait };
   };
 
   const items: QueueItem[] = [];
@@ -149,7 +175,7 @@ export async function stationQueue(user: Actor, opts: { roasterId?: string | nul
       nameAr: c.productNameAr, nameEn: c.productNameEn,
       orders: c.orders.map((o) => ({ orderNumber: o.orderNumber, customerName: o.customerName })),
       productionNumber: null, forStock: false, needKg: c.demandKg, plannedGreenKg, expectedLossPct: c.expectedRoastLoss,
-      green: g.green, greenAvailableKg: r3(g.availableKg), blocked, claim,
+      green: g.green, greenAvailableKg: r3(g.availableKg), greenWait: g.wait, blocked, claim,
     });
   }
   for (const po of stockPos) {
@@ -163,7 +189,7 @@ export async function stationQueue(user: Actor, opts: { roasterId?: string | nul
       key: ref, itemType: "ProductionOrder", itemId: po.id, productId: po.productSku.productId,
       nameAr: po.productSku.product.productNameAr, nameEn: po.productSku.product.productNameEn,
       orders: [], productionNumber: po.productionNumber, forStock: true, needKg: remaining, plannedGreenKg,
-      expectedLossPct: po.productSku.product.expectedRoastLoss, green: g.green, greenAvailableKg: r3(g.availableKg), blocked, claim,
+      expectedLossPct: po.productSku.product.expectedRoastLoss, green: g.green, greenAvailableKg: r3(g.availableKg), greenWait: g.wait, blocked, claim,
     });
   }
   // Startable first (in the queue's own order), then the blocked ones.
@@ -206,7 +232,7 @@ export async function stationQueue(user: Actor, opts: { roasterId?: string | nul
       key: `Slot:${s.id}`, itemType: "RoastCoffee", itemId: s.productId, productId: s.productId,
       nameAr: s.product.ar, nameEn: s.product.en, orders: demand?.orders ?? [], productionNumber: null, forStock,
       needKg: demand?.needKg ?? 0, plannedGreenKg: plannedKg, expectedLossPct: demand?.expectedLossPct ?? slotProducts.get(s.productId) ?? 15,
-      green: g.green, greenAvailableKg: r3(g.availableKg), blocked, claim,
+      green: g.green, greenAvailableKg: r3(g.availableKg), greenWait: g.wait, blocked, claim,
       slot: { id: s.id, roasterId: s.roasterId, operatorId: s.operatorId, operatorName: s.operatorName, startsAt: s.startsAt, endsAt: s.endsAt, status: s.status as StationSlot["status"], plannedGreenKg: plannedKg },
     });
   }
@@ -225,7 +251,7 @@ export async function stationQueue(user: Actor, opts: { roasterId?: string | nul
       mineItem = {
         key: mineClaim.itemRef, itemType: mineClaim.itemType as QueueItem["itemType"], itemId: mineClaim.itemId, productId: p.id,
         nameAr: p.productNameAr, nameEn: p.productNameEn, orders: [], productionNumber: null, forStock: mineClaim.itemType === "ProductionOrder",
-        needKg: 0, plannedGreenKg, expectedLossPct: p.expectedRoastLoss, green: g.green, greenAvailableKg: r3(g.availableKg), blocked: null, claim: mineView,
+        needKg: 0, plannedGreenKg, expectedLossPct: p.expectedRoastLoss, green: g.green, greenAvailableKg: r3(g.availableKg), greenWait: g.wait, blocked: null, claim: mineView,
       };
     }
   }
@@ -249,7 +275,8 @@ export async function stationQueue(user: Actor, opts: { roasterId?: string | nul
     roastedKg: r3(todays.reduce((s, b) => s + b.roastedBeanQuantity, 0)),
   };
 
-  const body = { roasters, roaster, slots, items, mine, today };
+  const lotScan = (await readStationSettings(prisma)).lotScanRequired;
+  const body = { roasters, roaster, slots, items, mine, today, lotScan };
   const version = createHash("sha1").update(JSON.stringify(body)).digest("hex").slice(0, 16);
   return { serverTime: new Date().toISOString(), version, ...body };
 }

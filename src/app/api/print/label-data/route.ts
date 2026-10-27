@@ -2,8 +2,7 @@ import { NextResponse } from "@/lib/api-response";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { handlePrismaError } from "@/lib/api-error";
-import { buildJob, parseJobRequest, profileSnapshot } from "@/lib/print/server/job";
-import { itemRef } from "@/lib/print/server/data";
+import { auditItem, buildJob, parseJobRequest, profileSnapshot } from "@/lib/print/server/job";
 
 /**
  * Preview data for the print dialog (B-1): the resolved label content, layout totals and content
@@ -29,7 +28,7 @@ export async function POST(req: Request) {
           profileId: parsed.profile.id,
           profileName: parsed.profile.name,
           profile: profileSnapshot(parsed.profile),
-          items: parsed.items.map((it) => (it.kind === "cup" ? { kind: "cup", sessionId: it.sessionId, cupId: it.cupId, copies: it.copies, ref: itemRef(it) } : { kind: "product", productId: it.productId, copies: it.copies, ref: itemRef(it) })) as Prisma.InputJsonValue,
+          items: parsed.items.map(auditItem) as Prisma.InputJsonValue,
           itemCount: parsed.items.length,
           after: { namedScorers: true, presetId: parsed.presetId } as Prisma.InputJsonValue,
         },

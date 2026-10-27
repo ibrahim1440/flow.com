@@ -6,8 +6,9 @@ import { prisma } from "@/lib/db";
 import { getCuppingSettings } from "@/lib/cupping/close-policy";
 import { isoDay } from "../bidi";
 import { cupResult, type ScoreIn } from "../cupping";
-import type { CupData, LabelData, OriginData, Trace } from "../content";
-import type { AttributeKey } from "../templates";
+import type { CupData, GreenLotData, LabelData, MaterialData, OriginData, Trace } from "../content";
+import type { AttributeKey, TemplateKey } from "../templates";
+import { greenLotReceipts } from "@/lib/services/green-lot-receipts";
 
 export class PrintRefusal extends Error {
   constructor(public status: number, public code: string, message: string, public extra: Record<string, unknown> = {}) {
@@ -15,17 +16,32 @@ export class PrintRefusal extends Error {
   }
 }
 
-import { itemRef, type CupItemIn, type ItemIn, type OriginItemIn } from "../items";
-export { itemRef, type CupItemIn, type ItemIn, type OriginItemIn };
+import { itemRef, type CupItemIn, type GreenItemIn, type ItemIn, type MaterialItemIn, type OriginItemIn } from "../items";
+export { itemRef, type CupItemIn, type GreenItemIn, type ItemIn, type MaterialItemIn, type OriginItemIn };
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() !== "" ? v.trim() : null);
 
 /** Parses untrusted job items. Copies are validated by the layout engine. */
-export function parseItems(raw: unknown, template: "COFFEE_ORIGIN" | "CUPPING_RESULTS"): ItemIn[] {
+export function parseItems(raw: unknown, template: TemplateKey): ItemIn[] {
   if (!Array.isArray(raw)) throw new PrintRefusal(400, "ITEMS_REQUIRED", "items must be an array.");
   return raw.map((r, i) => {
     const o = (r ?? {}) as Record<string, unknown>;
     const copies = typeof o.copies === "number" ? o.copies : 1;
+    if (template === "GREEN_LOT") {
+      const greenBeanId = str(o.greenBeanId);
+      if (!greenBeanId) throw new PrintRefusal(400, "ITEM_INVALID", `items[${i}].greenBeanId is required.`);
+      const sackNo = o.sackNo === undefined || o.sackNo === null ? null : o.sackNo;
+      if (sackNo !== null && !(Number.isInteger(sackNo) && (sackNo as number) >= 1 && (sackNo as number) <= 999)) {
+        throw new PrintRefusal(400, "ITEM_INVALID", `items[${i}].sackNo must be a whole number from 1 to 999.`);
+      }
+      // One label per sack: a per-sack item prints once (a second copy of «كيس 3» is a second item).
+      return { kind: "green", greenBeanId, sackNo: sackNo as number | null, copies: sackNo === null ? copies : 1 };
+    }
+    if (template === "MATERIAL_SHELF") {
+      const materialId = str(o.materialId);
+      if (!materialId) throw new PrintRefusal(400, "ITEM_INVALID", `items[${i}].materialId is required.`);
+      return { kind: "material", materialId, copies };
+    }
     if (template === "COFFEE_ORIGIN") {
       const productId = str(o.productId);
       if (!productId) throw new PrintRefusal(400, "ITEM_INVALID", `items[${i}].productId is required.`);
@@ -49,11 +65,12 @@ async function resolveOrigin(items: OriginItemIn[]): Promise<OriginData[]> {
     const p = byId.get(it.productId);
     if (!p) throw new PrintRefusal(404, "PRODUCT_NOT_FOUND", "A selected coffee no longer exists.", { productId: it.productId });
     let trace: Trace = NO_TRACE;
+    let barcode: string | null = null;
     if (it.lotId) {
       // B-7: only a lot of THIS coffee.
       const lot = await prisma.finishedGoodsLot.findFirst({
         where: { id: it.lotId, productId: p.id },
-        include: { productSku: { select: { skuCode: true } }, packedFromBatch: { select: { id: true, date: true } }, roastingBatch: { select: { id: true, date: true } } },
+        include: { productSku: { select: { skuCode: true, barcode: true } }, packedFromBatch: { select: { id: true, date: true } }, roastingBatch: { select: { id: true, date: true } } },
       });
       if (!lot) throw new PrintRefusal(400, "LOT_NOT_RELATED", "The selected lot does not belong to this coffee.", { productId: p.id });
       const roast = lot.packedFromBatch ?? lot.roastingBatch;
@@ -63,6 +80,7 @@ async function resolveOrigin(items: OriginItemIn[]): Promise<OriginData[]> {
         batchNumber: lot.batchNumber || null,
         lotRef: [lot.productSku?.skuCode, isoDay(lot.createdAt)].filter(Boolean).join(" · ") || null,
       };
+      barcode = lot.productSku?.barcode?.trim() || null;
     } else if (it.batchId) {
       const b = await prisma.roastingBatch.findFirst({ where: { id: it.batchId, productId: p.id, status: { not: "Cancelled" } }, select: { batchNumber: true, date: true } });
       if (!b) throw new PrintRefusal(400, "BATCH_NOT_RELATED", "The selected batch does not belong to this coffee.", { productId: p.id });
@@ -74,7 +92,7 @@ async function resolveOrigin(items: OriginItemIn[]): Promise<OriginData[]> {
       country: { en: p.countryEn, ar: p.countryAr }, region: { en: p.regionEn, ar: p.regionAr },
       variety: { en: p.varietyEn, ar: p.varietyAr }, process: { en: p.processEn, ar: p.processAr },
       altitude: p.altitude, cupNotes: { en: p.cupNotesEn, ar: p.cupNotesAr }, roastPath: { en: p.roastPathEn, ar: p.roastPathAr },
-      trace,
+      trace, barcode,
     });
   }
   return out;
@@ -159,7 +177,51 @@ async function resolveCups(items: CupItemIn[], named: boolean): Promise<CupData[
   return out;
 }
 
-export async function resolveItems(template: "COFFEE_ORIGIN" | "CUPPING_RESULTS", items: ItemIn[], named = false): Promise<LabelData[]> {
+/**
+ * Green-coffee lot labels (20261114090000_green_lot_labels). A per-sack item needs the lot's sack count recorded and a
+ * sack number within it; the label reads «كيس n من N» from the lot, so a reprint of any sack says the same thing.
+ */
+async function resolveGreen(items: GreenItemIn[]): Promise<GreenLotData[]> {
+  const ids = [...new Set(items.map((i) => i.greenBeanId))];
+  const [lots, receipts] = await Promise.all([prisma.greenBean.findMany({ where: { id: { in: ids } } }), greenLotReceipts(ids)]);
+  const byId = new Map(lots.map((l) => [l.id, l]));
+  return items.map((it) => {
+    const l = byId.get(it.greenBeanId);
+    if (!l) throw new PrintRefusal(404, "LOT_NOT_FOUND", "A selected green lot no longer exists.", { greenBeanId: it.greenBeanId });
+    if (it.sackNo !== null && (!l.sackCount || it.sackNo > l.sackCount)) {
+      throw new PrintRefusal(400, "SACK_OUT_OF_RANGE", l.sackCount ? `Sack ${it.sackNo} is beyond the lot's ${l.sackCount} sacks.` : "Record the lot's sack count first.", { greenBeanId: l.id, sackCount: l.sackCount });
+    }
+    const r = receipts.get(l.id);
+    return {
+      kind: "green", ref: itemRef(it), greenBeanId: l.id, code: l.labelCode, serial: l.serialNumber,
+      name: { en: l.beanType, ar: l.beanTypeAr }, country: { en: l.country, ar: l.countryAr }, region: { en: l.region, ar: l.regionAr },
+      process: { en: l.process, ar: l.processAr }, variety: l.variety, altitude: l.altitude,
+      supplier: r?.supplier ?? null, invoiceRef: r?.invoiceRef ?? null, receivedDate: isoDay(l.receivedDate), receivedKg: r?.receivedKg ?? null,
+      sack: it.sackNo !== null && l.sackCount ? { no: it.sackNo, of: l.sackCount, kg: l.sackWeightKg } : null,
+      sacks: l.sackCount ? { count: l.sackCount, kg: l.sackWeightKg } : null,
+      trace: NO_TRACE,
+    } satisfies GreenLotData;
+  });
+}
+
+async function resolveMaterials(items: MaterialItemIn[]): Promise<MaterialData[]> {
+  const ids = [...new Set(items.map((i) => i.materialId))];
+  const rows = await prisma.materialItem.findMany({ where: { id: { in: ids } }, include: { itemCategory: { select: { nameAr: true, nameEn: true } } } });
+  const byId = new Map(rows.map((m) => [m.id, m]));
+  return items.map((it) => {
+    const m = byId.get(it.materialId);
+    if (!m) throw new PrintRefusal(404, "MATERIAL_NOT_FOUND", "A selected item no longer exists.", { materialId: it.materialId });
+    return {
+      kind: "material", ref: itemRef(it), materialId: m.id, code: m.labelCode, itemCode: m.code,
+      name: { en: m.name, ar: m.nameAr }, category: { en: m.itemCategory?.nameEn ?? m.itemCategory?.nameAr ?? null, ar: m.itemCategory?.nameAr ?? null },
+      unit: m.unitOfMeasure, trace: NO_TRACE,
+    } satisfies MaterialData;
+  });
+}
+
+export async function resolveItems(template: TemplateKey, items: ItemIn[], named = false): Promise<LabelData[]> {
+  if (template === "GREEN_LOT") return resolveGreen(items.filter((i): i is GreenItemIn => i.kind === "green"));
+  if (template === "MATERIAL_SHELF") return resolveMaterials(items.filter((i): i is MaterialItemIn => i.kind === "material"));
   return template === "COFFEE_ORIGIN"
     ? resolveOrigin(items.filter((i): i is OriginItemIn => i.kind === "product"))
     : resolveCups(items.filter((i): i is CupItemIn => i.kind === "cup"), named);

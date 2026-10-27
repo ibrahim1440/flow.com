@@ -13,6 +13,8 @@ import { Btn, Flag, Notice, OpsBanner, OpsEmpty, OpsError, OpsLoading, OpsRoot, 
 import { useI18n } from "@/lib/i18n/context";
 import { PrintDialog, type DialogItem } from "@/components/print/PrintDialog";
 import { PRINT_GATE_NOTE_ID, PrintNotCertifiedNotice, usePrintCertified } from "@/components/print/Certification";
+import { hasModuleAccess } from "@/lib/auth-shared";
+import { RecordSource, type RecordKind } from "./record-source";
 
 type Product = {
   id: string; productNameEn: string; productNameAr: string | null;
@@ -55,6 +57,10 @@ function LabelsInner() {
   const sp = useSearchParams();
   const [search, setSearch] = useState(() => (sp.get("q") ?? "").slice(0, 80));
   const fromLot = (sp.get("lot") ?? "").slice(0, 40);
+  // The label's source (20261114090000_green_lot_labels): coffee products (origin labels), green-coffee lots (sack
+  // labels with a barcode) or stock items (shelf labels). ?lot= (a green lot just received) opens on the lots.
+  const canRecords = hasModuleAccess(user?.permissions ?? {}, "inventory");
+  const [source, setSource] = useState<"products" | RecordKind>(() => (fromLot && canRecords ? "green" : sp.get("source") === "materials" && canRecords ? "materials" : sp.get("source") === "green" && canRecords ? "green" : "products"));
   const [selected, setSelected] = useState<string[]>([]);
   const [dialog, setDialog] = useState(false);
   const [printed, setPrinted] = useState<string | null>(null);
@@ -81,7 +87,7 @@ function LabelsInner() {
     <div className="hr-page">
       <PageHeader title={L("الملصقات", "Labels")} actions={<>
         {canProfiles ? <a className="hr-btn" href="/dashboard/labels/profiles" data-testid="labels-profiles">{L("إعدادات الطباعة", "Print settings")}</a> : null}
-        {canPrint ? (
+        {canPrint && source === "products" ? (
           <Btn variant="primary" disabled={selected.length === 0 || certified !== true} onClick={() => setDialog(true)} data-testid="labels-print"
             aria-describedby={certified === false ? PRINT_GATE_NOTE_ID : undefined}>
             {L("طباعة المحدد", "Print selected")} (<span className="hr-num">{selected.length}</span>)
@@ -97,7 +103,15 @@ function LabelsInner() {
       {canPrint && certified === false ? <PrintNotCertifiedNotice /> : null}
       {printed ? <OpsBanner tone="success" onClose={() => setPrinted(null)}><span data-testid="labels-printed">{L("سُجّلت مهمة الطباعة وفُتحت نافذة الطباعة في المتصفح.", "The print job was recorded and the browser’s print dialog opened.")}</span></OpsBanner> : null}
 
-      {fromLot ? <Notice tone="info"><span data-testid="labels-from-lot">{L(`اللوت ${fromLot}: اختر منتج القهوة الذي يُعبّأ منه هذا البن ثم اطبع ملصقه.`, `Lot ${fromLot}: select the coffee product this bean is packed as, then print its label.`)}</span></Notice> : null}
+      {canRecords ? (
+        <div className="hr-tabs is-underline" role="tablist" aria-label={L("مصدر الملصق", "Label source")} data-testid="labels-source">
+          {([["products", L("منتجات القهوة", "Coffee products")], ["green", L("لوطات البن الأخضر", "Green coffee lots")], ["materials", L("أصناف المخزون · ملصق رف", "Stock items · shelf label")]] as const).map(([k, t]) => (
+            <button key={k} type="button" role="tab" aria-selected={source === k} className="hr-tab" onClick={() => setSource(k)} data-testid={`labels-source-${k}`}>{t}</button>
+          ))}
+        </div>
+      ) : null}
+
+      {source !== "products" ? <RecordSource kind={source} canPrint={canPrint} certified={certified} initialSearch={source === "green" ? fromLot : ""} preselect={source === "green" ? fromLot : ""} onPrinted={setPrinted} /> : <>
 
       <input className="hr-input" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={L("ابحث في المنتجات…", "Search products…")} aria-label={L("ابحث في المنتجات", "Search products")} style={{ maxWidth: 420 }} />
 
@@ -139,6 +153,8 @@ function LabelsInner() {
           </table>
         </div>
       )}
+
+      </>}
 
       {dialog && canPrint && certified === true ? (
         <PrintDialog open onClose={() => setDialog(false)} items={items} initialTemplate="COFFEE_ORIGIN"

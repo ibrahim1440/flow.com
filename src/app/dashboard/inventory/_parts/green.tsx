@@ -10,6 +10,8 @@ import { useI18n } from "@/lib/i18n/context";
 import { beanGroupKey, coverageBarPct, coverageTone, ROAST_WINDOW_DAYS } from "@/lib/inventory/metrics";
 import { CheckIcon } from "../../_components/stock-materials";
 import { ChevronIcon, Coverage, RecentMovements, SortControl, fmtQty } from "./shared";
+import { PrintLabelButton } from "@/components/print/QuickPrint";
+import { lotPagePath } from "@/lib/scan/codes";
 
 export type GreenBean = {
   id: string; serialNumber: string;
@@ -21,6 +23,8 @@ export type GreenBean = {
   altitude: string | null; location: string | null;
   quantityKg: number; isActive: boolean;
   receivedDate: string; createdAt: string;
+  /** The label code «GL-00042» and the sacks (20261114090000_green_lot_labels). */
+  labelCode?: string; sackCount?: number | null; sackWeightKg?: number | null;
 };
 
 type GroupStat = { consumed: number; rate: number | null; coverage: number | "INF" | null };
@@ -34,12 +38,14 @@ type Sort = "coverage" | "balance" | "name";
 
 export function GreenTab({
   beans, search, onSearch, showInactive, onToggleInactive, canAdjust, canMaintain, canReceive,
-  onCount, onEdit, onToggleActive, onDelete, onOpenLedger, refreshKey,
+  onCount, onEdit, onToggleActive, onDelete, onOpenLedger, refreshKey, whereOf,
 }: {
   beans: GreenBean[]; search: string; onSearch: (v: string) => void; showInactive: boolean; onToggleInactive: () => void;
   canAdjust: boolean; canMaintain: boolean; canReceive: boolean;
   onCount: (b: GreenBean) => void; onEdit: (b: GreenBean) => void; onToggleActive: (b: GreenBean) => void; onDelete: (b: GreenBean) => void;
   onOpenLedger: () => void; refreshKey: number;
+  /** Phase 3 (stock locations): where a lot's balance is — «مصنع التحميص 40 · المقهى 5». */
+  whereOf?: (beanId: string) => React.ReactNode;
 }) {
   const { t, lang } = useI18n();
   const L = useL();
@@ -73,7 +79,7 @@ export function GreenTab({
     const m = new Map<string, { key: string; lots: GreenBean[]; balance: number; stat: GroupStat | null }>();
     for (const b of beans) {
       if (!showInactive && !b.isActive) continue;
-      if (q && !`${b.beanType} ${b.beanTypeAr ?? ""} ${b.country} ${b.countryAr ?? ""} ${b.serialNumber}`.toLowerCase().includes(q)) continue;
+      if (q && !`${b.beanType} ${b.beanTypeAr ?? ""} ${b.country} ${b.countryAr ?? ""} ${b.serialNumber} ${b.labelCode ?? ""}`.toLowerCase().includes(q)) continue;
       const key = beanGroupKey(b);
       const g = m.get(key) ?? { key, lots: [], balance: 0, stat: ov?.groups[key] ?? null };
       g.lots.push(b);
@@ -206,9 +212,11 @@ export function GreenTab({
                     {isOpen && g.lots.map((bean) => (
                       <tr key={bean.id} className={`stk-lotrow${bean.isActive ? "" : " is-inactive"}`}>
                         <td className="m-title">
-                          <span className="hr-id">{bean.serialNumber}</span>{bean.location ? <span> · {L("رف", "Shelf")} {bean.location}</span> : null}
+                          {bean.labelCode ? <Link className="ops-link hr-id" href={lotPagePath(bean.labelCode)} data-testid={`lot-link-${bean.labelCode}`} title={L("صفحة اللوت", "Lot page")}>{bean.serialNumber}</Link> : <span className="hr-id">{bean.serialNumber}</span>}
+                          {bean.labelCode ? <span className="hr-caption hr-id"> · {bean.labelCode}</span> : null}{bean.sackCount ? <span className="hr-caption"> · {lang === "ar" ? `${bean.sackCount} كيس` : `${bean.sackCount} sacks`}</span> : null}{bean.location ? <span> · {L("رف", "Shelf")} {bean.location}</span> : null}
                           {!bean.isActive ? <> <span className="stk-flag tone-warning">{t("inactive")}</span></> : null}
                           <span className="hr-msub">{L("استلام", "Received")} {opsDate(bean.receivedDate, lang)} · <span className="hr-num">{fmtQty(bean.quantityKg, 2)}</span> {kgU}</span>
+                          {whereOf ? whereOf(bean.id) : null}
                         </td>
                         <td className="hr-hide-compact">{L("استلام", "Received")} {opsDate(bean.receivedDate, lang)}</td>
                         <td className="num"><span className="hr-num">{fmtQty(bean.quantityKg, 2)}</span></td>
@@ -216,6 +224,9 @@ export function GreenTab({
                         <td className="hr-hide-mobile" />
                         <td className="hr-mobile-cell" />
                         <td className="stk-acts stk-macts">
+                          <PrintLabelButton template="GREEN_LOT" variant="ghost" iconOnly testId={`lot-print-${bean.labelCode ?? bean.id}`}
+                            subtitle={`${disp(bean.beanType, bean.beanTypeAr)} · ${bean.serialNumber}`}
+                            items={[{ kind: "green", greenBeanId: bean.id, label: `${disp(bean.beanType, bean.beanTypeAr)} · ${bean.serialNumber}`, sacks: { count: bean.sackCount ?? null, kg: bean.sackWeightKg ?? null } }]} />
                           {canAdjust && (
                             <Btn size="sm" variant="ghost" title={t("performCount")} onClick={() => onCount(bean)}>
                               <CheckIcon />{L("جرد", "Count")}

@@ -7,6 +7,7 @@ import { Metrics, OpsLoading, OpsRoot } from "@/components/ops/ui";
 import { useD21Phone, useD21Title, usePhone } from "@/components/shell/page-context";
 import { SettingsFrame } from "../../_components/tools-ui";
 import { QcMinSection } from "./_parts/qc-min";
+import { StationScanSection } from "./_parts/station-scan";
 import { OrderRecomputeSection } from "./_parts/order-recompute";
 import {
   BASE, CapacityNote, N, Plus, ReadOnlyNote, Retry, RoastersHead, StatusText, TYPE, dayLabel, useLang, useOverview, windowText,
@@ -138,6 +139,7 @@ export default function RoastersPage() {
               {samples.length === 0 ? empty : phone ? list(samples) : table(samples, L("حمّاصات العينات", "Sample roasters"))}
             </section>
             <QcMinSection />
+            <StationScanSection />
             <OrderRecomputeSection />
             <CapacityNote short={phone} />
             {data.can.edit ? null : <ReadOnlyNote />}

@@ -1,0 +1,45 @@
+/* The one scan input (20261114090000_green_lot_labels): a field + «الكاميرا», a status line; the camera layer is full
+   screen on a phone and a centred panel on a desktop. Colours from the application's tokens, with fallbacks for the
+   station (which loads its own sheet). */
+.scn { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.scn-row { display: flex; gap: 8px; align-items: stretch; }
+.scn-field { position: relative; flex: 1 1 auto; min-width: 0; display: flex; }
+.scn-field .hr-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.scn-ico { position: absolute; inset-inline-start: 10px; top: 50%; transform: translateY(-50%); color: var(--text-secondary, #68756D); pointer-events: none; }
+.scn-input { width: 100%; min-height: 44px; padding-inline-start: 36px; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+.scn-input::placeholder { letter-spacing: 0; }
+.scn-cam { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; flex: none; }
+.scn.is-compact .scn-cam-t { display: none; }
+.scn-fb { margin: 0; min-height: 20px; font-size: 13px; line-height: 20px; color: var(--text-secondary, #68756D); }
+.scn-fb.is-success { color: var(--status-success, #405F4D); font-weight: 600; }
+.scn-fb.is-danger { color: var(--status-danger, #A34435); font-weight: 600; }
+.scn-fb.is-warning { color: var(--status-warning, #95651E); font-weight: 600; }
+@media (max-width: 520px) { .scn-cam-t { display: none; } }
+
+.scn-cam-layer { position: fixed; inset: 0; z-index: 1000; background: #101511; color: #fff; display: flex; flex-direction: column; padding: 12px 16px calc(16px + env(safe-area-inset-bottom)); gap: 12px; }
+@media (min-width: 768px) { .scn-cam-layer { inset: 5vh auto auto 50%; transform: translateX(-50%); width: min(560px, 92vw); max-height: 90vh; border-radius: 12px; box-shadow: 0 8px 24px rgb(37 49 43 / 30%); } }
+.scn-cam-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 16px; }
+.scn-cam-x { background: transparent; border: 0; color: #fff; width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; }
+.scn-cam-x:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.scn-cam-view { position: relative; flex: 1 1 auto; min-height: 240px; border-radius: 8px; overflow: hidden; background: #000; }
+.scn-cam-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.scn-cam-frame { position: absolute; inset: 34% 8%; border: 3px solid rgb(255 255 255 / 90%); border-radius: 8px; box-shadow: 0 0 0 100vmax rgb(0 0 0 / 35%); }
+.scn-cam-msg { position: absolute; inset: auto 12px 12px; margin: 0; background: rgb(0 0 0 / 70%); padding: 8px 12px; border-radius: 8px; font-size: 14px; line-height: 22px; }
+.scn-cam-hint { margin: 0; font-size: 13px; color: rgb(255 255 255 / 80%); }
+.scn-cam-manual { display: flex; gap: 8px; }
+.scn-cam-manual .hr-input { flex: 1 1 auto; min-height: 44px; background: #fff; color: #25312B; border-radius: 6px; border: 1px solid #7E8B82; padding: 0 12px; font-size: 16px; }
+.scn-cam-manual .hr-btn { min-height: 44px; padding: 0 16px; border-radius: 6px; border: 1px solid #fff; background: transparent; color: #fff; font: inherit; cursor: pointer; }
+@media (prefers-reduced-motion: reduce) { .scn-cam-layer { transition: none; } }
+/* A line a scan just focused (the count sheet). */
+tr.is-scanned > td { background: var(--status-success-soft, #EBF1EA); transition: background 220ms; }
+@media (prefers-reduced-motion: reduce) { tr.is-scanned > td { transition: none; } }
+/* The roasting station (its own sheet, no ERP form styles): the station's touch scale (targets ≥ 56 px). */
+.d21.ws .scn .hr-input { width: 100%; min-height: 56px; border: 1px solid var(--border-control, #7E8B82); border-radius: 8px; padding-inline-end: 12px; font: inherit; font-size: 18px; background: var(--surface, #fff); color: var(--text, #25312B); }
+.d21.ws .scn .hr-btn { min-height: 56px; padding: 0 16px; border: 1px solid var(--border-control, #7E8B82); border-radius: 8px; background: var(--surface, #fff); color: var(--text, #25312B); font: inherit; font-size: 16px; cursor: pointer; }
+.d21.ws .scn .hr-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.d21.ws .scn-fb { font-size: 15px; line-height: 22px; }
+.ws-lotscan { display: grid; gap: 8px; padding: 12px 16px; border-radius: 12px; background: var(--surface, #fff); }
+.ws-lotscan-h { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.ws-lotscan-h b { font-size: 16px; }
+.ws-lotscan .st-textlink { background: none; border: 0; padding: 0; font: inherit; color: var(--accent, #405F4D); text-decoration: underline; cursor: pointer; }
+.inv-scan { max-width: 560px; }

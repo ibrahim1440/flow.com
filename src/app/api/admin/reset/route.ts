@@ -87,6 +87,10 @@ export async function POST(request: Request) {
       prisma.cuppingSessionBatch.deleteMany(),
       prisma.cuppingSession.deleteMany(),
       prisma.inventoryMovement.deleteMany(),
+      // 20261115090000_stock_locations: the transfers go with their movements (InventoryMovement.transferId is RESTRICT);
+      // the locations are configuration, like the suppliers — kept. Balances follow their items (trigger stock_balance_sync).
+      prisma.stockTransferLine.deleteMany(),
+      prisma.stockTransfer.deleteMany(),
       // Phase D: DeliveryLine.finishedGoodsLotId is ON DELETE RESTRICT too, so the lines go
       // before the lots (their deliveries would cascade them, but only after the lots).
       prisma.deliveryLine.deleteMany(),

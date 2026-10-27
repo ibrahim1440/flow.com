@@ -1,5 +1,6 @@
 /**
- * The Template Manager registry (A-5): two templates, their field catalogue, default order and
+ * The Template Manager registry (A-5): four templates (green-coffee lot and material shelf labels:
+ * 20261114090000_green_lot_labels), their field catalogue, default order and
  * visibility, the compact field priority (A-4 / design P2-1), and the type scale per label size.
  * Field configuration (show / hide and order) is a plain array of { key, show } — the same shape
  * stored in PrintTemplatePreset.fields.
@@ -7,7 +8,7 @@
 import { isCompactLabel } from "./profiles";
 import type { PrintLang } from "./bidi";
 
-export const TEMPLATE_KEYS = ["COFFEE_ORIGIN", "CUPPING_RESULTS"] as const;
+export const TEMPLATE_KEYS = ["COFFEE_ORIGIN", "CUPPING_RESULTS", "GREEN_LOT", "MATERIAL_SHELF"] as const;
 export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
 
 export const ATTRIBUTE_KEYS = ["fragranceAroma", "flavor", "aftertaste", "acidity", "body", "balance", "overall", "sweetness", "uniformity", "cleanCup"] as const;
@@ -17,7 +18,10 @@ export type FieldKey =
   | "logo" | "name" | "country" | "region" | "variety" | "process" | "altitude" | "cupNotes" | "roastPath"
   | "roastDate" | "batchNumber" | "lotRef" | "footer"
   | "score" | `attr_${AttributeKey}` | "sharedNotes" | "scorerNotes" | "session"
-  | "scorerNames";
+  | "scorerNames"
+  // Green-coffee lot and material shelf labels (the barcode / QR fields also print on a Coffee origin lot label).
+  | "lotCode" | "supplier" | "invoiceRef" | "receivedDate" | "receivedWeight" | "sack" | "barcode" | "qr"
+  | "materialCode" | "category" | "unit";
 
 export type FieldDef = {
   key: FieldKey;
@@ -25,7 +29,8 @@ export type FieldDef = {
   ar: string;
   /** text = one line; notes = wraps to the notes line limit; trace = from a batch/lot record (omitted + warning when missing, B-7). */
   /** option = not printed itself; switches how another field prints (design review rulings 6–7). */
-  kind: "text" | "notes" | "trace" | "logo" | "footer" | "score" | "attr" | "name" | "option";
+  /** code = a barcode / QR code drawn from the record's label code (never typed text). */
+  kind: "text" | "notes" | "trace" | "logo" | "footer" | "score" | "attr" | "name" | "option" | "code";
   /** Never clipped silently; a label whose essential field overflows needs acknowledgement. */
   essential?: boolean;
 };
@@ -62,6 +67,17 @@ export const FIELD_DEFS: Record<FieldKey, FieldDef> = {
   // labels.cupping_named_scorers permission AND a preset whose privacy confirmation is recorded —
   // the server forces this off otherwise. Guest feedback is not a label option at all (2.2).
   scorerNames: { key: "scorerNames", en: "Scorer names in notes", ar: "أسماء المقيّمين في الملاحظات", kind: "option" },
+  lotCode: { key: "lotCode", en: "Lot", ar: "اللوت", kind: "text", essential: true },
+  supplier: { key: "supplier", en: "Supplier", ar: "المورد", kind: "text" },
+  invoiceRef: { key: "invoiceRef", en: "Invoice", ar: "الفاتورة", kind: "text" },
+  receivedDate: { key: "receivedDate", en: "Received", ar: "الاستلام", kind: "text" },
+  receivedWeight: { key: "receivedWeight", en: "Weight", ar: "الوزن", kind: "text" },
+  sack: { key: "sack", en: "Sack", ar: "الكيس", kind: "text", essential: true },
+  barcode: { key: "barcode", en: "Barcode", ar: "الباركود", kind: "code" },
+  qr: { key: "qr", en: "QR code (lot page)", ar: "رمز QR (صفحة اللوت)", kind: "code" },
+  materialCode: { key: "materialCode", en: "Item code", ar: "رمز الصنف", kind: "text" },
+  category: { key: "category", en: "Category", ar: "التصنيف", kind: "text" },
+  unit: { key: "unit", en: "Unit", ar: "الوحدة", kind: "text" },
 };
 
 export type TemplateDef = {
@@ -71,7 +87,7 @@ export type TemplateDef = {
   /** Default print order; `show` is the default visibility. */
   defaults: { key: FieldKey; show: boolean }[];
   /** Compact (50 × 30 class) field set in priority order (A-4, P2-1). */
-  compact: ("name" | "notes" | "origin" | "score" | "trace")[];
+  compact: ("name" | "notes" | "origin" | "score" | "trace" | "sack" | "code")[];
 };
 
 export const TEMPLATES: Record<TemplateKey, TemplateDef> = {
@@ -85,6 +101,8 @@ export const TEMPLATES: Record<TemplateKey, TemplateDef> = {
       { key: "process", show: true }, { key: "altitude", show: true }, { key: "cupNotes", show: true },
       { key: "roastPath", show: true }, { key: "roastDate", show: false }, { key: "batchNumber", show: false },
       { key: "lotRef", show: false }, { key: "footer", show: true },
+      // The packed lot's SKU barcode (ProductSKU.barcode), when a lot is selected: off by default.
+      { key: "barcode", show: false },
     ],
     compact: ["name", "notes", "origin", "trace"],
   },
@@ -106,7 +124,36 @@ export const TEMPLATES: Record<TemplateKey, TemplateDef> = {
     ],
     compact: ["name", "score", "notes", "trace"],
   },
+  // «ملصق لوت البن الأخضر» — on the sack: the bean, its origin, the receipt, «كيس 3 من 15», the Code 128 barcode of the
+  // lot code (scanned at counts, the roast draw and production) and a QR code of the lot's trace page.
+  GREEN_LOT: {
+    key: "GREEN_LOT",
+    en: "Green coffee lot",
+    ar: "لوت البن الأخضر",
+    defaults: [
+      { key: "logo", show: true }, { key: "name", show: true },
+      { key: "country", show: true }, { key: "process", show: true }, { key: "variety", show: true }, { key: "altitude", show: true },
+      { key: "lotCode", show: true }, { key: "supplier", show: true }, { key: "invoiceRef", show: true },
+      { key: "receivedDate", show: true }, { key: "receivedWeight", show: true }, { key: "sack", show: true },
+      { key: "barcode", show: true }, { key: "qr", show: true }, { key: "footer", show: false },
+    ],
+    compact: ["name", "sack", "code"],
+  },
+  // «ملصق رف» — a stock material (bags, labels, café items) on its shelf: the name, category, unit, code and barcode.
+  MATERIAL_SHELF: {
+    key: "MATERIAL_SHELF",
+    en: "Shelf label",
+    ar: "ملصق رف",
+    defaults: [
+      { key: "logo", show: false }, { key: "name", show: true }, { key: "category", show: true }, { key: "unit", show: true },
+      { key: "materialCode", show: true }, { key: "barcode", show: true }, { key: "footer", show: false },
+    ],
+    compact: ["name", "code"],
+  },
 };
+
+/** The two record labels with a barcode of their own (lot / material), unlike the product and cupping labels. */
+export const isRecordLabel = (t: TemplateKey) => t === "GREEN_LOT" || t === "MATERIAL_SHELF";
 
 export type FieldConfig = { key: FieldKey; show: boolean }[];
 

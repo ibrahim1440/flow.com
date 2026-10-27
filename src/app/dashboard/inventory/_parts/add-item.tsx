@@ -14,6 +14,7 @@ import { Dialog } from "@/components/hr/ui";
 import { useI18n } from "@/lib/i18n/context";
 import { MaterialForm, type MaterialCategoryOption } from "../../_components/stock-materials";
 import { BeanForm, emptyForm, type FormState } from "./bean-form";
+import { PrintLabelButton } from "@/components/print/QuickPrint";
 
 export type CategoryNode = MaterialCategoryOption & { isSystem: boolean; sortOrder: number; itemCount: number; lowCount: number; archivedAt: string | null; updatedByName: string | null };
 
@@ -35,7 +36,7 @@ function pushRecent(id: string) {
   }
 }
 
-type SavedBean = { id: string; serialNumber: string; beanType: string; beanTypeAr: string | null; country: string; countryAr: string | null; quantityKg: number };
+type SavedBean = { id: string; serialNumber: string; beanType: string; beanTypeAr: string | null; country: string; countryAr: string | null; quantityKg: number; sackCount?: number | null; sackWeightKg?: number | null; sackWarning?: { ar: string; en: string } | null };
 
 export function AddItemFlow({ categories, initialCategoryId, canReceive, onClose, onSaved, onError }: {
   categories: CategoryNode[]; initialCategoryId?: string | null; canReceive: boolean;
@@ -92,17 +93,19 @@ export function AddItemFlow({ categories, initialCategoryId, canReceive, onClose
   // ── Step 3 (green): the lot is saved — offer its label ─────────────────────
   if (savedBean) {
     const beanName = lang === "ar" && savedBean.beanTypeAr ? savedBean.beanTypeAr : savedBean.beanType;
-    const q = encodeURIComponent(savedBean.beanType || savedBean.country);
     return (
       <Dialog open title={L("أُضيف اللوت", "Lot added")} sub={<><span>{beanName}</span> · <span className="hr-id">{savedBean.serialNumber}</span></>}
         onClose={() => { onSaved(L("أُضيف لوت البن الأخضر.", "Green coffee lot added.")); }}
         actions={<>
-          <Link className="hr-btn is-primary" href={`/dashboard/labels?q=${q}&lot=${encodeURIComponent(savedBean.serialNumber)}`} data-testid="add-print-label">{L("اطبع الملصق", "Print label")}</Link>
+          <PrintLabelButton template="GREEN_LOT" variant="primary" size="md" label={L("اطبع الملصق", "Print label")} testId="add-print-label"
+            subtitle={`${beanName} · ${savedBean.serialNumber}`}
+            items={[{ kind: "green", greenBeanId: savedBean.id, label: `${beanName} · ${savedBean.serialNumber}`, perSack: true, sacks: { count: savedBean.sackCount ?? null, kg: savedBean.sackWeightKg ?? null }, receivedKg: savedBean.quantityKg }]} />
           <Btn onClick={() => onSaved(L("أُضيف لوت البن الأخضر.", "Green coffee lot added."))} data-testid="add-done">{L("إغلاق", "Close")}</Btn>
         </>}>
         <div data-testid="add-label-prompt" className="hr-stack" style={{ gap: 8 }}>
+          {savedBean.sackWarning ? <Notice tone="warning"><span data-testid="add-sack-warning">{lang === "ar" ? savedBean.sackWarning.ar : savedBean.sackWarning.en}</span></Notice> : null}
           <p style={{ margin: 0 }}>{L(`سُجّل ${savedBean.quantityKg} كغ في «بن أخضر».`, `${savedBean.quantityKg} kg recorded under «Green coffee».`)}</p>
-          <p className="hr-caption" style={{ margin: 0 }}>{L("ملصقات الأصل تُطبع من صفحة الملصقات لمنتج القهوة المرتبط بهذا البن؛ تفتح الصفحة والبحث جاهز باسم البن.", "Origin labels print from the Labels page for the coffee product of this bean; the page opens with the bean's name already searched.")}</p>
+          <p className="hr-caption" style={{ margin: 0 }}>{L("ملصق اللوت: بيانات البن والاستلام، ملصق مرقّم لكل كيس، وباركود يُمسح عند الجرد وسحب البن والتحميص.", "The lot label: the bean and its receipt, one numbered label per sack, and a barcode scanned at counts, the green draw and roasting.")}</p>
         </div>
       </Dialog>
     );
@@ -120,7 +123,7 @@ export function AddItemFlow({ categories, initialCategoryId, canReceive, onClose
         );
       }
       return (
-        <BeanForm title={L("إضافة بن أخضر", "Add green coffee")} initial={emptyForm()} onSave={saveBean} onClose={onClose} saving={savingBean} error={beanError} />
+        <BeanForm title={L("إضافة بن أخضر", "Add green coffee")} initial={emptyForm()} openingSite onSave={saveBean} onClose={onClose} saving={savingBean} error={beanError} />
       );
     }
     if (picked.template === "ROASTED_COFFEE" || picked.template === "FINISHED") {

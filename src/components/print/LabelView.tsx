@@ -14,6 +14,8 @@ import { LEGACY_CAVEAT, NO_APPROVED_SCORE, finalMeta, finalMetaShort, legacyMeta
 import { LOGO_SRC } from "@/lib/print/logo";
 import { FIELD_DEFS, compactOmitsNotes, isShown, notesMaxLines, type FieldConfig, type FieldKey, type TemplateKey } from "@/lib/print/templates";
 import { cssMm, cssPt } from "@/lib/print/units";
+import { Barcode } from "./Codes";
+import { GreenLotLabel, MaterialLabel } from "./RecordLabels";
 
 export type LabelOptions = {
   template: TemplateKey;
@@ -271,6 +273,9 @@ function ScoreBlock({ d, lang, compact }: { d: CupData; lang: PrintLang; compact
 }
 
 export function LabelView({ data, opts, wMm, hMm, refAttr }: { data: LabelData; opts: LabelOptions; wMm: number; hMm: number; refAttr?: string }) {
+  // The record labels with a barcode of their own (20261114090000_green_lot_labels).
+  if (data.kind === "green") return <GreenLotLabel data={data} opts={opts} wMm={wMm} hMm={hMm} refAttr={refAttr} />;
+  if (data.kind === "material") return <MaterialLabel data={data} opts={opts} wMm={wMm} hMm={hMm} refAttr={refAttr} />;
   const m = labelMetrics(wMm, hMm, opts.lang);
   const t = m.t;
   const compact = m.cls === "compact";
@@ -324,6 +329,10 @@ export function LabelView({ data, opts, wMm, hMm, refAttr }: { data: LabelData; 
             );
           })}
         </div>
+        {/* The packed lot's SKU barcode (ProductSKU.barcode), when the field is on and the lot has one. */}
+        {data.kind === "origin" && data.barcode && isShown(opts.fields, "barcode") ? (
+          <div className="pl-codes"><Barcode value={data.barcode} widthMm={Math.min(m.inner, m.cls === "large" ? 90 : 50)} heightMm={m.cls === "large" ? 18 : 9} testId="pl-barcode" /></div>
+        ) : null}
         {footer ? <Footer lang={opts.lang} /> : null}
       </div>
     </div>
@@ -352,6 +361,7 @@ function CompactLabel({ data, opts, wMm, hMm, style, cls, dir, refAttr }: { data
     if (p === "origin" && origin.length) blocks.push(<div key="o" className="pl-c-line" data-field="origin">{origin.map((o, i) => <span key={i}>{i ? " · " : ""}<span dir={sides[i] === "ar" ? "rtl" : "ltr"}><T s={sides[i]} text={o} /></span></span>)}</div>);
     if (p === "trace" && trace) blocks.push(<div key="r" className="pl-c-line" data-field="trace"><bdi dir="ltr">{trace}</bdi></div>);
   }
+  if (data.kind === "origin" && data.barcode && isShown(opts.fields, "barcode")) blocks.push(<div key="bc" className="pl-codes is-compact"><Barcode value={data.barcode} widthMm={wMm - 4} heightMm={8} testId="pl-barcode" /></div>);
   return (
     <div className={cls} style={style} dir={dir} data-label-ref={refAttr} data-testid="print-label">
       <div className="pl-inner">{blocks}</div>

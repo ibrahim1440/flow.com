@@ -18,18 +18,23 @@ import { itemRef, type ItemIn } from "@/lib/print/items";
 import { jobTotals, layoutWarnings, paginate, pageSize, perPage, validateJob, type LayoutError } from "@/lib/print/layout";
 import { LOGO_MIN_HEIGHT_MM } from "@/lib/print/logo";
 import { profileDisplayName, usesStartSlot, type PrintProfileData } from "@/lib/print/profiles";
-import { FIELD_DEFS, TEMPLATES, defaultFields, defaultNotesLines, normalizeFields, notesMaxLines, sizeClass, type FieldConfig, type FieldKey, type TemplateKey } from "@/lib/print/templates";
+import { FIELD_DEFS, TEMPLATES, defaultFields, defaultNotesLines, isRecordLabel, normalizeFields, notesMaxLines, sizeClass, type FieldConfig, type FieldKey, type TemplateKey } from "@/lib/print/templates";
 import { mmToCssPx } from "@/lib/print/units";
 import { PRINT_NOT_CERTIFIED_CODE, PRINT_NOT_CERTIFIED_MESSAGE } from "@/lib/print/certification";
 import { LabelView, type LabelOptions } from "./LabelView";
 import { PrintRoot, SheetPage } from "./SheetView";
+import { SackSection, type SackMode, type Sacks } from "./SackSection";
 import "./print.css";
 
 export type DialogItem =
   // `batch`: a roasting batch the caller already knows (the roasting station's recorded screen):
   // traceability starts on with that batch selected; the server still checks it belongs to the coffee.
   | { kind: "product"; productId: string; label: string; batch?: { id: string; batchNumber: string } | null }
-  | { kind: "cup"; sessionId: string; cupId: string | null; label: string };
+  | { kind: "cup"; sessionId: string; cupId: string | null; label: string }
+  // Green-coffee lot / material shelf labels (20261114090000_green_lot_labels). `sacks`: the lot's recorded sacks;
+  // `perSack`: open on one label per sack (the receipt), else one label for the lot.
+  | { kind: "green"; greenBeanId: string; label: string; sacks?: Sacks; receivedKg?: number | null; perSack?: boolean }
+  | { kind: "material"; materialId: string; label: string };
 
 type Profile = PrintProfileData & { canEdit?: boolean };
 type Preset = { id: string; name: string; templateKey: TemplateKey; language: PrintLang; fields: unknown; notesMaxLines: number | null; showLogo: boolean; profileId: string | null; canEdit: boolean };
@@ -154,6 +159,11 @@ export function PrintDialog({ open, onClose, items, initialTemplate, subtitle, o
   // The applied saved preset: the server authorizes named scorers only through one (decision 2.1).
   const [presetId, setPresetId] = useState<string | null>(null);
   const [presetMsg, setPresetMsg] = useState<string | null>(null);
+  // Green lots: the sacks recorded on each lot (updated when saved here) and what to print — every sack, a range, or
+  // one label for the lot.
+  const [sacks, setSacks] = useState<Record<string, Sacks>>(() => Object.fromEntries(items.flatMap((it) => (it.kind === "green" ? [[it.greenBeanId, it.sacks ?? { count: null, kg: null }]] : []))));
+  const [sackMode, setSackMode] = useState<Record<string, SackMode>>(() => Object.fromEntries(items.flatMap((it) => (it.kind === "green"
+    ? [[it.greenBeanId, { mode: it.perSack !== false && (it.sacks?.count ?? 0) > 0 ? "sacks" : it.perSack ? "sacks" : "lot", from: 1, to: it.sacks?.count ?? 1 } as SackMode]] : []))));
   const stageRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const [stageW, setStageW] = useState(400);
@@ -167,7 +177,7 @@ export function PrintDialog({ open, onClose, items, initialTemplate, subtitle, o
       if (!alive) return;
       if (!p.ok || !s.ok) { setMetaErr({ status: p.ok ? s.status : p.status, message: (p.ok ? s : p).body.error ?? "" }); return; }
       setMeta({ profiles: p.body.profiles, canManage: p.body.canManage, presets: pr.ok ? pr.body.presets : [], canManagePresets: pr.ok ? pr.body.canManage : false, maxLabels: s.body.maxLabelsPerJob });
-      const want = template === "CUPPING_RESULTS" ? "THERMAL_100x70" : "A4_L7165";
+      const want = template === "CUPPING_RESULTS" || template === "GREEN_LOT" ? "THERMAL_100x70" : template === "MATERIAL_SHELF" ? "COMPACT_50x30" : "A4_L7165";
       const def = p.body.profiles.find((x) => x.presetKey === want) ?? p.body.profiles[0];
       setProfileId((cur) => cur ?? def?.id ?? null);
     })().catch((e) => alive && setMetaErr({ status: 0, message: String(e) }));
@@ -187,9 +197,18 @@ export function PrintDialog({ open, onClose, items, initialTemplate, subtitle, o
 
   const effFields = useMemo<FieldConfig>(() => fields.map((f) => (f.key === "roastDate" || f.key === "batchNumber" ? { ...f, show: traceOn } : f)), [fields, traceOn]);
 
-  const reqItems: ItemIn[] = useMemo(() => items.map((it, i) => (it.kind === "product"
-    ? { kind: "product", productId: it.productId, batchId: traceOn ? trace[it.productId]?.batchId ?? null : null, lotId: traceOn ? trace[it.productId]?.lotId ?? null : null, copies: copies[i] ?? 1 }
-    : { kind: "cup", sessionId: it.sessionId, cupId: it.cupId, copies: copies[i] ?? 1 })), [items, copies, trace, traceOn]);
+  const reqItems: ItemIn[] = useMemo(() => items.flatMap((it, i): ItemIn[] => {
+    if (it.kind === "product") return [{ kind: "product", productId: it.productId, batchId: traceOn ? trace[it.productId]?.batchId ?? null : null, lotId: traceOn ? trace[it.productId]?.lotId ?? null : null, copies: copies[i] ?? 1 }];
+    if (it.kind === "cup") return [{ kind: "cup", sessionId: it.sessionId, cupId: it.cupId, copies: copies[i] ?? 1 }];
+    if (it.kind === "material") return [{ kind: "material", materialId: it.materialId, copies: copies[i] ?? 1 }];
+    // A green lot: one item per sack in the range («كيس n من N»), or the lot label with its copies.
+    const m = sackMode[it.greenBeanId], n = sacks[it.greenBeanId]?.count ?? 0;
+    if (m?.mode === "sacks" && n > 0) {
+      const from = Math.min(Math.max(1, m.from), n), to = Math.min(Math.max(from, m.to), n);
+      return Array.from({ length: to - from + 1 }, (_, k) => ({ kind: "green" as const, greenBeanId: it.greenBeanId, sackNo: from + k, copies: 1 }));
+    }
+    return [{ kind: "green", greenBeanId: it.greenBeanId, sackNo: null, copies: copies[i] ?? 1 }];
+  }), [items, copies, trace, traceOn, sackMode, sacks]);
 
   const jobItems = useMemo(() => reqItems.map((it) => ({ ref: itemRef(it), copies: it.copies })), [reqItems]);
   const layoutErrors: LayoutError[] = profile && meta ? validateJob(profile, jobItems, startSlot, meta.maxLabels) : [];
@@ -217,6 +236,19 @@ export function PrintDialog({ open, onClose, items, initialTemplate, subtitle, o
   }, [open, bodyKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const byRef = useMemo(() => new Map((preview?.labels ?? []).map((l) => [l.ref, l])), [preview]);
+  // A lot's sacks as the server has them (a lot created on the purchase invoice with its sacks): fill what the caller
+  // did not know, once, and open on one label per sack when that was asked for.
+  const lotInfo = useMemo(() => new Map((preview?.labels ?? []).flatMap((l) => (l.kind === "green" ? [[l.greenBeanId, l] as const] : []))), [preview]);
+  useEffect(() => {
+    for (const it of items) {
+      if (it.kind !== "green") continue;
+      const l = lotInfo.get(it.greenBeanId);
+      if (!l?.sacks || sacks[it.greenBeanId]?.count) continue;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- the server's record fills the caller's unknown sacks once
+      setSacks((m) => ({ ...m, [it.greenBeanId]: { count: l.sacks!.count, kg: l.sacks!.kg } }));
+      if (it.perSack !== false) setSackMode((m) => ({ ...m, [it.greenBeanId]: { mode: "sacks", from: 1, to: l.sacks!.count } }));
+    }
+  }, [lotInfo]); // eslint-disable-line react-hooks/exhaustive-deps
   const opts: LabelOptions = { template, lang, fields: effFields, notesLines };
   const label = profile ? { w: profile.labelWidthMm * profile.scalePct / 100, h: profile.labelHeightMm * profile.scalePct / 100 } : { w: 100, h: 70 };
   const cls = sizeClass(label.w, label.h);
@@ -316,7 +348,8 @@ export function PrintDialog({ open, onClose, items, initialTemplate, subtitle, o
   };
 
   const n = totals?.labels ?? 0;
-  const title = `${L("طباعة", "Print")} ${countNoun(n, uiLang, LABEL_FORMS)}${template === "CUPPING_RESULTS" ? ` · ${L("نتائج التذوق", "Cupping results")}` : ""}`;
+  const title = `${L("طباعة", "Print")} ${countNoun(n, uiLang, LABEL_FORMS)}${template === "CUPPING_RESULTS" ? ` · ${L("نتائج التذوق", "Cupping results")}` : isRecordLabel(template) ? ` · ${L(TEMPLATES[template].ar, TEMPLATES[template].en)}` : ""}`;
+  const record = isRecordLabel(template);
 
   if (!open) return null;
 
@@ -359,7 +392,10 @@ export function PrintDialog({ open, onClose, items, initialTemplate, subtitle, o
               <section className="pd-sec">
                 <h3>{L("القالب", "Template")}</h3>
                 <Seg label={L("القالب", "Template")} value={template} onChange={() => {}} testId="pd-template"
-                  items={[{ key: "COFFEE_ORIGIN", label: L("منشأ القهوة", "Coffee origin"), disabled: template !== "COFFEE_ORIGIN" }, { key: "CUPPING_RESULTS", label: L("نتائج التذوق", "Cupping results"), disabled: template !== "CUPPING_RESULTS" }]} />
+                  items={record ? [{ key: template, label: L(TEMPLATES[template].ar, TEMPLATES[template].en) }]
+                    : [{ key: "COFFEE_ORIGIN", label: L("منشأ القهوة", "Coffee origin"), disabled: template !== "COFFEE_ORIGIN" }, { key: "CUPPING_RESULTS", label: L("نتائج التذوق", "Cupping results"), disabled: template !== "CUPPING_RESULTS" }]} />
+                {template === "GREEN_LOT" ? <span className="hr-caption">{L("باركود رمز اللوت يُمسح عند الجرد وسحب البن والتحميص؛ رمز QR يفتح صفحة اللوت.", "The lot-code barcode is scanned at counts, the green draw and roasting; the QR code opens the lot's page.")}</span> : null}
+                {template === "MATERIAL_SHELF" ? <span className="hr-caption">{L("باركود رمز الصنف يُمسح عند الجرد والاستلام.", "The item-code barcode is scanned at counts and receiving.")}</span> : null}
                 {template === "COFFEE_ORIGIN" ? <span className="hr-caption">{L("«نتائج التذوق» متاحة عند الطباعة من نتائج جلسة تذوق.", "“Cupping results” is available when printing from a cupping session’s results.")}</span> : null}
               </section>
 
@@ -413,7 +449,7 @@ export function PrintDialog({ open, onClose, items, initialTemplate, subtitle, o
                   <ol style={{ margin: 0, padding: 0, listStyle: "none", fontSize: 13 }}>
                     {TEMPLATES[template].compact.map((c, i) => {
                       const omitted = c === "notes" && lang === "BI";
-                      const txt = c === "name" ? L("الاسم", "Name") : c === "score" ? L("النتيجة النهائية أو حالتها", "Final score or its state") : c === "notes" ? L("الإيحاءات", "Notes") : c === "origin" ? L("سطر المنشأ", "Origin line") : L("الدفعة · تاريخ التحميص", "Batch · roast date");
+                      const txt = c === "name" ? L("الاسم", "Name") : c === "score" ? L("النتيجة النهائية أو حالتها", "Final score or its state") : c === "notes" ? L("الإيحاءات", "Notes") : c === "origin" ? L("سطر المنشأ", "Origin line") : c === "sack" ? L("الرقم التسلسلي · رقم الكيس", "Serial · sack number") : c === "code" ? L("الباركود ورمزه", "The barcode and its code") : L("الدفعة · تاريخ التحميص", "Batch · roast date");
                       return <li key={c} className={omitted ? "hr-muted" : undefined}><span className="hr-num">{i + 1}.</span> {txt}{omitted ? ` (${L("محذوفة — لا مساحة", "left off — no room")})` : ""}</li>;
                     })}
                     <li className="hr-muted"><span className="hr-num">{TEMPLATES[template].compact.length + 1}.</span> {L("الشعار", "Logo")} ({L("محذوف — غير مقروء بهذا المقاس", "left off — not legible at this size")})</li>
@@ -422,11 +458,22 @@ export function PrintDialog({ open, onClose, items, initialTemplate, subtitle, o
               ) : null}
 
               <section className="pd-sec">
-                <h3>{template === "CUPPING_RESULTS" ? L("النسخ لكل كوب", "Copies per cup") : L("النسخ لكل منتج", "Copies per product")}</h3>
+                <h3>{template === "CUPPING_RESULTS" ? L("النسخ لكل كوب", "Copies per cup") : template === "GREEN_LOT" ? L("الأكياس والنسخ", "Sacks and copies") : template === "MATERIAL_SHELF" ? L("النسخ لكل صنف", "Copies per item") : L("النسخ لكل منتج", "Copies per product")}</h3>
                 {items.map((it, i) => (
-                  <div className="pd-row" key={i}>
-                    <span>{it.kind === "cup" && preview ? nameOf(itemRef(reqItems[i])) || it.label : it.label}</span>
-                    <Stepper value={copies[i] ?? 1} max={100} label={`${L("النسخ", "Copies")} · ${it.label}`} onChange={(v) => { setCopiesTouched(true); setCopies((c) => c.map((x, j) => (j === i ? v : x))); }} />
+                  <div key={i} className="hr-stack" style={{ gap: 6 }}>
+                    {it.kind === "green" ? (
+                      <SackSection key={`${it.greenBeanId}:${sacks[it.greenBeanId]?.count ?? "-"}:${sacks[it.greenBeanId]?.kg ?? "-"}`} greenBeanId={it.greenBeanId} label={it.label}
+                        sacks={sacks[it.greenBeanId] ?? { count: null, kg: null }} receivedKg={it.receivedKg ?? lotInfo.get(it.greenBeanId)?.receivedKg ?? null}
+                        value={sackMode[it.greenBeanId] ?? { mode: "lot", from: 1, to: 1 }}
+                        onChange={(v) => setSackMode((m) => ({ ...m, [it.greenBeanId]: v }))}
+                        onSaved={(sk) => setSacks((m) => ({ ...m, [it.greenBeanId]: sk }))} />
+                    ) : null}
+                    <div className="pd-row">
+                      <span>{it.kind === "cup" && preview ? nameOf(itemRef(reqItems[i])) || it.label : it.label}</span>
+                      {it.kind === "green" && sackMode[it.greenBeanId]?.mode === "sacks" && (sacks[it.greenBeanId]?.count ?? 0) > 0
+                        ? <span className="hr-caption" data-testid="pd-sack-labels">{countNoun(reqItems.filter((r) => r.kind === "green" && r.greenBeanId === it.greenBeanId).length, uiLang, LABEL_FORMS)} · {L("واحد لكل كيس", "one per sack")}</span>
+                        : <Stepper value={copies[i] ?? 1} max={100} label={`${L("النسخ", "Copies")} · ${it.label}`} onChange={(v) => { setCopiesTouched(true); setCopies((c) => c.map((x, j) => (j === i ? v : x))); }} />}
+                    </div>
                   </div>
                 ))}
                 <div className="pd-total" data-testid="pd-total">{totalText}</div>
@@ -451,7 +498,7 @@ export function PrintDialog({ open, onClose, items, initialTemplate, subtitle, o
                 </section>
               ) : null}
 
-              <section className="pd-sec">
+              {record ? null : <section className="pd-sec">
                 {/* Origin: optional switch + batch selector (1647:7512). Cupping: the per-cup rows from the
                     session record (1664:182033); the batch / roast-date fields switch them on the label. */}
                 <h3>{template === "CUPPING_RESULTS" ? L("التتبع", "Traceability") : L("التتبع (اختياري)", "Traceability (optional)")}</h3>
@@ -474,7 +521,8 @@ export function PrintDialog({ open, onClose, items, initialTemplate, subtitle, o
                   <span className="hr-caption">{L("لكل كوب من سجل الجلسة (CuppingSessionBatch) · للقراءة فقط. محدد الدفعة لقالب منشأ القهوة فقط.", "Per cup from the session record (CuppingSessionBatch) · read-only. The batch selector is for the Coffee origin template only.")}</span>
                 </> : null}
                 {traceOn && template === "COFFEE_ORIGIN" ? <span className="hr-caption">{L("البحث محصور في دفعات هذا المنتج. التاريخ من سجل الدفعة بصيغة YYYY-MM-DD.", "Search is limited to this product’s batches. Date from the batch record, YYYY-MM-DD.")}</span> : null}
-              </section>
+                {traceOn && template === "COFFEE_ORIGIN" && fields.some((f) => f.key === "barcode" && f.show) ? <span className="hr-caption">{L("الباركود: باركود الصنف (SKU) للوت المعبأ المختار، إن وُجد.", "Barcode: the SKU barcode of the selected packed lot, when it has one.")}</span> : null}
+              </section>}
 
               <section className="pd-sec">
                 <button type="button" className="hr-btn is-ghost is-sm" style={{ width: "fit-content" }} aria-expanded={showFields} onClick={() => setShowFields((v) => !v)} data-testid="pd-fields-toggle">
@@ -499,7 +547,7 @@ export function PrintDialog({ open, onClose, items, initialTemplate, subtitle, o
                         );
                       })}
                     </ul>
-                    {cls !== "compact" ? (
+                    {cls !== "compact" && !record ? (
                       <label className="hr-field"><span className="hr-label">{L("أقصى عدد أسطر للإيحاءات", "Notes: maximum lines")}</span>
                         <Select className="hr-select" value={notesLines ?? ""} onChange={(e) => setNotesLines(e.target.value === "" ? null : Number(e.target.value))} data-testid="pd-notes-lines">
                           <option value="">{L("حسب المقاس", "By size")} ({defaultNotesLines(cls, lang)})</option>

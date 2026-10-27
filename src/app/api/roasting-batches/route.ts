@@ -22,7 +22,8 @@ import {
 import { emitAutomationEvent } from "@/lib/automation/emit";
 import { canSeeCustomerContact, CUSTOMER_OPERATIONS_SELECT } from "@/lib/auth/customer-detail";
 import { nextRoastBatchNumber } from "@/lib/services/batch-number";
-import { resolveGreenLot } from "@/lib/services/green-source";
+import { resolveExpectedLot, resolveGreenLot } from "@/lib/services/green-source";
+import { otherCoffeeCheck } from "@/lib/services/scan-lookup";
 import { autoPrepareAfterBatches } from "@/lib/services/orders/preparation";
 import { roastQueue } from "@/lib/services/roast-queue";
 import { checkRoasterForRoast, logRoasterControls, type RoasterCheckResult } from "@/lib/services/roaster-controls";
@@ -32,6 +33,7 @@ import { linkBatchToSlot, ScheduleError } from "@/lib/services/schedule/schedule
 import { scheduleError } from "@/lib/services/schedule/http";
 import { lossVerdict } from "@/lib/station/shared";
 import { onRoast } from "@/lib/accounting/ops/inventory-events";
+import { assertLocationHas, productionLocation, setStockLocation } from "@/lib/services/stock-locations";
 
 /**
  * The single live production order raised from this order line, or null when there is
@@ -129,6 +131,13 @@ function evaluateSurplusOverride(
  */
 const QUEUE_SURPLUS_TOLERANCE = { minKg: 1, share: 0.2 };
 const queueTolerance = (demandKg: number) => Math.max(QUEUE_SURPLUS_TOLERANCE.minKg, QUEUE_SURPLUS_TOLERANCE.share * demandKg);
+
+/** Phase 3: the roast draws at the production site (stock_balance_sync books the decrement there). */
+async function drawAtProductionSite(tx: Prisma.TransactionClient, greenBeanId: string, qty: number, companyKg: number) {
+  const site = await productionLocation(tx);
+  await setStockLocation(tx, site.id);
+  if (companyKg >= qty) await assertLocationHas(tx, { kind: "GREEN_BEAN", entityId: greenBeanId, locationId: site.id, need: qty });
+}
 
 class AppError extends Error {
   constructor(readonly status: number, message: string) {
@@ -286,6 +295,9 @@ export async function POST(request: Request) {
   // before (the supervisor's «تغيير», and every existing client).
   const statedGreenBeanId: string | null =
     typeof data.greenBeanId === "string" && data.greenBeanId ? data.greenBeanId : null;
+  // Council F1: the lot a client SHOWED as the automatic choice (the station's «اسحب من»): recorded exactly, or refused.
+  const expectedGreenBeanId: string | null =
+    !statedGreenBeanId && typeof data.expectedGreenBeanId === "string" && data.expectedGreenBeanId ? data.expectedGreenBeanId : null;
   if (data.greenBeanId !== undefined && data.greenBeanId !== null && data.greenBeanId !== "" && statedGreenBeanId === null) {
     return NextResponse.json({ error: "greenBeanId must be a green lot id." }, { status: 400 });
   }
@@ -447,6 +459,20 @@ export async function POST(request: Request) {
   }
   // ─────────────────────────────────────────────────────────────────────────
 
+  // A STATED lot of another coffee than the product's is the supervisor's choice (production › roast_to_stock), never
+  // the roaster's: refused here for everyone else — whatever client sent it (the ERP sheet, the station record route,
+  // a scan). Council MEDIUM (green-lot labels): the station's scan check alone was bypassable.
+  if (statedGreenBeanId && !hasSubPrivilege(user.permissions, "production", "roast_to_stock")) {
+    const lot = await prisma.greenBean.findUnique({ where: { id: statedGreenBeanId }, select: { id: true, beanType: true, country: true, serialNumber: true } });
+    const coffeeId = !isStockBatch && orderItemId
+      ? await prisma.orderItem.findUnique({ where: { id: orderItemId }, select: { productId: true, productSku: { select: { productId: true } } } }).then((l) => l?.productSku?.productId ?? l?.productId ?? null)
+      : typeof productId === "string" && productId ? productId : null;
+    if (lot) {
+      const c = await otherCoffeeCheck(lot, coffeeId, false);
+      if (!c.ok && c.code === "OTHER_COFFEE") return NextResponse.json({ error: c.ar, errorAr: c.ar, errorEn: c.en, code: "OTHER_COFFEE" }, { status: 409 });
+    }
+  }
+
   try {
   const batch = await prisma.$transaction(async (tx) => {
     // Idempotency: one transaction per key at a time, then the probe again under the lock. The
@@ -578,7 +604,8 @@ export async function POST(request: Request) {
     let greenBeanId: string = statedGreenBeanId ?? "";
     let greenSource: { source: "stated" | "default" | "fifo_fallback"; fallbackFrom: string | null } = { source: "stated", fallbackFrom: null };
     if (!statedGreenBeanId) {
-      const pick = await resolveGreenLot(tx, isStockBatch ? { productId: productId as string } : { orderItemId: orderItemId as string }, qty);
+      const src = isStockBatch ? { productId: productId as string } : { orderItemId: orderItemId as string };
+      const pick = expectedGreenBeanId ? await resolveExpectedLot(tx, src, qty, expectedGreenBeanId) : await resolveGreenLot(tx, src, qty);
       greenBeanId = pick.lot.id;
       greenSource = { source: pick.source, fallbackFrom: pick.source === "fifo_fallback" ? pick.defaultLot?.serialNumber ?? null : null };
     }
@@ -587,10 +614,14 @@ export async function POST(request: Request) {
       // Step 1: confirm existence and active status
       const bean = await tx.greenBean.findUnique({
         where:  { id: greenBeanId },
-        select: { isActive: true },
+        select: { isActive: true, quantityKg: true },
       });
       if (!bean)          throw new AppError(404, "Green bean not found.");
       if (!bean.isActive) throw new AppError(400, "Cannot use an inactive green bean.");
+
+      // Phase 3 (stock locations): the green is drawn at the production site (the roastery). Enough coffee in the
+      // company but not there → a clear refusal naming where it is, with a prefilled transfer (STOCK_LOCATION_SHORT).
+      await drawAtProductionSite(tx, greenBeanId, qty, bean.quantityKg);
 
       // Step 2: conditional update — WHERE quantityKg >= qty is evaluated atomically at write time
       const updated = await tx.greenBean.updateMany({

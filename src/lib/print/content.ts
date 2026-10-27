@@ -23,6 +23,8 @@ export type OriginData = {
   cupNotes: Bi;
   roastPath: Bi;
   trace: Trace;
+  /** The selected packed lot's SKU barcode (ProductSKU.barcode), printed when the «barcode» field is on. */
+  barcode?: string | null;
 };
 
 export type CupData = {
@@ -38,7 +40,47 @@ export type CupData = {
   trace: Trace;
 };
 
-export type LabelData = OriginData | CupData;
+/** A green-coffee lot label (20261114090000_green_lot_labels), one per lot or one per sack. */
+export type GreenLotData = {
+  kind: "green";
+  ref: string;
+  greenBeanId: string;
+  /** The barcode payload, «GL-00042». */
+  code: string;
+  serial: string;
+  name: Bi;
+  country: Bi; region: Bi; process: Bi;
+  variety: string | null;
+  altitude: string | null;
+  /** From the lot's first receipt, when it came through one (a business name — never a person or a price). */
+  supplier: string | null;
+  /** The supplier's own invoice number, when the receipt belongs to a purchase invoice. */
+  invoiceRef: string | null;
+  receivedDate: string | null;
+  /** Kilograms received on the lot's receipts (not today's balance). */
+  receivedKg: number | null;
+  /** «كيس 3 من 15» — a per-sack label; null for one label for the lot. */
+  sack: { no: number; of: number; kg: number | null } | null;
+  /** The lot's sacks as recorded (for the lot label: «15 × 60 كغ»). */
+  sacks: { count: number; kg: number | null } | null;
+  trace: Trace;
+};
+
+/** A shelf label of a stock material (bags, labels, café items). */
+export type MaterialData = {
+  kind: "material";
+  ref: string;
+  materialId: string;
+  /** The barcode payload, «MT-00007». */
+  code: string;
+  itemCode: string;
+  name: Bi;
+  category: Bi;
+  unit: string;
+  trace: Trace;
+};
+
+export type LabelData = OriginData | CupData | GreenLotData | MaterialData;
 
 export type WarningCode =
   | "TRACE_MISSING"            // a shown roast date / batch / lot has no record → omitted (B-7)
@@ -71,6 +113,7 @@ export function labelMetrics(wMm: number, hMm: number, lang: PrintLang) {
 /** The notes text of a label side, as recorded (before truncation). */
 export function notesText(d: LabelData, side: "en" | "ar", template: TemplateKey, fields: FieldConfig, translate: (tag: string, lang: "ar" | "en") => string = (x) => x, short = false): string | null {
   if (d.kind === "origin") return isShown(fields, "cupNotes") ? d.cupNotes[side] : null;
+  if (d.kind !== "cup") return null;
   const r = d.result;
   const parts: string[] = [];
   if (isShown(fields, "sharedNotes") && r.state === "FINAL" && r.sharedNotes) {
@@ -133,6 +176,14 @@ export function contentWarnings(
   const notesShown = template === "COFFEE_ORIGIN" ? isShown(fields, "cupNotes") : isShown(fields, "sharedNotes") || isShown(fields, "scorerNotes");
   if (compact && compactOmitsNotes(lang) && notesShown) out.push({ code: "NOTES_OMITTED_BI_COMPACT" });
   for (const d of data) {
+    if (d.kind === "green" || d.kind === "material") {
+      // Record labels: a missing name in a printed language prints «—»; supplier / invoice are omitted when unknown.
+      const missing: string[] = [];
+      if (sides(lang).some((s) => !d.name[s])) missing.push("name");
+      if (d.kind === "green" && isShown(fields, "country") && sides(lang).some((s) => !d.country[s])) missing.push("country");
+      if (missing.length) out.push({ code: "FIELDS_MISSING", ref: d.ref, detail: missing.join(",") });
+      continue;
+    }
     for (const f of ["roastDate", "batchNumber", "lotRef"] as const) {
       if (isShown(fields, f) && !d.trace[f] && !(d.kind === "cup" && f === "lotRef")) out.push({ code: "TRACE_MISSING", ref: d.ref, field: f });
     }
@@ -178,7 +229,7 @@ export const BLOCKING_CODES: WarningCode[] = ["LEGACY_COMPACT_BLOCKED"];
 export function labelGapMm(data: LabelData, lang: PrintLang, cls: SizeClass, fields: FieldConfig): number {
   // Compact keeps its 0.5 mm; the A4 full-page class has no Figma variant and keeps the 0.5 mm it had.
   if (cls !== "standard") return 0.5;
-  if (data.kind === "origin" || lang !== "BI") return 1;
+  if (data.kind !== "cup" || lang !== "BI") return 1;
   const r = (data as CupData).result;
   if (r.state === "CLOSED_LEGACY") return 0.375;
   const perScorer = isShown(fields, "scorerNotes") && (r.scorerNotes?.length ?? 0) > 0;

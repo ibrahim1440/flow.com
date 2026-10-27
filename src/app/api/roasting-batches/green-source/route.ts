@@ -2,8 +2,7 @@ import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
-import { greenSourceFacts } from "@/lib/services/green-source";
-import { pickGreenLot } from "@/lib/green-source";
+import { greenSourceFacts, pickFromFacts } from "@/lib/services/green-source";
 
 /**
  * GET /api/roasting-batches/green-source?productId=… | ?orderItemId=…[&kg=…]
@@ -29,7 +28,9 @@ export async function GET(request: Request) {
   try {
     const facts = await greenSourceFacts(prisma, productId ? { productId } : { orderItemId });
     if (!facts) return NextResponse.json({ error: "Product or order line not found." }, { status: 404 });
-    return NextResponse.json({ ...facts, pick: pickGreenLot(facts.defaultLot, facts.candidates, kg) });
+    // Phase 3 (stock locations): the facts carry the production site and each lot's quantity there (`siteKg`); the
+    // pick is the one the roast POST makes (pickFromFacts), so the sheet and the server cannot disagree.
+    return NextResponse.json({ ...facts, pick: pickFromFacts(facts, kg) });
   } catch (err) {
     return handleDomainError(err);
   }

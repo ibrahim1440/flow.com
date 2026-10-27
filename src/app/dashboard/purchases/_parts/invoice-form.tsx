@@ -14,6 +14,7 @@
 // return to draft, edit / cancel a received un-posted invoice (its receipts reversed), cancel a posted one (accounts
 // payable; the goods stay), the payments. On the phone the line editor is a stack of cards.
 import Link from "next/link";
+import { PrintLabelButton } from "@/components/print/QuickPrint";
 import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Btn, Notice, OpsLoading } from "@/components/ops/ui";
@@ -27,6 +28,8 @@ import { PURCHASE_TAX_INFO, defaultLineTaxCode, isPurchaseTaxCode, lineTaxChoice
 import { PI_STATUS, type PurchaseCan } from "./invoices";
 import { SupplierDialog } from "./suppliers";
 import { fmtDate, fmtTime } from "../../employees/_ui/shared";
+import { LocationSelect, useLocations } from "../../inventory/_parts/locations";
+import { locationName } from "@/lib/inventory/locations";
 
 type Meta = { can: PurchaseCan; sodSelfAllowed: boolean; simpleMode: boolean; viewer: { id: string } };
 type Supplier = { id: string; name: string; vatNumber: string | null; isNonResident?: boolean; kind?: string; paymentTermsDays: number | null };
@@ -50,6 +53,7 @@ type ServerLine = {
 type Invoice = {
   id: string; number: string; supplierId: string; supplier: { name: string; vatNumber: string | null }; supplierRef: string; invoiceDate: string; dueDate: string; status: string; notes: string | null;
   customsDeclarationNo: string | null; customsDeclarationDate: string | null; origin: string; receivedDate: string | null; updatedAt: string;
+  receivingLocationId?: string | null; receivingLocation?: { id: string; code: string; nameAr: string; nameEn: string | null } | null;
   netTotal: string; vatTotal: string; grossTotal: string; paidTotal: string; outstanding: string; createdBy: string; lastEditedBy: string | null; submittedBy: string | null; postedBy: string | null;
   journalEntryId: string | null; received: boolean; reversedReceipts: number; cancelReason: string | null; cancelledAt: string | null; cancelledBy: string | null; lines: ServerLine[];
   allocations: { id: string; amount: string; payment: { number: string; paymentDate: string; status: string } }[];
@@ -94,8 +98,9 @@ export function PurchaseInvoiceForm({ id }: { id: string | null }) {
   const data = inv.data;
   const can = meta.data?.can;
   const activity = useApi<{ entries: Activity[] }>(id ? `/api/purchases/invoices/${id}/activity?lang=${lang}` : null);
-  const [form, setForm] = useState<{ base: Invoice | null | "receipt"; supplierId: string; supplierRef: string; invoiceDate: string; dueDate: string; dueTouched: boolean; notes: string; customsNo: string; customsDate: string; receivedDate: string; lines: Line[] } | null>(null);
+  const [form, setForm] = useState<{ base: Invoice | null | "receipt"; supplierId: string; supplierRef: string; invoiceDate: string; dueDate: string; dueTouched: boolean; notes: string; customsNo: string; customsDate: string; receivedDate: string; locationId?: string; lines: Line[] } | null>(null);
   const [editing, setEditing] = useState(false);
+  const { state: locState } = useLocations(false);
   const [dialog, setDialog] = useState<null | "post" | "return" | "cancel" | "cancelPosted">(null);
   const [reason, setReason] = useState("");
   const [beanFor, setBeanFor] = useState<string | null>(null);
@@ -113,7 +118,7 @@ export function PurchaseInvoiceForm({ id }: { id: string | null }) {
   function fromInvoice(x: Invoice) {
     return {
       base: x, supplierId: x.supplierId, supplierRef: x.supplierRef, invoiceDate: x.invoiceDate, dueDate: x.dueDate, dueTouched: true, notes: x.notes ?? "",
-      customsNo: x.customsDeclarationNo ?? "", customsDate: x.customsDeclarationDate ?? "", receivedDate: x.receivedDate ?? todayRiyadh(),
+      customsNo: x.customsDeclarationNo ?? "", customsDate: x.customsDeclarationDate ?? "", receivedDate: x.receivedDate ?? todayRiyadh(), locationId: x.receivingLocationId ?? "",
       lines: x.lines.map((l): Line => {
         const b = blankLine();
         const vatRate = l.taxCode ?? "";
@@ -179,6 +184,7 @@ export function PurchaseInvoiceForm({ id }: { id: string | null }) {
   const registerOf = (id: string) => (register.data ?? []).find((r) => r.id === id);
   const registerLabel = (r: RegisterReceipt) => `${r.purchaseDate.slice(0, 10)} · ${r.supplier.name} · ${r.item ? (lang === "ar" ? r.item.nameAr ?? r.item.name : r.item.name) : r.type} · ${r.quantity}${r.value ? ` · ${money(r.value)}` : ""}`;
   const hasStock = f.lines.some(isStock);
+  const receivingSite = f.locationId || locState?.lastReceivingId || locState?.defaultId || "";
 
   const itemLabel = (l: Line): string => {
     const c = catOf(l.pick);
@@ -210,6 +216,8 @@ export function PurchaseInvoiceForm({ id }: { id: string | null }) {
     action, supplierId: f.supplierId, supplierRef: f.supplierRef, invoiceDate: f.invoiceDate, dueDate: f.dueTouched ? f.dueDate || null : null, notes: f.notes || null,
     customsDeclarationNo: hasImport ? f.customsNo.trim() || null : null, customsDeclarationDate: hasImport ? f.customsDate || null : null,
     receivedDate: f.receivedDate || null, expectedUpdatedAt: data?.updatedAt ?? null,
+    // Phase 3: «موقع الاستلام» — where the goods are received (default: the person's last one, else the default site).
+    receivingLocationId: receivingSite || null,
     lines: f.lines.map((l) => {
       const taxCode = codeOf(l), vatRate = String(PURCHASE_TAX_INFO[taxCode].rate);
       if (l.pick === "IMPORT") return { kind: "IMPORT_VAT", customsValue: plainNumber(l.customsValue) || "0", description: l.description || null, taxCode };
@@ -450,6 +458,14 @@ export function PurchaseInvoiceForm({ id }: { id: string | null }) {
               <span className="acct-hint">{L("يوم دخول البضاعة المخزن — تاريخ الاستلام وحركة التكلفة", "The day the goods came in — the receipt's and cost movement's day")}</span>
             </label>
           ) : null}
+          {(editable && hasStock) || data?.receivingLocation ? (
+            <label className="hr-field"><span className="hr-label">{L("موقع الاستلام", "Receiving location")}</span>
+              {editable && hasStock
+                ? <LocationSelect locations={locState?.locations ?? []} value={receivingSite} onChange={(v) => set({ locationId: v })} label={L("موقع الاستلام", "Receiving location")} testId="inv-location" />
+                : <span data-testid="inv-location-view">{data?.receivingLocation ? locationName(data.receivingLocation, lang) : "—"}</span>}
+              <span className="acct-hint">{L("المكان الذي تدخله البضاعة؛ يمكن تحويلها لاحقًا إلى موقع آخر", "Where the goods come in; they can be transferred to another location later")}</span>
+            </label>
+          ) : null}
           {hasImport || data?.customsDeclarationNo ? <>
             <label className="hr-field"><span className="hr-label">{L("رقم البيان الجمركي", "Customs declaration no.")}{editable ? " *" : ""}</span>
               {editable ? <input className="hr-input" dir="ltr" value={f.customsNo} onChange={(e) => set({ customsNo: e.target.value })} data-testid="inv-customs-no" placeholder="1234567" /> : <bdi className="acct-code">{f.customsNo || "—"}</bdi>}
@@ -572,12 +588,14 @@ export function PurchaseInvoiceForm({ id }: { id: string | null }) {
         <Dialog open title={L("استُلمت البضاعة", "Goods received")} onClose={afterLots} testId="pi-label-prompt"
           sub={<><span className="acct-code">{saved.invoice.number}</span> · {PI_STATUS[saved.invoice.status] ? L(PI_STATUS[saved.invoice.status][0], PI_STATUS[saved.invoice.status][1]) : saved.invoice.status}</>}
           actions={<Btn variant="primary" onClick={afterLots} data-testid="pi-label-done">{L("متابعة إلى الفاتورة", "Continue to the invoice")}</Btn>}>
-          <p style={{ margin: 0 }}>{L("اطبع ملصق كل لوت بن أخضر استُلم:", "Print the label of each green lot received:")}</p>
+          <p style={{ margin: 0 }}>{L("اطبع ملصق كل لوت بن أخضر استُلم — ملصق مرقّم لكل كيس، بباركود يُمسح عند الجرد والتحميص:", "Print the label of each green lot received — one numbered label per sack, with a barcode scanned at counts and roasting:")}</p>
           <ul className="pi-lots">
             {saved.lots.map((lot) => (
               <li key={lot.id}>
                 <span><strong>{lang === "ar" ? lot.beanTypeAr ?? lot.beanType : lot.beanType}</strong> · <bdi className="acct-code">{lot.serialNumber}</bdi>{lot.created ? <span className="pur-tag">{L("لوط جديد", "New lot")}</span> : null}</span>
-                <Link className="hr-btn is-sm" href={`/dashboard/labels?q=${encodeURIComponent(lot.beanType || lot.country)}&lot=${encodeURIComponent(lot.serialNumber)}`} data-testid={`pi-print-label-${lot.serialNumber}`}>{L("اطبع الملصق", "Print label")}</Link>
+                <PrintLabelButton template="GREEN_LOT" label={L("اطبع الملصق", "Print label")} testId={`pi-print-label-${lot.serialNumber}`}
+                  subtitle={`${lang === "ar" ? lot.beanTypeAr ?? lot.beanType : lot.beanType} · ${lot.serialNumber}`}
+                  items={[{ kind: "green", greenBeanId: lot.id, label: `${lang === "ar" ? lot.beanTypeAr ?? lot.beanType : lot.beanType} · ${lot.serialNumber}`, perSack: true }]} />
               </li>
             ))}
           </ul>

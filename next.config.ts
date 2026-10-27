@@ -74,11 +74,13 @@ const SECURITY_HEADERS = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  // This application asks for none of these. Denying them costs nothing and removes them
+  // This application asks for none of these but the camera. Denying them costs nothing and removes them
   // from anything that later manages to run inside the page.
   {
     key: "Permissions-Policy",
-    value: "camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=()",
+    // camera=(self): the label scanner (src/components/scan/CameraScan.tsx) reads barcodes with the device camera on
+    // this origin only — never in a frame or another origin (20261114090000_green_lot_labels). Everything else stays off.
+    value: "camera=(self), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=()",
   },
   { key: "Content-Security-Policy", value: CSP_ENFORCED },
   { key: "Content-Security-Policy-Report-Only", value: CSP_REPORT_ONLY },

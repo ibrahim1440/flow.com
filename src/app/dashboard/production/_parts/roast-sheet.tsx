@@ -7,6 +7,7 @@
 // production privilege the roaster role does not hold by default). Loss = green − roasted, live,
 // with a warning outside the product's normal range. POST /api/roasting-batches resolves the lot
 // again under its transaction, so the line here and the server can never disagree silently.
+import { ShortStockHint, type ShortLocation } from "../../inventory/_parts/locations";
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { newRequestKey, isConclusiveResponse } from "@/lib/request-key";
@@ -14,7 +15,8 @@ import { LOSS_WARN_POINTS, DEFAULT_EXPECTED_LOSS } from "@/lib/station/shared";
 import { OpsPane, useL } from "@/components/ops/ui";
 import { AutoRow, Chips, Cta, NumIn, parseNum } from "@/components/ops/station";
 import { Select } from "@/components/ui/Select";
-import { pickGreenLot, greenRefusal, type GreenLot } from "@/lib/green-source";
+import { pickGreenLot, greenRefusal, type GreenLot, type GreenSite } from "@/lib/green-source";
+import { ScanInput, lookupScanCode, type ScanFeedback } from "@/components/scan/ScanInput";
 import { useI18n } from "@/lib/i18n/context";
 
 export type RoastLine = {
@@ -45,6 +47,8 @@ type SheetRoaster = { id: string; name: string; status: string; isDefault: boole
 type Facts = {
   productId: string | null; productNameEn: string | null; productNameAr: string | null;
   expectedRoastLoss: number; defaultLot: GreenLot | null; candidates: GreenLot[];
+  /** Phase 3 (stock locations): the production site (each lot carries `siteKg`, what it holds there). */
+  site?: GreenSite | null;
 };
 
 const LAST_CHARGE_KEY = "hq.roast.lastChargeKg";
@@ -75,9 +79,12 @@ export function RoastSheet({ mode, products, beans, canChangeGreen, isAdmin, onC
   const [profile, setProfile] = useState(mode.kind === "order" ? mode.line.profileHint : "");
   const [changing, setChanging] = useState(false);
   const [statedLot, setStatedLot] = useState("");
+  const [statedByScan, setStatedByScan] = useState(false);
   const [poChoice, setPoChoice] = useState(mode.kind === "order" && mode.line.livePos.length === 1 ? mode.line.livePos[0].id : "");
   const [surplus, setSurplus] = useState<{ message: string; reason: string } | null>(null);
   const [error, setError] = useState("");
+  // Phase 3 (stock locations): a roast short of green AT the roastery names where the coffee is and offers the transfer.
+  const [short, setShort] = useState<ShortLocation | null>(null);
   const [busy, setBusy] = useState(false);
   // D5 (Workstations W1): the roaster the batch is roasted on. With none configured the sheet
   // records exactly as before (no roaster, no capacity rule).
@@ -123,7 +130,7 @@ export function RoastSheet({ mode, products, beans, canChangeGreen, isAdmin, onC
 
   const g = parseNum(green), r = parseNum(roasted);
   const stated = statedLot ? beans.find((b) => b.id === statedLot) ?? null : null;
-  const pick = useMemo(() => (facts ? pickGreenLot(facts.defaultLot, facts.candidates, Number.isFinite(g) ? g : 0) : null), [facts, g]);
+  const pick = useMemo(() => (facts ? pickGreenLot(facts.defaultLot, facts.candidates, Number.isFinite(g) ? g : 0, facts.site ?? null) : null), [facts, g]);
   const lot = stated
     ? { id: stated.id, serialNumber: stated.serialNumber, beanType: stated.beanType, quantityKg: stated.quantityKg }
     : pick?.ok ? pick.lot : null;
@@ -152,7 +159,7 @@ export function RoastSheet({ mode, products, beans, canChangeGreen, isAdmin, onC
 
   async function save(withSurplus = false) {
     if (!ready || busy) return;
-    setBusy(true); setError("");
+    setBusy(true); setError(""); setShort(null);
     try {
       keyRef.current ??= newRequestKey();
       const res = await fetch("/api/roasting-batches", {
@@ -162,7 +169,7 @@ export function RoastSheet({ mode, products, beans, canChangeGreen, isAdmin, onC
           // A coffee card: the server attributes the batch to the oldest order (Phase C item 2).
           ...(mode.kind === "order" ? { orderItemId: mode.line.id, productionOrderId: poChoice || undefined } : mode.kind === "coffee" ? { productId, allocate: "oldest" } : { productId }),
           // Sent only when a supervisor changed it; otherwise the server resolves the lot.
-          ...(stated ? { greenBeanId: stated.id } : {}),
+          ...(stated ? { greenBeanId: stated.id } : pick?.ok ? { expectedGreenBeanId: pick.lot.id } : {}),
           greenBeanQuantity: +g.toFixed(3),
           roastedBeanQuantity: +r.toFixed(3),
           roastProfile: profile.trim() || undefined,
@@ -176,6 +183,7 @@ export function RoastSheet({ mode, products, beans, canChangeGreen, isAdmin, onC
         if (res.status === 422 && data?.code === "ACK_REQUIRED") { setNeedAck(true); setAck(false); setError(localizeApiError(data, lang) ?? ""); return; }
         if (res.status === 422 && isAdmin) { setSurplus({ message: localizeApiError(data, lang) ?? "", reason: surplus?.reason ?? "" }); return; }
         setError(localizeApiError(data, lang) || L("تعذّر تسجيل الدفعة.", "Could not record the batch."));
+        if (data?.code === "STOCK_LOCATION_SHORT") setShort(data.location ?? null);
         return;
       }
       try { window.localStorage.setItem(LAST_CHARGE_KEY, String(+g.toFixed(3))); } catch { /* storage unavailable */ }
@@ -206,19 +214,23 @@ export function RoastSheet({ mode, products, beans, canChangeGreen, isAdmin, onC
   else if (!facts) greenLine = <AutoRow title={L("جارٍ تحديد البن الأخضر…", "Finding the green coffee…")} />;
   else if (stated) {
     greenLine = <AutoRow testId="roast-green" title={<>{L("البن الأخضر: ", "Green: ")}{stated.beanType} <span className="ops-serial">{stated.serialNumber}</span></>}
-      sub={L(`اختاره المشرف · متاح ${kgText(stated.quantityKg)} كغ`, `Chosen by the supervisor · ${kgText(stated.quantityKg)} kg available`)}
+      sub={statedByScan ? L(`من الكيس الممسوح · متاح ${kgText(stated.quantityKg)} كغ`, `From the scanned sack · ${kgText(stated.quantityKg)} kg available`) : L(`اختاره المشرف · متاح ${kgText(stated.quantityKg)} كغ`, `Chosen by the supervisor · ${kgText(stated.quantityKg)} kg available`)}
       action={<button type="button" className="st-textlink is-sm" onClick={() => { setStatedLot(""); setChanging(false); }}>{L("العودة للتلقائي", "Back to automatic")}</button>} />;
   } else if (pick?.ok) {
     const fb = pick.source === "fifo_fallback";
+    const here = facts.site ? pick.lot.siteKg ?? 0 : null;
+    const siteNote = facts.site && here !== null && here + 0.0005 < pick.lot.quantityKg
+      ? L(` · منها ${kgText(here)} كغ في «${facts.site.nameAr}»`, ` · ${kgText(here)} kg of it at «${facts.site.nameEn || facts.site.nameAr}»`) : "";
     greenLine = <AutoRow testId="roast-green" warn={fb}
       title={<>{L("البن الأخضر: ", "Green: ")}{lotName(pick.lot)} <span className="ops-serial">{pick.lot.serialNumber}</span></>}
       sub={fb
         ? L(`اللوت الافتراضي ${pick.defaultLot?.serialNumber ?? ""} لا يكفي، فأُخذ الأقدم من نفس البن والبلد · متاح ${kgText(pick.lot.quantityKg)} كغ`, `The default lot ${pick.defaultLot?.serialNumber ?? ""} is short, so the oldest lot of the same bean and origin is used · ${kgText(pick.lot.quantityKg)} kg available`)
-        : L(`محدد تلقائيًا من إعداد المنتج · متاح ${kgText(pick.lot.quantityKg)} كغ`, `Chosen automatically from the product · ${kgText(pick.lot.quantityKg)} kg available`)}
+        : L(`محدد تلقائيًا من إعداد المنتج · متاح ${kgText(pick.lot.quantityKg)} كغ`, `Chosen automatically from the product · ${kgText(pick.lot.quantityKg)} kg available`) + siteNote}
       action={canChangeGreen ? <button type="button" className="st-textlink is-sm" onClick={() => setChanging(true)} data-testid="roast-green-change">{L("تغيير", "Change")}</button> : undefined} />;
   } else if (pick && !pick.ok) {
     const msg = greenRefusal(pick, Number.isFinite(g) ? g : 0);
-    greenLine = <AutoRow warn testId="roast-green" title={L("لا يكفي البن الأخضر", "Not enough green coffee")} sub={lang === "ar" ? msg.ar : msg.en}
+    greenLine = <AutoRow warn testId="roast-green" title={pick.reason === "AT_OTHER_SITE" ? L("بانتظار تحويل", "Waiting for a transfer") : L("لا يكفي البن الأخضر", "Not enough green coffee")}
+      sub={<>{lang === "ar" ? msg.ar : msg.en}{pick.reason === "AT_OTHER_SITE" ? <> <a className="ops-link" href={pick.transferHref} data-testid="roast-green-transfer">{L("حوّل الآن", "Transfer now")}</a></> : null}</>}
       action={canChangeGreen ? <button type="button" className="st-textlink is-sm" onClick={() => setChanging(true)} data-testid="roast-green-change">{L("اختر مصدرًا", "Pick a lot")}</button> : undefined} />;
   }
 
@@ -242,10 +254,24 @@ export function RoastSheet({ mode, products, beans, canChangeGreen, isAdmin, onC
           </div>
         ) : null}
         {greenLine}
+        {/* Scan the sack drawn from (20261114090000_green_lot_labels): an inactive or short lot is refused; another
+            coffee than the product's only by a supervisor (production › roast_to_stock), as «تغيير» below. */}
+        <ScanInput compact testId="roast-lot-scan" placeholder={L("امسح ملصق كيس البن الأخضر", "Scan the green-coffee sack label")} onCode={async (code): Promise<ScanFeedback> => {
+          const r = await lookupScanCode<{ id: string; serialNumber: string; beanType: string; beanTypeAr: string | null; country: string; quantityKg: number }>(code, lang === "en" ? "en" : "ar", { only: "GREEN_LOT", kg: Number.isFinite(g) && g > 0 ? g : undefined, productId: productId ?? undefined });
+          if (!r.ok) return { tone: "danger", text: r.message };
+          if (r.draw && !r.draw.ok) return { tone: "danger", text: (lang === "en" ? r.draw.en : r.draw.ar) ?? "" };
+          const h = r.hit;
+          const d = facts?.defaultLot;
+          const same = !d || d.id === h.id || (d.beanType.trim().toLowerCase() === h.beanType.trim().toLowerCase() && d.country.trim().toLowerCase() === h.country.trim().toLowerCase());
+          if (!same && !canChangeGreen) return { tone: "danger", text: L(`اللوت ${h.serialNumber} ليس من بن هذا المنتج — اطلب من المشرف تغيير المصدر.`, `Lot ${h.serialNumber} is not this product's coffee — ask the supervisor to change the source.`) };
+          if (!beans.some((b) => b.id === h.id)) return { tone: "danger", text: L(`اللوت ${h.serialNumber} غير متاح للتحميص.`, `Lot ${h.serialNumber} is not available for roasting.`) };
+          setStatedLot(h.id); setStatedByScan(true); setChanging(false);
+          return { tone: "success", text: L(`سيُسحب من ${h.beanTypeAr || h.beanType} · ${h.serialNumber}`, `Drawing from ${h.beanType} · ${h.serialNumber}`) };
+        }} />
         {changing && canChangeGreen ? (
           <div className="st-field">
             <label htmlFor="roast-lot">{L("مصدر البن الأخضر (للمشرف)", "Green lot (supervisor)")}</label>
-            <Select id="roast-lot" value={statedLot} onChange={(e) => setStatedLot(e.target.value)} className="hr-input" style={{ height: 48, width: "100%" }}>
+            <Select id="roast-lot" value={statedLot} onChange={(e) => { setStatedLot(e.target.value); setStatedByScan(false); }} className="hr-input" style={{ height: 48, width: "100%" }}>
               <option value="">{L("اختر لوتًا", "Choose a lot")}</option>
               {beans.filter((b) => b.isActive !== false && b.quantityKg > 0).map((b) => (
                 <option key={b.id} value={b.id}>{b.beanType} ({b.serialNumber}) — {kgText(b.quantityKg)} {L("كغ", "kg")}</option>
@@ -329,7 +355,7 @@ export function RoastSheet({ mode, products, beans, canChangeGreen, isAdmin, onC
             <button type="button" className="st-sec" disabled={surplus.reason.trim().length < 8 || busy} onClick={() => save(true)}>{L("سجّلها كفائض", "Record as surplus")}</button>
           </div>
         ) : null}
-        {error ? <p className="hr-notice tone-danger" role="alert" style={{ margin: 0 }}>{error}</p> : null}
+        {error ? <p className="hr-notice tone-danger" role="alert" style={{ margin: 0 }} data-testid="roast-error">{error}{short ? <> <ShortStockHint location={short} /></> : null}</p> : null}
       </div>
     </OpsPane>
   );

@@ -14,10 +14,14 @@ import { lineVariance, movedSinceCount } from "@/lib/inventory/counts";
 import type { Material } from "../../_components/stock-materials";
 import type { GreenBean } from "./green";
 import { fmtQty, int, timeOf, unitWord } from "./shared";
+import { LocationSelect, type Balances, type Loc } from "./locations";
+import { locationName } from "@/lib/inventory/locations";
+import { CountSheetScan, StartCountScan } from "./count-scan";
 
 type Category = "RAW_MATERIAL" | "PACKAGING_MATERIAL";
 type Summary = { lines: number; counted: number; uncounted: number; withVariance: number; gains: Record<Category, number>; losses: Record<Category, number> };
-type SessionRow = { id: string; number: number; status: "OPEN" | "POSTED" | "CANCELLED"; title: string | null; createdAt: string; postedAt: string | null; createdByName: string | null; postedByName: string | null; summary: Summary };
+type SiteRef = { id: string; code: string; nameAr: string; nameEn: string | null } | null;
+type SessionRow = { id: string; number: number; status: "OPEN" | "POSTED" | "CANCELLED"; title: string | null; createdAt: string; postedAt: string | null; createdByName: string | null; postedByName: string | null; summary: Summary; location?: SiteRef };
 type Line = {
   id: string; category: Category; entityId: string; systemQty: number; countedQty: number | null; notes: string | null;
   postedPreviousQty: number | null; postedNewQty: number | null; postedVariance: number | null; movementId: string | null;
@@ -44,12 +48,16 @@ const fmtVar = (v: number | null, unit: string, lang: "ar" | "en") => {
 
 // ─── Start a count («إجراء جرد»): pick green-coffee lots and / or packaging materials ──────────
 
-export function StartCountDialog({ beans, materials, onClose, onCreated, defaultCategory }: {
+export function StartCountDialog({ beans, materials, onClose, onCreated, defaultCategory, locations, defaultLocationId, balances }: {
   beans: GreenBean[]; materials: Material[]; onClose: () => void; onCreated: (id: string) => void; defaultCategory?: Category;
+  /** Phase 3: a count is of ONE location — the system quantities are that location's. */
+  locations?: Loc[]; defaultLocationId?: string | null; balances?: Balances | null;
 }) {
   const { lang } = useI18n();
   const L = useL();
   const [cat, setCat] = useState<Category>(defaultCategory ?? "RAW_MATERIAL");
+  const [site, setSite] = useState<string>(defaultLocationId ?? "");
+  const atSite = (kind: "green" | "material", id: string, total: number) => (balances && site ? (balances[kind][id] ?? []).find((r) => r.locationId === site)?.qty ?? 0 : total);
   const [q, setQ] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [title, setTitle] = useState("");
@@ -59,10 +67,10 @@ export function StartCountDialog({ beans, materials, onClose, onCreated, default
   const items = useMemo(() => {
     const s = q.trim().toLowerCase();
     const list = cat === "RAW_MATERIAL"
-      ? beans.filter((b) => b.isActive).map((b) => ({ key: `RAW_MATERIAL:${b.id}`, name: lang === "ar" && b.beanTypeAr ? b.beanTypeAr : b.beanType, sub: `${b.serialNumber}${b.location ? ` · ${L("رف", "Shelf")} ${b.location}` : ""}`, qty: `${fmtQty(b.quantityKg, 2)} ${unitWord("KG", lang)}` }))
-      : materials.filter((m) => m.isActive).map((m) => ({ key: `PACKAGING_MATERIAL:${m.id}`, name: lang === "ar" && m.nameAr ? m.nameAr : m.name, sub: m.code, qty: `${int(m.quantityOnHand)} ${unitWord(m.unitOfMeasure, lang, m.quantityOnHand)}` }));
+      ? beans.filter((b) => b.isActive).map((b) => ({ key: `RAW_MATERIAL:${b.id}`, name: lang === "ar" && b.beanTypeAr ? b.beanTypeAr : b.beanType, sub: `${b.serialNumber}${b.location ? ` · ${L("رف", "Shelf")} ${b.location}` : ""}`, qty: `${fmtQty(atSite("green", b.id, b.quantityKg), 2)} ${unitWord("KG", lang)}` }))
+      : materials.filter((m) => m.isActive).map((m) => { const q2 = atSite("material", m.id, m.quantityOnHand); return { key: `PACKAGING_MATERIAL:${m.id}`, name: lang === "ar" && m.nameAr ? m.nameAr : m.name, sub: m.code, qty: `${int(q2)} ${unitWord(m.unitOfMeasure, lang, q2)}` }; });
     return s ? list.filter((i) => `${i.name} ${i.sub}`.toLowerCase().includes(s)) : list;
-  }, [cat, q, beans, materials, lang, L]);
+  }, [cat, q, beans, materials, lang, L, site, balances]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const allOn = items.length > 0 && items.every((i) => picked.has(i.key));
   const toggle = (k: string) => setPicked((p) => { const n = new Set(p); if (n.has(k)) n.delete(k); else n.add(k); return n; });
@@ -78,6 +86,7 @@ export function StartCountDialog({ beans, materials, onClose, onCreated, default
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title: title.trim() || null,
+        ...(site ? { locationId: site } : {}),
         items: [...picked].map((k) => { const [category, entityId] = k.split(":"); return { category, entityId }; }),
       }),
     });
@@ -100,6 +109,17 @@ export function StartCountDialog({ beans, materials, onClose, onCreated, default
       }>
       {error ? <Notice tone="danger">{error}</Notice> : null}
       <div className="hr-stack" style={{ gap: 12 }}>
+        {locations && locations.length ? (
+          <Field label={`${L("موقع الجرد", "Location counted")} *`} help={L("يُعدّ ما في هذا الموقع فقط، وتُسوّى أرصدته هو.", "Only what is at this location is counted, and only its balances are adjusted.")}>
+            <LocationSelect locations={locations} value={site} onChange={setSite} label={L("موقع الجرد", "Location counted")} testId="count-location" />
+          </Field>
+        ) : null}
+        <StartCountScan onPick={(c, id) => {
+          const k = `${c}:${id}`;
+          if (picked.has(k)) return "already";
+          setPicked((p) => new Set(p).add(k)); setCat(c); setQ("");
+          return "added";
+        }} />
         <div className="hr-tabs is-underline" role="tablist" aria-label={L("نوع الصنف", "Item kind")}>
           {(["RAW_MATERIAL", "PACKAGING_MATERIAL"] as Category[]).map((c) => (
             <button key={c} type="button" role="tab" aria-selected={cat === c} className="hr-tab" onClick={() => { setCat(c); setQ(""); }}>
@@ -196,6 +216,7 @@ export function CountsTab({ openId, onOpen, canEdit, canPost, onStart, onPosted 
                 <tr key={s.id} className="is-clickable" tabIndex={0} onClick={() => onOpen(s.id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(s.id); } }}>
                   <td className="m-title">
                     <span className="strong">{L("جرد", "Count")} #{s.number}</span>{s.title ? <span className="hr-caption"> · {s.title}</span> : null}
+                    {s.location ? <span className="hr-caption" data-testid={`count-site-${s.number}`}> · {locationName(s.location, lang)}</span> : null}
                     <span className="hr-msub">{opsDate(s.createdAt, lang)} · {s.summary.lines} {L("أصناف", "items")} · {s.summary.withVariance} {L("بفروقات", "with variance")}</span>
                   </td>
                   <td className="m-end"><StatusDot map={STATUS} value={s.status} /></td>
@@ -244,6 +265,15 @@ function CountSheet({ id, canEdit, canPost, onBack, onPosted }: { id: string; ca
     if (!r.ok) { setError(await errorOf(r, L("تعذّر الحفظ.", "Could not save."))); return false; }
     setS(await r.json());
     return true;
+  }
+
+  /** A scanned item not on the sheet yet: added to it; returns its line id (count-scan.tsx). */
+  async function addLine(category: Category, entityId: string): Promise<string | null> {
+    const r = await fetch(`/api/inventory/counts/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ add: [{ category, entityId }] }) });
+    if (!r.ok) { setError(await errorOf(r, L("تعذّر الحفظ.", "Could not save."))); return null; }
+    const fresh = (await r.json()) as Session;
+    setS(fresh);
+    return fresh.lines.find((l) => l.category === category && l.entityId === entityId)?.id ?? null;
   }
 
   async function save() {
@@ -301,6 +331,7 @@ function CountSheet({ id, canEdit, canPost, onBack, onPosted }: { id: string; ca
       </div>
       <div className="ops-sechead" style={{ marginTop: 0 }}>
         <h2>{L("جرد", "Count")} #{s.number}{s.title ? ` · ${s.title}` : ""}</h2>
+        {(s as { location?: SiteRef }).location ? <p className="hr-caption" data-testid="count-detail-site">{L("موقع الجرد", "Location counted")}: <span className="strong">{locationName((s as { location: NonNullable<SiteRef> }).location, lang)}</span></p> : null}
         <p className="hr-caption"><StatusDot map={STATUS} value={s.status} /> · {L("بدأه", "started by")} {s.createdByName ?? "—"} · {opsDate(s.createdAt, lang)} {timeOf(s.createdAt)}</p>
         {editable ? (
           <span style={{ display: "inline-flex", gap: 8 }}>
@@ -323,6 +354,8 @@ function CountSheet({ id, canEdit, canPost, onBack, onPosted }: { id: string; ca
         <div><span className="stk-lbl">{L("صافي مواد التعبئة", "Packaging net")}</span><span className="stk-mid">{fmtVar(sumBy("PACKAGING_MATERIAL", 1) + sumBy("PACKAGING_MATERIAL", -1), "PIECE", lang)}</span><span className="stk-d">{L("زيادة", "gain")} {int(sumBy("PACKAGING_MATERIAL", 1))} · {L("نقص", "loss")} {int(Math.abs(sumBy("PACKAGING_MATERIAL", -1)))}</span></div>
       </div>
 
+      {editable ? <CountSheetScan lines={s.lines} add={addLine} /> : null}
+
       <div className="hr-tablewrap">
         <table className="hr-table is-mrow" aria-label={L("ورقة الجرد", "Count sheet")}>
           <thead>
@@ -341,7 +374,7 @@ function CountSheet({ id, canEdit, canPost, onBack, onPosted }: { id: string; ca
               const digits = u === "PIECE" || u === "UNIT" ? 0 : 2;
               const moved = s.status === "OPEN" && l.currentQty !== null && movedSinceCount(l.currentQty, l.systemQty);
               return (
-                <tr key={l.id} className={counted === null ? "is-uncounted" : undefined}>
+                <tr key={l.id} className={counted === null ? "is-uncounted" : undefined} data-count-line={l.id}>
                   <td className="m-title">
                     <span className="strong">{disp(l)}</span>
                     <span className="stk-sub hr-id">{l.item?.code ?? l.entityId}{l.category === "RAW_MATERIAL" && l.item?.sub ? ` · ${L("رف", "Shelf")} ${l.item.sub}` : ""}</span>

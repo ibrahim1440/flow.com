@@ -38,6 +38,7 @@ import { opsRefuse } from "./refusals";
 import { cleanLines, getInvoice, header, lineRows, lockInvoice, nextNumber, ownReceipts, postInvoiceTx, receiptReversed, refDuplicate, totals, type InvoiceInput, type InvoiceLineInput } from "./ap";
 import { receiveGreen, receiveMaterial, reverseReceipt, type ReceiptUser } from "@/lib/services/purchase-receipts";
 import { greenLotFields } from "@/lib/services/green-lots";
+import { receivingLocationId as resolveReceivingLocation } from "@/lib/services/stock-locations";
 import { invoiceSummary, logPurchaseActivity, withDeniedLog } from "./purchase-activity";
 
 type Tx = Prisma.TransactionClient;
@@ -69,6 +70,8 @@ export type PurchaseInvoiceInput = {
   customsDeclarationNo?: string | null; customsDeclarationDate?: string | null;
   /** CA4: the day the goods were received (default: today in Riyadh) — the receipts' and cost moves' day. */
   receivedDate?: string | null;
+  /** Phase 3: «موقع الاستلام» — the location the goods are received at (default: the default receiving site). */
+  receivingLocationId?: string | null;
   /** SA3: an edit sends the invoice's updatedAt as it read it; anything else is INVOICE_STALE. */
   expectedUpdatedAt?: string | null;
   lines: PurchaseLineInput[]; action?: PurchaseAction;
@@ -155,6 +158,8 @@ async function saveTx(input: PurchaseInvoiceInput, id: string | null, user: Rece
   return prisma.$transaction(async (tx) => {
     await setAuditContext(tx, ctx);
     const { h, supplier } = await header(tx, input as InvoiceInput);
+    // Phase 3: where the goods are received (an active location; none given → the default site).
+    const receivingLocationId = await resolveReceivingLocation(tx, input?.receivingLocationId);
     // Serialise every save of one (supplier, supplier invoice no.): a double submit waits for the first.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`ap:ref:${h.supplierId}:${h.supplierRef.trim().toLowerCase()}`}, 0))`;
     const cur = id ? await lockInvoice(tx, id) : null;
@@ -275,7 +280,7 @@ async function saveTx(input: PurchaseInvoiceInput, id: string | null, user: Rece
         continue;
       }
       const notes = `فاتورة مشتريات ${number} · ${h.supplierRef}`;
-      const common = { value: s.net, lineKey: `SINV:${invId}`, purchaseDate: receivedDate };
+      const common = { value: s.net, lineKey: `SINV:${invId}`, purchaseDate: receivedDate, locationId: receivingLocationId };
       const purchaseRecordId = s.stockKind === "GREEN_BEAN"
         ? (await receiveGreen(tx, user, { supplierId: h.supplierId, greenBeanId: itemId as string, quantity: Number(s.quantity), costPerUnit: Number(s.unitCost), notes, ...common })).purchase.id
         : (await receiveMaterial(tx, user, { materialItemId: itemId as string, quantity: Number(s.quantity), supplierId: h.supplierId, reference: h.supplierRef, notes: `فاتورة مشتريات ${number}`, unitCost: Number(s.unitCost), ...common })).purchase!.id;
@@ -297,7 +302,7 @@ async function saveTx(input: PurchaseInvoiceInput, id: string | null, user: Rece
     await tx.supplierInvoice.update({
       where: { id: invId },
       data: {
-        ...h, ...totals(clean), lastEditedBy: user.id, lines: { create: lineRows(clean) },
+        ...h, ...totals(clean), lastEditedBy: user.id, lines: { create: lineRows(clean) }, receivingLocationId,
         // The receipt day: set when this save receives; kept when an edit keeps earlier receipts; none for a draft.
         receivedDate: action === "draft" ? null : stock.length ? receivedDate : keep.size ? cur?.receivedDate ?? null : null,
         ...(action === "draft" ? { status: "DRAFT", submittedBy: null, submittedAt: null } : { status: "SUBMITTED", submittedBy: user.id, submittedAt: now }),

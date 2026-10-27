@@ -5,11 +5,12 @@ import { requireAnyModule, requireEdit } from "@/lib/auth-server";
 import { hasSubPrivilege } from "@/lib/auth";
 import { auditInventoryReceipt } from "@/lib/services/inventory-receiving";
 import { parseStockQuantity } from "@/lib/services/stock-quantity";
-import { handlePrismaError } from "@/lib/api-error";
+import { handleDomainError, handlePrismaError } from "@/lib/api-error";
 import { randomBytes } from "node:crypto";
 import { resolveMaterialCategory, categoryDbRefusal } from "@/lib/services/item-categories";
 import { refusal } from "@/lib/inventory/category-response";
 import { ITEM_UNITS } from "@/lib/inventory/item-categories";
+import { receivingLocationId, setStockLocation } from "@/lib/services/stock-locations";
 
 // Stocked packaging materials: bags, labels, cartons. These are what a BOM's MATERIAL
 // components consume. Before this existed, PurchaseType.PACKAGING recorded the cost of
@@ -61,6 +62,7 @@ export async function GET(request: Request) {
       items.map((m) => ({
         id: m.id,
         code: m.code,
+        labelCode: m.labelCode,
         name: m.name,
         nameAr: m.nameAr,
         category: m.category,
@@ -140,6 +142,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `Material code "${code}" already exists.` }, { status: 409 });
 
     const item = await prisma.$transaction(async (tx) => {
+      // Phase 3: opening stock is received at a site, named explicitly (b.locationId, active; else the default
+      // receiving site) — this transaction is that one receipt.
+      const locationId = quantityOnHand > 0 ? await receivingLocationId(tx, b.locationId) : null;
+      if (locationId) await setStockLocation(tx, locationId);
       const created = await tx.materialItem.create({
         data: {
           code,
@@ -167,6 +173,7 @@ export async function POST(request: Request) {
             sourceDocId: created.id,
             userId: user.id,
             notes: "Opening balance",
+            locationId: locationId!,
           },
         });
         await auditInventoryReceipt(tx, user, {
@@ -183,6 +190,6 @@ export async function POST(request: Request) {
   } catch (err) {
     const r = categoryDbRefusal(err);
     if (r) return refusal(r);
-    return handlePrismaError(err);
+    return handleDomainError(err);
   }
 }

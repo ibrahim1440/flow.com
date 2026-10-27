@@ -2,6 +2,7 @@ import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireAnySub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
+import { sackFields, sackMismatch } from "@/lib/services/green-lots";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -29,6 +30,13 @@ export async function PUT(request: Request, { params }: Params) {
       altitude, location, isActive, receivedDate,
     } = body;
 
+    // The lot's sacks (per-sack labels): changed only when the body names them; the label code never changes.
+    let sacks: { sackCount?: number | null; sackWeightKg?: number | null } = {};
+    if ("sackCount" in body || "sackWeightKg" in body) {
+      const s = sackFields(body);
+      if ("error" in s) return NextResponse.json({ ...s, code: "SACKS_INVALID" }, { status: 400 });
+      sacks = s;
+    }
     const bean = await prisma.greenBean.update({
       where: { id },
       data: {
@@ -37,9 +45,12 @@ export async function PUT(request: Request, { params }: Params) {
         variety, process, processAr,
         altitude, location, isActive,
         receivedDate: receivedDate ? new Date(receivedDate) : undefined,
+        ...sacks,
       },
     });
-    return NextResponse.json(bean);
+    // A soft warning only (the save stands): the sacks do not add up to the lot's quantity.
+    const sackWarning = "sackCount" in sacks ? sackMismatch(bean.sackCount, bean.sackWeightKg, bean.quantityKg) : null;
+    return NextResponse.json(sackWarning ? { ...bean, sackWarning } : bean);
   } catch (err) {
     return handlePrismaError(err);
   }

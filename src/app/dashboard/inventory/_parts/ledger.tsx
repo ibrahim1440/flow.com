@@ -9,9 +9,11 @@ import { CAT_LABELS, DownloadIcon, MovementType, QtyChange, SRC_LABELS, TYPE_MAP
 const PAGE_SIZE = 25;
 
 /** `itemCategories` (unified inventory): the «التصنيف» chip filters by item category (a main category covers its sub-categories). */
-export function LedgerTab({ refreshKey, initial, itemCategories, initialItemCategory }: {
+export function LedgerTab({ refreshKey, initial, itemCategories, initialItemCategory, locations, initialLocation }: {
   refreshKey: number; initial?: { category?: string; type?: string; source?: string };
   itemCategories?: { id: string; nameAr: string; nameEn: string | null; parentId: string | null }[]; initialItemCategory?: string;
+  /** Phase 3 (stock locations): the «الموقع» chip and the location of each movement. */
+  locations?: { id: string; nameAr: string; nameEn: string | null; isActive: boolean }[]; initialLocation?: string;
 }) {
   const { t, lang } = useI18n();
   const L = useL();
@@ -21,7 +23,13 @@ export function LedgerTab({ refreshKey, initial, itemCategories, initialItemCate
   const [type, setType] = useState(initial?.type ?? "");
   const [source, setSource] = useState(initial?.source ?? "");
   const [itemCategory, setItemCategory] = useState(initialItemCategory ?? "");
+  const [location, setLocation] = useState(initialLocation ?? "");
   const [page, setPage] = useState(1);
+  const siteOf = (m: { locationId?: string | null }) => {
+    if (!locations || locations.length < 2 || !m.locationId) return "";
+    const l = locations.find((x) => x.id === m.locationId);
+    return l ? (lang === "ar" ? l.nameAr : l.nameEn || l.nameAr) : "";
+  };
   const [data, setData] = useState<{ total: number; rows: EnrichedMovement[] } | null>(null);
   const [error, setError] = useState(false);
 
@@ -33,9 +41,10 @@ export function LedgerTab({ refreshKey, initial, itemCategories, initialItemCate
     if (type) p.set("type", type);
     if (source) p.set("source", source);
     if (itemCategory) p.set("itemCategory", itemCategory);
+    if (location) p.set("location", location);
     if (qDebounced) p.set("q", qDebounced);
     return p;
-  }, [category, type, source, itemCategory, qDebounced]);
+  }, [category, type, source, itemCategory, location, qDebounced]);
 
   // A filter change goes back to page 1 (set by the handlers below, never from an effect).
   const reset = <T,>(set: (v: T) => void) => (v: T) => { set(v); setPage(1); };
@@ -83,6 +92,10 @@ export function LedgerTab({ refreshKey, initial, itemCategories, initialItemCate
               return { value: c.id, label: p ? `${n(p)} › ${n(c)}` : n(c) };
             })} />
         ) : null}
+        {locations && locations.length > 1 ? (
+          <FilterChip label={L("الموقع", "Location")} value={location} onChange={reset(setLocation)}
+            options={locations.map((l) => ({ value: l.id, label: lang === "ar" ? l.nameAr : l.nameEn || l.nameAr }))} />
+        ) : null}
         <FilterChip label={L("نوع المخزون", "Stock kind")} value={category} onChange={reset(setCategory)} options={Object.keys(CAT_LABELS).map((k) => ({ value: k, label: pair(CAT_LABELS, k, 1) }))} />
         <FilterChip label={L("النوع", "Type")} value={type} onChange={reset(setType)} options={Object.keys(TYPE_MAP).map((k) => ({ value: k, label: pair(TYPE_MAP, k, 2) }))} />
         <FilterChip label={L("المصدر", "Source")} value={source} onChange={reset(setSource)} options={Object.keys(SRC_LABELS).map((k) => ({ value: k, label: pair(SRC_LABELS, k, 1) }))} />
@@ -117,7 +130,7 @@ export function LedgerTab({ refreshKey, initial, itemCategories, initialItemCate
                 {g.rows.map((m) => {
                   const isGain = m.quantityChanged > 0;
                   const isZero = Math.abs(m.quantityChanged) < 0.0005;
-                  const srcLabel = pair(SRC_LABELS, m.sourceDocType, 1);
+                  const srcLabel = pair(SRC_LABELS, m.sourceDocType, 1) + (m.sourceDocType !== "STOCK_TRANSFER" && siteOf(m) ? ` · ${siteOf(m)}` : "");
                   const discrete = m.unit === "PIECE" || m.unit === "UNIT";
                   const digits = discrete ? 0 : 2;
                   return (
@@ -127,7 +140,7 @@ export function LedgerTab({ refreshKey, initial, itemCategories, initialItemCate
                       <td className="m-title">
                         <span className="strong">{disp(m.entityLabel, m.entityLabelAr)}</span>
                         {m.entityCode && m.category !== "PACKAGING_MATERIAL" ? <span className="hr-caption"> · <span className="hr-id">{m.entityCode}</span></span> : null}
-                        <span className="stk-sub hr-desktop-only">{pair(CAT_LABELS, m.category, 1)}</span>
+                        <span className="stk-sub hr-desktop-only">{pair(CAT_LABELS, m.category, 1)}{siteOf(m) ? ` · ${siteOf(m)}` : ""}</span>
                         <span className="hr-msub"><span className="hr-num">{timeOf(m.timestamp)}</span> · {pair(TYPE_MAP, m.type, 2)} · {srcLabel}</span>
                       </td>
                       <td className="num"><span className="hr-num" style={{ color: "var(--text-secondary)" }}>{discrete ? int(m.previousQuantity) : fmtQty(m.previousQuantity, digits)}</span></td>

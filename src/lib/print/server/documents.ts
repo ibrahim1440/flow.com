@@ -2,8 +2,7 @@
 // Read-only: nothing here writes, reserves or moves anything. The pure builders
 // (../roast-sheet.ts, ../delivery-note.ts) decide what the page says.
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
-import { pickGreenLot } from "@/lib/green-source";
-import { greenSourceFacts } from "@/lib/services/green-source";
+import { greenSourceFacts, pickFromFacts } from "@/lib/services/green-source";
 import { deliveryLotsFor } from "@/lib/services/delivery-lots";
 import { batchRoasterId, readRoasters } from "@/lib/services/schedule/schedule-db";
 import { addDays, effectiveStatus, hoursOf, riyadhKey, riyadhMidnight, workWindow } from "@/lib/services/schedule/planner";
@@ -69,7 +68,7 @@ async function expectedLot(db: Db, productId: string, kg: number, cache: Map<str
   if (!cache.has(productId)) cache.set(productId, await greenSourceFacts(db as never, { productId }));
   const facts = cache.get(productId);
   if (!facts) return null;
-  const pick = pickGreenLot(facts.defaultLot, facts.candidates, kg);
+  const pick = pickFromFacts(facts, kg);
   if (!pick.ok) return null;
   return { serial: pick.lot.serialNumber, name: pick.lot.beanTypeAr || pick.lot.beanType, source: pick.source };
 }

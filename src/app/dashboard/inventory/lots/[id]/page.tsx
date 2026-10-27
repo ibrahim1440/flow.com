@@ -11,6 +11,7 @@ import { Notice, OpsLoading, OpsRoot, PageHeader, StatusDot, Timeline, kg, opsDa
 import "@/components/ops/stock.css";
 import { useI18n } from "@/lib/i18n/context";
 import { timeOf } from "../../_parts/shared";
+import { GreenLotPage } from "./green-lot";
 
 type Trace = {
   lot: {
@@ -35,7 +36,16 @@ const ALLOC: Record<string, [string, "warning" | "success" | "neutral", string]>
   RESERVED: ["محجوز", "warning", "Reserved"], CONSUMED: ["سُلِّم", "success", "Delivered"], RELEASED: ["أُلغي الحجز", "neutral", "Released"],
 };
 
-export default function LotTracePage() {
+/**
+ * One address for a lot's page: a finished-goods lot by its id (the «تتبع» link), a green-coffee lot by its label code
+ * «GL-00042» (the QR code on its label, the scan, the lot row) — 20261114090000_green_lot_labels.
+ */
+export default function LotPage() {
+  const { id } = useParams<{ id: string }>();
+  return /^GL-?\d+$/i.test(decodeURIComponent(id ?? "")) ? <GreenLotPage code={decodeURIComponent(id)} /> : <LotTracePage />;
+}
+
+function LotTracePage() {
   const { id } = useParams<{ id: string }>();
   const { lang } = useI18n();
   const L = useL();

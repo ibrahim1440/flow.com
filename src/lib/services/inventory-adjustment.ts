@@ -6,6 +6,7 @@ import type { Db } from "@/lib/hr/core";
 import { auditPrivilegedInventory } from "./inventory-privileged-audit";
 import { ADJUSTMENT_NOOP_THRESHOLD } from "./stock-quantity";
 import { onAdjustment } from "@/lib/accounting/ops/inventory-events";
+import { locationQty, productionLocation, withStockLocation } from "./stock-locations";
 
 export {
   normalizeAdjustmentReason,
@@ -36,8 +37,12 @@ export type AdjustmentUser = Parameters<typeof auditPrivilegedInventory>[1];
 
 export type AdjustmentResult = {
   noChange: boolean;
+  /** The balance counted — the location's when a location was given, else the company-wide total. */
   previousQuantity: number;
   newQuantity: number;
+  /** The company-wide total before / after (the movement's before / after). */
+  totalBefore: number;
+  totalAfter: number;
   quantityChanged: number;
   movementId: string | null;
   unit: string;
@@ -63,6 +68,12 @@ export async function applyInventoryAdjustment(
     reason: string;
     sourceDocId?: string | null;
     details?: Record<string, unknown>;
+    /**
+     * Phase 3 (20261115090000_stock_locations): the location counted. `target` is then that location's quantity; the
+     * variance moves its balance (and the company-wide total by the same amount). Without it: `target` is the total and
+     * the variance is booked at the production site — named explicitly, never left to the receiving default (council SA1).
+     */
+    locationId?: string | null;
   },
 ): Promise<AdjustmentResult> {
   // Lock the row before reading the balance (see the routes' comments: it serialises against a
@@ -83,50 +94,59 @@ export async function applyInventoryAdjustment(
     unit = locked[0].unitOfMeasure;
   }
 
-  const newQuantity = typeof a.target === "function" ? Number(a.target(previousQuantity).toFixed(4)) : a.target;
-  if (!Number.isFinite(newQuantity) || newQuantity < 0) {
+  // The balance the count is about: the location's (when given) or the total.
+  const totalBefore = previousQuantity;
+  const base = a.locationId ? await locationQty(tx, a.kind, a.entityId, a.locationId) : previousQuantity;
+  const counted = typeof a.target === "function" ? Number(a.target(base).toFixed(4)) : a.target;
+  if (!Number.isFinite(counted) || counted < 0) {
+    const [previousQuantity, newQuantity] = [base, counted];
     throw { _appCode: 409, message: `The adjustment would leave a negative or invalid balance (${previousQuantity} → ${newQuantity}).` };
   }
-  const quantityChanged = Number((newQuantity - previousQuantity).toFixed(4));
+  const quantityChanged = Number((counted - base).toFixed(4));
   if (Math.abs(quantityChanged) < ADJUSTMENT_NOOP_THRESHOLD) {
-    return { noChange: true, previousQuantity, newQuantity: previousQuantity, quantityChanged: 0, movementId: null, unit };
+    return { noChange: true, previousQuantity: base, newQuantity: base, totalBefore, totalAfter: totalBefore, quantityChanged: 0, movementId: null, unit };
   }
+  const newQuantity = Math.max(0, Number((totalBefore + quantityChanged).toFixed(4)));
+  const site = a.locationId ?? (await productionLocation(tx)).id;
+  // The location is scoped to this adjustment and restored after (a count session adjusts many items in one transaction).
+  return withStockLocation(tx, site, async () => {
+    const movement = await tx.inventoryMovement.create({
+      data: {
+        type: "ADJUSTMENT",
+        category: a.kind === "GREEN_BEAN" ? "RAW_MATERIAL" : "PACKAGING_MATERIAL",
+        referenceEntityId: a.entityId,
+        quantityChanged,
+        previousQuantity,
+        newQuantity,
+        sourceDocType: "MANUAL_ADJUSTMENT",
+        sourceDocId: a.sourceDocId ?? null,
+        userId: user.id,
+        notes: a.reason,
+        locationId: site,
+      },
+    });
 
-  const movement = await tx.inventoryMovement.create({
-    data: {
-      type: "ADJUSTMENT",
-      category: a.kind === "GREEN_BEAN" ? "RAW_MATERIAL" : "PACKAGING_MATERIAL",
-      referenceEntityId: a.entityId,
-      quantityChanged,
-      previousQuantity,
-      newQuantity,
-      sourceDocType: "MANUAL_ADJUSTMENT",
-      sourceDocId: a.sourceDocId ?? null,
-      userId: user.id,
-      notes: a.reason,
-    },
+    if (a.kind === "GREEN_BEAN") {
+      await tx.greenBean.update({ where: { id: a.entityId }, data: { quantityKg: newQuantity } });
+    } else {
+      await tx.materialItem.update({ where: { id: a.entityId }, data: { quantityOnHand: newQuantity } });
+    }
+
+    // The responsible person, not only the login (owner decision, inventory Option A).
+    // Accounting A3: the count's gain / loss at the moving average → INVENTORY_VARIANCE (reason carried).
+    await onAdjustment(tx, { kind: a.kind, entityId: a.entityId, qtyChange: quantityChanged, newQty: newQuantity, movementId: movement.id, reason: a.reason, actor: user.id });
+
+    await auditPrivilegedInventory(tx, user, {
+      action: "INVENTORY_ADJUSTED",
+      entityType: a.kind === "GREEN_BEAN" ? "GreenBean" : "MaterialItem",
+      entityId: a.entityId,
+      reason: a.reason,
+      beforeQuantity: previousQuantity,
+      afterQuantity: newQuantity,
+      unit,
+      details: { movementId: movement.id, previousQuantity, newQuantity, quantityChanged, ...(a.locationId ? { locationId: a.locationId, locationBefore: base, locationAfter: counted } : { locationId: site }), ...(a.details ?? {}) },
+    });
+
+    return { noChange: false, previousQuantity: base, newQuantity: counted, totalBefore, totalAfter: newQuantity, quantityChanged, movementId: movement.id, unit };
   });
-
-  if (a.kind === "GREEN_BEAN") {
-    await tx.greenBean.update({ where: { id: a.entityId }, data: { quantityKg: newQuantity } });
-  } else {
-    await tx.materialItem.update({ where: { id: a.entityId }, data: { quantityOnHand: newQuantity } });
-  }
-
-  // The responsible person, not only the login (owner decision, inventory Option A).
-  // Accounting A3: the count's gain / loss at the moving average → INVENTORY_VARIANCE (reason carried).
-  await onAdjustment(tx, { kind: a.kind, entityId: a.entityId, qtyChange: quantityChanged, newQty: newQuantity, movementId: movement.id, reason: a.reason, actor: user.id });
-
-  await auditPrivilegedInventory(tx, user, {
-    action: "INVENTORY_ADJUSTED",
-    entityType: a.kind === "GREEN_BEAN" ? "GreenBean" : "MaterialItem",
-    entityId: a.entityId,
-    reason: a.reason,
-    beforeQuantity: previousQuantity,
-    afterQuantity: newQuantity,
-    unit,
-    details: { movementId: movement.id, previousQuantity, newQuantity, quantityChanged, ...(a.details ?? {}) },
-  });
-
-  return { noChange: false, previousQuantity, newQuantity, quantityChanged, movementId: movement.id, unit };
 }

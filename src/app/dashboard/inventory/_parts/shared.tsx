@@ -33,6 +33,7 @@ export const SRC_LABELS: Record<string, [string, string]> = {
   PRODUCTION_ORDER: ["أمر إنتاج", "Production order"],
   OPENING_BALANCE: ["رصيد افتتاحي (استلام)", "Opening balance (receipt)"],
   RECEIVING: ["استلام توريد", "Receiving"],
+  STOCK_TRANSFER: ["تحويل بين المواقع", "Transfer between locations"],
 };
 
 export const CAT_LABELS: Record<string, [string, string]> = {
@@ -64,6 +65,8 @@ export type EnrichedMovement = {
   type: "IN" | "OUT" | "ADJUSTMENT" | "LOSS";
   category: string;
   referenceEntityId: string | null;
+  /** Phase 3: where the movement happened. */
+  locationId?: string | null;
   quantityChanged: number;
   previousQuantity: number;
   newQuantity: number;

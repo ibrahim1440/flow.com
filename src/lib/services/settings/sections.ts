@@ -154,3 +154,28 @@ export function parseQcPatch(b: Record<string, unknown>): { ok: true; data: { qc
   }
   return { ok: true, data };
 }
+
+// ─── Roasting station (migration 20261116090000_station_lot_scan) ─────────────────────────────
+
+/** «تأكيد الكيس بالمسح في محطة التحميص»: off by default — the station offers no scan. */
+export type StationSettings = { lotScanRequired: boolean };
+
+export function stationFromRow(row: { stationLotScanRequired?: boolean | null } | null | undefined): StationSettings {
+  return { lotScanRequired: row?.stationLotScanRequired === true };
+}
+
+export async function readStationSettings(db: Db): Promise<StationSettings> {
+  return stationFromRow((await db.systemConfig.findUnique({ where: { id: "singleton" } })) as { stationLotScanRequired?: boolean | null } | null);
+}
+
+/** PUT /api/settings/production/station body → the column to write (a boolean, nothing else). */
+export function parseStationPatch(b: Record<string, unknown>): { ok: true; data: { stationLotScanRequired?: boolean } } | Problem {
+  const data: { stationLotScanRequired?: boolean } = {};
+  if ("lotScanRequired" in b) {
+    if (typeof b.lotScanRequired !== "boolean") {
+      return { ok: false, field: "lotScanRequired", error: "lotScanRequired is true or false.", errorAr: "قيمة «تأكيد الكيس بالمسح» نعم أو لا." };
+    }
+    data.stationLotScanRequired = b.lotScanRequired;
+  }
+  return { ok: true, data };
+}

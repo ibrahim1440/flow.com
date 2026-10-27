@@ -306,6 +306,22 @@ export const EVENTS: NotificationEventDef[] = [
     }),
   },
   {
+    key: "production.green_transfer_needed", category: "production", severity: "warning",
+    label: { ar: "بن أخضر مطلوب للتحميص في موقع آخر — تحويل مقترح", en: "Green coffee needed for roasting is at another site — a transfer is suggested" },
+    recipients: [{ perm: [{ module: "inventory", sub: "receive" }, { module: "inventory", sub: "adjust" }, { module: "production", sub: "manage_schedule" }] }],
+    requires: [MOD("inventory")],
+    trigger: "checkGreenReadiness (lib/services/green-readiness.ts): the daily workspace job, and on demand when «مساحة عملي» or the roasting station queue loads — one alert per (coffee, day), updated, never duplicated",
+    render: (f) => ({
+      titleAr: `حوّل ${s(f.shortKg)} كغ من ${s(f.lotName)} إلى «${s(f.siteName)}» قبل تحميص ${s(f.productName)} (${s(f.day)})`,
+      titleEn: `Transfer ${s(f.shortKg)} kg of ${sEn(f, "lotName")} to «${sEn(f, "siteName")}» before roasting ${sEn(f, "productName")} (${s(f.day)})`,
+      bodyAr: [`مطلوب ${s(f.needKg)} كغ للتحميص`, `في موقع الإنتاج ${s(f.atSiteKg)} كغ`, f.fromName ? `البن في «${s(f.fromName)}»` : "", s(f.lotCode)].filter(Boolean).join(" · ") + ". افتح التحويل المقترح وأكّده بنقرة."
+        + (Number(f.restKg ?? 0) > 0 ? ` والباقي ${s(f.restKg)} كغ مطلوب من موقع آخر: ${s(f.othersAr)}.` : ""),
+      bodyEn: [`${s(f.needKg)} kg needed to roast`, `${s(f.atSiteKg)} kg at the production site`, f.fromName ? `the coffee is at «${sEn(f, "fromName")}»` : "", s(f.lotCode)].filter(Boolean).join(" · ") + ". Open the suggested transfer and confirm it with one tap."
+        + (Number(f.restKg ?? 0) > 0 ? ` The remaining ${s(f.restKg)} kg are needed from another site: ${s(f.othersEn)}.` : ""),
+      link: s(f.transferHref) || "/dashboard/inventory/transfers/new",
+    }),
+  },
+  {
     key: "production.station_problem", category: "production", severity: "danger",
     label: { ar: "أُبلغ عن مشكلة في محطة التحميص", en: "A problem was reported at the roasting station" },
     recipients: [{ perm: [{ module: "production", sub: "manage_schedule" }, { module: "production", sub: "manage_roasters" }] }], requires: [MOD("production")],

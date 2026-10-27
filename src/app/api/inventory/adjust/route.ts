@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireAuth, stockChangeGate } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { applyInventoryAdjustment, normalizeAdjustmentReason } from "@/lib/services/inventory-adjustment";
+import { activeLocation } from "@/lib/services/stock-locations";
 
 /**
  * Book a counted adjustment against green coffee.
@@ -59,12 +60,15 @@ export async function POST(request: Request) {
       // balance and the INVENTORY_ADJUSTED person audit (owner decision, inventory Option A) are
       // written by applyInventoryAdjustment in this transaction — the same code a count session
       // posts through (src/lib/services/inventory-adjustment.ts).
+      // Phase 3: a count at one location (body.locationId, active) sets that location's quantity.
+      const locationId = body.locationId ? (await activeLocation(tx, body.locationId)).id : null;
       const booked = await applyInventoryAdjustment(tx, user, {
         kind: "GREEN_BEAN",
         entityId,
         target: newActualQuantity,
         reason: explained.reason,
         sourceDocId: null,
+        locationId,
       });
       if (booked.noChange) return { noChange: true as const, currentQuantity: booked.previousQuantity };
       const updatedBean = await tx.greenBean.findUniqueOrThrow({ where: { id: entityId } });

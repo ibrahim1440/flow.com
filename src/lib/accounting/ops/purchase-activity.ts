@@ -38,7 +38,7 @@ export async function invoiceSummary(tx: Tx, id: string): Promise<InvoiceSummary
 }
 
 /** The address hash AuthAuditLog keeps (never the address): the platform address rule of auditFromRequest. */
-async function ipHashOf(ip: string | null | undefined): Promise<string> {
+export async function ipHashOf(ip: string | null | undefined): Promise<string> {
   const value = ip || "0.0.0.0";
   try {
     const { hashRateLimitKey } = await import("@/lib/rate-limit");
