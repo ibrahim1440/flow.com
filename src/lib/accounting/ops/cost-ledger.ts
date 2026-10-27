@@ -14,7 +14,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { postEntry, type PostEntryInput, type PostEntryResult, type PostingLineInput, type PostingDims, type EngineModule } from "../posting-engine";
 import { riyadhDay, dayText } from "../dates";
 import { roundMoney, ZERO, Decimal } from "../money";
-import { issue, receive, revalue, unitCost, type Holder } from "./costing";
+import { issue, receive, returnOut, revalue, unitCost, type Holder } from "./costing";
 import { materialInventoryRole } from "@/lib/inventory/item-categories";
 
 type Tx = Prisma.TransactionClient;
@@ -107,6 +107,14 @@ export async function costOut(tx: Tx, m: MoveBase & { qty: Decimal; closeOut?: b
   return write(tx, m, a.qty.negated(), a.value.negated(), a.unitCost, a.after);
 }
 
+/** Stock OUT of `qty` at a GIVEN value (a receipt reversed: the value it came in at, bounded by what the holder holds). */
+export async function costReturnOut(tx: Tx, m: MoveBase & { qty: Decimal; value: Decimal }): Promise<MoveResult> {
+  const prior = await existing(tx, m);
+  if (prior) return prior;
+  const a = returnOut(m.holder, m.qty, m.value);
+  return write(tx, m, a.qty.negated(), a.value.negated(), a.unitCost, a.after);
+}
+
 /** A value change without quantity: what the holder absorbs, and the rest (to expense). */
 export async function costRevalue(tx: Tx, m: MoveBase & { delta: Decimal }): Promise<MoveResult & { rest: Decimal }> {
   const prior = await existing(tx, m);
@@ -176,6 +184,13 @@ export type OpsPostResult = PostEntryResult | { status: "none" } | { status: "de
 // forgotten flush cannot pass silently: its movements stay PENDING and the database refuses the commit
 // (ledger_cost_move_resolved).
 const queues = new WeakMap<object, (() => Promise<unknown>)[]>();
+
+/** Queue a posting step of its own (a reversal) to run with the others at flushPostings(tx). */
+export function deferPosting(tx: Tx, run: () => Promise<unknown>): void {
+  const q = queues.get(tx) ?? [];
+  q.push(run);
+  queues.set(tx, q);
+}
 
 /** Post every entry the operation queued on this transaction, in order. Call it last, inside the transaction. */
 export async function flushPostings(tx: Tx): Promise<void> {

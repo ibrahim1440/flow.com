@@ -95,7 +95,9 @@ export async function POST(request: Request) {
       prisma.stockAllocation.deleteMany(),
       prisma.finishedGoodsLot.deleteMany(),
       prisma.productionOrder.deleteMany(),
-      prisma.purchaseRecord.deleteMany(),
+      // 20261113090000_purchase_invoice_phase2: a receipt a landed cost (freight, duty…) was capitalised onto is
+      // referenced by that supplier invoice line (ON DELETE RESTRICT) — the books outlive a reset, so it stays.
+      prisma.purchaseRecord.deleteMany({ where: { landedCostLines: { none: {} } } }),
       prisma.qcRecord.deleteMany(),
       // Guest invitations of the QC panel (20261023090000_production_qc_simplify); before the batches.
       prisma.qcInvite.deleteMany(),

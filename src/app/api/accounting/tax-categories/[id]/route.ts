@@ -2,6 +2,10 @@ import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
+import { acctError } from "@/lib/accounting/http";
+import { auditFromRequest, setAuditContext } from "@/lib/accounting/audit";
+import { opsDbRefusal, opsRefuse } from "@/lib/accounting/ops/refusals";
+import { PURCHASE_TAX_CODES } from "@/lib/purchases/tax-codes";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -107,8 +111,17 @@ export async function PATCH(request: Request, { params }: Params) {
 
   data.updatedBy = user.id;
 
+  // CC3: the purchase VAT codes (P-*) are system codes — their rate and type never change and none becomes the sales
+  // default (the database refuses it too: tax_category_purchase_freeze). Names, the active flag and the ZATCA code stay.
+  const current = await prisma.taxCategory.findUnique({ where: { id }, select: { code: true, rate: true, categoryType: true } });
+  if (current && (PURCHASE_TAX_CODES as readonly string[]).includes(current.code)
+      && ((data.rate !== undefined && Number(data.rate) !== Number(current.rate)) || (data.categoryType !== undefined && data.categoryType !== current.categoryType) || isDefault === true)) {
+    return acctError(opsRefuse("TAX_CATEGORY_FROZEN"));
+  }
+
   try {
     const taxCategory = await prisma.$transaction(async (tx) => {
+      await setAuditContext(tx, auditFromRequest(request, user.id));
       if (isDefault === true) {
         await tx.taxCategory.updateMany({ where: { isDefault: true, id: { not: id } }, data: { isDefault: false } });
         data.isDefault = true;
@@ -119,6 +132,8 @@ export async function PATCH(request: Request, { params }: Params) {
     });
     return NextResponse.json(taxCategory);
   } catch (err) {
+    const frozen = opsDbRefusal(String((err as Error)?.message ?? ""));
+    if (frozen) return acctError(frozen);
     return handlePrismaError(err);
   }
 }

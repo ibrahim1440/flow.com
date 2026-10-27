@@ -251,6 +251,10 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
   // Accounting A3: entering supplier invoices (drafts) and submitting them for approval.
   purchases: [
     { key: "invoices", label: "Enter supplier invoices and submit them for approval" },
+    // Unified inventory phase 2 (20261113090000_purchase_invoice_phase2): undo what an un-posted purchase invoice
+    // received — cancel it, or edit a received line (its receipt is reversed). Written true by the migration for every
+    // document that could already do it (draft writer + inventory › receive); grantable / removable per role or user.
+    { key: "received_change", label: "Cancel or edit a received purchase invoice (reverses its receipt)" },
   ],
   // «مساحة عملي»: everyone assigns work to themself and their HR direct reports and sees that team.
   workspace: [

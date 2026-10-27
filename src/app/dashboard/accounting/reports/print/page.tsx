@@ -47,9 +47,9 @@ function body(p: Payload, lang: DocLang): { columns: DocColumn[]; rows: DocCell[
     for (const [k, a, e] of [["netChange", "صافي التغير في النقد", "Net change in cash"], ["cashStart", "النقد أول المدة", "Cash at the start"], ["cashEnd", "النقد آخر المدة", "Cash at the end"], ["difference", "فرق المطابقة", "Reconciling difference"]] as const) rows.push([{ main: L(a, e) }, { main: m(d[k]) }]);
     return { columns: [{ key: "a", label: L("البند", "Item"), numeric: false }, { key: "v", label: `${d.from} – ${d.to}`, numeric: true }], rows, meta: [{ label: L("الطريقة", "Method"), value: L("غير المباشرة", "Indirect") }] };
   }
-  const boxes = [...(d.sales as { box: number; ar: string; en: string; amount: string; adjustment: string; vat: string }[]), ...(d.purchases as { box: number; ar: string; en: string; amount: string; adjustment: string; vat: string }[])];
+  const boxes = [...(d.sales as { box: number | null; ar: string; en: string; amount: string; adjustment: string; vat: string }[]), ...(d.purchases as { box: number | null; ar: string; en: string; amount: string; adjustment: string; vat: string }[])];
   const s = d.summary as Record<string, string>;
-  const rows: DocCell[][] = boxes.map((b) => [{ main: String(b.box) }, { main: L(b.ar, b.en) }, { main: m(b.amount) }, { main: m(b.adjustment) }, { main: m(b.vat) }]);
+  const rows: DocCell[][] = boxes.map((b) => [{ main: b.box === null ? "—" : String(b.box) }, { main: L(b.ar, b.en) }, { main: m(b.amount) }, { main: m(b.adjustment) }, { main: m(b.vat) }]);
   rows.push([{ main: "13" }, { main: L("إجمالي الضريبة المستحقة", "Total VAT due") }, { main: "" }, { main: "" }, { main: m(s.totalVatDue) }]);
   rows.push([{ main: "16" }, { main: L("صافي الضريبة المستحقة", "Net VAT due") }, { main: "" }, { main: "" }, { main: m(s.netVatDue) }]);
   const disc = d.disclaimer as { ar: string; en: string };

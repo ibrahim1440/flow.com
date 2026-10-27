@@ -1318,6 +1318,10 @@ model Supplier {
   vatNumber        String?
   /// Default credit terms in days (the due date a new supplier invoice proposes). NULL = 30.
   paymentTermsDays Int?
+  /// Phase 2 (20261113090000_purchase_invoice_phase2): a non-resident supplier — its services are reverse-charged (P-RC15).
+  isNonResident    Boolean          @default(false)
+  /// GOODS_SERVICES (default) | CUSTOMS | CLEARING_AGENT — import VAT (P-IMP15) is billed by customs / a clearing agent only.
+  kind             String           @default("GOODS_SERVICES")
   supplierInvoices SupplierInvoice[]
   supplierPayments SupplierPayment[]
 }
@@ -1340,6 +1344,8 @@ model PurchaseRecord {
   // untyped rows; this is the FK that lets a purchase actually restock a MaterialItem.
   materialItemId String?
   materialItem   MaterialItem? @relation(fields: [materialItemId], references: [id])
+  /// Phase 2: landed-cost lines (freight, duty, clearance, insurance) capitalised onto this receipt.
+  landedCostLines SupplierInvoiceLine[] @relation("LandedCostTarget")
 
   @@index([purchaseDate])
   @@index([supplierId, purchaseDate])
@@ -2483,6 +2489,15 @@ model TaxCategory {
   updatedAt            DateTime        @updatedAt
   createdBy            String?
   updatedBy            String?
+
+  // ── Unified inventory phase 2 (20261113090000_purchase_invoice_phase2): purchase VAT categories ──
+  /// SALES | PURCHASES | BOTH (CHECK). The seeded purchase codes P-S15 … P-RC15 are PURCHASES.
+  appliesTo            String          @default("BOTH")
+  /// RECOVERABLE | NON_RECOVERABLE | NONE | IMPORT | REVERSE_CHARGE (CHECK); null for a sales-only category.
+  inputVatTreatment    String?
+  /// The purchases box of the VAT return: '7' | '8' | '9' | '10' | '11' (CHECK); null = not on the return.
+  vatReturnBox         String?
+  supplierInvoiceLines SupplierInvoiceLine[]
 
   @@index([isActive])
   @@index([categoryType])
@@ -7316,6 +7331,14 @@ model SupplierInvoice {
   cancelledBy    String?
   cancelledAt    DateTime?
   cancelReason   String?
+  /// Phase 2: the customs declaration import VAT (P-IMP15) is claimed on — both or neither (CHECK).
+  customsDeclarationNo   String?
+  customsDeclarationDate DateTime? @db.Date
+  /// PURCHASES = the one-step purchase invoice (src/lib/accounting/ops/purchase-invoice.ts); AP = a bill entered through
+  /// the legacy accounts-payable API (whose STOCK line capitalises value without a receipt). CHECK; frozen once posted.
+  origin         String    @default("AP")
+  /// The day the invoice's goods were received (its receipts' and cost moves' day); NULL when it received nothing.
+  receivedDate   DateTime? @db.Date
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
@@ -7351,9 +7374,25 @@ model SupplierInvoiceLine {
   matchedValue      Decimal?         @db.Decimal(18, 2)
   variance          Decimal?         @db.Decimal(18, 2)
   capitalized       Decimal?         @db.Decimal(18, 2)
+  // ── Phase 2 (20261113090000_purchase_invoice_phase2): the purchase VAT category of the line ──
+  taxCategoryId     String?
+  taxCategory       TaxCategory?     @relation(fields: [taxCategoryId], references: [id], onDelete: Restrict)
+  /// Written when the invoice is posted (buildPurchaseTaxSnapshot); never changed afterwards.
+  taxSnapshot       Json?
+  /// IMPORT_VAT lines: the customs value the import VAT is computed on (net is 0).
+  customsValue      Decimal?         @db.Decimal(18, 2)
+  /// P-RC15 lines: the self-assessed VAT (not payable to the supplier; Dr VAT_INPUT / Cr VAT_OUTPUT).
+  selfAssessedVat   Decimal?         @db.Decimal(18, 2)
+  /// LANDED_COST lines: the receipt (of any supplier) the freight / duty / clearance / insurance is capitalised onto.
+  targetPurchaseRecordId String?
+  targetPurchaseRecord   PurchaseRecord? @relation("LandedCostTarget", fields: [targetPurchaseRecordId], references: [id], onDelete: Restrict)
+  /// LANDED_COST lines: FREIGHT | DUTY | CLEARANCE | INSURANCE.
+  landedCostType    String?
 
   @@unique([invoiceId, lineNo])
   @@index([purchaseRecordId])
+  @@index([taxCategoryId])
+  @@index([targetPurchaseRecordId])
 }
 
 /// A payment to a supplier, applied in full to its posted invoices. POSTED → VOIDED (reversed).

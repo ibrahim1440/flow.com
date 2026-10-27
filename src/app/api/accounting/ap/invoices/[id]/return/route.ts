@@ -1,4 +1,5 @@
 import { NextResponse } from "@/lib/api-response";
+import { auditFromRequest } from "@/lib/accounting/audit";
 import { requireSub } from "@/lib/auth-server";
 import { acctError, jsonBody } from "@/lib/accounting/http";
 import { returnInvoice } from "@/lib/accounting/ops/ap";
@@ -11,7 +12,7 @@ export async function POST(request: Request, { params }: Params) {
   if (error) return error;
   try {
     const b = await jsonBody(request);
-    return NextResponse.json(await returnInvoice((await params).id, String(b.reason ?? ""), user.id));
+    return NextResponse.json(await returnInvoice((await params).id, String(b.reason ?? ""), user.id, auditFromRequest(request, user.id)));
   } catch (err) {
     return acctError(err);
   }

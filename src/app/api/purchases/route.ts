@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { parsePeriod, periodStart } from "@/lib/inventory/purchases-query";
-import { onGreenReceipt } from "@/lib/accounting/ops/inventory-events";
+import { receiveGreen } from "@/lib/services/purchase-receipts";
 
 /**
  * The purchase register. Without parameters: the newest 200 (unchanged). With `period` (30 | 90 |
@@ -50,70 +50,9 @@ export async function POST(request: Request) {
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      // ── Serialise against a concurrent delete of this coffee ────────────────
-      // PurchaseRecord.itemId and InventoryMovement.referenceEntityId are untyped strings
-      // with no foreign key behind them, so inserting them takes no lock on the coffee they
-      // name and the database will not stop them naming one that is being deleted. Reading
-      // the row first proves only that it existed a moment ago.
-      //
-      // Locking it is what makes the guard in DELETE /api/green-beans/[id] mean anything: that
-      // route locks this same row, counts the references, and refuses if any exist. Taking the
-      // lock BEFORE the loose rows are written puts the two transactions in a queue — either
-      // the delete sees these rows and refuses, or this transaction finds the coffee gone and
-      // rolls back. Without it the delete can count zero, commit, and leave a purchase and a
-      // ledger entry describing stock that arrived for a coffee that no longer exists.
-      //
-      // FOR UPDATE rather than FOR KEY SHARE because this transaction goes on to update the
-      // row anyway; it is the same lock, taken earlier, and it introduces no new ordering —
-      // GreenBean is still the first thing this transaction acquires.
-      const locked = await tx.$queryRaw<{ id: string; quantityKg: number }[]>`
-        SELECT "id", "quantityKg" FROM "GreenBean" WHERE "id" = ${itemId} FOR UPDATE`;
-      const bean = locked[0];
-      if (!bean) throw { _appCode: 404, message: "Green bean not found." };
-
-      const previousQuantity = bean.quantityKg;
-      const newQuantity = previousQuantity + quantity;
-      const totalCost = +(quantity * costPerUnit).toFixed(4);
-
-      const purchase = await tx.purchaseRecord.create({
-        data: {
-          supplierId,
-          type: "GREEN_BEAN",
-          itemId,
-          quantity,
-          costPerUnit,
-          totalCost,
-          purchaseDate: new Date(purchaseDate),
-          notes: notes ?? null,
-          userId: user.id,
-        },
-        include: { supplier: true },
-      });
-
-      const movement = await tx.inventoryMovement.create({
-        data: {
-          type: "IN",
-          category: "RAW_MATERIAL",
-          referenceEntityId: itemId,
-          quantityChanged: quantity,
-          previousQuantity,
-          newQuantity,
-          sourceDocType: "PURCHASE",
-          sourceDocId: purchase.id,
-          userId: user.id,
-          notes: notes ?? null,
-        },
-      });
-
-      const updatedBean = await tx.greenBean.update({
-        where: { id: itemId },
-        data: { quantityKg: { increment: quantity } },
-      });
-
-      // Accounting A3: the receipt is a GRN — costed into the green lot's moving average, and (once accounting is
-      // live) posted Dr INVENTORY_GREEN / Cr GRNI for the supplier, in this transaction.
-      await onGreenReceipt(tx, { purchaseId: purchase.id, greenBeanId: itemId, supplierId, qtyKg: quantity, unitCost: costPerUnit, purchaseDate: purchase.purchaseDate, actor: user.id, movementId: movement.id });
-
+      // The shared receive service (src/lib/services/purchase-receipts.ts): the lock, the purchase record, the IN
+      // movement, the lot's balance and the GRN (cost + entry), exactly as this route always booked them.
+      const { purchase, updatedBean } = await receiveGreen(tx, user, { supplierId, greenBeanId: itemId, quantity, costPerUnit, purchaseDate: new Date(purchaseDate), notes: notes ?? null });
       await flushPostings(tx);
       return { purchase, updatedBean };
     });

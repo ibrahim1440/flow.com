@@ -592,17 +592,24 @@ export const NAV: NavNode[] = [
         id: "stock.purchases",
         ar: "المشتريات", en: "Purchases",
         href: "/dashboard/purchases",
-        anyOf: [{ module: "inventory" }],
+        // Unified inventory phase 2: ONE purchases screen — «الفواتير» (purchase invoices, the default), «الاستلامات»
+        // (receipts) and «الموردين». Reached by the receiving side (inventory) and by the invoice side (purchases ›
+        // invoices, accounting › ap — the audience of «فواتير الموردين»); each tab and every API keeps its own gate.
+        anyOf: [{ module: "inventory" }, { module: "purchases", sub: "invoices" }, { module: "accounting", sub: "ap" }],
         shell: { icon: "truck", trailRoot: "inventory" },
       },
       {
         // Accounting A3: supplier invoices — entered by purchasing (purchases › invoices), approved and posted by
-        // accounts payable (accounting › ap). Figma ACC-50 / 51.
+        // accounts payable (accounting › ap). Figma ACC-50 / 51. Since unified inventory phase 2 the list is the
+        // «الفواتير» tab of «المشتريات»: no sidebar entry of its own (place "none"), it highlights «المشتريات», its
+        // address redirects to the tab, and its detail pages keep this gate.
         id: "stock.supplierInvoices",
         ar: "فواتير الموردين", en: "Supplier invoices",
         href: "/dashboard/purchases/invoices",
         anyOf: [{ module: "purchases", sub: "invoices" }, { module: "accounting", sub: "ap" }],
-        shell: { icon: "note", trailRoot: "inventory" },
+        highlightAs: ["stock.purchases"],
+        // Its pages (the invoice detail) read «المخزون والمشتريات / المشتريات» in the top bar, as the screen they belong to.
+        shell: { icon: "note", trailRoot: "inventory", place: "none", crumb: { ar: "المشتريات", en: "Purchases" } },
       },
       {
         id: "stock.products",

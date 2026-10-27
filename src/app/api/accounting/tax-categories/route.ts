@@ -5,11 +5,17 @@ import { handlePrismaError } from "@/lib/api-error";
 
 const CATEGORY_TYPES = new Set(["STANDARD", "ZERO_RATED", "EXEMPT", "OUT_OF_SCOPE"]);
 
-export async function GET() {
+/**
+ * The tax categories a sales document or a manual journal line picks from. SA4: the purchase VAT codes (P-*,
+ * appliesTo PURCHASES) are kept out of that list; ?appliesTo=PURCHASES lists only them, ?appliesTo=ALL every row.
+ */
+export async function GET(request: Request) {
   const { error } = await requireModule("accounting");
   if (error) return error;
 
-  const taxCategories = await prisma.taxCategory.findMany({ orderBy: { code: "asc" } });
+  const scope = new URL(request.url).searchParams.get("appliesTo")?.toUpperCase();
+  const where = scope === "ALL" ? {} : scope === "PURCHASES" ? { appliesTo: { in: ["PURCHASES", "BOTH"] } } : { appliesTo: { in: ["SALES", "BOTH"] } };
+  const taxCategories = await prisma.taxCategory.findMany({ where, orderBy: { code: "asc" } });
   return NextResponse.json(taxCategories);
 }
 
@@ -39,6 +45,10 @@ export async function POST(request: Request) {
 
   if (typeof code !== "string" || !code.trim()) {
     return NextResponse.json({ error: "code is required." }, { status: 400 });
+  }
+  // The P-* codes are the system's purchase VAT categories (seeded by 20261113090000_purchase_invoice_phase2).
+  if (/^P-/i.test(code.trim())) {
+    return NextResponse.json({ error: "رموز P-* محجوزة لفئات ضريبة المشتريات.", errorEn: "Codes P-* are reserved for the purchase VAT categories.", code: "TAX_CATEGORY_FROZEN" }, { status: 409 });
   }
   if (typeof nameEn !== "string" || !nameEn.trim()) {
     return NextResponse.json({ error: "nameEn is required." }, { status: 400 });

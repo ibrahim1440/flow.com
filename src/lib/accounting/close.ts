@@ -16,7 +16,7 @@
 // every revenue / expense balance of the year to RETAINED_EARNINGS, dated 31 December — closes December and the
 // fiscal year, and opens the next year (its twelve months; the balance-sheet balances simply carry on, the ledger
 // being cumulative). Permissions are the routes' (A1 period duties + step-up); every write is audited.
-import type { Prisma } from "@/generated/prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { Decimal, ZERO, fix2 } from "./money";
 import { dayText, riyadhDay } from "./dates";
@@ -108,8 +108,10 @@ export async function closeChecklist(periodId: string) {
 
   // 6. VAT: the month's documents = the VAT accounts' movement from documents
   const vat = await vatMonth(from, to);
-  out.push(check("vat", !settings?.accountingActive ? "NA" : vat.difference.isZero() ? "PASS" : "FAIL",
-    `ضريبة المستندات المرحّلة = حركة حسابات الضريبة في الأستاذ؛ الفرق ${fix2(vat.difference)}`, `VAT on posted documents = the VAT accounts' movement; difference ${fix2(vat.difference)}`,
+  // Output and input are checked apart: an error on one side never hides behind an opposite error on the other.
+  const vatOk = vat.outputDifference.isZero() && vat.inputDifference.isZero();
+  out.push(check("vat", !settings?.accountingActive ? "NA" : vatOk ? "PASS" : "FAIL",
+    `ضريبة المستندات المرحّلة = حركة حسابات الضريبة في الأستاذ؛ فرق المخرجات ${fix2(vat.outputDifference)} · فرق المدخلات ${fix2(vat.inputDifference)}`, `VAT on posted documents = the VAT accounts' movement; output difference ${fix2(vat.outputDifference)} · input difference ${fix2(vat.inputDifference)}`,
     `/dashboard/accounting/reports?view=vat&year=${p.year}&q=${Math.floor((p.periodNo - 1) / 3) + 1}`, null, vat.difference));
 
   // 7. ZATCA queue (A4): nothing pending / failed for documents signed up to the month end
@@ -138,13 +140,29 @@ async function vatMonth(from: Date, to: Date) {
       FROM "SalesInvoice" i JOIN "JournalEntry" j ON j."sourceId" = i."id" AND j."sourceType" IN ('SALES_INVOICE', 'CREDIT_NOTE', 'DEBIT_NOTE') AND j."status" IN ('POSTED', 'REVERSED')
      WHERE j."entryDate" >= ${from} AND j."entryDate" <= ${to}
     UNION ALL
-    SELECT 'purchases', coalesce(sum(CASE WHEN j."type"::text = 'REVERSAL' THEN -s."vatTotal" ELSE s."vatTotal" END), 0)
-      FROM "SupplierInvoice" s JOIN "JournalEntry" j ON j."sourceId" = s."id" AND j."sourceType" = 'SUPPLIER_INVOICE' AND j."sourceEvent" IN ('POSTED', 'POSTED.REVERSED') AND j."status" IN ('POSTED', 'REVERSED')
-     WHERE j."entryDate" >= ${from} AND j."entryDate" <= ${to}`;
+    SELECT 'purchases', coalesce(sum(CASE WHEN j."type"::text = 'REVERSAL' THEN -v.claimed ELSE v.claimed END), 0)
+      FROM "JournalEntry" j JOIN LATERAL (${PURCHASE_VAT_SQL}) v ON true
+     WHERE j."sourceType" = 'SUPPLIER_INVOICE' AND j."sourceEvent" IN ('POSTED', 'POSTED.REVERSED') AND j."status" IN ('POSTED', 'REVERSED')
+       AND j."entryDate" >= ${from} AND j."entryDate" <= ${to}
+    UNION ALL
+    SELECT 'reverseCharge', coalesce(sum(CASE WHEN j."type"::text = 'REVERSAL' THEN -v.rc ELSE v.rc END), 0)
+      FROM "JournalEntry" j JOIN LATERAL (${PURCHASE_VAT_SQL}) v ON true
+     WHERE j."sourceType" = 'SUPPLIER_INVOICE' AND j."sourceEvent" IN ('POSTED', 'POSTED.REVERSED') AND j."status" IN ('POSTED', 'REVERSED')
+       AND j."entryDate" >= ${from} AND j."entryDate" <= ${to}`;
   const d = (k: string) => new Decimal(String(docs.find((x) => x.kind === k)?.v ?? 0));
-  const difference = d("sales").minus(gl("VAT_OUTPUT").negated()).plus(d("purchases").minus(gl("VAT_INPUT")));
-  return { salesDocs: d("sales"), purchaseDocs: d("purchases"), glOutput: gl("VAT_OUTPUT").negated(), glInput: gl("VAT_INPUT"), difference };
+  // Phase 2: the input VAT a bill claims is its recoverable / import VAT plus the reverse charge's self-assessed VAT
+  // (a not-recoverable VAT is cost, never VAT_INPUT); the reverse charge also posts to VAT_OUTPUT.
+  const outputDifference = d("sales").plus(d("reverseCharge")).minus(gl("VAT_OUTPUT").negated());
+  const inputDifference = d("purchases").minus(gl("VAT_INPUT"));
+  return { salesDocs: d("sales").plus(d("reverseCharge")), purchaseDocs: d("purchases"), glOutput: gl("VAT_OUTPUT").negated(), glInput: gl("VAT_INPUT"), outputDifference, inputDifference, difference: outputDifference.abs().plus(inputDifference.abs()) };
 }
+
+/** Per posted supplier invoice (j."sourceId"): the input VAT it claims and the reverse-charge VAT it self-assessed. */
+const PURCHASE_VAT_SQL = Prisma.sql`
+  SELECT coalesce(sum(CASE WHEN coalesce(l."taxSnapshot" ->> 'inputVatTreatment', c."inputVatTreatment", 'RECOVERABLE') = 'NON_RECOVERABLE' THEN 0 ELSE l."vat" END)
+                  + sum(coalesce(l."selfAssessedVat", 0)), 0) AS claimed,
+         coalesce(sum(coalesce(l."selfAssessedVat", 0)), 0) AS rc
+    FROM "SupplierInvoiceLine" l LEFT JOIN "TaxCategory" c ON c."id" = l."taxCategoryId" WHERE l."invoiceId" = j."sourceId"`;
 
 /** A4 feature detection: the e-invoicing tables may not exist (a database before 20261105090000) or the switch is OFF. */
 async function zatcaCheck(to: Date): Promise<CheckResult> {

@@ -11,7 +11,7 @@ import { OpsLoading } from "@/components/ops/ui";
 import { Select } from "@/components/ui/Select";
 import { AcctShell, money, todayRiyadh, useApi, useLang, type Setup } from "../_ui/shell";
 
-type Box = { box: number; key: string; ar: string; en: string; amount: string; adjustment: string; vat: string; note: { ar: string; en: string } | null };
+type Box = { box: number | null; key: string; ar: string; en: string; amount: string; adjustment: string; vat: string; note: { ar: string; en: string } | null };
 type Bucket = { count: number; vat: string };
 type Vat = {
   year: number; quarter: number; from: string; to: string; dueDate: string; sales: Box[]; purchases: Box[];
@@ -32,8 +32,8 @@ function Boxes({ title, rows, testId }: { title: string; rows: Box[]; testId: st
         <thead><tr><th>{L("الخانة", "Box")}</th><th>{title}</th><th className="num">{L("المبلغ", "Amount")}</th><th className="num acct-hide-m">{L("التعديلات", "Adjustments")}</th><th className="num">{L("الضريبة", "VAT")}</th></tr></thead>
         <tbody>
           {rows.map((b) => (
-            <tr key={b.key} className={b.box === 6 || b.box === 12 ? "is-total" : ""} data-box={b.box}>
-              <td className="hr-num">{b.box}</td>
+            <tr key={b.key} className={b.box === 6 || b.box === 12 ? "is-total" : ""} data-box={b.box ?? "wp"}>
+              <td className="hr-num">{b.box ?? "—"}</td>
               <td>{L(b.ar, b.en)}{b.note ? <span className="acct-th-sub">{L(b.note.ar, b.note.en)}</span> : null}</td>
               <td className="num hr-num">{money(b.amount)}</td><td className="num hr-num acct-hide-m">{money(b.adjustment)}</td><td className="num hr-num">{money(b.vat)}</td>
             </tr>

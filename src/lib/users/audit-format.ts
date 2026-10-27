@@ -7,7 +7,7 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { moduleLabel, subLabel, LEVEL_AR, LEVEL_EN, SYSTEM_ROLES, NO_ACCESS_ROLE } from "./catalog";
 
-export type AuditCategory = "all" | "permissions" | "accounts" | "signin";
+export type AuditCategory = "all" | "permissions" | "accounts" | "signin" | "purchases";
 type Def = { ar: string; en: string; cat: Exclude<AuditCategory, "all"> };
 
 /** Every action the log shows, with its words (UR-12 «الإجراء»). Anything else is not listed here. */
@@ -51,6 +51,20 @@ export const AUDIT_ACTIONS: Record<string, Def> = {
   STATION_SWITCH: { ar: "بدّل الموظف في محطة", en: "Switched employee at a station", cat: "signin" },
   STATION_PIN_FAILED: { ar: "رمز محطة غير صحيح", en: "Wrong station PIN", cat: "signin" },
   STATION_PIN_LOCKED: { ar: "قُفل رمز المحطة", en: "Station PIN locked", cat: "signin" },
+  // Unified inventory phase 2: the purchase invoice's activity (src/lib/accounting/ops/purchase-activity.ts).
+  PURCHASE_INVOICE_SAVED: { ar: "حفظ فاتورة مشتريات كمسودة", en: "Saved a purchase invoice as draft", cat: "purchases" },
+  PURCHASE_INVOICE_SUBMITTED: { ar: "قدّم فاتورة مشتريات للاعتماد", en: "Submitted a purchase invoice", cat: "purchases" },
+  PURCHASE_INVOICE_RECEIVED: { ar: "استلم بضاعة فاتورة مشتريات وقدّمها", en: "Received a purchase invoice's goods and submitted it", cat: "purchases" },
+  PURCHASE_INVOICE_EDITED_AFTER_RECEIPT: { ar: "عدّل فاتورة مشتريات بعد استلامها", en: "Edited a purchase invoice after receiving", cat: "purchases" },
+  PURCHASE_INVOICE_POSTED: { ar: "اعتمد فاتورة مشتريات ورحّلها", en: "Approved and posted a purchase invoice", cat: "purchases" },
+  PURCHASE_INVOICE_RETURNED: { ar: "أعاد فاتورة مشتريات للمسودة", en: "Returned a purchase invoice to draft", cat: "purchases" },
+  PURCHASE_INVOICE_CANCELLED: { ar: "ألغى فاتورة مشتريات وعكس استلامها", en: "Cancelled a purchase invoice and reversed its receipt", cat: "purchases" },
+  PURCHASE_INVOICE_CANCELLED_POSTED: { ar: "ألغى فاتورة مشتريات معتمدة وعكس قيدها", en: "Cancelled an approved purchase invoice and reversed its entry", cat: "purchases" },
+  PURCHASE_INVOICE_DELETED: { ar: "حذف مسودة فاتورة مشتريات", en: "Deleted a purchase invoice draft", cat: "purchases" },
+  PURCHASE_RECEIPT_REVERSED: { ar: "عكس استلامًا", en: "Reversed a goods receipt", cat: "purchases" },
+  PURCHASE_LOT_CREATED: { ar: "أنشأ لوط بن أخضر من فاتورة", en: "Created a green lot from an invoice", cat: "purchases" },
+  PURCHASE_LOT_RETIRED: { ar: "أوقف لوطًا بلا رصيد بعد الإلغاء", en: "Deactivated an empty lot after the cancel", cat: "purchases" },
+  PURCHASE_ACTION_DENIED: { ar: "رُفض إجراء على فاتورة مشتريات", en: "A purchase invoice action was refused", cat: "purchases" },
 };
 
 const SOURCE: Record<string, { ar: string; en: string }> = { WEB: { ar: "ويب", en: "Web" }, STATION: { ar: "محطة", en: "Station" }, SYSTEM: { ar: "النظام", en: "System" } };
@@ -66,7 +80,7 @@ export function parseFilters(sp: URLSearchParams | Record<string, unknown>): Aud
   const source = get("source");
   return {
     q: (get("q") ?? "").trim().slice(0, 80),
-    cat: cat === "permissions" || cat === "accounts" || cat === "signin" ? cat : "all",
+    cat: cat === "permissions" || cat === "accounts" || cat === "signin" || cat === "purchases" ? cat : "all",
     days: days === "all" ? null : [7, 30, 90, 365].includes(Number(days)) ? Number(days) : 30,
     source: source === "web" || source === "station" || source === "system" ? source : "all",
     before: get("before"),
@@ -184,6 +198,33 @@ export function describe(r: Row, names: Map<string, string>, lang: "ar" | "en" =
     case "STATION_CREATED": case "STATION_UPDATED": case "STATION_POLICY_CHANGED": target = m.stationName ? T(`محطة «${m.stationName}»`, `station “${m.stationName}”`) : T("المحطات", "Stations"); break;
     case "STATION_REGISTERED": case "STATION_CODE_ISSUED": case "STATION_CODE_CANCELLED": case "STATION_ACTIVATED": case "STATION_REVOKED": case "STATION_DEVICE_STATIONS":
       target = m.deviceName ? T(`جهاز «${m.deviceName}»`, `device “${m.deviceName}”`) : T("جهاز محطة", "station device"); details = m.stationName ? T(`المحطة: ${m.stationName}`, `Station: ${m.stationName}`) : ""; break;
+    // Unified inventory phase 2: the purchase invoice's activity — the document, its totals, and what changed.
+    case "PURCHASE_INVOICE_SAVED": case "PURCHASE_INVOICE_SUBMITTED": case "PURCHASE_INVOICE_RECEIVED": case "PURCHASE_INVOICE_EDITED_AFTER_RECEIPT":
+    case "PURCHASE_INVOICE_POSTED": case "PURCHASE_INVOICE_RETURNED": case "PURCHASE_INVOICE_CANCELLED": case "PURCHASE_INVOICE_CANCELLED_POSTED":
+    case "PURCHASE_INVOICE_DELETED": case "PURCHASE_RECEIPT_REVERSED": case "PURCHASE_LOT_CREATED": case "PURCHASE_LOT_RETIRED": case "PURCHASE_ACTION_DENIED": {
+      target = m.number ? T(`فاتورة ${m.number}`, `invoice ${m.number}`) : T("فاتورة مشتريات", "purchase invoice");
+      const a = (m.after ?? null) as { supplierName?: string; grossTotal?: string; lines?: { quantity: string | null; net: string; description: string }[] } | null;
+      const b = (m.before ?? null) as { grossTotal?: string; lines?: unknown[] } | null;
+      const sar = T("ر.س", "SAR");
+      const parts: string[] = [];
+      if (r.action === "PURCHASE_ACTION_DENIED") {
+        const what: Record<string, [string, string]> = { save: ["الحفظ", "save"], edit: ["تعديل فاتورة مستلمة", "editing a received invoice"], cancel: ["الإلغاء", "cancel"], post: ["الاعتماد والترحيل", "approve and post"] };
+        const why: Record<string, [string, string]> = { RECEIVED_CHANGE_REQUIRED: ["بلا صلاحية إلغاء/تعديل فاتورة مستلمة", "without the received-change permission"], SOD_OWN_INVOICE: ["فصل المهام: فاتورته", "segregation of duties: their own invoice"], INVOICE_STALE: ["عدّلها غيره منذ فتحها", "changed by someone else since it was opened"], RECEIVE_REQUIRED: ["بلا صلاحية الاستلام", "without the receive permission"] };
+        const w = what[String(m.attempted)] ?? [String(m.attempted ?? "—"), String(m.attempted ?? "—")];
+        const y = why[String(m.code)] ?? [String(m.code ?? "—"), String(m.code ?? "—")];
+        parts.push(T(`${w[0]} · ${y[0]}`, `${w[1]} · ${y[1]}`));
+      } else if (r.action === "PURCHASE_LOT_CREATED" || r.action === "PURCHASE_LOT_RETIRED") parts.push(T(`اللوط ${m.lot?.serialNumber ?? "—"}`, `lot ${m.lot?.serialNumber ?? "—"}`));
+      else if (r.action === "PURCHASE_RECEIPT_REVERSED") parts.push(T(`الاستلام ${String(m.purchaseRecordId ?? "").slice(-6)}`, `receipt ${String(m.purchaseRecordId ?? "").slice(-6)}`));
+      else {
+        if (a?.supplierName) parts.push(a.supplierName);
+        if (a?.lines) parts.push(T(`${a.lines.length} سطر`, `${a.lines.length} lines`));
+        if (b?.grossTotal && a?.grossTotal && b.grossTotal !== a.grossTotal) parts.push(lang === "en" ? `${b.grossTotal} → ${a.grossTotal} ${sar}` : `${b.grossTotal} ← ${a.grossTotal} ${sar}`);
+        else if (a?.grossTotal) parts.push(`${a.grossTotal} ${sar}`);
+        if (Array.isArray(m.reversedReceipts) && m.reversedReceipts.length) parts.push(T(`عُكس ${m.reversedReceipts.length} استلام`, `${m.reversedReceipts.length} receipt(s) reversed`));
+      }
+      details = parts.join(" · ");
+      break;
+    }
     case "STATION_ACCESS_CHANGED": {
       const ch = (Array.isArray(m.changes) ? m.changes : []) as { stationName: string; to: string }[];
       details = ch.map((c) => `${c.stationName}: ${c.to === "NONE" ? T("غير مسموح", "not allowed") : c.to === "SUPERVISOR" ? T("مسموح · مشرف", "allowed · supervisor") : T("مسموح", "allowed")}`).join(" · ");

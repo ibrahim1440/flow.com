@@ -98,7 +98,9 @@ export async function POST(request: Request) {
       prisma.stockAllocation.deleteMany(),
       prisma.finishedGoodsLot.deleteMany(),
       prisma.productionOrder.deleteMany(),
-      prisma.purchaseRecord.deleteMany(),
+      // 20261113090000_purchase_invoice_phase2: a receipt a landed cost (freight, duty…) was capitalised onto is
+      // referenced by that supplier invoice line (ON DELETE RESTRICT) — the books outlive a reset, so it stays.
+      prisma.purchaseRecord.deleteMany({ where: { landedCostLines: { none: {} } } }),
       prisma.qcRecord.deleteMany(),
       // Guest invitations of the QC panel (20261023090000_production_qc_simplify); before the batches.
       prisma.qcInvite.deleteMany(),
@@ -145,13 +147,12 @@ export async function POST(request: Request) {
       // a slot outlives its customer by design so the orphan sweep still deletes its blob (an hour on).
       prisma.productSKU.deleteMany(),
       prisma.coffeeProduct.deleteMany(),
-      // 20261104090000_ops_posting (accounting A3): the supplier invoices and payments name the suppliers cleared
-      // next (ON DELETE RESTRICT): payments first (their allocations cascade), then the invoices (their lines
-      // cascade). The ledger, the cost sub-ledger (append-only) and the expense categories are NOT cleared — the
-      // books outlive a reset of operational data, like the A1 ledger.
-      prisma.supplierPayment.deleteMany(),
-      prisma.supplierInvoice.deleteMany(),
-      prisma.supplier.deleteMany(),
+      // Supplier invoices and payments are NOT cleared (council N3, 20261113090000_purchase_invoice_phase2): they are
+      // part of the books, like the ledger, the cost sub-ledger and the expense categories — numbered documents the
+      // database refuses to delete once submitted, posted or cancelled (ledger_ap_invoice_delete_guard; a posted
+      // invoice's lines are frozen too). So only the suppliers that hold none of them (and no receipt kept above)
+      // are cleared; a supplier with invoices, payments or a kept receipt stays with its documents.
+      prisma.supplier.deleteMany({ where: { supplierInvoices: { none: {} }, supplierPayments: { none: {} }, purchases: { none: {} } } }),
     ]);
     await deleteCustomerFileBlobs(prisma, blobs.map((b) => b.blobPathname));
 

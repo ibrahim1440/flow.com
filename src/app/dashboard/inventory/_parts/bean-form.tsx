@@ -46,9 +46,12 @@ async function callTranslate(text: string, target: "ar" | "en"): Promise<string 
 // ─── BeanForm (Add / Edit) ───────────────────────────────────────────────────
 
 export function BeanForm({
-  title, initial, onSave, onClose, saving, error,
+  title, initial, onSave, onClose, saving, error, hideQuantity, saveLabel,
 }: {
   title: string;
+  /** The purchase invoice's «لوط جديد»: the quantity is the invoice line's, not the form's. */
+  hideQuantity?: boolean;
+  saveLabel?: string;
   /** A refusal of the save, shown inside the dialog (the smart add flow). */
   error?: string;
   initial: FormState;
@@ -112,7 +115,7 @@ export function BeanForm({
       onClose={onClose}
       actions={
         <>
-          <Btn variant="primary" type="submit" form="bean-form" disabled={saving}>{saving ? t("saving") : t("save")}</Btn>
+          <Btn variant="primary" type="submit" form="bean-form" disabled={saving}>{saving ? t("saving") : saveLabel ?? t("save")}</Btn>
           <Btn onClick={onClose}>{t("cancel")}</Btn>
         </>
       }
@@ -122,10 +125,12 @@ export function BeanForm({
         <Field label={t("serialNumber")} help={L("يُولَّد تلقائيًا", "Auto-generated")}>
           <input className="hr-input hr-id" dir="ltr" value={form.serialNumber} onChange={(e) => set("serialNumber", e.target.value)} placeholder="GB-20260511-142" />
         </Field>
-        <Field label={`${t("quantityKg")} *`}>
-          <input className="hr-input" type="number" step="0.01" min="0" value={form.quantityKg} required
-            onChange={(e) => set("quantityKg", parseFloat(e.target.value) || 0)} />
-        </Field>
+        {hideQuantity ? null : (
+          <Field label={`${t("quantityKg")} *`}>
+            <input className="hr-input" type="number" step="0.01" min="0" value={form.quantityKg} required
+              onChange={(e) => set("quantityKg", parseFloat(e.target.value) || 0)} />
+          </Field>
+        )}
         {bilingualFields.map(({ enKey, arKey, labelEn, labelAr, required }) => (
           <div key={enKey} style={{ display: "contents" }}>
             <Field label={`${labelEn}${required ? " *" : ""}`}>

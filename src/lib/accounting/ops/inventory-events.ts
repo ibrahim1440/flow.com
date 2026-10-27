@@ -10,7 +10,7 @@ import { toBusinessDay } from "../dates";
 import { LOSS_WARN_POINTS } from "@/lib/station/shared";
 import { Decimal, ZERO, roundMoney } from "../money";
 import { qty4, roastCost, split } from "./costing";
-import { costIn, costOut, lockHolder, lockHolders, postAndResolve, resolveNone, side, type CostKind, type HolderRow, type MoveResult, type Src } from "./cost-ledger";
+import { costIn, costOut, costReturnOut, deferPosting, lockHolder, lockHolders, postAndResolve, resolveNone, side, type CostKind, type HolderRow, type MoveResult, type Src } from "./cost-ledger";
 
 type Tx = Prisma.TransactionClient;
 const kg = (n: number | Decimal) => qty4(n);
@@ -37,11 +37,16 @@ export async function abnormalThreshold(tx: Tx, productId?: string | null): Prom
 // ─── Receipts (GRN) ──────────────────────────────────────────────────────────────────────────────
 
 /** Green coffee received on a purchase (PurchaseRecord): Dr INVENTORY_GREEN / Cr GRNI (party = supplier). */
-export async function onGreenReceipt(tx: Tx, a: { purchaseId: string; greenBeanId: string; supplierId: string; qtyKg: number; unitCost: number; purchaseDate: Date; actor: string; movementId?: string | null }) {
+//
+// `value` (optional): the receipt's value as the purchase invoice priced its line (net, rounded once) — the one-step
+// purchase invoice receives at exactly the amount it bills, so the match carries no price variance. `lineKey`
+// (optional): the source document line — `SINV:<invoice id>` when the purchase invoice itself received the goods
+// (the immutable link from the receipt to the bill that created it; the bill's GRN line links back).
+export async function onGreenReceipt(tx: Tx, a: { purchaseId: string; greenBeanId: string; supplierId: string; qtyKg: number; unitCost: number; purchaseDate: Date; actor: string; movementId?: string | null; value?: Decimal; lineKey?: string }) {
   const h = await lockHolder(tx, "GREEN_BEAN", a.greenBeanId);
-  const value = roundMoney(new Decimal(a.qtyKg.toFixed(6)).times(new Decimal(a.unitCost.toFixed(6))));
+  const value = a.value ? roundMoney(a.value) : roundMoney(new Decimal(a.qtyKg.toFixed(6)).times(new Decimal(a.unitCost.toFixed(6))));
   const src: Src = { module: "purchasing", type: "GRN", id: a.purchaseId, event: "RECEIVED" };
-  const m = await costIn(tx, { holder: h, src, kind: "RECEIPT", qty: kg(a.qtyKg), value, actor: a.actor, inventoryMovementId: a.movementId, day: dayOf(a.purchaseDate) });
+  const m = await costIn(tx, { holder: h, src, lineKey: a.lineKey, kind: "RECEIPT", qty: kg(a.qtyKg), value, actor: a.actor, inventoryMovementId: a.movementId, day: dayOf(a.purchaseDate) });
   return postAndResolve(tx, [m.id], {
     source: src, date: dayOf(a.purchaseDate), memo: `استلام بن أخضر (سند ${a.purchaseId})`, createdBy: a.actor,
     lines: [side(h.role, m.value, greenDim(a.greenBeanId)), side("GRNI", m.value.negated(), { party: { type: "SUPPLIER", id: a.supplierId } })],
@@ -53,16 +58,52 @@ export async function onGreenReceipt(tx: Tx, a: { purchaseId: string; greenBeanI
  * or INVENTORY_CAFE / Cr GRNI); without a cost the quantity is received at zero value and the supplier invoice
  * later capitalises its cost (a STOCK line).
  */
-export async function onMaterialReceipt(tx: Tx, a: { sourceId: string; materialItemId: string; supplierId: string | null; qty: number; unitCost: number | null; actor: string; movementId?: string | null }) {
+export async function onMaterialReceipt(tx: Tx, a: { sourceId: string; materialItemId: string; supplierId: string | null; qty: number; unitCost: number | null; actor: string; movementId?: string | null; value?: Decimal; lineKey?: string; purchaseDate?: Date }) {
   const h = await lockHolder(tx, "MATERIAL", a.materialItemId);
-  const value = a.unitCost && a.unitCost > 0 ? roundMoney(new Decimal(a.qty.toFixed(6)).times(new Decimal(a.unitCost.toFixed(6)))) : ZERO;
+  const value = a.value ? roundMoney(a.value) : a.unitCost && a.unitCost > 0 ? roundMoney(new Decimal(a.qty.toFixed(6)).times(new Decimal(a.unitCost.toFixed(6)))) : ZERO;
   const src: Src = { module: "purchasing", type: "GRN", id: a.sourceId, event: "RECEIVED" };
-  const m = await costIn(tx, { holder: h, src, kind: "RECEIPT", qty: kg(a.qty), value, actor: a.actor, inventoryMovementId: a.movementId });
+  const day = a.purchaseDate ? dayOf(a.purchaseDate) : undefined;
+  const m = await costIn(tx, { holder: h, src, lineKey: a.lineKey, kind: "RECEIPT", qty: kg(a.qty), value, actor: a.actor, inventoryMovementId: a.movementId, day });
   if (!a.supplierId || value.isZero()) { await resolveNone(tx, [m.id]); return { status: "none" as const }; }
   return postAndResolve(tx, [m.id], {
-    source: src, memo: `استلام مواد (سند ${a.sourceId})`, createdBy: a.actor,
+    source: src, ...(day ? { date: day } : {}), memo: `استلام مواد (سند ${a.sourceId})`, createdBy: a.actor,
     lines: [side(h.role, m.value, materialDim(a.materialItemId)), side("GRNI", m.value.negated(), { party: { type: "SUPPLIER", id: a.supplierId } })],
   });
+}
+
+/**
+ * A goods receipt REVERSED (phase 2: the one-step purchase invoice cancelled or edited before it is posted, while the
+ * goods are still untouched): the quantity leaves the holder at the value it came in at (kind RETURN), and the
+ * receipt's entry is reversed — the mirror Dr GRNI / Cr INVENTORY_* (`purchasing · GRN · REVERSED`). A receipt whose
+ * entry was skipped (before activation / go-live) or never posted reverses nothing in the books: the return movement
+ * takes the receipt's own ledger state. A part the holder could no longer give back (its value moved on) goes to
+ * INVENTORY_VARIANCE in a correction entry, so the sub-ledger and the GL stay equal. Idempotent by the source event.
+ */
+export async function onReceiptReversed(tx: Tx, a: { purchaseId: string; reason: string; actor: string; movementId?: string | null }) {
+  const rec = await tx.costMove.findFirst({ where: { sourceType: "GRN", sourceId: a.purchaseId, sourceEvent: "RECEIVED" }, include: { costItem: { select: { kind: true, entityId: true } } } });
+  if (!rec) return { status: "none" as const };
+  const kind = rec.costItem.kind as CostKind;
+  const h = await lockHolder(tx, kind, rec.costItem.entityId);
+  const src: Src = { module: "purchasing", type: "GRN", id: a.purchaseId, event: "REVERSED" };
+  const value = new Decimal(rec.value).abs();
+  const out = await costReturnOut(tx, { holder: h, src, lineKey: rec.lineKey, kind: "RETURN", qty: new Decimal(rec.qty).abs(), value, actor: a.actor, inventoryMovementId: a.movementId, reason: a.reason });
+  if (out.replayed) return { status: "replayed" as const };
+  const dims = kind === "GREEN_BEAN" ? greenDim(rec.costItem.entityId) : materialDim(rec.costItem.entityId);
+  if (rec.glState === "POSTED" && rec.journalEntryId) {
+    const entryId = rec.journalEntryId;
+    const notBack = value.minus(out.value);
+    deferPosting(tx, async () => {
+      const rev = await reverseEntry(tx, { entryId, reason: a.reason, actorId: a.actor });
+      await tx.costMove.updateMany({ where: { id: out.id, glState: "PENDING" }, data: { glState: "POSTED", journalEntryId: rev.entryId } });
+      if (!notBack.isZero()) {
+        await postAndResolve(tx, [], { source: { ...src, event: "REVERSED_FIX" }, memo: `تصحيح تكلفة عكس استلام (سند ${a.purchaseId})`, createdBy: a.actor, lines: [side(h.role, notBack, dims), side("INVENTORY_VARIANCE", notBack.negated(), dims)] }, { now: true });
+      }
+    });
+    return { status: "deferred" as const };
+  }
+  // Nothing was posted for the receipt: nothing to reverse in the books.
+  await tx.costMove.updateMany({ where: { id: out.id, glState: "PENDING" }, data: { glState: rec.glState === "SKIPPED" ? "SKIPPED" : "NONE" } });
+  return { status: "none" as const };
 }
 
 /** Stock a new green lot / material is created with (no cost given): received at zero value — the opening valuation costs it. */

@@ -60,6 +60,21 @@ export function issue(h: Holder, q: Decimal, opts: { closeOut?: boolean } = {}):
 }
 
 /**
+ * A RETURN of `q` at the value it came in at (a receipt reversed before its goods were used): the value given back is
+ * the original `v`, never more than the holder holds; returning everything left takes the whole remaining value (so
+ * an empty holder keeps no residue). Unit-cost snapshot: the value returned per unit.
+ */
+export function returnOut(h: Holder, q: Decimal, v: MoneyInput | Decimal): Applied {
+  if (q.isNegative()) throw new RangeError("A return quantity is not negative.");
+  const outQty = Decimal.min(q, h.qty);
+  const all = outQty.gte(h.qty);
+  const value = all ? h.value : Decimal.min(roundMoney(v as MoneyInput), h.value);
+  const afterQty = h.qty.minus(outQty);
+  const afterValue = h.value.minus(value);
+  return { qty: outQty, value, unitCost: unitCost(value, outQty), after: { qty: afterQty, value: afterValue, avgCost: unitCost(afterValue, afterQty) } };
+}
+
+/**
  * A value change without a quantity change (a price variance on an invoice, a revaluation). A holder holding stock
  * absorbs it, down to zero at most; the rest (or all of it, when the holder is empty) is returned as `rest` —
  * the caller expenses it (INVENTORY_VARIANCE).
@@ -126,6 +141,12 @@ export function split(total: Decimal, weights: Decimal[]): Decimal[] {
 }
 
 // ─── AP math ─────────────────────────────────────────────────────────────────────────────────────
+
+/** A purchase invoice stock line's net: quantity × unit cost, rounded once (HALF-UP, 2 dp) — the one-step purchase
+ *  invoice receives the goods at exactly this value, so its GRN line matches with no price variance. */
+export function stockLineNet(quantity: Decimal, unitCost: Decimal): Decimal {
+  return roundMoney(quantity.times(unitCost));
+}
 
 /** VAT on a net line (rate %, rounded once per LINE — never on the header). */
 export function lineVat(net: Decimal, ratePct: Decimal): Decimal {

@@ -316,9 +316,11 @@ export function categoryPath(c: MaterialCategoryOption | undefined, all: Materia
  * unit defaults to the category's. Plain names first: the Arabic name is required, the English one and the code
  * are optional (a code is generated). POST /api/materials with categoryId.
  */
-export function MaterialForm({ category, categories, onClose, onSaved, onError, onBack }: {
+export function MaterialForm({ category, categories, onClose, onSaved, onError, onBack, noOpening }: {
   category: MaterialCategoryOption; categories: MaterialCategoryOption[];
-  onClose: () => void; onSaved: (m: { id: string; name: string; nameAr: string | null }) => void; onError: (m: string) => void; onBack?: () => void;
+  onClose: () => void; onSaved: (m: { id: string; name: string; nameAr: string | null; unitOfMeasure?: string; categoryId?: string | null; code?: string }) => void; onError: (m: string) => void; onBack?: () => void;
+  /** The purchase invoice's «صنف جديد»: created at zero — the invoice line receives the quantity. */
+  noOpening?: boolean;
 }) {
   const { t, lang } = useI18n();
   const L = useL();
@@ -343,7 +345,7 @@ export function MaterialForm({ category, categories, onClose, onSaved, onError, 
           name: form.nameEn.trim() || form.nameAr.trim(),
           nameAr: form.nameAr.trim() || null,
           unitOfMeasure: form.unitOfMeasure,
-          quantityOnHand: Number(form.quantityOnHand),
+          quantityOnHand: noOpening ? 0 : Number(form.quantityOnHand),
           reorderPoint: Number(form.reorderPoint),
         }),
       });
@@ -392,9 +394,9 @@ export function MaterialForm({ category, categories, onClose, onSaved, onError, 
             {UNIT_OPTIONS.map(([v, ar, en]) => <option key={v} value={v}>{lang === "ar" ? ar : en}</option>)}
           </Select>
         </Field>
-        <Field label={t("onHandLabel")} help={canReceive ? L("رصيد افتتاحي يُسجَّل كاستلام", "An opening balance, recorded as a receipt") : L("ابدأ بصفر واستلم التوريد لاحقًا", "Start at zero and receive the delivery later")}>
+        {noOpening ? null : <Field label={t("onHandLabel")} help={canReceive ? L("رصيد افتتاحي يُسجَّل كاستلام", "An opening balance, recorded as a receipt") : L("ابدأ بصفر واستلم التوريد لاحقًا", "Start at zero and receive the delivery later")}>
           <input className="hr-input" type="number" min={0} step="any" data-testid="item-qty" value={form.quantityOnHand} disabled={!canReceive} onChange={(e) => setForm({ ...form, quantityOnHand: e.target.value })} />
-        </Field>
+        </Field>}
         <Field label={t("reorderPointLabel")}>
           <input className="hr-input" type="number" min={0} step="any" value={form.reorderPoint} onChange={(e) => setForm({ ...form, reorderPoint: e.target.value })} />
         </Field>

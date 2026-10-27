@@ -3,6 +3,7 @@ import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireAnyModule, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
+import { greenLotFields } from "@/lib/services/green-lots";
 
 export async function GET(request: Request) {
   // Production workers need to see bean names and stock when creating roasting batches
@@ -21,11 +22,6 @@ export async function GET(request: Request) {
   return NextResponse.json(beans);
 }
 
-function nullify(v: unknown): string | null {
-  if (typeof v === "string" && v.trim() !== "") return v.trim();
-  return null;
-}
-
 export async function POST(request: Request) {
   const { error, user } = await requireSub("inventory", "receive");
   if (error) return error;
@@ -37,25 +33,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "quantityKg must be a non-negative number." }, { status: 400 });
   }
 
-  const serialNumber =
-    raw.serialNumber?.trim() ||
-    `GB-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${Math.floor(Math.random() * 900 + 100)}`;
-
-  const data = {
-    serialNumber,
-    beanType:   raw.beanType?.trim()   || "Unknown",
-    beanTypeAr: nullify(raw.beanTypeAr),
-    country:    raw.country?.trim()    || "Unknown",
-    countryAr:  nullify(raw.countryAr),
-    region:     nullify(raw.region),
-    regionAr:   nullify(raw.regionAr),
-    variety:    nullify(raw.variety),
-    process:    nullify(raw.process),
-    processAr:  nullify(raw.processAr),
-    altitude:   nullify(raw.altitude),
-    location:   nullify(raw.location),
-    quantityKg,
-  };
+  // The lot form's fields, mapped once (src/lib/services/green-lots.ts) — the one-step purchase invoice uses the same.
+  const data = { ...greenLotFields(raw), quantityKg };
 
   try {
     let bean;

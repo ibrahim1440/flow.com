@@ -64,7 +64,7 @@ export const SUB_AR: Record<string, Record<string, string>> = {
     manage_roasters: "إدارة المحامص وصيانتها وإسناد المشغّلين", manage_schedule: "إدارة جدول التحميص واعتماد الخطط",
   },
   inventory: { receive: "استلام البن الأخضر", adjust: "تسوية المخزون وتعديله", override: "تجاوز المخزون للدفعات الملغاة", valuation: "تقييم المخزون وتكلفة الإنتاج" },
-  purchases: { invoices: "إدخال فواتير الموردين وتقديمها للاعتماد" },
+  purchases: { invoices: "إدخال فواتير الموردين وتقديمها للاعتماد", received_change: "إلغاء/تعديل فاتورة مستلمة (يعكس استلامها)" },
   workspace: { assign_any: "إسناد المهام لأي موظف وإدارة أي مهمة", team_view: "عرض مهام وتقويم وأعباء جميع الموظفين" },
   sales: {
     lead_write: "إنشاء العملاء المحتملين وتعديلهم", lead_assign: "إسناد العميل المحتمل أو تغيير مالكه", lead_convert: "تحويل العميل المحتمل إلى عميل وصفقة",

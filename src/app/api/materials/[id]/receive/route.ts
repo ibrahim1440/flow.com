@@ -3,9 +3,8 @@ import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
-import { auditInventoryReceipt } from "@/lib/services/inventory-receiving";
 import { parseStockQuantity } from "@/lib/services/stock-quantity";
-import { onMaterialReceipt } from "@/lib/accounting/ops/inventory-events";
+import { receiveMaterial } from "@/lib/services/purchase-receipts";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -55,42 +54,9 @@ export async function POST(request: Request, { params }: Params) {
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      // Lock the material row first. A count (PATCH /api/materials/:id) takes the same lock, so a
-      // receipt and a count are serialised and neither loses the other's units; a packaging draw
-      // decrements atomically and reads its balance back (unified-packaging.ts).
-      const locked = await tx.$queryRaw<{ id: string; quantityOnHand: number; isActive: boolean; unitOfMeasure: string }[]>`
-        SELECT "id", "quantityOnHand", "isActive", "unitOfMeasure"::text AS "unitOfMeasure" FROM "MaterialItem" WHERE "id" = ${id} FOR UPDATE`;
-      const item = locked[0];
-      if (!item) throw { _appCode: 404, message: "Material not found." };
-      if (!parseStockQuantity(b.quantity, { allowZero: false, unitOfMeasure: item.unitOfMeasure }).ok)
-        throw { _appCode: 400, message: `quantity must be a whole number for a material counted in ${item.unitOfMeasure.toLowerCase()}s.`, code: "RECEIVE_QUANTITY_INVALID" };
-      if (!item.isActive) throw { _appCode: 409, message: "This material is inactive; reactivate it before receiving." };
-      const supplier = supplierId ? await tx.supplier.findUnique({ where: { id: supplierId }, select: { id: true, name: true } }) : null;
-      if (supplierId && !supplier) throw { _appCode: 404, message: "Supplier not found." };
-
-      const previousQuantity = item.quantityOnHand;
-      const newQuantity = Number((previousQuantity + quantity).toFixed(4));
-      const label = [supplier ? `Supplier: ${supplier.name}` : null, reference ? `Ref: ${reference}` : null, notes].filter(Boolean).join(" · ");
-      const movement = await tx.inventoryMovement.create({
-        data: {
-          type: "IN",
-          category: "PACKAGING_MATERIAL",
-          referenceEntityId: id,
-          quantityChanged: quantity,
-          previousQuantity,
-          newQuantity,
-          sourceDocType: "RECEIVING",
-          sourceDocId: supplier?.id ?? id,
-          userId: user.id,
-          notes: `Received · ${label}`.slice(0, 1000),
-        },
-      });
-      const updated = await tx.materialItem.update({ where: { id }, data: { quantityOnHand: newQuantity } });
-      const purchase = supplier && unitCost !== null && unitCost > 0
-        ? await tx.purchaseRecord.create({ data: { supplierId: supplier.id, type: "PACKAGING", itemId: id, materialItemId: id, quantity, costPerUnit: unitCost, totalCost: +(quantity * unitCost).toFixed(4), purchaseDate: new Date(), notes: [reference ? `Ref: ${reference}` : null, notes].filter(Boolean).join(" · ") || null, userId: user.id } })
-        : null;
-      await onMaterialReceipt(tx, { sourceId: purchase?.id ?? movement.id, materialItemId: id, supplierId: purchase ? supplier!.id : null, qty: quantity, unitCost: purchase ? unitCost : null, actor: user.id, movementId: movement.id });
-      await auditInventoryReceipt(tx, user, { entityId: id, opening: false, movementId: movement.id, quantity, previousQuantity, newQuantity, supplier, reference, notes });
+      // The shared receive service (src/lib/services/purchase-receipts.ts): the row lock, the whole-number rule, the
+      // IN movement, the balance, the costed GRN when a supplier and a unit cost are given, and the receipt audit.
+      const { material: updated, movement } = await receiveMaterial(tx, user, { materialItemId: id, quantity, rawQuantity: b.quantity, supplierId, reference, notes, unitCost });
       await flushPostings(tx);
       return { material: updated, movement };
     });

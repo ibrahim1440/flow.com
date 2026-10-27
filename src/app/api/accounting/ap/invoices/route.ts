@@ -1,8 +1,9 @@
 import { NextResponse } from "@/lib/api-response";
 import { hasSubPrivilege } from "@/lib/auth-shared";
-import { acctError, jsonBody, qp } from "@/lib/accounting/http";
+import { acctError, qp } from "@/lib/accounting/http";
+import { opsRefuse } from "@/lib/accounting/ops/refusals";
 import { requireApRead, requireDraftWriter } from "@/lib/accounting/ops/http";
-import { createInvoice, listInvoices, type InvoiceInput } from "@/lib/accounting/ops/ap";
+import { listInvoices } from "@/lib/accounting/ops/ap";
 import { isSimpleMode } from "@/lib/simple-mode";
 import { sodPolicy } from "@/lib/accounting/sod";
 
@@ -18,13 +19,14 @@ export async function GET(request: Request) {
   }
 }
 
-/** A new draft (Figma ACC-51). purchases › invoices or accounting › ap. */
-export async function POST(request: Request) {
-  const { user, error } = await requireDraftWriter();
+/**
+ * Gone (council review SA1): supplier invoices are entered as purchase invoices — POST /api/purchases/invoices, one
+ * document for stock (received in the same save), expenses, import VAT and landed costs. This legacy route's STOCK
+ * line capitalised value with no goods received; no screen uses it any more. The gate still answers first, so an
+ * unauthorised caller learns nothing about the route.
+ */
+export async function POST() {
+  const { error } = await requireDraftWriter();
   if (error) return error;
-  try {
-    return NextResponse.json(await createInvoice((await jsonBody(request)) as unknown as InvoiceInput, user.id), { status: 201 });
-  } catch (err) {
-    return acctError(err);
-  }
+  return acctError(opsRefuse("LEGACY_AP_ROUTE_GONE"));
 }

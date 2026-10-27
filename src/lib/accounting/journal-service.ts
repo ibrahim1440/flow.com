@@ -1,3 +1,4 @@
+import { opsRefuse } from "./ops/refusals";
 import { Prisma } from "@/generated/prisma/client";
 import type { JournalEntryStatus } from "@/generated/prisma/client";
 import { prisma, TX_OPTS } from "@/lib/db";
@@ -133,6 +134,8 @@ async function validateLines(tx: Prisma.TransactionClient, entryDate: Date, line
       const taxCategory = taxCategoryById.get(line.taxCategoryId);
       if (!taxCategory) throw new AccountingError("Tax category not found.", 400);
       assertTaxCategoryActive(taxCategory);
+      // SA4: a purchase VAT code (P-*) is for supplier invoices only — never a manual journal line.
+      if (taxCategory.appliesTo === "PURCHASES") throw opsRefuse("TAX_CATEGORY_PURCHASES_ONLY");
     }
   }
   return { period, taxCategoryById };

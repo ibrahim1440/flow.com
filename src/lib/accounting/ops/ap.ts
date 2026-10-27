@@ -5,7 +5,11 @@
 //     posting (approve = post, by an AP holder other than its preparer / submitter — SIMPLE MODE excepted):
 //       Dr GRNI (party = supplier) the matched receipts' values   · GRN lines
 //       Dr INVENTORY_* / INVENTORY_VARIANCE the price variance     · capitalised while the stock is on hand
-//       Dr INVENTORY_* stock lines without a costed receipt       · capitalised into the holder (rest → variance)
+//       Dr INVENTORY_* stock lines without a costed receipt       · capitalised into the holder (rest → variance) —
+//                                                                   an AP-origin bill only (legacy API); a one-step
+//                                                                   purchase invoice receives its stock lines first
+//       Dr INVENTORY_* landed costs (freight, duty, clearance,     · capitalised onto the target receipt's holder, the
+//          insurance) on a receipt of any supplier                    consumed share → INVENTORY_VARIANCE (the GRN rule)
 //       Dr <category account> expense lines                      · ExpenseCategory → account (never a hard-coded code)
 //       Dr VAT_INPUT the VAT (per line)
 //       Cr AP (party = supplier) the gross                        — `purchasing · SUPPLIER_INVOICE · POSTED`
@@ -22,14 +26,24 @@ import { Decimal, ZERO, toDecimal, MoneyError } from "../money";
 import { dayText, parseBusinessDay, riyadhDay, addDaysUtc } from "../dates";
 import { setAuditContext, type AuditContext } from "../audit";
 import { qty4, lineVat, agingBucket, varianceOnHand, AGING_BUCKETS, type AgingBucket } from "./costing";
-import { costRevalue, lockHolder, netLines, side, accountSide, type CostKind } from "./cost-ledger";
+import { costRevalue, lockHolders, netLines, side, accountSide, type CostKind, type HolderRow } from "./cost-ledger";
 import { opsRefuse } from "./refusals";
+import { buildPurchaseTaxSnapshot, purchaseTaxCategories, purchaseTaxCodeForRate } from "./purchase-tax";
+import { invoiceSummary, logPurchaseActivity, withDeniedLog } from "./purchase-activity";
 
 type Tx = Prisma.TransactionClient;
 const str = (v: unknown, max: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
 
 export type InvoiceLineInput = {
-  kind: "GRN" | "STOCK" | "EXPENSE";
+  kind: "GRN" | "STOCK" | "EXPENSE" | "IMPORT_VAT" | "LANDED_COST";
+  /** Phase 2: the purchase VAT category (P-S15 …); without it the rate decides (15 → P-S15, 0 → P-Z0). */
+  taxCode?: string | null;
+  taxCategoryId?: string | null;
+  /** IMPORT_VAT lines: the customs value the import VAT is computed on. */
+  customsValue?: string | number | null;
+  /** LANDED_COST lines: the goods receipt (any supplier) the cost is capitalised onto, and its type. */
+  targetPurchaseRecordId?: string | null;
+  landedCostType?: string | null;
   purchaseRecordId?: string | null;
   stockKind?: "GREEN_BEAN" | "MATERIAL" | null;
   stockItemId?: string | null;
@@ -39,7 +53,11 @@ export type InvoiceLineInput = {
   net: string | number;
   vatRate?: string | number | null;
 };
-export type InvoiceInput = { supplierId: string; supplierRef: string; invoiceDate: string; dueDate?: string | null; notes?: string | null; lines: InvoiceLineInput[] };
+export type InvoiceInput = { supplierId: string; supplierRef: string; invoiceDate: string; dueDate?: string | null; notes?: string | null; customsDeclarationNo?: string | null; customsDeclarationDate?: string | null; lines: InvoiceLineInput[] };
+export type InvoiceSupplier = { id: string; name: string; vatNumber: string | null; isNonResident: boolean; kind: string; paymentTermsDays: number | null };
+export const LANDED_COST_TYPES = ["FREIGHT", "DUTY", "CLEARANCE", "INSURANCE"] as const;
+/** The codes a landed cost may carry (P-RC15: freight from a non-resident carrier). */
+const LANDED_TAX = new Set(["P-S15", "P-S15-NR", "P-O", "P-RC15"]);
 
 function money(v: unknown, what: string): Decimal {
   try {
@@ -53,7 +71,7 @@ function day(v: unknown, what: string): Date {
 }
 
 /** Gapless-enough internal numbers «SINV-2026-000001» / «SPAY-2026-000001» (serialised per prefix and year). */
-async function nextNumber(tx: Tx, prefix: "SINV" | "SPAY", on: Date): Promise<string> {
+export async function nextNumber(tx: Tx, prefix: "SINV" | "SPAY", on: Date): Promise<string> {
   const y = on.getUTCFullYear();
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`ap:number:${prefix}:${y}`}, 0))`;
   const like = `${prefix}-${y}-%`;
@@ -64,20 +82,35 @@ async function nextNumber(tx: Tx, prefix: "SINV" | "SPAY", on: Date): Promise<st
   return `${prefix}-${y}-${String(last + 1).padStart(6, "0")}`;
 }
 
-type CleanLine = { kind: InvoiceLineInput["kind"]; purchaseRecordId: string | null; stockKind: string | null; stockItemId: string | null; expenseCategoryId: string | null; description: string; quantity: Decimal | null; net: Decimal; vatRate: Decimal; vat: Decimal; gross: Decimal };
+export type CleanLine = { kind: InvoiceLineInput["kind"]; purchaseRecordId: string | null; stockKind: string | null; stockItemId: string | null; expenseCategoryId: string | null; description: string; quantity: Decimal | null; net: Decimal; vatRate: Decimal; vat: Decimal; gross: Decimal; taxCategoryId: string; treatment: string | null; customsValue: Decimal | null; selfAssessedVat: Decimal | null; targetPurchaseRecordId: string | null; landedCostType: string | null };
 
-/** Validate and price the lines (VAT per line, rounded once). */
-async function cleanLines(tx: Tx, supplierId: string, lines: unknown): Promise<CleanLine[]> {
+/**
+ * Validate and price the lines (VAT per line, rounded once — lineVat, the central money rule). Phase 2: each line has a
+ * purchase VAT category (purchase-tax.ts) — its rate replaces any rate the request sends — and its rules:
+ *   P-S15 needs the supplier's VAT number (else P-S15-NR or P-O); P-IMP15 is an IMPORT_VAT line (net 0, VAT on the
+ *   customs VAT base) on an invoice with a customs declaration, billed by customs or a clearing agent (Supplier.kind),
+ *   never a non-resident; P-RC15 is an expense or a landed cost (foreign freight) of a non-resident supplier, its VAT
+ *   self-assessed (not payable to the supplier, so the line's VAT is 0). A LANDED_COST line names a receipt of any
+ *   supplier and takes P-S15, P-S15-NR, P-O or P-RC15.
+ */
+export async function cleanLines(tx: Tx, supplier: InvoiceSupplier, lines: unknown, customs: { no: string | null } = { no: null }): Promise<CleanLine[]> {
   if (!Array.isArray(lines) || lines.length === 0 || lines.length > 200) throw opsRefuse("INVOICE_LINES_REQUIRED");
+  const supplierId = supplier.id;
+  const tax = await purchaseTaxCategories(tx);
   const out: CleanLine[] = [];
   for (const [i, raw] of (lines as InvoiceLineInput[]).entries()) {
     if (!raw || typeof raw !== "object") throw opsRefuse("OPS_BAD_INPUT", `Line ${i + 1}.`);
     const kind = raw.kind;
-    if (kind !== "GRN" && kind !== "STOCK" && kind !== "EXPENSE") throw opsRefuse("OPS_BAD_INPUT", `Line ${i + 1}: kind is GRN, STOCK or EXPENSE.`);
-    const net = money(raw.net, `Line ${i + 1} net`);
+    if (kind !== "GRN" && kind !== "STOCK" && kind !== "EXPENSE" && kind !== "IMPORT_VAT" && kind !== "LANDED_COST") throw opsRefuse("OPS_BAD_INPUT", `Line ${i + 1}: kind is GRN, STOCK, EXPENSE, IMPORT_VAT or LANDED_COST.`);
+    let net = kind === "IMPORT_VAT" ? ZERO : money(raw.net, `Line ${i + 1} net`);
     if (net.isNegative()) throw opsRefuse("OPS_BAD_INPUT", `Line ${i + 1}: the net is not negative (a credit note is a separate document).`);
-    const vatRate = raw.vatRate === undefined || raw.vatRate === null || raw.vatRate === "" ? new Decimal(15) : money(raw.vatRate, `Line ${i + 1} VAT rate`);
-    if (vatRate.isNegative() || vatRate.gt(100)) throw opsRefuse("OPS_BAD_INPUT", `Line ${i + 1}: VAT rate 0–100.`);
+    const givenRate = raw.vatRate === undefined || raw.vatRate === null || raw.vatRate === "" ? null : money(raw.vatRate, `Line ${i + 1} VAT rate`);
+    const code = str(raw.taxCode, 20) ?? (raw.taxCategoryId ? tax.byId.get(String(raw.taxCategoryId))?.code ?? null : null)
+      ?? (kind === "IMPORT_VAT" ? "P-IMP15" : purchaseTaxCodeForRate(givenRate === null ? 15 : Number(givenRate)));
+    const tc = code ? tax.byCode.get(code) : undefined;
+    if (!tc || !tc.isActive) throw opsRefuse("TAX_CATEGORY_INVALID", `Line ${i + 1}.`, `السطر ${i + 1}.`);
+    const treatment = tc.inputVatTreatment;
+    const vatRate = new Decimal(tc.rate);
     let quantity: Decimal | null = null;
     if (raw.quantity !== undefined && raw.quantity !== null && raw.quantity !== "") {
       const q = Number(raw.quantity);
@@ -86,11 +119,21 @@ async function cleanLines(tx: Tx, supplierId: string, lines: unknown): Promise<C
     }
     let description = str(raw.description, 300);
     let purchaseRecordId: string | null = null, stockKind: string | null = null, stockItemId: string | null = null, expenseCategoryId: string | null = null;
-    if (kind === "GRN") {
+    let customsValue: Decimal | null = null, targetPurchaseRecordId: string | null = null, landedCostType: string | null = null;
+    if (kind === "LANDED_COST") {
+      targetPurchaseRecordId = str(raw.targetPurchaseRecordId, 64);
+      landedCostType = (LANDED_COST_TYPES as readonly string[]).includes(String(raw.landedCostType)) ? String(raw.landedCostType) : null;
+      const pr = targetPurchaseRecordId ? await tx.purchaseRecord.findUnique({ where: { id: targetPurchaseRecordId }, select: { id: true, type: true, quantity: true } }) : null;
+      if (!pr || !landedCostType || (await receiptReversed(tx, pr.id))) throw opsRefuse("LANDED_COST_TARGET", `Line ${i + 1}.`, `السطر ${i + 1}.`);
+      if (!(await tx.costMove.count({ where: { sourceType: "GRN", sourceId: pr.id, sourceEvent: "RECEIVED" } }))) throw opsRefuse("GRN_NOT_COSTED");
+      if (!LANDED_TAX.has(tc.code)) throw opsRefuse("LANDED_COST_TAX", `Line ${i + 1}.`, `السطر ${i + 1}.`);
+      description = description ?? `${({ FREIGHT: "شحن", DUTY: "رسوم جمركية", CLEARANCE: "تخليص", INSURANCE: "تأمين" } as Record<string, string>)[landedCostType]} · استلام ${pr.id.slice(-6)}`;
+    } else if (kind === "GRN") {
       purchaseRecordId = str(raw.purchaseRecordId, 64);
       const pr = purchaseRecordId ? await tx.purchaseRecord.findUnique({ where: { id: purchaseRecordId }, select: { id: true, supplierId: true, quantity: true, type: true, itemId: true, materialItemId: true } }) : null;
       if (!pr) throw opsRefuse("GRN_NOT_FOUND");
       if (pr.supplierId !== supplierId) throw opsRefuse("GRN_OTHER_SUPPLIER");
+      if (await receiptReversed(tx, pr.id)) throw opsRefuse("RECEIPT_REVERSED");
       quantity = quantity ?? qty4(pr.quantity);
       description = description ?? `استلام ${pr.id.slice(-6)} · ${pr.quantity} ${pr.type === "GREEN_BEAN" ? "كغ" : ""}`.trim();
     } else if (kind === "STOCK") {
@@ -98,95 +141,134 @@ async function cleanLines(tx: Tx, supplierId: string, lines: unknown): Promise<C
       stockItemId = str(raw.stockItemId, 64);
       const exists = stockKind === "GREEN_BEAN" ? await tx.greenBean.count({ where: { id: stockItemId ?? "" } }) : stockKind === "MATERIAL" ? await tx.materialItem.count({ where: { id: stockItemId ?? "" } }) : 0;
       if (!stockKind || !stockItemId || !exists) throw opsRefuse("STOCK_ITEM_INVALID");
-    } else {
+    } else if (kind === "EXPENSE") {
       expenseCategoryId = str(raw.expenseCategoryId, 64);
       const c = expenseCategoryId ? await tx.expenseCategory.findUnique({ where: { id: expenseCategoryId }, select: { isActive: true, nameAr: true } }) : null;
       if (!c || !c.isActive) throw opsRefuse("EXPENSE_CATEGORY_INVALID");
       description = description ?? c.nameAr;
+    } else {
+      customsValue = money(raw.customsValue, `Line ${i + 1} customs value`);
+      if (!customsValue.gt(0)) throw opsRefuse("TAX_IMPORT_VALUE", `Line ${i + 1}.`, `السطر ${i + 1}.`);
+      description = description ?? "ضريبة استيراد مدفوعة في الجمارك";
     }
-    const vat = lineVat(net, vatRate);
-    out.push({ kind, purchaseRecordId, stockKind, stockItemId, expenseCategoryId, description: description ?? "—", quantity, net, vatRate, vat, gross: net.plus(vat) });
+    // The category's rules.
+    if (treatment === "RECOVERABLE" && !supplier.vatNumber) throw opsRefuse("TAX_SUPPLIER_VAT_REQUIRED", `Line ${i + 1}.`, `السطر ${i + 1}.`);
+    if ((treatment === "IMPORT") !== (kind === "IMPORT_VAT")) throw opsRefuse("TAX_IMPORT_LINE", `Line ${i + 1}.`, `السطر ${i + 1}.`);
+    // Import VAT is paid to customs (directly or through a clearing agent) — never owed to a foreign goods supplier.
+    if (treatment === "IMPORT" && (supplier.isNonResident || (supplier.kind !== "CUSTOMS" && supplier.kind !== "CLEARING_AGENT"))) throw opsRefuse("TAX_IMPORT_SUPPLIER", `Line ${i + 1}.`, `السطر ${i + 1}.`);
+    if (treatment === "IMPORT" && !customs.no) throw opsRefuse("TAX_CUSTOMS_REQUIRED");
+    if (treatment === "REVERSE_CHARGE" && !supplier.isNonResident) throw opsRefuse("TAX_RC_NON_RESIDENT", `Line ${i + 1}.`, `السطر ${i + 1}.`);
+    if (treatment === "REVERSE_CHARGE" && kind !== "EXPENSE" && kind !== "LANDED_COST") throw opsRefuse("TAX_RC_SERVICES", `Line ${i + 1}.`, `السطر ${i + 1}.`);
+    let vat: Decimal, selfAssessedVat: Decimal | null = null;
+    if (treatment === "IMPORT") { net = ZERO; vat = lineVat(customsValue as Decimal, vatRate); }
+    else if (treatment === "REVERSE_CHARGE") { vat = ZERO; selfAssessedVat = lineVat(net, vatRate); }
+    else vat = lineVat(net, vatRate);
+    out.push({ kind, purchaseRecordId, stockKind, stockItemId, expenseCategoryId, description: description ?? "—", quantity, net, vatRate, vat, gross: net.plus(vat), taxCategoryId: tc.id, treatment, customsValue, selfAssessedVat, targetPurchaseRecordId, landedCostType });
   }
-  if (out.every((l) => l.gross.isZero())) throw opsRefuse("INVOICE_LINES_REQUIRED");
+  if (out.every((l) => l.gross.isZero() && !(l.selfAssessedVat ?? ZERO).gt(0))) throw opsRefuse("INVOICE_LINES_REQUIRED");
   return out;
 }
 
-async function header(tx: Tx, input: InvoiceInput) {
+export async function header(tx: Tx, input: InvoiceInput) {
   const supplierId = str(input?.supplierId, 64);
   if (!supplierId) throw opsRefuse("SUPPLIER_REQUIRED");
-  const supplier = await tx.supplier.findUnique({ where: { id: supplierId }, select: { id: true, paymentTermsDays: true } });
+  const supplier = await tx.supplier.findUnique({ where: { id: supplierId }, select: { id: true, name: true, vatNumber: true, isNonResident: true, kind: true, paymentTermsDays: true } });
   if (!supplier) throw opsRefuse("SUPPLIER_REQUIRED");
   const supplierRef = str(input.supplierRef, 60);
   if (!supplierRef) throw opsRefuse("SUPPLIER_REF_REQUIRED");
   const invoiceDate = day(input.invoiceDate, "invoiceDate");
   const dueDate = input.dueDate ? day(input.dueDate, "dueDate") : addDaysUtc(invoiceDate, supplier.paymentTermsDays ?? 30);
   if (dueDate < invoiceDate) throw opsRefuse("OPS_BAD_INPUT", "The due date is on or after the invoice date.", "تاريخ الاستحقاق لا يسبق تاريخ الفاتورة.");
-  return { supplierId, supplierRef, invoiceDate, dueDate, notes: str(input.notes, 1000) };
+  // Phase 2: the customs declaration (import VAT, P-IMP15) — both its number and date, or neither.
+  const customsDeclarationNo = str(input.customsDeclarationNo, 60);
+  const customsDeclarationDate = input.customsDeclarationDate ? day(input.customsDeclarationDate, "customsDeclarationDate") : null;
+  if (!!customsDeclarationNo !== !!customsDeclarationDate) throw opsRefuse("TAX_CUSTOMS_REQUIRED");
+  return { h: { supplierId, supplierRef, invoiceDate, dueDate, notes: str(input.notes, 1000), customsDeclarationNo, customsDeclarationDate }, supplier };
 }
 
-async function refDuplicate(tx: Tx, supplierId: string, ref: string, exceptId: string | null) {
+export async function refDuplicate(tx: Tx, supplierId: string, ref: string, exceptId: string | null) {
   const n = await tx.$queryRaw<{ n: number }[]>`SELECT count(*)::int AS n FROM "SupplierInvoice" WHERE "supplierId" = ${supplierId} AND lower(btrim("supplierRef")) = lower(btrim(${ref})) AND "status" <> 'CANCELLED' AND "id" <> ${exceptId ?? ""}`;
   if ((n[0]?.n ?? 0) > 0) throw opsRefuse("SUPPLIER_REF_DUPLICATE");
 }
 
-const totals = (lines: CleanLine[]) => ({ netTotal: lines.reduce((s, l) => s.plus(l.net), ZERO), vatTotal: lines.reduce((s, l) => s.plus(l.vat), ZERO), grossTotal: lines.reduce((s, l) => s.plus(l.gross), ZERO) });
-const lineRows = (lines: CleanLine[]) => lines.map((l, i) => ({ lineNo: i + 1, kind: l.kind, purchaseRecordId: l.purchaseRecordId, stockKind: l.stockKind, stockItemId: l.stockItemId, expenseCategoryId: l.expenseCategoryId, description: l.description, quantity: l.quantity, net: l.net, vatRate: l.vatRate, vat: l.vat, gross: l.gross }));
+export const totals = (lines: CleanLine[]) => ({ netTotal: lines.reduce((s, l) => s.plus(l.net), ZERO), vatTotal: lines.reduce((s, l) => s.plus(l.vat), ZERO), grossTotal: lines.reduce((s, l) => s.plus(l.gross), ZERO) });
+export const lineRows = (lines: CleanLine[]) => lines.map((l, i) => ({ lineNo: i + 1, kind: l.kind, purchaseRecordId: l.purchaseRecordId, stockKind: l.stockKind, stockItemId: l.stockItemId, expenseCategoryId: l.expenseCategoryId, description: l.description, quantity: l.quantity, net: l.net, vatRate: l.vatRate, vat: l.vat, gross: l.gross, taxCategoryId: l.taxCategoryId, customsValue: l.customsValue, selfAssessedVat: l.selfAssessedVat, targetPurchaseRecordId: l.targetPurchaseRecordId, landedCostType: l.landedCostType }));
 
-export async function createInvoice(input: InvoiceInput, actorId: string) {
+/**
+ * SA1 — a one-step purchase invoice (origin PURCHASES) whose STOCK lines are still to be received goes through the
+ * purchase-invoice service only: the legacy AP submit / edit / post would capitalise their value with no goods.
+ */
+function refuseLegacyOnPurchase(inv: { origin: string; lines: { kind: string }[] }) {
+  if (inv.origin === "PURCHASES" && inv.lines.some((l) => l.kind === "STOCK")) throw opsRefuse("PURCHASE_INVOICE_SERVICE_ONLY");
+}
+
+export async function createInvoice(input: InvoiceInput, actorId: string, ctx?: AuditContext) {
   return prisma.$transaction(async (tx) => {
-    const h = await header(tx, input);
-    const lines = await cleanLines(tx, h.supplierId, input.lines);
+    const { h, supplier } = await header(tx, input);
+    const lines = await cleanLines(tx, supplier, input.lines, { no: h.customsDeclarationNo });
     await refDuplicate(tx, h.supplierId, h.supplierRef, null);
     const number = await nextNumber(tx, "SINV", riyadhDay());
     const inv = await tx.supplierInvoice.create({ data: { ...h, number, ...totals(lines), createdBy: actorId, lastEditedBy: actorId, lines: { create: lineRows(lines) } }, select: { id: true } });
+    await logPurchaseActivity(tx, ctx ?? { actorId }, "PURCHASE_INVOICE_SAVED", inv.id);
     return getInvoice(inv.id, tx);
   }, TX_OPTS);
 }
 
-export async function updateInvoice(id: string, input: InvoiceInput, actorId: string) {
+export async function updateInvoice(id: string, input: InvoiceInput, actorId: string, ctx?: AuditContext) {
   return prisma.$transaction(async (tx) => {
     const cur = await lockInvoice(tx, id);
     if (cur.status !== "DRAFT") throw opsRefuse("INVOICE_STATE", "Only a draft is edited.", "تُعدَّل المسودة فقط.");
-    const h = await header(tx, input);
-    const lines = await cleanLines(tx, h.supplierId, input.lines);
+    if ((await ownReceipts(tx, id)).length) throw opsRefuse("INVOICE_RECEIVED");
+    refuseLegacyOnPurchase(cur);
+    const before = await invoiceSummary(tx, id);
+    const { h, supplier } = await header(tx, input);
+    const lines = await cleanLines(tx, supplier, input.lines, { no: h.customsDeclarationNo });
     await refDuplicate(tx, h.supplierId, h.supplierRef, id);
     await tx.supplierInvoiceLine.deleteMany({ where: { invoiceId: id } });
     await tx.supplierInvoice.update({ where: { id }, data: { ...h, ...totals(lines), lastEditedBy: actorId, lines: { create: lineRows(lines) } } });
+    await logPurchaseActivity(tx, ctx ?? { actorId }, "PURCHASE_INVOICE_SAVED", id, { before });
     return getInvoice(id, tx);
   }, TX_OPTS);
 }
 
-export async function deleteInvoice(id: string) {
-  return prisma.$transaction(async (tx) => {
-    const cur = await lockInvoice(tx, id);
-    if (cur.status !== "DRAFT") throw opsRefuse("INVOICE_STATE", "Only a draft is deleted.", "تُحذف المسودة فقط.");
-    await tx.supplierInvoice.delete({ where: { id } });
-    return { deleted: true };
-  }, TX_OPTS);
+/**
+ * EA2 — no supplier invoice is deleted: every one is numbered when it is created, and the SINV sequence has no gaps
+ * and no reuse. A draft is cancelled instead (it stays «ملغاة» with its number) — cancelPurchaseInvoice. The database
+ * refuses deleting anything but a DRAFT as well (ledger_ap_invoice_delete_guard).
+ */
+export async function deleteInvoice(id: string, ctx?: AuditContext) {
+  void ctx;
+  if (!(await prisma.supplierInvoice.count({ where: { id } }))) throw opsRefuse("OPS_NOT_FOUND");
+  throw opsRefuse("INVOICE_NUMBER_ISSUED");
 }
 
-export async function submitInvoice(id: string, actorId: string) {
+export async function submitInvoice(id: string, actorId: string, ctx?: AuditContext) {
   return prisma.$transaction(async (tx) => {
     const cur = await lockInvoice(tx, id);
     if (cur.status !== "DRAFT") throw opsRefuse("INVOICE_STATE");
+    refuseLegacyOnPurchase(cur);
     await tx.supplierInvoice.update({ where: { id }, data: { status: "SUBMITTED", submittedBy: actorId, submittedAt: new Date() } });
+    await logPurchaseActivity(tx, ctx ?? { actorId }, "PURCHASE_INVOICE_SUBMITTED", id);
     return getInvoice(id, tx);
   }, TX_OPTS);
 }
 
 /** Back to draft (the approver returns it with a reason, recorded in the notes). */
-export async function returnInvoice(id: string, reason: string, actorId: string) {
+export async function returnInvoice(id: string, reason: string, actorId: string, ctx?: AuditContext) {
   const r = str(reason, 300);
   if (!r || r.length < 3) throw opsRefuse("OPS_BAD_INPUT", "A reason is required.", "السبب مطلوب.");
   return prisma.$transaction(async (tx) => {
     const cur = await lockInvoice(tx, id);
     if (cur.status !== "SUBMITTED") throw opsRefuse("INVOICE_STATE");
+    // SA2: an invoice that received its goods itself is never a plain draft again (its preparer edits or cancels it).
+    if ((await ownReceipts(tx, id)).length) throw opsRefuse("INVOICE_RECEIVED_RETURN");
     await tx.supplierInvoice.update({ where: { id }, data: { status: "DRAFT", submittedBy: null, submittedAt: null, notes: `${cur.notes ? cur.notes + "\n" : ""}أُعيدت للمسودة (${dayText(riyadhDay())}، ${actorId}): ${r}`.slice(0, 1000) } });
+    await logPurchaseActivity(tx, { ...(ctx ?? { actorId }), reason: r }, "PURCHASE_INVOICE_RETURNED", id);
     return getInvoice(id, tx);
   }, TX_OPTS);
 }
 
-async function lockInvoice(tx: Tx, id: string) {
+export async function lockInvoice(tx: Tx, id: string) {
   const rows = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "SupplierInvoice" WHERE "id" = ${id} FOR UPDATE`;
   if (!rows.length) throw opsRefuse("OPS_NOT_FOUND");
   return tx.supplierInvoice.findUniqueOrThrow({ where: { id }, include: { lines: { orderBy: { lineNo: "asc" } } } });
@@ -197,66 +279,152 @@ async function grnOf(tx: Tx, purchaseRecordId: string) {
   return tx.costMove.findFirst({ where: { sourceType: "GRN", sourceId: purchaseRecordId, sourceEvent: "RECEIVED" }, include: { costItem: { select: { kind: true, entityId: true } } } });
 }
 
+/**
+ * The receipts THIS invoice received itself (the one-step purchase invoice, phase 2) and that are not reversed: its
+ * GRN lines whose receipt's cost movement carries the invoice as its source line (`SINV:<id>`, immutable — the cost
+ * sub-ledger is append-only). A GRN line matched to a receipt recorded on its own is not one of them.
+ */
+export async function ownReceipts(db: Tx | typeof prisma, invoiceId: string, opts: { includeReversed?: boolean } = {}): Promise<string[]> {
+  const all = opts.includeReversed === true;
+  const rows = await db.$queryRaw<{ id: string }[]>`
+    SELECT DISTINCT l."purchaseRecordId" AS id FROM "SupplierInvoiceLine" l
+      JOIN "CostMove" m ON m."sourceType" = 'GRN' AND m."sourceId" = l."purchaseRecordId" AND m."sourceEvent" = 'RECEIVED' AND m."lineKey" = ${`SINV:${invoiceId}`}
+     WHERE l."invoiceId" = ${invoiceId} AND l."kind" = 'GRN'
+       AND (${all} OR NOT EXISTS (SELECT 1 FROM "CostMove" r WHERE r."sourceType" = 'GRN' AND r."sourceId" = l."purchaseRecordId" AND r."sourceEvent" = 'REVERSED'))`;
+  return rows.map((r) => r.id);
+}
+
+/** Was this receipt reversed (its REVERSED cost movement exists)? */
+export async function receiptReversed(db: Tx | typeof prisma, purchaseRecordId: string): Promise<boolean> {
+  return (await db.costMove.count({ where: { sourceType: "GRN", sourceId: purchaseRecordId, sourceEvent: "REVERSED" } })) > 0;
+}
+
 /** Approve = post. SoD: not by its preparer or submitter (SIMPLE MODE: one owner, recorded). */
 export async function postInvoice(id: string, ctx: AuditContext) {
-  return prisma.$transaction(async (tx) => {
+  return withDeniedLog(ctx, "post", id, () => prisma.$transaction(async (tx) => {
     await setAuditContext(tx, ctx);
+    return postInvoiceTx(tx, id, ctx);
+  }, TX_OPTS));
+}
+
+/**
+ * Post in the caller's transaction (the one-step purchase invoice «حفظ واستلام واعتماد» posts in its own).
+ * CC2: every cost holder the posting touches (GRN lines' receipts, STOCK lines' items, landed costs' target receipts)
+ * is collected first and locked at once in the one fixed order (lockHolders: kind, then entity id) — the order a
+ * packaging run, a roast or a delivery takes — so two of them never wait on each other in a circle.
+ */
+export async function postInvoiceTx(tx: Tx, id: string, ctx: AuditContext) {
+  {
     const inv = await lockInvoice(tx, id);
     // SIMPLE MODE (one owner) may post a DRAFT directly. Self-posting — by the preparer, last editor or submitter — is
     // decided by the SoD setting (A5, src/lib/accounting/sod.ts; SIMPLE MODE always allows); the people on the
     // invoice record it and the SoD exceptions report lists it.
     const simple = isSimpleMode();
     if (inv.status !== "SUBMITTED" && !(simple && inv.status === "DRAFT")) throw opsRefuse("INVOICE_STATE", "Submit the invoice first.", "قدّم الفاتورة للاعتماد أولًا.");
+    refuseLegacyOnPurchase(inv);
     if ([inv.createdBy, inv.lastEditedBy, inv.submittedBy].includes(ctx.actorId) && !sodDecision(await sodPolicy(tx), "SELF_APPROVAL")) throw opsRefuse("SOD_OWN_INVOICE");
     const party = { type: "SUPPLIER" as const, id: inv.supplierId };
     const posting: (PostingLineInput | null)[] = [];
     const moveIds: string[] = [];
-    let vat = ZERO;
+    // The receipts the lines value (a GRN line's own receipt, a landed cost's target), read once.
+    const grns = new Map<string, NonNullable<Awaited<ReturnType<typeof grnOf>>>>();
     for (const l of inv.lines) {
+      const pr = l.kind === "GRN" ? l.purchaseRecordId : l.kind === "LANDED_COST" ? l.targetPurchaseRecordId : null;
+      if (!pr || grns.has(pr)) continue;
+      if (l.kind === "GRN") await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`ap:grn:${pr}`}, 0))`;
+      const g = await grnOf(tx, pr);
+      if (!g) throw opsRefuse("GRN_NOT_COSTED");
+      grns.set(pr, g);
+    }
+    const holders = await lockHolders(tx, [
+      ...[...grns.values()].map((g) => ({ kind: g.costItem.kind as CostKind, entityId: g.costItem.entityId })),
+      ...inv.lines.filter((l) => l.kind === "STOCK").map((l) => ({ kind: l.stockKind as CostKind, entityId: l.stockItemId as string })),
+    ]);
+    const holderOf = (kind: string, entityId: string) => holders.get(`${kind}:${entityId}`) as HolderRow;
+    // Phase 2: each line's VAT by its purchase VAT category — claimed (recoverable, import, reverse charge),
+    // capitalised into the cost (not recoverable), or none; the category is snapshotted on the line here.
+    const tax = await purchaseTaxCategories(tx);
+    let vat = ZERO, selfAssessed = ZERO;
+    for (const l of inv.lines) {
+      const tc = l.taxCategoryId ? tax.byId.get(l.taxCategoryId) : undefined;
+      // A line the migration could not classify (a legacy rate other than 15 / 0) is not posted on a guess.
+      if (!tc) throw opsRefuse("TAX_CATEGORY_INVALID", `Line ${l.lineNo} has no VAT category (a legacy rate of ${new Decimal(l.vatRate).toFixed()} %): return the invoice to draft and choose one.`, `السطر ${l.lineNo} بلا فئة ضريبة (نسبة قديمة ${new Decimal(l.vatRate).toFixed()}%): أعد الفاتورة للمسودة واختر فئتها.`);
+      const treatment = tc.inputVatTreatment ?? null;
+      const nonRecoverable = treatment === "NON_RECOVERABLE" ? new Decimal(l.vat) : ZERO;
       const net = new Decimal(l.net);
-      vat = vat.plus(l.vat);
+      if (treatment !== "NON_RECOVERABLE") vat = vat.plus(l.vat);
+      if (l.selfAssessedVat) selfAssessed = selfAssessed.plus(l.selfAssessedVat);
+      await tx.supplierInvoiceLine.update({ where: { id: l.id }, data: { taxSnapshot: buildPurchaseTaxSnapshot(tc) } });
       let matched: Decimal | null = null, variance: Decimal | null = null, capitalized: Decimal | null = null;
       if (l.kind === "GRN") {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`ap:grn:${l.purchaseRecordId}`}, 0))`;
         const taken = await tx.supplierInvoiceLine.count({ where: { purchaseRecordId: l.purchaseRecordId, invoiceId: { not: id }, invoice: { status: "POSTED" } } });
         if (taken) throw opsRefuse("GRN_ALREADY_MATCHED");
-        const grn = await grnOf(tx, l.purchaseRecordId as string);
-        if (!grn) throw opsRefuse("GRN_NOT_COSTED");
+        if (await receiptReversed(tx, l.purchaseRecordId as string)) throw opsRefuse("RECEIPT_REVERSED");
+        const grn = grns.get(l.purchaseRecordId as string)!;
         matched = new Decimal(grn.value).abs();
         variance = net.minus(matched);
-        const h = await lockHolder(tx, grn.costItem.kind as CostKind, grn.costItem.entityId);
-        const want = varianceOnHand(variance, new Decimal(grn.qty).abs(), h.qty);
+        // A VAT that is not recoverable is part of the cost: it follows the stock like a price variance.
+        const toCost = variance.plus(nonRecoverable);
+        const h = holderOf(grn.costItem.kind, grn.costItem.entityId);
+        const want = varianceOnHand(toCost, new Decimal(grn.qty).abs(), h.qty);
         const r = await costRevalue(tx, { holder: h, src: { module: "purchasing", type: "SUPPLIER_INVOICE", id, event: "POSTED" }, lineKey: `${l.lineNo}`, kind: "REVALUATION", delta: want, actor: ctx.actorId, reason: `فرق سعر فاتورة ${inv.number}` });
         if (r.id) moveIds.push(r.id);
         capitalized = r.value;
         const dims = { item: { type: grn.costItem.kind === "GREEN_BEAN" ? "GREEN_BEAN" as const : "MATERIAL" as const, id: grn.costItem.entityId } };
-        posting.push(side("GRNI", matched, { party }), side(h.role, r.value, dims), side("INVENTORY_VARIANCE", variance.minus(r.value), dims));
+        posting.push(side("GRNI", matched, { party }), side(h.role, r.value, dims), side("INVENTORY_VARIANCE", toCost.minus(r.value), dims));
+      } else if (l.kind === "LANDED_COST") {
+        // CA1 — freight, duty, clearance or insurance on a receipt (of any supplier): capitalised onto that receipt's
+        // holder by the GRN-variance rule (varianceOnHand) — the share of the receipt still on hand goes into the
+        // stock's cost; the share already consumed (roasted, packed, issued) is past its cost and goes to
+        // INVENTORY_VARIANCE. A not-recoverable VAT is part of the cost.
+        if (await receiptReversed(tx, l.targetPurchaseRecordId as string)) throw opsRefuse("RECEIPT_REVERSED");
+        const grn = grns.get(l.targetPurchaseRecordId as string)!;
+        const toCost = net.plus(nonRecoverable);
+        const h = holderOf(grn.costItem.kind, grn.costItem.entityId);
+        // N6 (accepted, informational): varianceOnHand compares the receipt's quantity with the holder's TOTAL on-hand
+        // quantity. For a fungible material (several receipts in one holder) the consumed share is therefore the
+        // item's, not that specific receipt's — consistent with moving-average costing, where receipts are not tracked
+        // apart once they are in the holder. (A green lot is its own holder, so there it is the receipt's own share.)
+        const want = varianceOnHand(toCost, new Decimal(grn.qty).abs(), h.qty);
+        const r = await costRevalue(tx, { holder: h, src: { module: "purchasing", type: "SUPPLIER_INVOICE", id, event: "POSTED" }, lineKey: `${l.lineNo}`, kind: "REVALUATION", delta: want, actor: ctx.actorId, reason: `تكلفة إضافية (${l.landedCostType}) فاتورة ${inv.number}` });
+        if (r.id) moveIds.push(r.id);
+        capitalized = r.value;
+        const dims = { item: { type: grn.costItem.kind === "GREEN_BEAN" ? "GREEN_BEAN" as const : "MATERIAL" as const, id: grn.costItem.entityId } };
+        posting.push(side(h.role, r.value, dims), side("INVENTORY_VARIANCE", toCost.minus(r.value), dims));
       } else if (l.kind === "STOCK") {
-        const h = await lockHolder(tx, l.stockKind as CostKind, l.stockItemId as string);
-        const want = l.quantity ? varianceOnHand(net, new Decimal(l.quantity), h.qty) : net;
+        const h = holderOf(l.stockKind as string, l.stockItemId as string);
+        const cost = net.plus(nonRecoverable);
+        const want = l.quantity ? varianceOnHand(cost, new Decimal(l.quantity), h.qty) : cost;
         const r = await costRevalue(tx, { holder: h, src: { module: "purchasing", type: "SUPPLIER_INVOICE", id, event: "POSTED" }, lineKey: `${l.lineNo}`, kind: "REVALUATION", delta: want, actor: ctx.actorId, reason: `تكلفة فاتورة ${inv.number}` });
         if (r.id) moveIds.push(r.id);
         capitalized = r.value;
         const dims = { item: { type: l.stockKind === "GREEN_BEAN" ? "GREEN_BEAN" as const : "MATERIAL" as const, id: l.stockItemId as string } };
-        posting.push(side(h.role, r.value, dims), side("INVENTORY_VARIANCE", net.minus(r.value), dims));
-      } else {
+        posting.push(side(h.role, r.value, dims), side("INVENTORY_VARIANCE", cost.minus(r.value), dims));
+      } else if (l.kind === "EXPENSE") {
         const c = await tx.expenseCategory.findUniqueOrThrow({ where: { id: l.expenseCategoryId as string }, select: { accountId: true } });
-        posting.push(accountSide(c.accountId, net, { party }, l.description));
+        posting.push(accountSide(c.accountId, net.plus(nonRecoverable), { party }, l.description));
       }
+      // (IMPORT_VAT: no net — only its VAT, claimed below.)
       if (matched || capitalized) await tx.supplierInvoiceLine.update({ where: { id: l.id }, data: { matchedValue: matched, variance, capitalized } });
     }
-    posting.push(side("VAT_INPUT", vat, { party }), side("AP", new Decimal(inv.grossTotal).negated(), { party }));
+    // The reverse charge: the buyer self-assesses the VAT — input and output at once (nothing owed to the supplier).
+    posting.push(side("VAT_INPUT", vat.plus(selfAssessed), { party }), side("VAT_OUTPUT", selfAssessed.negated(), { party }), side("AP", new Decimal(inv.grossTotal).negated(), { party }));
     const lines = netLines(posting);
     let journalEntryId: string | null = null;
     if (lines.length >= 2) {
-      const r = await postEntry(tx, { source: { module: "purchasing", type: "SUPPLIER_INVOICE", id, event: "POSTED" }, date: dayText(inv.invoiceDate), whenPeriodNotOpen: "nextOpenPeriod", memo: `فاتورة مورد ${inv.number} · ${inv.supplierRef}`, createdBy: ctx.actorId, lines });
+      // N5: an invoice that only carries import VAT is dated at its customs declaration — the period the VAT return
+      // reports it in (box 8) — so the ledger and the return agree; that period must be open (no rolling forward).
+      // A mixed invoice keeps its invoice date; the return's import-timing line explains the difference.
+      const importOnly = inv.lines.length > 0 && inv.lines.every((l) => l.kind === "IMPORT_VAT") && !!inv.customsDeclarationDate;
+      const r = await postEntry(tx, { source: { module: "purchasing", type: "SUPPLIER_INVOICE", id, event: "POSTED" }, date: dayText(importOnly ? inv.customsDeclarationDate as Date : inv.invoiceDate), whenPeriodNotOpen: importOnly ? "reject" : "nextOpenPeriod", memo: `فاتورة مورد ${inv.number} · ${inv.supplierRef}`, createdBy: ctx.actorId, lines });
       if (r.status === "posted") journalEntryId = r.entryId;
       if (moveIds.length) await tx.costMove.updateMany({ where: { id: { in: moveIds } }, data: r.status === "posted" ? { glState: "POSTED", journalEntryId: r.entryId } : { glState: "SKIPPED" } });
     } else if (moveIds.length) await tx.costMove.updateMany({ where: { id: { in: moveIds } }, data: { glState: "NONE" } });
     const now = new Date();
     await tx.supplierInvoice.update({ where: { id }, data: { status: "POSTED", postedBy: ctx.actorId, postedAt: now, journalEntryId, ...(inv.status === "DRAFT" ? { submittedBy: ctx.actorId, submittedAt: now } : {}) } });
+    await logPurchaseActivity(tx, ctx, "PURCHASE_INVOICE_POSTED", id);
     return getInvoice(id, tx);
-  }, TX_OPTS);
+  }
 }
 
 /**
@@ -277,9 +445,11 @@ export async function cancelInvoice(id: string, reason: string, ctx: AuditContex
     for (const l of inv.lines) {
       const cap = l.capitalized ? new Decimal(l.capitalized) : ZERO;
       if (cap.isZero()) continue;
-      const kind = (l.kind === "GRN" ? (await grnOf(tx, l.purchaseRecordId as string))?.costItem.kind : l.stockKind) as CostKind;
-      const entityId = l.kind === "GRN" ? (await grnOf(tx, l.purchaseRecordId as string))?.costItem.entityId as string : (l.stockItemId as string);
-      const h = await lockHolder(tx, kind, entityId);
+      const viaReceipt = l.kind === "GRN" ? l.purchaseRecordId : l.kind === "LANDED_COST" ? l.targetPurchaseRecordId : null;
+      const g = viaReceipt ? await grnOf(tx, viaReceipt) : null;
+      const kind = (g ? g.costItem.kind : l.stockKind) as CostKind;
+      const entityId = g ? g.costItem.entityId : (l.stockItemId as string);
+      const h = (await lockHolders(tx, [{ kind, entityId }])).get(`${kind}:${entityId}`) as HolderRow;
       const back = await costRevalue(tx, { holder: h, src, lineKey: `${l.lineNo}`, kind: "REVALUATION", delta: cap.negated(), actor: ctx.actorId, reason: r });
       if (back.id) moveIds.push(back.id);
       const notReturned = cap.plus(back.value); // cap − |released|
@@ -294,6 +464,7 @@ export async function cancelInvoice(id: string, reason: string, ctx: AuditContex
     }
     if (moveIds.length) await tx.costMove.updateMany({ where: { id: { in: moveIds } }, data: reversalId ? { glState: "POSTED", journalEntryId: reversalId } : { glState: "SKIPPED" } });
     await tx.supplierInvoice.update({ where: { id }, data: { status: "CANCELLED", cancelledBy: ctx.actorId, cancelledAt: new Date(), cancelReason: r } });
+    await logPurchaseActivity(tx, { ...ctx, reason: r }, "PURCHASE_INVOICE_CANCELLED_POSTED", id);
     return getInvoice(id, tx);
   }, TX_OPTS);
 }
@@ -383,12 +554,12 @@ export async function voidPayment(id: string, reason: string, ctx: AuditContext)
 const f2 = (d: Decimal | Prisma.Decimal | null | undefined) => (d === null || d === undefined ? null : new Decimal(d).toFixed(2));
 
 export async function getInvoice(id: string, db: Tx | typeof prisma = prisma) {
-  const inv = await db.supplierInvoice.findUnique({ where: { id }, include: { supplier: { select: { id: true, name: true, vatNumber: true } }, lines: { orderBy: { lineNo: "asc" }, include: { expenseCategory: { select: { code: true, nameAr: true, account: { select: { code: true, nameAr: true, nameEn: true } } } } } }, allocations: { include: { payment: { select: { id: true, number: true, paymentDate: true, status: true } } } } } });
+  const inv = await db.supplierInvoice.findUnique({ where: { id }, include: { supplier: { select: { id: true, name: true, vatNumber: true } }, lines: { orderBy: { lineNo: "asc" }, include: { expenseCategory: { select: { code: true, nameAr: true, account: { select: { code: true, nameAr: true, nameEn: true } } } }, taxCategory: { select: { code: true, nameAr: true, nameEn: true, inputVatTreatment: true, vatReturnBox: true } }, targetPurchaseRecord: { select: { id: true, type: true, itemId: true, materialItemId: true, quantity: true, purchaseDate: true, supplier: { select: { name: true } } } } } }, allocations: { include: { payment: { select: { id: true, number: true, paymentDate: true, status: true } } } } } });
   if (!inv) throw opsRefuse("OPS_NOT_FOUND");
   return {
-    ...inv, invoiceDate: dayText(inv.invoiceDate), dueDate: dayText(inv.dueDate), netTotal: f2(inv.netTotal), vatTotal: f2(inv.vatTotal), grossTotal: f2(inv.grossTotal), paidTotal: f2(inv.paidTotal),
+    ...inv, invoiceDate: dayText(inv.invoiceDate), dueDate: dayText(inv.dueDate), customsDeclarationDate: inv.customsDeclarationDate ? dayText(inv.customsDeclarationDate) : null, receivedDate: inv.receivedDate ? dayText(inv.receivedDate) : null, updatedAt: inv.updatedAt.toISOString(), netTotal: f2(inv.netTotal), vatTotal: f2(inv.vatTotal), grossTotal: f2(inv.grossTotal), paidTotal: f2(inv.paidTotal),
     outstanding: f2(new Decimal(inv.grossTotal).minus(inv.paidTotal)),
-    lines: inv.lines.map((l) => ({ ...l, quantity: l.quantity ? new Decimal(l.quantity).toFixed() : null, net: f2(l.net), vatRate: new Decimal(l.vatRate).toFixed(), vat: f2(l.vat), gross: f2(l.gross), matchedValue: f2(l.matchedValue), variance: f2(l.variance), capitalized: f2(l.capitalized) })),
+    lines: inv.lines.map((l) => ({ ...l, quantity: l.quantity ? new Decimal(l.quantity).toFixed() : null, net: f2(l.net), vatRate: new Decimal(l.vatRate).toFixed(), vat: f2(l.vat), gross: f2(l.gross), matchedValue: f2(l.matchedValue), variance: f2(l.variance), capitalized: f2(l.capitalized), customsValue: f2(l.customsValue), selfAssessedVat: f2(l.selfAssessedVat), taxCode: l.taxCategory?.code ?? null })),
     allocations: inv.allocations.map((a) => ({ id: a.id, amount: f2(a.amount), payment: { ...a.payment, paymentDate: dayText(a.payment.paymentDate) } })),
   };
 }
@@ -399,19 +570,34 @@ export async function getPayment(id: string, db: Tx | typeof prisma = prisma) {
   return { ...p, paymentDate: dayText(p.paymentDate), amount: f2(p.amount), allocations: p.allocations.map((a) => ({ ...a, amount: f2(a.amount) })) };
 }
 
-export async function listInvoices(q: { status?: string | null; supplierId?: string | null; take?: number }) {
+export async function listInvoices(q: { status?: string | null; supplierId?: string | null; take?: number; from?: string | null; to?: string | null; q?: string | null }) {
+  // Phase 2 (the purchases screen): a period (invoice date, YYYY-MM-DD) and a search (number, supplier ref or name).
+  const from = q.from && /^\d{4}-\d{2}-\d{2}$/.test(q.from) ? day(q.from, "from") : null;
+  const to = q.to && /^\d{4}-\d{2}-\d{2}$/.test(q.to) ? day(q.to, "to") : null;
+  const search = q.q?.trim().slice(0, 80) || null;
   const rows = await prisma.supplierInvoice.findMany({
-    where: { ...(q.status ? { status: q.status } : {}), ...(q.supplierId ? { supplierId: q.supplierId } : {}) },
+    where: {
+      ...(q.status ? { status: q.status } : {}), ...(q.supplierId ? { supplierId: q.supplierId } : {}),
+      ...(from || to ? { invoiceDate: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
+      ...(search ? { OR: [{ number: { contains: search, mode: "insensitive" as const } }, { supplierRef: { contains: search, mode: "insensitive" as const } }, { supplier: { name: { contains: search, mode: "insensitive" as const } } }] } : {}),
+    },
     orderBy: [{ invoiceDate: "desc" }, { number: "desc" }], take: Math.min(q.take ?? 500, 1000),
     include: { supplier: { select: { name: true } } },
   });
   const today = riyadhDay();
   const counts = await prisma.supplierInvoice.groupBy({ by: ["status"], _count: { _all: true }, _sum: { grossTotal: true, paidTotal: true } });
+  // Which of these received their goods themselves (one-step), in one query.
+  const ids = rows.map((r) => r.id);
+  const received = new Set(ids.length ? (await prisma.$queryRaw<{ id: string }[]>`
+    SELECT DISTINCT l."invoiceId" AS id FROM "SupplierInvoiceLine" l
+      JOIN "CostMove" m ON m."sourceType" = 'GRN' AND m."sourceId" = l."purchaseRecordId" AND m."sourceEvent" = 'RECEIVED' AND m."lineKey" = 'SINV:' || l."invoiceId"
+     WHERE l."invoiceId" = ANY(${ids}::text[]) AND l."kind" = 'GRN'
+       AND NOT EXISTS (SELECT 1 FROM "CostMove" r WHERE r."sourceType" = 'GRN' AND r."sourceId" = l."purchaseRecordId" AND r."sourceEvent" = 'REVERSED')`).map((r) => r.id) : []);
   return {
     rows: rows.map((r) => {
       const outstanding = new Decimal(r.grossTotal).minus(r.paidTotal);
       const overdueDays = r.status === "POSTED" && outstanding.gt(0) ? Math.max(0, Math.floor((today.getTime() - r.dueDate.getTime()) / 86_400_000)) : 0;
-      return { id: r.id, number: r.number, supplierId: r.supplierId, supplierName: r.supplier.name, supplierRef: r.supplierRef, invoiceDate: dayText(r.invoiceDate), dueDate: dayText(r.dueDate), status: r.status, grossTotal: f2(r.grossTotal), paidTotal: f2(r.paidTotal), outstanding: f2(outstanding), overdueDays, createdBy: r.createdBy, submittedBy: r.submittedBy };
+      return { id: r.id, number: r.number, supplierId: r.supplierId, supplierName: r.supplier.name, supplierRef: r.supplierRef, invoiceDate: dayText(r.invoiceDate), dueDate: dayText(r.dueDate), status: r.status, netTotal: f2(r.netTotal), vatTotal: f2(r.vatTotal), received: received.has(r.id), grossTotal: f2(r.grossTotal), paidTotal: f2(r.paidTotal), outstanding: f2(outstanding), overdueDays, createdBy: r.createdBy, submittedBy: r.submittedBy };
     }),
     summary: Object.fromEntries(counts.map((c) => [c.status, { count: c._count._all, gross: f2(c._sum.grossTotal ?? ZERO), outstanding: f2(new Decimal(c._sum.grossTotal ?? 0).minus(c._sum.paidTotal ?? 0)) }])),
   };
@@ -503,6 +689,7 @@ export async function openReceipts(supplierId: string | null) {
      WHERE m."sourceType" = 'GRN' AND m."sourceEvent" = 'RECEIVED' AND m."value" > 0
        AND (${supplierId}::text IS NULL OR p."supplierId" = ${supplierId})
        AND NOT EXISTS (SELECT 1 FROM "SupplierInvoiceLine" l JOIN "SupplierInvoice" v ON v."id" = l."invoiceId" WHERE l."purchaseRecordId" = p."id" AND v."status" = 'POSTED')
+       AND NOT EXISTS (SELECT 1 FROM "CostMove" r WHERE r."sourceType" = 'GRN' AND r."sourceId" = p."id" AND r."sourceEvent" = 'REVERSED')
      ORDER BY m."businessDay" DESC, m."createdAt" DESC
      LIMIT 2000`;
   return rows.map((r) => ({ purchaseRecordId: r.purchaseRecordId, supplierId: r.supplierId, supplierName: r.supplierName, type: r.type, date: dayText(r.day), quantity: new Decimal(r.qty).toFixed(), value: new Decimal(r.value).toFixed(2), glState: r.glState, itemKind: r.itemKind, itemId: r.itemId, notes: r.notes }));
