@@ -1036,6 +1036,15 @@ model SystemConfig {
   /// Settings › Invoicing & tax: the VAT percent a NEW quotation line starts with. NULL = the
   /// built-in 15%. Issued documents keep the rate each line carries. CHECK 0–100.
   invoiceDefaultVatPercent Decimal? @db.Decimal(5, 2)
+  /// Settings › Inventory «حد النقص عند الاستلام» (20261118090000_shortfall_threshold): a receiver's shortfall on a transfer
+  /// line above any of these needs inventory › adjust and the stock-change gate. NULL = the default (2 %, 500 SAR, on).
+  /// CHECK percent 0–100, value ≥ 0.
+  inventoryShortfallPercent         Decimal? @db.Decimal(5, 2)
+  inventoryShortfallValueSar        Decimal? @db.Decimal(12, 2)
+  inventoryShortfallZeroNeedsAdjust Boolean?
+  /// The rolling limit per receiver: Σ of their shortfall value over 30 days more than this × the value limit needs a
+  /// supervisor. NULL = 2. CHECK 0–1000.
+  inventoryShortfallRollingMultiple Decimal? @db.Decimal(6, 2)
 
   // ─── QC (additive, migration 20261023090000_production_qc_simplify) ─────────────────────
   /// Settings › Production & roasting › QC: the minimum number of evaluators a batch needs before
@@ -1973,6 +1982,10 @@ model StockTransferLine {
   qtyReceived    Float?
   qtyShort       Float?
   varianceReason String?
+  /// The shortfall's value as judged at the receipt (20261118090000_shortfall_threshold): the write-off's own value at the
+  /// moving average, else the last known cost; NULL = no shortfall, or no cost known. Read by the rolling 30-day sum
+  /// per receiver. CHECK ≥ 0.
+  shortfallValue Decimal? @db.Decimal(18, 2)
   /// FG_LOT: the lot that travels (the source lot moved whole, or the part split off it).
   fgLotId        String?
   fgLot          FinishedGoodsLot? @relation("TransferLineLot", fields: [fgLotId], references: [id], onDelete: Restrict)

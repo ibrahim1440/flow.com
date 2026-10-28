@@ -1,12 +1,12 @@
 "use client";
-// One transfer («تحويل مخزون»): its route, status, lines (value at the moving average — information only: no journal
-// entry), the movements it wrote at each location (including «في الطريق»), and its activity log (the person audit).
+// One transfer («تحويل مخزون»): its route, status, lines (value at the moving average for a cost reader only —
+// information only: no journal entry), the movements it wrote at each location (including «في الطريق»), and its activity log (the person audit).
 // Two-step (20261117090000_locations_enhancements): «استلام» at the destination — what arrived per line, a shortfall with
 // its reason (written off from transit — the receiver records it with transfer_receive alone and the inventory
 // supervisors are notified, the owner before the locations release), finished goods in full — inventory › transfer_receive. «إلغاء التحويل» (inventory › transfer_cancel): one step — the movements reversed while the goods are
 // still at the destination; in transit — everything back to the source.
 import { localizeApiError } from "@/lib/i18n/api-errors";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { Btn, Field, KV, Notice, OpsBanner, OpsError, OpsLoading, OpsRoot, PageHeader, SecHead, Timeline, opsDate, useL } from "@/components/ops/ui";
@@ -14,6 +14,7 @@ import { Dialog } from "@/components/hr/ui";
 import "@/components/ops/stock.css";
 import { useUser } from "../../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
+import type { ShortfallPreview } from "@/lib/services/transfer-shortfall-gate";
 import { useI18n } from "@/lib/i18n/context";
 import { TRANSFER_STATUS_LABEL, TRANSIT_LABEL, TRANSIT_LOCATION_ID, locationName, type TransferStatus } from "@/lib/inventory/locations";
 import { unitWord } from "../../_parts/shared";
@@ -25,7 +26,9 @@ type Transfer = {
   sentAt: string | null; receivedAt: string | null; receivedByName: string | null; receiveNote: string | null;
   cancelledAt: string | null; cancelledByName: string | null; cancelReason: string | null;
   fromLocation: L10n; toLocation: L10n; fromLocationId: string; toLocationId: string;
-  lines: { id: string; lineNo: number; itemKind: string; entityId: string; fgLotId: string | null; qty: number; qtyReceived: number | null; qtyShort: number | null; varianceReason: string | null; value: string; item: Item | null; fgLot: Item | null }[];
+  lines: { id: string; lineNo: number; itemKind: string; entityId: string; fgLotId: string | null; qty: number; qtyReceived: number | null; qtyShort: number | null; varianceReason: string | null; value: string | null; item: Item | null; fgLot: Item | null }[];
+  /** The value at cost is sent to cost readers only (accounting, or inventory › valuation). */
+  costsVisible?: boolean;
   movements: { id: string; type: string; locationId: string; referenceEntityId: string | null; quantityChanged: number; previousQuantity: number; newQuantity: number; timestamp: string; notes: string | null }[];
   glStates: string[];
   activity: { id: string; action: string; at: string; by: string | null; metadata: { reason?: string | null; lines?: unknown[] } | null }[];
@@ -41,6 +44,9 @@ export default function TransferPage() {
   const L = useL();
   const canCancel = !!user && hasSubPrivilege(user.permissions, "inventory", "transfer_cancel");
   const canReceive = !!user && hasSubPrivilege(user.permissions, "inventory", "transfer_receive");
+  const canAdjust = !!user && hasSubPrivilege(user.permissions, "inventory", "adjust");
+  const [previewed, setPreviewed] = useState<{ key: string; data: ShortfallPreview | null }>({ key: "", data: null });
+  const previewSeq = useRef(0);
   const [t, setT] = useState<Transfer | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
@@ -89,13 +95,37 @@ export default function TransferPage() {
     setRecvError("");
     setReceiving(true);
   }
-  const recvRows = (t?.lines ?? []).map((l) => {
+  const baseRows = (t?.lines ?? []).map((l) => {
     const v = recv[l.lineNo] ?? { qty: String(l.qty), reason: "" };
     const n = v.qty.trim() === "" ? NaN : Number(v.qty);
     const short = Number.isFinite(n) ? q4(l.qty - n) : 0;
-    const bad = !Number.isFinite(n) || n < 0 || n > l.qty + 1e-9 || (l.itemKind === "FG_LOT" && short > 0) || (short > 0 && v.reason.trim().length < 3);
-    return { l, v, n, short, bad };
+    return { l, v, n, short };
   });
+  const recvShortAny = baseRows.some((r) => r.short > 0);
+  // The verdict follows what is typed (debounced); the latest answer wins.
+  const previewKey = receiving && recvShortAny ? JSON.stringify(baseRows.map((r) => [r.l.lineNo, Number.isFinite(r.n) ? r.n : null])) : "";
+  const preview = previewKey && previewed.key === previewKey ? previewed.data : null;
+  const previewing = !!previewKey && previewed.key !== previewKey;
+  const recvRows = baseRows.map(({ l, v, n, short }) => {
+    // Over the owner's threshold? The server's verdict (POST …/receive/preview, council F5: no cost reaches this page).
+    const pv = preview?.lines.find((x) => x.lineNo === l.lineNo) ?? null;
+    const over = short > 0 && !!pv?.over;
+    const bad = !Number.isFinite(n) || n < 0 || n > l.qty + 1e-9 || (l.itemKind === "FG_LOT" && short > 0) || (short > 0 && v.reason.trim().length < 3) || (over && !canAdjust);
+    return { l, v, n, short, bad, over, pv };
+  });
+  const recvShort = recvShortAny;
+  useEffect(() => {
+    if (!previewKey) return;
+    const seq = ++previewSeq.current;
+    const h = setTimeout(() => {
+      fetch(`/api/inventory/transfers/${id}/receive/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines: (JSON.parse(previewKey) as [number, number | null][]).filter(([, q]) => q !== null).map(([lineNo, qtyReceived]) => ({ lineNo, qtyReceived })) }) })
+        .then(async (r) => (r.ok ? ((await r.json()) as ShortfallPreview) : null)).catch(() => null)
+        .then((data) => { if (seq === previewSeq.current) setPreviewed({ key: previewKey, data }); });
+    }, 250);
+    return () => clearTimeout(h);
+  }, [previewKey, id]);
+  const transferOver = recvShort && !!preview && preview.transfer.length > 0;
+  const recvBlocked = recvRows.some((r) => r.bad) || (recvShort && previewing) || (transferOver && !canAdjust);
   async function receive() {
     setBusy(true);
     setRecvError("");
@@ -117,7 +147,7 @@ export default function TransferPage() {
     const l = t.lines.find((x) => x.entityId === entityId || x.fgLotId === entityId);
     return l ? (l.fgLotId === entityId && l.fgLot ? l.fgLot : l.item) : undefined;
   };
-  const total = t.lines.reduce((s, l) => s + Number(l.value), 0);
+  const total = t.lines.reduce((s, l) => s + Number(l.value ?? 0), 0);
   const unitOf = (l: Transfer["lines"][number], n: number) => (l.itemKind === "FG_LOT" ? L(n === 1 ? "عبوة" : "عبوات", n === 1 ? "unit" : "units") : unitWord(l.item?.unit, lang, n));
   const ACTION: Record<string, [string, string]> = {
     STOCK_TRANSFER_CREATED: ["أنشأ التحويل ونفّذه", "Created and posted the transfer"],
@@ -167,7 +197,7 @@ export default function TransferPage() {
         <SecHead title={L("الأصناف", "Items")} />
         <div className="hr-tablewrap">
           <table className="hr-table is-mrow" aria-label={L("أصناف التحويل", "Transfer lines")} data-testid="transfer-lines">
-            <thead><tr><th>{L("الصنف", "Item")}</th><th className="num">{L("المرسَل", "Sent")}</th>{t.status === "RECEIVED" ? <th className="num">{L("المستلَم", "Received")}</th> : null}<th className="num hr-hide-mobile">{L("القيمة بالتكلفة (ر.س)", "Value at cost (SAR)")}</th></tr></thead>
+            <thead><tr><th>{L("الصنف", "Item")}</th><th className="num">{L("المرسَل", "Sent")}</th>{t.status === "RECEIVED" ? <th className="num">{L("المستلَم", "Received")}</th> : null}{t.costsVisible ? <th className="num hr-hide-mobile">{L("القيمة بالتكلفة (ر.س)", "Value at cost (SAR)")}</th> : null}</tr></thead>
             <tbody>
               {t.lines.map((l) => (
                 <tr key={l.id} data-testid={`transfer-line-row-${l.lineNo}`}>
@@ -176,15 +206,15 @@ export default function TransferPage() {
                     <span className="hr-id hr-caption">{l.item?.code}</span>
                     {l.fgLot ? <span className="hr-caption" data-testid={`transfer-split-${l.lineNo}`}> · {L("لوت جديد من اللوت نفسه", "a new lot split from it")}</span> : null}
                     {(l.qtyShort ?? 0) > 0 ? <span className="stk-sub tr-short" data-testid={`transfer-short-${l.lineNo}`}>{L("ناقص", "Short")} <span className="hr-num">{q4(l.qtyShort!)}</span> — {l.varianceReason}</span> : null}
-                    <span className="hr-msub">{L("القيمة بالتكلفة", "Value at cost")} <span className="hr-num">{money(l.value)}</span> {L("ر.س", "SAR")}</span>
+                    {t.costsVisible && l.value !== null ? <span className="hr-msub">{L("القيمة بالتكلفة", "Value at cost")} <span className="hr-num">{money(l.value)}</span> {L("ر.س", "SAR")}</span> : null}
                   </td>
                   <td className="num"><span className="hr-num">{q4(l.qty)}</span> <span className="hr-caption">{unitOf(l, l.qty)}</span></td>
                   {t.status === "RECEIVED" ? <td className="num"><span className="hr-num">{q4(l.qtyReceived ?? l.qty)}</span></td> : null}
-                  <td className="num hr-hide-mobile"><span className="hr-num">{money(l.value)}</span></td>
+                  {t.costsVisible ? <td className="num hr-hide-mobile" data-testid={`transfer-line-value-${l.lineNo}`}><span className="hr-num">{money(l.value ?? 0)}</span></td> : null}
                 </tr>
               ))}
             </tbody>
-            <tfoot><tr><td>{L(`${t.lines.length} سطر`, `${t.lines.length} line${t.lines.length === 1 ? "" : "s"}`)}</td><td />{t.status === "RECEIVED" ? <td /> : null}<td className="num hr-hide-mobile stk-tot"><span className="hr-num">{money(total)}</span></td></tr></tfoot>
+            <tfoot><tr><td>{L(`${t.lines.length} سطر`, `${t.lines.length} line${t.lines.length === 1 ? "" : "s"}`)}</td><td />{t.status === "RECEIVED" ? <td /> : null}{t.costsVisible ? <td className="num hr-hide-mobile stk-tot"><span className="hr-num">{money(total)}</span></td> : null}</tr></tfoot>
           </table>
         </div>
 
@@ -223,14 +253,14 @@ export default function TransferPage() {
 
         <Dialog open={receiving} title={L("استلام التحويل", "Receive the transfer")} sub={<><span className="hr-id">{t.ref}</span> · {name(t.fromLocation)} {lang === "en" ? "→" : "←"} {name(t.toLocation)}</>} onClose={() => setReceiving(false)} className="stk-wide"
           actions={<>
-            <Btn variant="primary" busy={busy} disabled={recvRows.some((r) => r.bad)} onClick={receive} data-testid="transfer-receive-confirm">{L("تأكيد الاستلام", "Confirm receipt")}</Btn>
+            <Btn variant="primary" busy={busy} disabled={recvBlocked} onClick={receive} data-testid="transfer-receive-confirm">{L("تأكيد الاستلام", "Confirm receipt")}</Btn>
             <Btn onClick={() => setReceiving(false)}>{L("رجوع", "Back")}</Btn>
           </>}
         >
           {recvError ? <Notice tone="danger"><span data-testid="transfer-receive-error">{recvError}</span></Notice> : null}
           <p className="hr-caption" style={{ margin: 0 }}>{L(`سجّل ما وصل فعلًا إلى «${name(t.toLocation)}». إن وصل أقل: اكتب السبب، ويُشطب الناقص من المخزون كتسوية ويُبلَّغ مشرفو المخزون. المنتج الجاهز يُستلم كاملًا.`, `Record what actually reached «${name(t.toLocation)}». If less arrived, give the reason; the missing quantity is written off as an adjustment and the inventory supervisors are notified. Finished goods are received in full.`)}</p>
           <div className="tr-recv-lines" role="list" aria-label={L("سطور الاستلام", "Receipt lines")}>
-            {recvRows.map(({ l, v, short }) => (
+            {recvRows.map(({ l, v, short, over, pv }) => (
               <div key={l.id} className="tr-recv-line" role="listitem" data-testid={`receive-line-${l.lineNo}`}>
                 <div className="tr-recv-item">
                   <span className="strong">{l.item ? (lang === "ar" && l.item.nameAr ? l.item.nameAr : l.item.name) : l.entityId}</span> <span className="hr-id hr-caption">{l.item?.code}</span>
@@ -248,9 +278,28 @@ export default function TransferPage() {
                       value={v.reason} data-testid={`receive-reason-${l.lineNo}`} onChange={(e) => setRecv((r) => ({ ...r, [l.lineNo]: { ...v, reason: e.target.value } }))} />
                   </label>
                 ) : null}
+                {over && pv ? (
+                  <div className="tr-recv-over" role="alert" data-testid={`receive-over-${l.lineNo}`}>
+                    <Notice tone={canAdjust ? "warning" : "danger"}>
+                      <strong>{L("تجاوز الحد", "Over the limit")}</strong>{" · "}{L(pv.wordsAr, pv.wordsEn)}.{" "}
+                      {canAdjust
+                        ? L("يحتاج تسجيله صلاحية «تسوية المخزون» — ستُطلب منك تأكيد هويتك.", "Recording it needs «adjust stock» — you will be asked to confirm your identity.")
+                        : L("يحتاج مشرفًا (صلاحية «تسوية المخزون»): استلم الكمية كاملة أو اطلب من مشرف تسجيل الفرق.", "It needs a supervisor («adjust stock»): receive in full, or ask a supervisor to record the difference.")}
+                    </Notice>
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
+          {transferOver && preview ? (
+            <div role="alert" data-testid="receive-over-transfer">
+              <Notice tone={canAdjust ? "warning" : "danger"}>
+                <strong>{L("تجاوز الحد", "Over the limit")}</strong>{" · "}{L(preview.transferWordsAr ?? "", preview.transferWordsEn ?? "")}.{" "}
+                {canAdjust ? L("يحتاج صلاحية «تسوية المخزون» — ستُطلب منك تأكيد هويتك.", "Needs «adjust stock» — you will be asked to confirm your identity.") : L("يحتاج مشرفًا (صلاحية «تسوية المخزون»).", "It needs a supervisor («adjust stock»).")}
+              </Notice>
+            </div>
+          ) : null}
+          {recvShort && preview?.individualRequired ? <Notice tone="danger"><span data-testid="receive-individual">{L("تسجيل النقص يحتاج حساب شخصي موثّق: سجّل الدخول بحسابك الشخصي، أو استلم الكمية كاملة.", "Recording a shortfall needs a verified individual account: sign in with your own account, or receive in full.")}</span></Notice> : null}
           <Field label={L("ملاحظة الاستلام", "Receipt note")}>
             <input className="hr-input" maxLength={500} value={recvNote} onChange={(e) => setRecvNote(e.target.value)} data-testid="receive-note" />
           </Field>

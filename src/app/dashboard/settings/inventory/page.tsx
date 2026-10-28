@@ -3,10 +3,11 @@
 // draws this page: it holds the one inventory figure the system already used as a constant — the
 // green-coffee low-stock line of the inventory screen («أصناف أقل من 20 كغ», Figma 251:2482) —
 // in the label-column sections of F-P01, and points to where the per-item reorder points live.
-// GET / PUT /api/settings/inventory (admin role, step-up, audited).
+// GET / PUT /api/settings/inventory (admin role, step-up, audited). «حد النقص عند الاستلام» (feat/shortfall-threshold):
+// above any limit a receiver's shortfall needs inventory › adjust and the stock-change gate (a supervisor).
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { OpsLoading, OpsRoot, PageHeader, useL } from "@/components/ops/ui";
+import { Btn, OpsLoading, OpsRoot, PageHeader, useL } from "@/components/ops/ui";
 import { Ico } from "@/components/shell/icons";
 import { useD21Phone } from "@/components/shell/page-context";
 import { routeAllowed } from "@/lib/nav/registry";
@@ -14,7 +15,14 @@ import { Sec, SettingsFrame, useViewer } from "../../_components/tools-ui";
 import { SingleSetting } from "../_parts/single-setting";
 import "../_parts/sections.css";
 
-type Inv = { lowStockGreenKg: string | null; effectiveLowStockGreenKg: string; isDefault: boolean; range: { default: number }; can: { edit: boolean } };
+type Shortfall = {
+  stored: { percent: string | null; valueSar: string | null; zeroNeedsAdjust: boolean | null; rollingMultiple: string | null };
+  effective: { percent: number; valueSar: number; zeroNeedsAdjust: boolean; rollingMultiple: number };
+  defaults: { percent: number; valueSar: number; zeroNeedsAdjust: boolean; rollingMultiple: number };
+  /** Council F3: the limits set high enough that a large shortfall passes without a supervisor. */
+  high: ("PERCENT" | "VALUE" | "ZERO")[];
+};
+type Inv = { lowStockGreenKg: string | null; effectiveLowStockGreenKg: string; isDefault: boolean; range: { default: number }; shortfall: Shortfall; can: { edit: boolean } };
 
 export default function InventorySettingsPage() {
   const L = useL();
@@ -44,6 +52,42 @@ export default function InventorySettingsPage() {
                 savedText={(j) => L(`حُفظ. شاشة المخزون تعلّم الآن الأصناف الأقل من ${String(j.effectiveLowStockGreenKg)} كغ.`, `Saved. The inventory screen now flags beans below ${String(j.effectiveLowStockGreenKg)} kg.`)}
               />
             </Sec>
+            <Sec title={L("حد النقص عند الاستلام", "Shortfall limit at receipt")} caption={L("نقص أكبر من أي حد هنا لا يسجّله المستلم وحده: يحتاج صلاحية «تسوية المخزون» وتأكيد الهوية (مشرف)", "A shortfall above any limit here is not recorded on the receiver's word alone: it needs «adjust stock» and an identity confirmation (a supervisor)")} testId="shortfall-limit">
+              <SingleSetting
+                url="/api/settings/inventory" field="shortfallPercent" testId="shortfall-percent"
+                stored={s.shortfall.stored.percent} effective={String(s.shortfall.effective.percent)} isDefault={s.shortfall.stored.percent === null} canEdit={s.can.edit}
+                label={L("نسبة النقص من كمية السطر", "Shortfall as a share of the line")}
+                help={L(`من 0 إلى 100 · فارغ = الافتراضي ${s.shortfall.defaults.percent}٪`, `0 to 100 · empty = the default ${s.shortfall.defaults.percent} %`)}
+                unit="%"
+                onSaved={(j) => setS((x) => (x ? { ...x, ...(j as Partial<Inv>) } : x))}
+                savedText={(j) => L(`حُفظ. النقص أكثر من ${String((j as Inv).shortfall.effective.percent)}٪ من السطر يحتاج مشرفًا.`, `Saved. A shortfall above ${String((j as Inv).shortfall.effective.percent)} % of the line needs a supervisor.`)}
+              />
+              <SingleSetting
+                url="/api/settings/inventory" field="shortfallValueSar" testId="shortfall-value"
+                stored={s.shortfall.stored.valueSar} effective={String(s.shortfall.effective.valueSar)} isDefault={s.shortfall.stored.valueSar === null} canEdit={s.can.edit}
+                label={L("قيمة النقص بمتوسط التكلفة", "Shortfall value at the moving average")}
+                help={L(`صفر فأكثر · فارغ = الافتراضي ${s.shortfall.defaults.valueSar} ر.س`, `0 or more · empty = the default SAR ${s.shortfall.defaults.valueSar}`)}
+                unit={L("ر.س", "SAR")}
+                onSaved={(j) => setS((x) => (x ? { ...x, ...(j as Partial<Inv>) } : x))}
+                savedText={(j) => L(`حُفظ. النقص بقيمة أكثر من ${String((j as Inv).shortfall.effective.valueSar)} ر.س يحتاج مشرفًا.`, `Saved. A shortfall worth more than SAR ${String((j as Inv).shortfall.effective.valueSar)} needs a supervisor.`)}
+              />
+              <ZeroToggle s={s} onSaved={(j) => setS((x) => (x ? { ...x, ...(j as Partial<Inv>) } : x))} />
+              <SingleSetting
+                url="/api/settings/inventory" field="shortfallRollingMultiple" testId="shortfall-rolling"
+                stored={s.shortfall.stored.rollingMultiple} effective={String(s.shortfall.effective.rollingMultiple)} isDefault={s.shortfall.stored.rollingMultiple === null} canEdit={s.can.edit}
+                label={L("مجموع نقص المستلم خلال 30 يومًا (مضاعف حد القيمة)", "A receiver's shortfalls over 30 days (times the value limit)")}
+                help={L(`فارغ = الافتراضي ${s.shortfall.defaults.rollingMultiple} × · الآن ${s.shortfall.effective.rollingMultiple * s.shortfall.effective.valueSar} ر.س`, `Empty = the default ${s.shortfall.defaults.rollingMultiple} × · now SAR ${s.shortfall.effective.rollingMultiple * s.shortfall.effective.valueSar}`)}
+                unit="×"
+                onSaved={(j) => setS((x) => (x ? { ...x, ...(j as Partial<Inv>) } : x))}
+                savedText={(j) => L(`حُفظ. من تجاوز نقصُه خلال 30 يومًا ${String((j as Inv).shortfall.effective.rollingMultiple)} × حد القيمة يحتاج مشرفًا.`, `Saved. A receiver past ${String((j as Inv).shortfall.effective.rollingMultiple)} × the value limit in 30 days needs a supervisor.`)}
+              />
+              {s.shortfall.high.length ? (
+                <div className="hr-notice tone-warning" role="status" data-testid="shortfall-high">
+                  <strong>{L("تحذير: الحد مرتفع، النقص الكبير سيمر بدون مشرف", "Warning: the limit is high — a large shortfall will pass without a supervisor")}</strong>
+                  {" · "}{s.shortfall.high.map((h) => h === "PERCENT" ? L(`النسبة ${s.shortfall.effective.percent}٪ (50٪ فأكثر)`, `percent ${s.shortfall.effective.percent} % (50 % or more)`) : h === "VALUE" ? L(`القيمة ${s.shortfall.effective.valueSar} ر.س (10,000 فأكثر)`, `value SAR ${s.shortfall.effective.valueSar} (10,000 or more)`) : L("الاستلام بصفر لا يحتاج مشرفًا", "a line received at zero needs no supervisor")).join(L("، ", ", "))}
+                </div>
+              ) : null}
+            </Sec>
             <Sec title={L("مواد التعبئة", "Packaging materials")} caption={L("تُدار في صفحاتها المعتمدة ولا تتكرر هنا", "Managed on their own approved pages, not repeated here")}>
               {viewer && routeAllowed(viewer, "/dashboard/inventory") ? (
                 <div className="tl-card">
@@ -60,5 +104,36 @@ export default function InventorySettingsPage() {
         )}
       </SettingsFrame>
     </OpsRoot>
+  );
+}
+
+/** «الاستلام بصفر يحتاج مشرفًا»: on / off (null = the default, on). PUT shortfallZeroNeedsAdjust. */
+function ZeroToggle({ s, onSaved }: { s: Inv; onSaved: (j: Record<string, unknown>) => void }) {
+  const L = useL();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const on = s.shortfall.effective.zeroNeedsAdjust;
+  async function put(v: boolean | null) {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch("/api/settings/inventory", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shortfallZeroNeedsAdjust: v }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { setMsg({ ok: false, text: L(j.error ?? "تعذّر الحفظ. لم يتغير شيء.", j.errorEn ?? j.error ?? "Could not save. Nothing was changed.") }); return; }
+      onSaved(j);
+      setMsg({ ok: true, text: (j as Inv).shortfall.effective.zeroNeedsAdjust ? L("حُفظ. السطر المستلم بصفر يحتاج مشرفًا.", "Saved. A line received at zero needs a supervisor.") : L("حُفظ. السطر المستلم بصفر يتبع حدّي النسبة والقيمة فقط.", "Saved. A line received at zero follows the percent and value limits only.") });
+    } catch {
+      setMsg({ ok: false, text: L("تعذّر الحفظ. لم يتغير شيء.", "Could not save. Nothing was changed.") });
+    } finally { setBusy(false); }
+  }
+  return (
+    <div className="ss-setrow" data-testid="shortfall-zero">
+      <label className="hr-check" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input type="checkbox" checked={on} disabled={!s.can.edit || busy} onChange={(e) => void put(e.target.checked)} data-testid="shortfall-zero-input" />
+        <span>{L("الاستلام بصفر يحتاج مشرفًا", "Receiving a line at zero needs a supervisor")}</span>
+        <span className="hr-caption">{s.shortfall.stored.zeroNeedsAdjust === null ? L("(الافتراضي: مفعّل)", "(the default: on)") : null}</span>
+      </label>
+      {s.can.edit && s.shortfall.stored.zeroNeedsAdjust !== null ? <Btn size="sm" variant="ghost" disabled={busy} onClick={() => void put(null)} data-testid="shortfall-zero-reset">{L("العودة إلى الافتراضي", "Back to the default")}</Btn> : null}
+      {msg ? <p className={`hr-caption tone-${msg.ok ? "success" : "danger"}`} role="status" data-testid="shortfall-zero-msg">{msg.text}</p> : null}
+    </div>
   );
 }

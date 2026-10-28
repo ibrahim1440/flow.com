@@ -69,9 +69,60 @@ function decimalOf(v: unknown): Decimal | null {
   return /^\d+(\.\d+)?$/.test(t) ? parseFiniteDecimal(t) : null;
 }
 
-/** PUT /api/settings/inventory body → the column to write (absent key = nothing to change). */
-export function parseInventoryPatch(b: Record<string, unknown>): { ok: true; data: { inventoryLowStockGreenKg?: Decimal | null } } | Problem {
-  const data: { inventoryLowStockGreenKg?: Decimal | null } = {};
+export type InventoryPatch = {
+  inventoryLowStockGreenKg?: Decimal | null;
+  inventoryShortfallPercent?: Decimal | null;
+  inventoryShortfallValueSar?: Decimal | null;
+  inventoryShortfallZeroNeedsAdjust?: boolean | null;
+  inventoryShortfallRollingMultiple?: Decimal | null;
+};
+
+/**
+ * PUT /api/settings/inventory body → the columns to write (absent key = nothing to change; "" / null = back to the
+ * default). The shortfall threshold (20261118090000_shortfall_threshold): shortfallPercent 0–100 (2 decimals),
+ * shortfallValueSar ≥ 0 (2 decimals, at most 10,000,000,000), shortfallZeroNeedsAdjust true / false,
+ * shortfallRollingMultiple 0–1000 (2 decimals: a receiver's 30 days over this many times the value limit need a supervisor).
+ */
+export function parseInventoryPatch(b: Record<string, unknown>): { ok: true; data: InventoryPatch } | Problem {
+  const data: InventoryPatch = {};
+  if ("shortfallPercent" in b) {
+    const v = b.shortfallPercent;
+    if (v === null || v === "") data.inventoryShortfallPercent = null;
+    else {
+      const d = decimalOf(v);
+      if (!d || d.isNegative() || d.greaterThan(100) || d.decimalPlaces() > 2) {
+        return { ok: false, field: "shortfallPercent", error: "The shortfall limit is a percentage from 0 to 100, with at most two decimals.", errorAr: "حد نسبة النقص من 0 إلى 100، بمنزلتين عشريتين على الأكثر." };
+      }
+      data.inventoryShortfallPercent = d;
+    }
+  }
+  if ("shortfallValueSar" in b) {
+    const v = b.shortfallValueSar;
+    if (v === null || v === "") data.inventoryShortfallValueSar = null;
+    else {
+      const d = decimalOf(v);
+      if (!d || d.isNegative() || d.greaterThan(9_999_999_999) || d.decimalPlaces() > 2) {
+        return { ok: false, field: "shortfallValueSar", error: "The shortfall value limit is an amount in SAR of 0 or more, with at most two decimals.", errorAr: "حد قيمة النقص مبلغ بالريال من صفر فأكثر، بمنزلتين عشريتين على الأكثر." };
+      }
+      data.inventoryShortfallValueSar = d;
+    }
+  }
+  if ("shortfallRollingMultiple" in b) {
+    const v = b.shortfallRollingMultiple;
+    if (v === null || v === "") data.inventoryShortfallRollingMultiple = null;
+    else {
+      const d = decimalOf(v);
+      if (!d || d.isNegative() || d.greaterThan(1000) || d.decimalPlaces() > 2) {
+        return { ok: false, field: "shortfallRollingMultiple", error: "The 30-day multiple is a number from 0 to 1000, with at most two decimals.", errorAr: "مضاعف الثلاثين يومًا رقم من 0 إلى 1000، بمنزلتين عشريتين على الأكثر." };
+      }
+      data.inventoryShortfallRollingMultiple = d;
+    }
+  }
+  if ("shortfallZeroNeedsAdjust" in b) {
+    const v = b.shortfallZeroNeedsAdjust;
+    if (v !== null && typeof v !== "boolean") return { ok: false, field: "shortfallZeroNeedsAdjust", error: "«Received at zero needs a supervisor» is on or off.", errorAr: "«الاستلام بصفر يحتاج مشرفًا» تشغيل أو إيقاف." };
+    data.inventoryShortfallZeroNeedsAdjust = v as boolean | null;
+  }
   if ("lowStockGreenKg" in b) {
     const v = b.lowStockGreenKg;
     if (v === null || v === "") data.inventoryLowStockGreenKg = null;

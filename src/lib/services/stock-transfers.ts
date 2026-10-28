@@ -43,7 +43,8 @@ import { prisma, TX_OPTS } from "@/lib/db";
 import { setAuditContext, type AuditContext } from "@/lib/accounting/audit";
 import { ipHashOf } from "@/lib/accounting/ops/purchase-activity";
 import { costIn, costOut, flushPostings, lockHolder, lockHolders, resolveNone, type CostKind, type HolderRow } from "@/lib/accounting/ops/cost-ledger";
-import { Decimal, qty4 } from "@/lib/accounting/ops/costing";
+import { Decimal, issue, qty4 } from "@/lib/accounting/ops/costing";
+import { SHORTFALL_ROLLING_DAYS, judgeShortfall, judgementWords, shortfallLimitsFromRow, thresholdRefusal, type LineCheck, type ShortfallLimits } from "@/lib/inventory/shortfall-threshold";
 import { dayText, parseBusinessDay, riyadhDay } from "@/lib/accounting/dates";
 import {
   TRANSIT_LOCATION_ID, covers, isTransitLocation, locationName, parseReceiveLines, parseTransferLines, shortRefusal, inactiveRefusal,
@@ -57,6 +58,68 @@ import { isSimpleMode } from "@/lib/simple-mode";
 type Tx = Prisma.TransactionClient;
 type Fail = { _appCode: number; message: string; errorEn: string; errorAr: string; code: string; location?: Record<string, unknown> };
 const fail = (status: number, code: string, ar: string, en: string, location?: Record<string, unknown>): Fail => ({ _appCode: status, message: ar, errorAr: ar, errorEn: en, code, ...(location ? { location } : {}) });
+
+type Db = Prisma.TransactionClient | typeof prisma;
+
+/** The shortfall limits in force (Settings › Inventory; NULL = the default). */
+export async function readShortfallLimits(db: Db): Promise<ShortfallLimits> {
+  const row = await db.systemConfig.findUnique({ where: { id: "singleton" }, select: { inventoryShortfallPercent: true, inventoryShortfallValueSar: true, inventoryShortfallZeroNeedsAdjust: true, inventoryShortfallRollingMultiple: true } });
+  const l = shortfallLimitsFromRow(row);
+  return { percent: l.percent, valueSar: l.valueSar, zeroNeedsAdjust: l.zeroNeedsAdjust, rollingMultiple: l.rollingMultiple };
+}
+
+type HolderLike = { qty: Decimal; value: Decimal; lastInCost?: Decimal | null };
+
+/**
+ * Each short balance line with its shortfall's value — the write-off's own: costing.issue on the item's one cost holder
+ * at the moving average (the locked holder inside the receipt, the current one before it). A holder with no qty or no
+ * value (uncosted) is valued at the last known unit cost, as the opening valuation does: the last receipt (lastInCost),
+ * else the last purchase (PurchaseRecord). No cost known at all → valueSar null («قيمة غير معروفة», over the limit).
+ * Finished lots are never short.
+ */
+export async function shortfallChecks(db: Db, sent: readonly { lineNo: number; itemKind: string; entityId: string; qty: number }[], received: readonly { lineNo: number; qtyReceived: number; qtyShort: number }[], holders?: Map<string, HolderLike>): Promise<LineCheck[]> {
+  const short = sent.filter((l) => l.itemKind !== "FG_LOT" && (received.find((r) => r.lineNo === l.lineNo)?.qtyShort ?? 0) > 0);
+  if (!short.length) return [];
+  const read = holders ? null : new Map((await db.costItem.findMany({ where: { tenantId: "hiqbah", OR: short.map((l) => ({ kind: l.itemKind, entityId: l.entityId })) }, select: { kind: true, entityId: true, qty: true, value: true, lastInCost: true } }))
+    .map((h) => [`${h.kind}:${h.entityId}`, { qty: new Decimal(h.qty), value: new Decimal(h.value), lastInCost: h.lastInCost === null ? null : new Decimal(h.lastInCost) } as HolderLike]));
+  const unknown = short.filter((l) => { const h = (holders ?? read!).get(`${l.itemKind}:${l.entityId}`); return !(h && h.qty.gt(0) && h.value.gt(0)) && !(h?.lastInCost && h.lastInCost.gt(0)); });
+  const lastPurchase = new Map<string, Decimal>();
+  if (unknown.length) {
+    const greens = unknown.filter((l) => l.itemKind === "GREEN_BEAN").map((l) => l.entityId), mats = unknown.filter((l) => l.itemKind === "MATERIAL").map((l) => l.entityId);
+    const rows = await db.purchaseRecord.findMany({ where: { OR: [...(greens.length ? [{ type: "GREEN_BEAN" as const, itemId: { in: greens } }] : []), ...(mats.length ? [{ materialItemId: { in: mats } }] : [])] }, orderBy: { purchaseDate: "asc" }, select: { type: true, itemId: true, materialItemId: true, costPerUnit: true } });
+    for (const p of rows) {
+      if (p.type === "GREEN_BEAN" && p.itemId) lastPurchase.set(`GREEN_BEAN:${p.itemId}`, new Decimal(p.costPerUnit.toFixed(6)));
+      else if (p.materialItemId) lastPurchase.set(`MATERIAL:${p.materialItemId}`, new Decimal(p.costPerUnit.toFixed(6)));
+    }
+  }
+  return short.map((l) => {
+    const r = received.find((x) => x.lineNo === l.lineNo)!;
+    const k = `${l.itemKind}:${l.entityId}`;
+    const h = (holders ?? read!).get(k);
+    const q = new Decimal(r.qtyShort);
+    let valueSar: number | null;
+    if (h && h.qty.gt(0) && h.value.gt(0)) valueSar = Number(issue(h, q).value);
+    else if (h?.lastInCost && h.lastInCost.gt(0)) valueSar = Number(q.times(h.lastInCost).toDecimalPlaces(2));
+    else if (lastPurchase.get(k)?.gt(0)) valueSar = Number(q.times(lastPurchase.get(k)!).toDecimalPlaces(2));
+    else valueSar = null;
+    return { lineNo: l.lineNo, qty: l.qty, qtyReceived: r.qtyReceived, qtyShort: r.qtyShort, valueSar };
+  });
+}
+
+/** Σ of the shortfall value `receiverId` recorded in the last 30 days (StockTransferLine.shortfallValue, as recorded). */
+export async function priorRollingShortfall(db: Db, receiverId: string, excludeTransferId?: string): Promise<number> {
+  const since = new Date(Date.now() - SHORTFALL_ROLLING_DAYS * 86_400_000);
+  const r = await db.stockTransferLine.aggregate({ where: { shortfallValue: { not: null }, transfer: { receivedBy: receiverId, status: "RECEIVED", receivedAt: { gte: since }, ...(excludeTransferId ? { id: { not: excludeTransferId } } : {}) } }, _sum: { shortfallValue: true } });
+  return Number(r._sum.shortfallValue ?? 0);
+}
+
+/** The whole judgement of a receipt's shortfall (per line, per transfer, per receiver over 30 days). */
+export async function judgeReceipt(db: Db, t: { id: string; lines: readonly { lineNo: number; itemKind: string; entityId: string; qty: number }[] }, received: readonly { lineNo: number; qtyReceived: number; qtyShort: number }[], receiverId: string, holders?: Map<string, HolderLike>) {
+  const limits = await readShortfallLimits(db);
+  const checks = await shortfallChecks(db, t.lines, received, holders);
+  const j = judgeShortfall(checks, limits, checks.length ? await priorRollingShortfall(db, receiverId, t.id) : 0);
+  return { limits, checks, judgement: j };
+}
 
 export const TRANSFER_ACTIONS = ["STOCK_TRANSFER_CREATED", "STOCK_TRANSFER_SENT", "STOCK_TRANSFER_RECEIVED", "STOCK_TRANSFER_CANCELLED"] as const;
 export const transferRef = (n: number) => `TR-${String(n).padStart(5, "0")}`;
@@ -335,7 +398,7 @@ export async function createTransfer(body: Record<string, unknown>, actor: Actor
  * `canWriteOff` with inventory › transfer_receive: the owner's decision before release), and the supervisors are notified
  * (inventory.transfer_shortfall); finished goods are received in full.
  */
-export async function receiveTransfer(id: string, body: Record<string, unknown>, actor: Actor & { canWriteOff: boolean; user: AdjustmentUser }, ctx: AuditContext) {
+export async function receiveTransfer(id: string, body: Record<string, unknown>, actor: Actor & { canWriteOff: boolean; user: AdjustmentUser; /** The shortfall threshold's gate passed (inventory › adjust + stockChangeGate). */ thresholdCleared?: boolean }, ctx: AuditContext) {
   const note = typeof body.note === "string" && body.note.trim() ? body.note.trim().slice(0, 500) : null;
   return prisma.$transaction(async (tx) => {
     await setAuditContext(tx, ctx);
@@ -354,6 +417,13 @@ export async function receiveTransfer(id: string, body: Record<string, unknown>,
     const info = await itemInfo(tx, t.lines);
     const balanceLines = t.lines.filter((l) => l.itemKind !== "FG_LOT");
     const holders = await lockHolders(tx, balanceLines.map((l) => ({ kind: l.itemKind as CostKind, entityId: l.entityId })));
+    // The owner's shortfall threshold, judged on the LOCKED holders (the value the write-off takes): above it the
+    // shortfall needs inventory › adjust and the stock-change gate — the route ran it (actor.thresholdCleared).
+    // Per line, per transfer and per receiver over 30 days (council F1) — the receiver's own shortfalls are serialised
+    // (one receipt at a time per receiver), so two receipts cannot both slip under the rolling limit.
+    if (p.lines.some((l) => l.qtyShort > 0)) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`hiqbah.shortfall:${actor.id}`}))`;
+    const { limits, checks, judgement: jdg } = await judgeReceipt(tx, t, p.lines, actor.id, holders);
+    if (jdg.over && !actor.thresholdCleared) { const r = thresholdRefusal(jdg, limits, false); throw fail(r.status, r.code, r.error, r.errorEn); }
     const day = riyadhDay();
     const msg = `استلام ${transferRef(t.number)} · ${t.fromLocation.nameAr} ← ${t.toLocation.nameAr}`;
     const done: Record<string, unknown>[] = [];
@@ -374,7 +444,8 @@ export async function receiveTransfer(id: string, body: Record<string, unknown>,
         }
         done.push({ lineNo: l.lineNo, itemKind: l.itemKind, entityId: l.entityId, code: it?.code, sent: l.qty, qtyReceived: r.qtyReceived, qtyShort: r.qtyShort, varianceReason: r.varianceReason, writeOffMovementId: writeOff });
       }
-      await tx.stockTransferLine.update({ where: { id: l.id }, data: { qtyReceived: r.qtyReceived, qtyShort: r.qtyShort > 0 ? r.qtyShort : null, varianceReason: r.varianceReason } });
+      const judged = checks.find((c) => c.lineNo === l.lineNo);
+      await tx.stockTransferLine.update({ where: { id: l.id }, data: { qtyReceived: r.qtyReceived, qtyShort: r.qtyShort > 0 ? r.qtyShort : null, varianceReason: r.varianceReason, shortfallValue: r.qtyShort > 0 && judged?.valueSar != null ? judged.valueSar : null } });
     }
     await tx.stockTransfer.update({ where: { id }, data: { status: "RECEIVED", receivedAt: new Date(), receivedBy: actor.id, receivedByName: actor.name ?? null, receiveNote: note } });
     await logTransfer(tx, ctx, "STOCK_TRANSFER_RECEIVED", t, { from: { id: t.fromLocationId, name: t.fromLocation.nameAr }, to: { id: t.toLocationId, name: t.toLocation.nameAr }, lines: done, note });
@@ -387,9 +458,12 @@ export async function receiveTransfer(id: string, body: Record<string, unknown>,
       const itemsEn = shortLines.map(({ l, r }) => { const it = info.get(`${l.itemKind}:${l.entityId}`); return `${it?.name ?? l.entityId} ${r4(r.qtyShort)} ${unit(it?.unit ?? "")[1]}`; }).join(", ");
       const reasons = [...new Set(shortLines.map(({ r }) => r.varianceReason).filter(Boolean))].join("؛ ");
       const admins = (await tx.employee.findMany({ where: { role: "admin", active: true }, select: { id: true } })).map((e) => e.id);
+      // «تجاوز الحد»: the limits exceeded, in words (the notification and its e-mail flag them).
+      // (No amounts: the supervisors told need not read costs; the limits are settings.)
+      const [overAr, overEn] = jdg.over ? judgementWords(jdg, limits, false) : ["", ""];
       const told = await notify(tx, {
         event: "inventory.transfer_shortfall", dedupeKey: t.id, actorId: actor.id, entity: { type: "StockTransfer", id: t.id }, people: { admins },
-        facts: { byName: actor.name ?? actor.id, ref: transferRef(t.number), transferId: t.id, itemsAr, itemsEn, reasonsAr: reasons, fromName: t.fromLocation.nameAr, fromNameEn: t.fromLocation.nameEn ?? t.fromLocation.nameAr, toName: t.toLocation.nameAr, toNameEn: t.toLocation.nameEn ?? t.toLocation.nameAr },
+        facts: { byName: actor.name ?? actor.id, ref: transferRef(t.number), transferId: t.id, itemsAr, itemsEn, reasonsAr: reasons, fromName: t.fromLocation.nameAr, fromNameEn: t.fromLocation.nameEn ?? t.fromLocation.nameAr, toName: t.toLocation.nameAr, toNameEn: t.toLocation.nameEn ?? t.toLocation.nameAr, overAr: overAr || null, overEn: overEn || null },
       });
       // Council F1(d): a write-off on the receiver's word is never silent — someone other than the actor is told. With
       // nobody else (the actor is the only admin and the only supervisor) it is refused, and nothing is written; SIMPLE
@@ -500,7 +574,21 @@ export async function inTransitSummary() {
   }));
 }
 
-export async function getTransfer(id: string) {
+const COST_KEYS = new Set(["value", "unitCost", "avgCost", "valueSar", "shortfallValue", "costValue", "lastInCost"]);
+/** A JSON value with every cost field removed (any depth). */
+function withoutCosts<T>(v: T): T {
+  if (Array.isArray(v)) return v.map((x) => withoutCosts(x)) as T;
+  if (v && typeof v === "object") return Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([k]) => !COST_KEYS.has(k)).map(([k, x]) => [k, withoutCosts(x)])) as T;
+  return v;
+}
+
+/**
+ * One transfer for its page. `costs` (council, before the gate): only a cost reader (accounting, or inventory ›
+ * valuation — canReadCost) gets the value at cost of its lines and its cost moves; everyone else gets the quantities with
+ * no value (value null, costMoves empty). Default: no costs.
+ */
+export async function getTransfer(id: string, opts: { costs?: boolean } = {}) {
+  const costs = opts.costs === true;
   const t = await prisma.stockTransfer.findUnique({
     where: { id },
     include: { fromLocation: true, toLocation: true, lines: { orderBy: { lineNo: "asc" } }, movements: { orderBy: [{ timestamp: "asc" }, { type: "desc" }], select: { id: true, type: true, locationId: true, referenceEntityId: true, quantityChanged: true, previousQuantity: true, newQuantity: true, timestamp: true, notes: true } } },
@@ -521,12 +609,16 @@ export async function getTransfer(id: string) {
   const names = new Map((people.length ? await prisma.employee.findMany({ where: { id: { in: people } }, select: { id: true, name: true } }) : []).map((e) => [e.id, e.name]));
   return {
     ...t, ref: transferRef(t.number), transferDate: dayText(t.transferDate),
-    lines: t.lines.map((l, i) => ({ ...l, item: info.get(`${l.itemKind}:${l.entityId}`) ?? null, fgLot: l.fgLotId && l.fgLotId !== l.entityId ? info.get(`FG_LOT:${l.fgLotId}`) ?? null : null, value: value[i].toFixed(2) })),
-    costMoves: moves.map((m) => ({ ...m, qty: String(m.qty), value: String(m.value) })),
+    // shortfallValue is not sent (council F5: a receiver's browser gets no cost); the cost readers see it in the valuation.
+    lines: t.lines.map((l, i) => ({ ...l, shortfallValue: undefined, item: info.get(`${l.itemKind}:${l.entityId}`) ?? null, fgLot: l.fgLotId && l.fgLotId !== l.entityId ? info.get(`FG_LOT:${l.fgLotId}`) ?? null : null, value: costs ? value[i].toFixed(2) : null })),
+    costMoves: costs ? moves.map((m) => ({ ...m, qty: String(m.qty), value: String(m.value) })) : [],
+    costsVisible: costs,
     glStates: [...new Set(moves.map((m) => m.glState))],
-    activity: activity.map((a) => ({ id: a.id, action: a.action, at: a.occurredAt, by: a.userId ? names.get(a.userId) ?? null : null, metadata: a.metadata })),
+    // The audit's metadata carries each line's value at cost too: stripped for a non-reader.
+    activity: activity.map((a) => ({ id: a.id, action: a.action, at: a.occurredAt, by: a.userId ? names.get(a.userId) ?? null : null, metadata: costs ? a.metadata : withoutCosts(a.metadata) })),
   };
 }
+
 
 /** Finished lots that can be transferred from a location (unit-tracked, AVAILABLE, free units > 0). */
 export async function transferableLots(locationId: string) {

@@ -337,11 +337,13 @@ export const EVENTS: NotificationEventDef[] = [
     // Council F4: the receiver's free-text reason is clipped to ~200 characters in the e-mail (in full in the app).
     emailView: (r) => ({ ...r, titleAr: clipAfter(r.titleAr, " — السبب: ", REASON_EMAIL_MAX), titleEn: clipAfter(r.titleEn, " — reason: ", REASON_EMAIL_MAX) }),
     render: (f) => ({
-      titleAr: `استلم ${s(f.byName)} التحويل ${s(f.ref)} وفيه نقص: ${s(f.itemsAr)} — السبب: ${s(f.reasonsAr)}`,
+      // «تجاوز الحد» (the owner's threshold): flagged first, in the title (the e-mail's subject) and the body.
+      titleAr: `${f.overAr ? "تجاوز الحد · " : ""}استلم ${s(f.byName)} التحويل ${s(f.ref)} وفيه نقص: ${s(f.itemsAr)} — السبب: ${s(f.reasonsAr)}`,
       // The person and the reason may be Arabic: isolated (FSI … PDI) so the English line keeps its order.
-      titleEn: `\u2068${sEn(f, "byName")}\u2069 received transfer ${s(f.ref)} short: ${s(f.itemsEn)} — reason: \u2068${sEn(f, "reasonsAr")}\u2069`,
-      bodyAr: `من «${s(f.fromName)}» إلى «${s(f.toName)}». شُطبت الكمية الناقصة من «في الطريق» بقيد فرق مخزون. راجع التحويل.`,
-      bodyEn: `From «${sEn(f, "fromName")}» to «${sEn(f, "toName")}». The missing quantity was written off from «in transit» as an inventory variance. Review the transfer.`,
+      titleEn: `${f.overAr ? "Over the limit · " : ""}\u2068${sEn(f, "byName")}\u2069 received transfer ${s(f.ref)} short: ${s(f.itemsEn)} — reason: \u2068${sEn(f, "reasonsAr")}\u2069`,
+      bodyAr: `${f.overAr ? `تجاوز الحد (${s(f.overAr)})؛ سجّله صاحب صلاحية «تسوية المخزون» بعد تأكيد هويته. ` : ""}من «${s(f.fromName)}» إلى «${s(f.toName)}». شُطبت الكمية الناقصة من «في الطريق» بقيد فرق مخزون. راجع التحويل.`,
+      bodyEn: `${f.overEn ? `Over the limit (${s(f.overEn)}): recorded by an «adjust stock» holder after an identity confirmation. ` : ""}From «${sEn(f, "fromName")}» to «${sEn(f, "toName")}». The missing quantity was written off from «in transit» as an inventory variance. Review the transfer.`,
+      ...(f.overAr ? { severity: "danger" as const } : {}),
       link: `/dashboard/inventory/transfers/${enc(s(f.transferId))}`,
     }),
   },

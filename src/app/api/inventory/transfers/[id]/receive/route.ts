@@ -1,7 +1,7 @@
 import { NextResponse } from "@/lib/api-response";
 import { requireSub, stockChangeGate } from "@/lib/auth-server";
 import { assertVerifiedActor } from "@/lib/hr/identity";
-import { transferShortfallGate } from "@/lib/services/transfer-shortfall-gate";
+import { evaluateShortfall } from "@/lib/services/transfer-shortfall-gate";
 import { handleDomainError } from "@/lib/api-error";
 import { auditFromRequest } from "@/lib/accounting/audit";
 import { receiveTransfer } from "@/lib/services/stock-transfers";
@@ -16,7 +16,8 @@ type Params = { params: Promise<{ id: string }> };
  * alone (no inventory › adjust); the supervisors are notified at once (inventory.transfer_shortfall, in the app and by
  * e-mail). Finished goods are received in full.
  * Council F1 (transfer-shortfall-gate.ts): a shortfall only from a verified individual account (never a PIN-only
- * session); the transfer's own creator / sender needs inventory › adjust and the stock-change gate (segregation of duties).
+ * session); the transfer's own creator / sender needs inventory › adjust and the stock-change gate (segregation of duties);
+ * a shortfall over the owner's threshold (percent / value at the moving average / received at zero) needs the same.
  */
 export async function POST(request: Request, { params }: Params) {
   const { user, error } = await requireSub("inventory", "transfer_receive");
@@ -24,12 +25,12 @@ export async function POST(request: Request, { params }: Params) {
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   try {
     const id = (await params).id;
-    const refused = await transferShortfallGate(user, id, body ?? {}, {
+    const { refused, thresholdCleared } = await evaluateShortfall(user, id, body ?? {}, {
       verified: (u) => assertVerifiedActor(u, "inventory.transfer_shortfall").then(() => true, () => false),
       adjustGate: () => stockChangeGate(user, "inventory", "adjust"),
     });
     if (refused) return refused;
-    return NextResponse.json(await receiveTransfer(id, body ?? {}, { id: user.id, name: user.name, canWriteOff: true, user }, auditFromRequest(request, user.id)));
+    return NextResponse.json(await receiveTransfer(id, body ?? {}, { id: user.id, name: user.name, canWriteOff: true, user, thresholdCleared }, auditFromRequest(request, user.id)));
   } catch (err) {
     return handleDomainError(err);
   }
