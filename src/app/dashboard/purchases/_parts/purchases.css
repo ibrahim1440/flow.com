@@ -103,3 +103,33 @@
 .pur-root .pi-activity .pi-act-detail { font-size: 13px; color: var(--hr-text); overflow-wrap: anywhere; }
 .pur-root .pi-vathint.is-warn { color: var(--hr-warning); }
 .pur-root .pur-rev { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+
+/* «نقص من المورد» (20261119090000_supplier_shortfall): the line's «المستلم أقل من الفاتورة» row, the invoice's shortfall
+   timeline and its credit notes. */
+.pur-root .pi-short { grid-column: 2 / -1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.pur-root .pi-short .pur-check { min-height: 32px; font-size: 13px; }
+.pur-root .pi-short-row { display: grid; grid-template-columns: minmax(140px, 0.8fr) minmax(200px, 1.2fr) minmax(200px, 1.4fr); gap: 8px 12px; align-items: start; padding: 8px 10px; border-radius: var(--hr-r-sm); background: var(--hr-subtle); }
+.pur-root .pi-short-row .pi-lbl.is-shown { display: block; }
+.pur-root .pi-short-hint { grid-column: 1 / -1; font-size: 12.5px; }
+.pur-root .pi-timeline { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.pur-root .pi-timeline li { display: grid; gap: 2px; min-width: 120px; padding: 8px 12px; border: 1px solid var(--hr-border-subtle); border-radius: var(--hr-r-md); background: var(--hr-surface); position: relative; }
+.pur-root .pi-timeline li + li::before { content: "←"; position: absolute; inset-inline-start: -14px; top: 50%; transform: translateY(-50%); color: var(--hr-muted); font-size: 12px; }
+[dir="ltr"] .pur-root .pi-timeline li + li::before, .pur-root[dir="ltr"] .pi-timeline li + li::before { content: "→"; }
+.pur-root .pi-timeline li.is-open { border-color: var(--hr-warning); }
+.pur-root .pi-timeline li.is-done { border-color: var(--hr-success); }
+.pur-root .pi-timeline .pi-tl-k { font-size: 12px; color: var(--hr-muted); }
+.pur-root .pi-timeline .hr-num { font-size: 16px; font-weight: 600; }
+.pur-root .pi-notes-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.pur-root .pi-notes-list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13.5px; }
+@media (max-width: 1279px) {
+  .pur-root .pi-short { grid-column: 1 / -1; }
+  .pur-root .pi-short-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .pur-root .pi-short-reason { grid-column: 1 / -1; }
+}
+@media (max-width: 767px) {
+  .pur-root .pi-short-row { grid-template-columns: minmax(0, 1fr); }
+  .pur-root .pi-timeline li { flex: 1 1 calc(50% - 8px); min-width: 0; }
+  .pur-root .pi-timeline li + li::before { display: none; }
+}
+.pur-root .pur-mobile-only { display: none; }
+@media (max-width: 767px) { .pur-root .pur-mobile-only { display: inline; } }

@@ -35,7 +35,9 @@ import { Decimal, ZERO, toDecimal } from "../money";
 import { flushPostings, lockHolders, type CostKind } from "./cost-ledger";
 import { qty4, stockLineNet } from "./costing";
 import { opsRefuse } from "./refusals";
-import { cleanLines, getInvoice, header, lineRows, lockInvoice, nextNumber, ownReceipts, postInvoiceTx, receiptReversed, refDuplicate, totals, type InvoiceInput, type InvoiceLineInput } from "./ap";
+import { cleanLines, getInvoice, header, lineRows, lockInvoice, nextNumber, ownReceipts, postInvoiceTx, receiptReversed, refDuplicate, totals, type InvoiceInput, type InvoiceLineInput, type LineShortfall } from "./ap";
+import { resolveShortfallTreatment, supplierShortfallFromRow } from "./supplier-shortfall";
+import { claimsOfInvoice, openClaimsBySupplier } from "./supplier-claims";
 import { receiveGreen, receiveMaterial, reverseReceipt, type ReceiptUser } from "@/lib/services/purchase-receipts";
 import { greenLotFields } from "@/lib/services/green-lots";
 import { receivingLocationId as resolveReceivingLocation } from "@/lib/services/stock-locations";
@@ -64,6 +66,15 @@ export type PurchaseLineInput = {
   description?: string | null;
   net?: string | number | null;
   vatRate?: string | number | null;
+  /**
+   * «نقص من المورد» (20261119090000_supplier_shortfall), STOCK lines and the GRN lines of the invoice's own receipts: the
+   * quantity on the supplier's invoice when more than was received («المستلم أقل من الفاتورة»; absent = as received).
+   * The line's net is then billed × unit cost; the receipt stays received × unit cost.
+   */
+  billedQty?: string | number | null;
+  /** CLAIM «مطالبة المورد» | LOSS «خسارة» (inventory › adjust + step-up + reason); absent: the tolerance decides. */
+  shortfallTreatment?: string | null;
+  shortfallReason?: string | null;
 };
 export type PurchaseInvoiceInput = {
   supplierId: string; supplierRef: string; invoiceDate: string; dueDate?: string | null; notes?: string | null;
@@ -77,7 +88,7 @@ export type PurchaseInvoiceInput = {
   lines: PurchaseLineInput[]; action?: PurchaseAction;
 };
 /** What the caller's gates allowed (src/lib/purchases/gates.ts); the service enforces them. Deny by default: required. */
-export type PurchaseGrants = { mayReceive: boolean; mayChangeReceived: boolean };
+export type PurchaseGrants = { mayReceive: boolean; mayChangeReceived: boolean; /** «خسارة» on a shortfall: inventory › adjust through stockChangeGate (the route). */ mayWriteOffShortfall?: boolean };
 
 const ACTIONS: PurchaseAction[] = ["draft", "receive", "post"];
 const str = (v: unknown, max: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
@@ -96,7 +107,17 @@ function quantityOf(v: unknown, i: number): Decimal {
 }
 
 
-type Stock = { i: number; stockKind: "GREEN_BEAN" | "MATERIAL"; stockItemId: string | null; newLot: Record<string, unknown> | null; quantity: Decimal; unitCost: Decimal; net: Decimal; vatRate: string | number | null | undefined; description: string | null };
+/** net = the billed value (billed × unit cost); receivedNet = what the receipt takes into stock (received × unit cost). */
+type Stock = { i: number; stockKind: "GREEN_BEAN" | "MATERIAL"; stockItemId: string | null; newLot: Record<string, unknown> | null; quantity: Decimal; unitCost: Decimal; net: Decimal; receivedNet: Decimal; billedQty: Decimal | null; vatRate: string | number | null | undefined; description: string | null };
+
+/** A line's billed quantity: absent / empty / equal to the received = none; else > received (4 decimals at most). */
+function billedOf(v: unknown, received: Decimal, i: number): Decimal | null {
+  if (v === undefined || v === null || v === "") return null;
+  let b: Decimal;
+  try { b = quantityOf(v, i); } catch { throw opsRefuse("SHORTFALL_INVALID", `Line ${i + 1}.`, `السطر ${i + 1}.`); }
+  if (b.lt(received)) throw opsRefuse("SHORTFALL_INVALID", `Line ${i + 1}.`, `السطر ${i + 1}.`);
+  return b.equals(received) ? null : b;
+}
 
 /** Validate the raw lines (shape and stock maths) before anything is written. */
 function parseLines(raw: unknown): { stock: Stock[]; lines: PurchaseLineInput[] } {
@@ -111,7 +132,9 @@ function parseLines(raw: unknown): { stock: Stock[]; lines: PurchaseLineInput[] 
     if (!stockKind || (!stockItemId && !newLot)) throw opsRefuse("STOCK_LINE_INVALID", `Line ${i + 1}.`, `السطر ${i + 1}.`);
     const quantity = quantityOf(l.quantity, i);
     const unitCost = unitCostOf(l.unitCost, i);
-    stock.push({ i, stockKind, stockItemId, newLot, quantity, unitCost, net: stockLineNet(quantity, unitCost), vatRate: l.vatRate, description: str(l.description, 300) });
+    const billedQty = billedOf(l.billedQty, quantity, i);
+    const receivedNet = stockLineNet(quantity, unitCost);
+    stock.push({ i, stockKind, stockItemId, newLot, quantity, unitCost, net: billedQty ? stockLineNet(billedQty, unitCost) : receivedNet, receivedNet, billedQty, vatRate: l.vatRate, description: str(l.description, 300) });
   }
   return { stock, lines: raw as PurchaseLineInput[] };
 }
@@ -155,6 +178,12 @@ async function saveTx(input: PurchaseInvoiceInput, id: string | null, user: Rece
   const mayReceive = opts?.mayReceive === true, mayChangeReceived = opts?.mayChangeReceived === true;
   if (!mayReceive && (stock.some((x) => x.newLot) || (action !== "draft" && stock.length))) throw opsRefuse("RECEIVE_REQUIRED");
   const receivedDate = receivedDayOf(input?.receivedDate);
+  // «خسارة» on a shortfall is a stock write-off: the route's stockChangeGate (inventory › adjust + step-up) and a reason.
+  for (const [i, l] of (lines as PurchaseLineInput[]).entries()) {
+    if (l.shortfallTreatment !== "LOSS" || !l.billedQty) continue;
+    if (!opts?.mayWriteOffShortfall) throw opsRefuse("SHORTFALL_LOSS_REQUIRED");
+    if ((str(l.shortfallReason, 500) ?? "").length < 3) throw opsRefuse("SHORTFALL_REASON", `Line ${i + 1}.`, `السطر ${i + 1}.`);
+  }
   return prisma.$transaction(async (tx) => {
     await setAuditContext(tx, ctx);
     const { h, supplier } = await header(tx, input as InvoiceInput);
@@ -244,13 +273,48 @@ async function saveTx(input: PurchaseInvoiceInput, id: string | null, user: Rece
     // Stock lines: a new lot is created (empty) in this save; on receive each line becomes a receipt.
     const lots: LotOut[] = [];
     const out: InvoiceLineInput[] = [];
+    // «نقص من المورد»: per output line, its shortfall (the billed − received part at the unit cost) and its treatment.
+    const shortfalls: (LineShortfall | null)[] = [];
+    const tolerance = supplierShortfallFromRow(await tx.systemConfig.findUnique({ where: { id: "singleton" }, select: { purchaseShortfallTolerancePercent: true, purchaseAbandonReverseVat: true } })).tolerancePercent;
+    const shortOf = (i: number, billedQty: Decimal | null, received: Decimal, billedNet: Decimal, receivedNet: Decimal): LineShortfall | null => {
+      if (!billedQty) return null;
+      const net = billedNet.minus(receivedNet);
+      if (!net.gt(0)) throw opsRefuse("SHORTFALL_INVALID", `Line ${i + 1}.`, `السطر ${i + 1}.`);
+      const l = lines[i];
+      const treatment = resolveShortfallTreatment({ billed: Number(billedQty), received: Number(received), requested: l.shortfallTreatment ?? null, tolerancePercent: tolerance });
+      return { billedQty, qty: billedQty.minus(received), net, treatment, reason: str(l.shortfallReason, 500) };
+    };
     for (const [i, l] of lines.entries()) {
       const vatRate = l.vatRate ?? null;
       const taxCode = l.taxCode ?? null;
       if (l.kind === "EXPENSE") { out.push({ kind: "EXPENSE", expenseCategoryId: l.expenseCategoryId ?? null, description: l.description ?? null, net: l.net ?? "0", vatRate, taxCode }); continue; }
       if (l.kind === "IMPORT_VAT") { out.push({ kind: "IMPORT_VAT", description: l.description ?? null, net: "0", customsValue: l.customsValue ?? null, vatRate, taxCode: taxCode ?? "P-IMP15" }); continue; }
       if (l.kind === "LANDED_COST") { out.push({ kind: "LANDED_COST", targetPurchaseRecordId: l.targetPurchaseRecordId ?? null, landedCostType: l.landedCostType ?? null, description: l.description ?? null, net: l.net ?? "0", vatRate, taxCode }); continue; }
-      if (l.kind === "GRN") { out.push({ kind: "GRN", purchaseRecordId: l.purchaseRecordId ?? null, description: l.description ?? null, quantity: l.quantity ?? null, net: l.net ?? (await grnValue(tx, String(l.purchaseRecordId ?? ""))).toFixed(2), vatRate, taxCode }); continue; }
+      if (l.kind === "GRN") {
+        const value = await grnValue(tx, String(l.purchaseRecordId ?? ""));
+        let net: string | number = l.net ?? value.toFixed(2);
+        // A kept own receipt may carry the billed quantity. Council F3: its billed net is DERIVED — billed × the receipt's
+        // unit cost — and a net sent with it may differ by a rounding halala at most.
+        let sf: LineShortfall | null = null;
+        if (l.billedQty !== undefined && l.billedQty !== null && l.billedQty !== "") {
+          const pr = l.purchaseRecordId && own.includes(String(l.purchaseRecordId)) ? await tx.purchaseRecord.findUnique({ where: { id: String(l.purchaseRecordId) }, select: { quantity: true, costPerUnit: true } }) : null;
+          if (!pr) throw opsRefuse("SHORTFALL_INVALID", `Line ${i + 1}: only a receipt of this invoice.`, `السطر ${i + 1}: لاستلام هذه الفاتورة فقط.`);
+          const received = qty4(pr.quantity);
+          const billed = billedOf(l.billedQty, received, i);
+          const derived = billed ? stockLineNet(billed, new Decimal(pr.costPerUnit.toFixed(6))) : value;
+          if (l.net !== undefined && l.net !== null && l.net !== "") {
+            let given: Decimal;
+            try { given = new Decimal(String(l.net)); } catch { throw opsRefuse("SHORTFALL_INVALID", `Line ${i + 1}.`, `السطر ${i + 1}.`); }
+            if (given.minus(derived).abs().gt("0.01")) throw opsRefuse("SHORTFALL_INVALID", `Line ${i + 1}: the net is the billed quantity × the receipt's unit cost (${derived.toFixed(2)}).`, `السطر ${i + 1}: الصافي = الكمية المفوترة × تكلفة وحدة الاستلام (${derived.toFixed(2)}).`);
+          }
+          net = derived.toFixed(2);
+          sf = shortOf(i, billed, received, derived, value);
+        }
+        if (sf && l.shortfallTreatment === "LOSS" && !opts?.mayWriteOffShortfall) throw opsRefuse("SHORTFALL_LOSS_REQUIRED");
+        out.push({ kind: "GRN", purchaseRecordId: l.purchaseRecordId ?? null, description: l.description ?? null, quantity: l.quantity ?? null, net, vatRate, taxCode });
+        shortfalls[out.length - 1] = sf;
+        continue;
+      }
       const s = stock.find((x) => x.i === i) as Stock;
       let itemId = s.stockItemId;
       let lot: LotOut | null = null;
@@ -277,15 +341,18 @@ async function saveTx(input: PurchaseInvoiceInput, id: string | null, user: Rece
       const description = s.description ?? label;
       if (action === "draft") {
         out.push({ kind: "STOCK", stockKind: s.stockKind, stockItemId: itemId, description, quantity: s.quantity.toFixed(), net: s.net.toFixed(2), vatRate, taxCode: lines[i].taxCode ?? null });
+        shortfalls[out.length - 1] = shortOf(i, s.billedQty, s.quantity, s.net, s.receivedNet);
         continue;
       }
       const notes = `فاتورة مشتريات ${number} · ${h.supplierRef}`;
-      const common = { value: s.net, lineKey: `SINV:${invId}`, purchaseDate: receivedDate, locationId: receivingLocationId };
+      // The receipt takes what ARRIVED into stock (received × unit cost); the bill's line carries the billed value.
+      const common = { value: s.receivedNet, lineKey: `SINV:${invId}`, purchaseDate: receivedDate, locationId: receivingLocationId };
       const purchaseRecordId = s.stockKind === "GREEN_BEAN"
         ? (await receiveGreen(tx, user, { supplierId: h.supplierId, greenBeanId: itemId as string, quantity: Number(s.quantity), costPerUnit: Number(s.unitCost), notes, ...common })).purchase.id
         : (await receiveMaterial(tx, user, { materialItemId: itemId as string, quantity: Number(s.quantity), supplierId: h.supplierId, reference: h.supplierRef, notes: `فاتورة مشتريات ${number}`, unitCost: Number(s.unitCost), ...common })).purchase!.id;
       if (lot) lots.push(lot);
       out.push({ kind: "GRN", purchaseRecordId, description, quantity: s.quantity.toFixed(), net: s.net.toFixed(2), vatRate, taxCode: lines[i].taxCode ?? null });
+      shortfalls[out.length - 1] = shortOf(i, s.billedQty, s.quantity, s.net, s.receivedNet);
     }
     // Received lots kept from an earlier save (an edit) still offer their label.
     for (const pr of keep) {
@@ -296,7 +363,7 @@ async function saveTx(input: PurchaseInvoiceInput, id: string | null, user: Rece
       }
     }
 
-    const clean = await cleanLines(tx, supplier, out, { no: h.customsDeclarationNo });
+    const clean = await cleanLines(tx, supplier, out, { no: h.customsDeclarationNo }, shortfalls);
     if (cur) await tx.supplierInvoiceLine.deleteMany({ where: { invoiceId: invId } });
     const now = new Date();
     await tx.supplierInvoice.update({
@@ -415,8 +482,13 @@ export async function getPurchaseInvoice(id: string) {
     matIds.length ? prisma.materialItem.findMany({ where: { id: { in: matIds } }, select: { id: true, code: true, name: true, nameAr: true, unitOfMeasure: true, categoryId: true } }) : [],
   ]);
   const prOf = new Map(prs.map((p) => [p.id, p]));
+  // «نقص من المورد»: the claims this invoice opened, each with its settlements (the panel and the timeline).
+  const claims = await claimsOfInvoice(id);
+  const creditNotes = (await prisma.supplierCreditNote.findMany({ where: { invoiceId: id }, orderBy: { createdAt: "asc" }, select: { id: true, number: true, supplierRef: true, noteDate: true, net: true, vat: true, gross: true, advanceAmount: true, status: true, claimId: true, cancelReason: true } }))
+    .map((n) => ({ ...n, noteDate: n.noteDate.toISOString().slice(0, 10), net: new Decimal(n.net).toFixed(2), vat: new Decimal(n.vat).toFixed(2), gross: new Decimal(n.gross).toFixed(2), advanceAmount: new Decimal(n.advanceAmount).toFixed(2) }));
   return {
     ...inv,
+    claims, creditNotes,
     received: live.size > 0,
     reversedReceipts: [...own].filter((x) => !live.has(x)).length,
     lines: inv.lines.map((l) => {
@@ -436,14 +508,16 @@ export async function getPurchaseInvoice(id: string) {
 export async function supplierBalances() {
   const [sups, open] = await Promise.all([
     prisma.supplier.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, contact: true, vatNumber: true, isNonResident: true, kind: true, paymentTermsDays: true, createdAt: true, _count: { select: { purchases: true } } } }),
-    prisma.supplierInvoice.groupBy({ by: ["supplierId", "status"], where: { status: { in: ["POSTED", "SUBMITTED"] } }, _sum: { grossTotal: true, paidTotal: true }, _count: { _all: true } }),
+    prisma.supplierInvoice.groupBy({ by: ["supplierId", "status"], where: { status: { in: ["POSTED", "SUBMITTED"] } }, _sum: { grossTotal: true, paidTotal: true, creditedTotal: true }, _count: { _all: true } }),
   ]);
+  const claims = await openClaimsBySupplier();
   return sups.map((s) => {
     const posted = open.find((o) => o.supplierId === s.id && o.status === "POSTED");
     const pending = open.find((o) => o.supplierId === s.id && o.status === "SUBMITTED");
     return {
       id: s.id, name: s.name, contact: s.contact, vatNumber: s.vatNumber, isNonResident: s.isNonResident, kind: s.kind, paymentTermsDays: s.paymentTermsDays, receipts: s._count.purchases,
-      openBalance: new Decimal(posted?._sum.grossTotal ?? 0).minus(posted?._sum.paidTotal ?? 0).toFixed(2),
+      openBalance: new Decimal(posted?._sum.grossTotal ?? 0).minus(posted?._sum.paidTotal ?? 0).minus(posted?._sum.creditedTotal ?? 0).toFixed(2),
+      openClaims: (claims.get(s.id) ?? ZERO).toFixed(2),
       awaitingApproval: new Decimal(pending?._sum.grossTotal ?? 0).toFixed(2),
     };
   });
@@ -487,6 +561,8 @@ export async function receiptRegister(q: { from?: string | null; take?: number }
       value: rec ? new Decimal(rec.value).abs().toFixed(2) : null,
       reversed,
       invoice: inv ? { ...inv, own: rec?.lineKey === `SINV:${inv.id}` } : null,
+      // «نقص من المورد»: replacement goods for a supplier claim (billed on the claim's invoice — never «not invoiced»).
+      replacesClaim: rec?.lineKey?.startsWith("CLAIM:") ? rec.lineKey.slice(6) : null,
     };
   });
 }

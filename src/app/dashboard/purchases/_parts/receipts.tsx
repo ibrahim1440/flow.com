@@ -248,6 +248,8 @@ export type ReceiptRow = {
   item: { kind: string; id: string; code: string; name: string; nameAr: string | null; unit: string } | null;
   value: string | null; reversed: boolean;
   invoice: { id: string; number: string; status: string; own: boolean } | null;
+  /** «نقص من المورد»: replacement goods for this supplier claim (billed on the claim's invoice). */
+  replacesClaim?: string | null;
 };
 
 const UNIT: Record<string, [string, string]> = { KG: ["كغ", "kg"], GRAM: ["غ", "g"], PIECE: ["حبة", "pcs"], UNIT: ["وحدة", "units"], LITER: ["لتر", "L"] };
@@ -290,7 +292,7 @@ export function ReceiptsTab({ canReceive, canDraft, initialBean }: { canReceive:
     const start = periodStart(effPeriod);
     return sortPurchases(all.filter((p) => {
       if (start && new Date(p.purchaseDate) < start) return false;
-      if (which === "open" && (p.invoice || p.reversed)) return false;
+      if (which === "open" && (p.invoice || p.reversed || p.replacesClaim)) return false;
       if (which === "invoiced" && (!p.invoice || p.reversed)) return false;
       if (!q) return true;
       return `${p.supplier.name} ${p.item?.name ?? ""} ${p.item?.nameAr ?? ""} ${p.item?.code ?? ""} ${p.notes ?? ""} ${p.invoice?.number ?? ""}`.toLowerCase().includes(q);
@@ -301,7 +303,7 @@ export function ReceiptsTab({ canReceive, canDraft, initialBean }: { canReceive:
   const start30 = periodStart("30")!;
   const last30 = purchaseTotals(live.filter((p) => new Date(p.purchaseDate) >= start30));
   const green30 = purchaseTotals(live.filter((p) => p.type === "GREEN_BEAN" && new Date(p.purchaseDate) >= start30));
-  const notInvoiced = live.filter((p) => !p.invoice);
+  const notInvoiced = live.filter((p) => !p.invoice && !p.replacesClaim);
   const notInvoicedValue = notInvoiced.reduce((s, p) => s + (Number(p.value ?? p.totalCost) || 0), 0);
   const shown = purchaseTotals(filtered.filter((p) => !p.reversed));
   const sar = lang === "ar" ? "ر.س" : "SAR";
@@ -314,6 +316,7 @@ export function ReceiptsTab({ canReceive, canDraft, initialBean }: { canReceive:
   function status(p: ReceiptRow) {
     if (p.reversed) return <span className="pur-rev"><span className="hr-dot tone-cancelled"><span>{L("معكوس", "Reversed")}</span></span>{p.invoice ? <Link className="acct-code pur-inv-link" href={`/dashboard/purchases/invoices/${p.invoice.id}`}>{p.invoice.number}</Link> : null}</span>;
     if (p.invoice) return <Link className="acct-code pur-inv-link" href={`/dashboard/purchases/invoices/${p.invoice.id}`}>{p.invoice.number}</Link>;
+    if (p.replacesClaim) return <Link className="hr-dot tone-info" href="/dashboard/purchases?tab=claims" data-testid={`receipt-replacement-${p.id}`}><span>{L("بضاعة بديلة عن مطالبة", "Replacement for a claim")}</span></Link>;
     return <span className="hr-dot tone-warning" data-testid={`receipt-open-${p.id}`}><span>{L("لم تُفوتر بعد", "Not invoiced yet")}</span></span>;
   }
 

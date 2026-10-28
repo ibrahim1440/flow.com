@@ -61,6 +61,20 @@ export const OPS_REFUSALS = {
   // Review L-3: the commission payable is kept per employee (party = the HR record), so the ledger refuses an accrual
   // or a payout for a login that is not linked to an HR employee rather than post it with no party.
   COMMISSION_NO_HR_PERSON: { status: 409, en: "This sales login is not linked to an employee record in HR, so its commission cannot be booked to the employee's commission payable. Link the login to its HR employee (HR › Employees), then retry.", ar: "حساب المندوب غير مرتبط بسجل موظف في الموارد البشرية، فلا تُقيَّد عمولته على ذمة الموظف. اربط الحساب بسجل الموظف (الموارد البشرية › الموظفون) ثم أعد المحاولة." },
+  // «نقص من المورد» (20261119090000_supplier_shortfall).
+  SHORTFALL_INVALID: { status: 400, en: "The quantity on the supplier's invoice is at least the quantity received (at most 4 decimals); the shortfall is the difference.", ar: "الكمية في فاتورة المورد لا تقل عن الكمية المستلمة (4 خانات عشرية كحد أقصى)، والنقص هو الفرق." },
+  SHORTFALL_REASON: { status: 400, en: "Writing a shortfall off as a loss needs a reason (3 characters or more).", ar: "تسجيل النقص كخسارة يحتاج سببًا (3 أحرف على الأقل)." },
+  SHORTFALL_LOSS_REQUIRED: { status: 403, en: "Writing a supplier shortfall off as a loss needs the Inventory › Adjust permission and a fresh confirmation; claim it from the supplier instead.", ar: "تسجيل نقص المورد كخسارة يحتاج صلاحية «المخزون › تسوية» وتأكيد الهوية؛ أو طالب المورد به بدلًا من ذلك." },
+  SHORTFALL_TAX: { status: 400, en: "A shortfall is recorded on a stock line whose VAT is recoverable or nil (a not-recoverable VAT is part of the cost).", ar: "يُسجَّل النقص على سطر مخزون ضريبته قابلة للاسترداد أو بلا ضريبة (الضريبة غير القابلة للاسترداد جزء من التكلفة)." },
+  CLAIM_SETTLED: { status: 409, en: "A supplier claim on this invoice is already settled in part or in full (credit note, replacement or abandonment): undo that first.", ar: "مطالبة المورد على هذه الفاتورة سُوّيت كليًا أو جزئيًا (إشعار دائن أو بضاعة بديلة أو تنازل): ألغِ التسوية أولًا." },
+  CLAIM_STATE: { status: 409, en: "The supplier claim is not open.", ar: "مطالبة المورد ليست مفتوحة." },
+  CLAIM_AMOUNT: { status: 400, en: "The amount is above zero and at most what is still open on the claim.", ar: "المبلغ أكبر من صفر ولا يتجاوز المتبقي المفتوح من المطالبة." },
+  CREDIT_NOTE_VAT: { status: 400, en: "The credit note's VAT is the computed one within ±0.01 (and at most the claim's open VAT): expected", ar: "ضريبة الإشعار هي المحسوبة بفارق ±0.01 على الأكثر (ولا تتجاوز ضريبة المطالبة المفتوحة): المتوقع" },
+  CLAIM_OPENING_PENDING: { status: 409, en: "This claim was opened before accounting went live, so the books hold it only through the opening balances: apply the opening valuation (its «open supplier claims» line) and post the opening first.", ar: "فُتحت هذه المطالبة قبل تفعيل المحاسبة، فلا تظهر في الدفاتر إلا عبر الأرصدة الافتتاحية: طبّق التقييم الافتتاحي (سطر «مطالبات الموردين المفتوحة») ورحّل الأرصدة الافتتاحية أولًا." },
+  CLAIM_FROZEN: { status: 409, en: "A supplier claim's, settlement's or credit note's amounts never change; cancel and record it again.", ar: "مبالغ المطالبة أو تسويتها أو الإشعار الدائن لا تتغير؛ ألغِه وسجّله من جديد." },
+  CREDIT_NOTE_STATE: { status: 409, en: "The supplier credit note is not in a state that allows this.", ar: "حالة الإشعار الدائن لا تسمح بهذا الإجراء." },
+  GRN_CLAIM_REPLACEMENT: { status: 409, en: "This receipt is replacement goods for a supplier claim (already billed on the claim's invoice); it is not matched to another bill.", ar: "هذا الاستلام بضاعة بديلة عن مطالبة مورد (مفوترة في فاتورة المطالبة)، فلا يُطابَق بفاتورة أخرى." },
+  CREDIT_NOTE_REF_REQUIRED: { status: 400, en: "Enter the supplier's credit note number.", ar: "أدخل رقم الإشعار الدائن لدى المورد." },
 } satisfies Record<string, R>;
 
 export type OpsRefusalCode = keyof typeof OPS_REFUSALS;
@@ -74,6 +88,8 @@ export function opsRefuse(code: OpsRefusalCode, detail?: string, detailAr?: stri
 export function opsDbRefusal(message: string): AccountingError | null {
   if (/COST_MOVE_(IMMUTABLE|PENDING)/.test(message)) return opsRefuse("COST_MOVE_IMMUTABLE");
   if (/AP_INVOICE_PAID/.test(message)) return opsRefuse("INVOICE_PAID");
+  if (/AP_CLAIM_KEPT/.test(message)) return opsRefuse("CLAIM_SETTLED");
+  if (/AP_CLAIM_FROZEN|AP_CREDIT_NOTE_FROZEN/.test(message)) return opsRefuse("CLAIM_FROZEN");
   if (/AP_INVOICE_POSTED/.test(message)) return opsRefuse("AP_INVOICE_POSTED");
   if (/AP_INVOICE_DELETE/.test(message)) return opsRefuse("INVOICE_NUMBER_ISSUED");
   if (/TAX_CATEGORY_FROZEN/.test(message)) return opsRefuse("TAX_CATEGORY_FROZEN");

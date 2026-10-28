@@ -16,6 +16,8 @@ export const PURCHASE_ACTIVITY = [
   "PURCHASE_INVOICE_POSTED", "PURCHASE_INVOICE_RETURNED", "PURCHASE_INVOICE_CANCELLED", "PURCHASE_INVOICE_CANCELLED_POSTED",
   "PURCHASE_INVOICE_DELETED", "PURCHASE_RECEIPT_REVERSED", "PURCHASE_LOT_CREATED", "PURCHASE_LOT_RETIRED",
   "PURCHASE_ACTION_DENIED",
+  // «نقص من المورد» (20261119090000_supplier_shortfall).
+  "PURCHASE_CLAIM_OPENED", "PURCHASE_CREDIT_NOTE_POSTED", "PURCHASE_CREDIT_NOTE_CANCELLED", "PURCHASE_CLAIM_REPLACED", "PURCHASE_CLAIM_ABANDONED", "PURCHASE_CLAIM_REFUNDED",
 ] as const;
 export type PurchaseActivity = (typeof PURCHASE_ACTIVITY)[number];
 
@@ -69,7 +71,7 @@ export async function logPurchaseActivity(tx: Tx, ctx: Pick<AuditContext, "actor
 }
 
 /** The refusals worth a row in the person audit when someone tries (the attempt itself is the event). */
-const DENIED = new Set(["RECEIVED_CHANGE_REQUIRED", "SOD_OWN_INVOICE", "INVOICE_STALE", "RECEIVE_REQUIRED"]);
+const DENIED = new Set(["RECEIVED_CHANGE_REQUIRED", "SOD_OWN_INVOICE", "INVOICE_STALE", "RECEIVE_REQUIRED", "SHORTFALL_LOSS_REQUIRED"]);
 
 /**
  * Run a purchase action; when it is refused for one of the reasons above, record the attempt — who, which invoice, what

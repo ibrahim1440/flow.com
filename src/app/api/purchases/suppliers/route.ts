@@ -20,7 +20,7 @@ export async function GET() {
   if (!can.read && !hasModuleAccess(user.permissions, "inventory")) return forbidden();
   try {
     const rows = await supplierBalances();
-    return NextResponse.json({ can, rows: can.read ? rows : rows.map((r) => ({ ...r, openBalance: null, awaitingApproval: null })) });
+    return NextResponse.json({ can, rows: can.read ? rows : rows.map((r) => ({ ...r, openBalance: null, awaitingApproval: null, openClaims: null })) });
   } catch (err) {
     return acctError(err);
   }

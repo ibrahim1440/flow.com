@@ -4,8 +4,9 @@
 //   «الفواتير»    (default)  the purchase invoices + «+ فاتورة مشتريات» — the AP read gate (accounting module or
 //                            purchases › invoices); the button for the draft writer;
 //   «الاستلامات»            the receipts register and «استلام بدون فاتورة» (the exception path) — the inventory module;
-//   «الموردين»              suppliers, VAT number, terms, contact, open balance — either of the above.
-// ?tab=invoices|receipts|suppliers keeps the tab in the address; /dashboard/purchases/invoices redirects here.
+//   «الموردين»              suppliers, VAT number, terms, contact, open balance — either of the above;
+//   «مطالبات الموردين»      «نقص من المورد» (20261119090000_supplier_shortfall): the open supplier claims — the AP read gate.
+// ?tab=invoices|receipts|suppliers|claims keeps the tab in the address; /dashboard/purchases/invoices redirects here.
 // A «تسجيل مشتريات» link from the green coffee tab arrives with ?bean=<lot id> and opens the receipts pane on that lot.
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -20,8 +21,9 @@ import { PlusIcon } from "../_components/stock-materials";
 import { InvoicesTab } from "./_parts/invoices";
 import { ReceiptsTab } from "./_parts/receipts";
 import { SuppliersTab } from "./_parts/suppliers";
+import { ClaimsTab } from "./_parts/claims";
 
-type Tab = "invoices" | "receipts" | "suppliers";
+type Tab = "invoices" | "receipts" | "suppliers" | "claims";
 
 export default function PurchasesPage() {
   const L = useL();
@@ -38,6 +40,7 @@ export default function PurchasesPage() {
     ...(canRead ? [{ key: "invoices" as Tab, label: L("الفواتير", "Invoices") }] : []),
     ...(canInventory ? [{ key: "receipts" as Tab, label: L("الاستلامات", "Receipts") }] : []),
     ...(canRead || canInventory ? [{ key: "suppliers" as Tab, label: L("الموردين", "Suppliers") }] : []),
+    ...(canRead ? [{ key: "claims" as Tab, label: L("مطالبات الموردين", "Supplier claims") }] : []),
   ];
   const bean = sp.get("bean") ?? undefined;
   const asked = (bean ? "receipts" : sp.get("tab")) as Tab | null;
@@ -71,6 +74,7 @@ export default function PurchasesPage() {
           {tab === "invoices" ? <InvoicesTab suppliers={suppliers} /> : null}
           {tab === "receipts" ? <ReceiptsTab canReceive={canReceive} canDraft={canDraft} initialBean={bean} /> : null}
           {tab === "suppliers" ? <SuppliersTab /> : null}
+          {tab === "claims" ? <ClaimsTab suppliers={suppliers} initialSupplier={sp.get("supplier") ?? undefined} /> : null}
           {!tab ? <div className="hr-state"><h3>{L("لا صلاحية لعرض المشتريات.", "You have no access to purchases.")}</h3></div> : null}
         </div>
       </div>

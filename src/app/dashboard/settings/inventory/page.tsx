@@ -22,7 +22,9 @@ type Shortfall = {
   /** Council F3: the limits set high enough that a large shortfall passes without a supervisor. */
   high: ("PERCENT" | "VALUE" | "ZERO")[];
 };
-type Inv = { lowStockGreenKg: string | null; effectiveLowStockGreenKg: string; isDefault: boolean; range: { default: number }; shortfall: Shortfall; can: { edit: boolean } };
+type Inv = { lowStockGreenKg: string | null; effectiveLowStockGreenKg: string; isDefault: boolean; range: { default: number }; shortfall: Shortfall; supplierShortfall: SupplierShortfall; can: { edit: boolean } };
+/** «نقص من المورد» (20261119090000_supplier_shortfall): the weight tolerance and the abandonment's VAT reversal. */
+type SupplierShortfall = { stored: { tolerancePercent: string | null; abandonReverseVat: boolean | null }; effective: { tolerancePercent: number; abandonReverseVat: boolean }; defaults: { tolerancePercent: number; abandonReverseVat: boolean } };
 
 export default function InventorySettingsPage() {
   const L = useL();
@@ -88,6 +90,24 @@ export default function InventorySettingsPage() {
                 </div>
               ) : null}
             </Sec>
+            <Sec title={L("نقص من المورد", "Supplier shortfall")} caption={L("فاتورة المشتريات حين يصل أقل مما فوترَه المورد: النقص ضمن حد التسامح يُحمَّل على التكلفة، وما فوقه مطالبة على المورد", "A purchase invoice that received less than the supplier billed: a shortfall within the tolerance goes into the cost, above it it is a claim on the supplier")} testId="supplier-shortfall">
+              <SingleSetting
+                url="/api/settings/inventory" field="purchaseShortfallTolerancePercent" testId="supplier-shortfall-tolerance"
+                stored={s.supplierShortfall.stored.tolerancePercent} effective={String(s.supplierShortfall.effective.tolerancePercent)} isDefault={s.supplierShortfall.stored.tolerancePercent === null} canEdit={s.can.edit}
+                label={L("حد التسامح في الوزن (من كمية الفاتورة)", "Weight tolerance (of the billed quantity)")}
+                help={L(`من 0 إلى 2 · فارغ = الافتراضي ${s.supplierShortfall.defaults.tolerancePercent}٪ · فاقد طبيعي (IAS 2)`, `0 to 2 · empty = the default ${s.supplierShortfall.defaults.tolerancePercent} % · a normal loss (IAS 2)`)}
+                unit="%"
+                onSaved={(j) => setS((x) => (x ? { ...x, ...(j as Partial<Inv>) } : x))}
+                savedText={(j) => L(`حُفظ. نقص حتى ${String((j as Inv).supplierShortfall.effective.tolerancePercent)}٪ يُحمَّل على التكلفة ما لم يُختر غير ذلك.`, `Saved. A shortfall up to ${String((j as Inv).supplierShortfall.effective.tolerancePercent)} % goes into the cost unless chosen otherwise.`)}
+              />
+              {s.supplierShortfall.effective.tolerancePercent > 1 ? (
+                <div className="hr-notice tone-warning" role="status" data-testid="supplier-shortfall-high">
+                  <strong>{L("تحذير: حد التسامح أعلى من 1٪", "Warning: the tolerance is above 1 %")}</strong>
+                  {" · "}{L(`نقص حتى ${s.supplierShortfall.effective.tolerancePercent}٪ من الفاتورة يُحمَّل على تكلفة المخزون بلا مطالبة ولا خسارة`, `a shortfall up to ${s.supplierShortfall.effective.tolerancePercent} % of the invoice goes into the stock's cost with no claim and no loss`)}
+                </div>
+              ) : null}
+              <AbandonVatToggle s={s} onSaved={(j) => setS((x) => (x ? { ...x, ...(j as Partial<Inv>) } : x))} />
+            </Sec>
             <Sec title={L("مواد التعبئة", "Packaging materials")} caption={L("تُدار في صفحاتها المعتمدة ولا تتكرر هنا", "Managed on their own approved pages, not repeated here")}>
               {viewer && routeAllowed(viewer, "/dashboard/inventory") ? (
                 <div className="tl-card">
@@ -134,6 +154,38 @@ function ZeroToggle({ s, onSaved }: { s: Inv; onSaved: (j: Record<string, unknow
       </label>
       {s.can.edit && s.shortfall.stored.zeroNeedsAdjust !== null ? <Btn size="sm" variant="ghost" disabled={busy} onClick={() => void put(null)} data-testid="shortfall-zero-reset">{L("العودة إلى الافتراضي", "Back to the default")}</Btn> : null}
       {msg ? <p className={`hr-caption tone-${msg.ok ? "success" : "danger"}`} role="status" data-testid="shortfall-zero-msg">{msg.text}</p> : null}
+    </div>
+  );
+}
+
+/** «التنازل عن المطالبة يعكس ضريبة مدخلاتها»: on / off (null = the default, on). PUT purchaseAbandonReverseVat. */
+function AbandonVatToggle({ s, onSaved }: { s: Inv; onSaved: (j: Record<string, unknown>) => void }) {
+  const L = useL();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const on = s.supplierShortfall.effective.abandonReverseVat;
+  async function put(v: boolean | null) {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch("/api/settings/inventory", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ purchaseAbandonReverseVat: v }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { setMsg({ ok: false, text: L(j.error ?? "تعذّر الحفظ. لم يتغير شيء.", j.errorEn ?? j.error ?? "Could not save. Nothing was changed.") }); return; }
+      onSaved(j);
+      setMsg({ ok: true, text: (j as Inv).supplierShortfall.effective.abandonReverseVat ? L("حُفظ. التنازل عن مطالبة يعكس ضريبة مدخلاتها.", "Saved. Abandoning a claim reverses its input VAT.") : L("حُفظ. التنازل عن مطالبة يُبقي ضريبة مدخلاتها.", "Saved. Abandoning a claim keeps its input VAT.") });
+    } catch {
+      setMsg({ ok: false, text: L("تعذّر الحفظ. لم يتغير شيء.", "Could not save. Nothing was changed.") });
+    } finally { setBusy(false); }
+  }
+  return (
+    <div className="ss-setrow" data-testid="supplier-shortfall-vat">
+      <label className="hr-check" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input type="checkbox" checked={on} disabled={!s.can.edit || busy} onChange={(e) => void put(e.target.checked)} data-testid="supplier-shortfall-vat-input" />
+        <span>{L("التنازل عن مطالبة المورد يعكس ضريبة مدخلاتها", "Abandoning a supplier claim reverses its input VAT")}</span>
+        <span className="hr-caption">{s.supplierShortfall.stored.abandonReverseVat === null ? L("(الافتراضي: مفعّل)", "(the default: on)") : null}</span>
+      </label>
+      <p className="hr-caption">{L("تحقق مع مستشارك الضريبي.", "Check with your tax adviser.")}</p>
+      {s.can.edit && s.supplierShortfall.stored.abandonReverseVat !== null ? <Btn size="sm" variant="ghost" disabled={busy} onClick={() => void put(null)} data-testid="supplier-shortfall-vat-reset">{L("العودة إلى الافتراضي", "Back to the default")}</Btn> : null}
+      {msg ? <p className={`hr-caption tone-${msg.ok ? "success" : "danger"}`} role="status" data-testid="supplier-shortfall-vat-msg">{msg.text}</p> : null}
     </div>
   );
 }

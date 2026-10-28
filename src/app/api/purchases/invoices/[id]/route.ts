@@ -3,7 +3,7 @@ import { acctError, jsonBody } from "@/lib/accounting/http";
 import { auditFromRequest } from "@/lib/accounting/audit";
 import { requireApRead } from "@/lib/accounting/ops/http";
 import { getPurchaseInvoice, savePurchaseInvoice, type PurchaseInvoiceInput } from "@/lib/accounting/ops/purchase-invoice";
-import { purchaseSaveGate } from "@/lib/purchases/gates";
+import { purchaseSaveGate, shortfallLossGate } from "@/lib/purchases/gates";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -27,8 +27,10 @@ export async function PUT(request: Request, { params }: Params) {
   try { body = await jsonBody(request); } catch (err) { return acctError(err); }
   const { user, error, mayReceive, mayChangeReceived } = await purchaseSaveGate(String(body.action ?? "draft"));
   if (error) return error;
+  const loss = await shortfallLossGate(user, body);
+  if (loss.error) return loss.error;
   try {
-    return NextResponse.json(await savePurchaseInvoice(body as unknown as PurchaseInvoiceInput, (await params).id, user, auditFromRequest(request, user.id), { mayReceive, mayChangeReceived }));
+    return NextResponse.json(await savePurchaseInvoice(body as unknown as PurchaseInvoiceInput, (await params).id, user, auditFromRequest(request, user.id), { mayReceive, mayChangeReceived, mayWriteOffShortfall: loss.mayWriteOffShortfall }));
   } catch (err) {
     return acctError(err);
   }

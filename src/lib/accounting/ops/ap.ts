@@ -30,6 +30,7 @@ import { costRevalue, lockHolders, netLines, side, accountSide, type CostKind, t
 import { opsRefuse } from "./refusals";
 import { buildPurchaseTaxSnapshot, purchaseTaxCategories, purchaseTaxCodeForRate } from "./purchase-tax";
 import { invoiceSummary, logPurchaseActivity, withDeniedLog } from "./purchase-activity";
+import { supplierShortfallFromRow } from "./supplier-shortfall";
 
 type Tx = Prisma.TransactionClient;
 const str = (v: unknown, max: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
@@ -71,18 +72,26 @@ function day(v: unknown, what: string): Date {
 }
 
 /** Gapless-enough internal numbers «SINV-2026-000001» / «SPAY-2026-000001» (serialised per prefix and year). */
-export async function nextNumber(tx: Tx, prefix: "SINV" | "SPAY", on: Date): Promise<string> {
+export async function nextNumber(tx: Tx, prefix: "SINV" | "SPAY" | "SCN", on: Date): Promise<string> {
   const y = on.getUTCFullYear();
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`ap:number:${prefix}:${y}`}, 0))`;
   const like = `${prefix}-${y}-%`;
   const rows = prefix === "SINV"
     ? await tx.$queryRaw<{ n: string | null }[]>`SELECT max("number") AS n FROM "SupplierInvoice" WHERE "number" LIKE ${like}`
-    : await tx.$queryRaw<{ n: string | null }[]>`SELECT max("number") AS n FROM "SupplierPayment" WHERE "number" LIKE ${like}`;
+    : prefix === "SPAY"
+      ? await tx.$queryRaw<{ n: string | null }[]>`SELECT max("number") AS n FROM "SupplierPayment" WHERE "number" LIKE ${like}`
+      : await tx.$queryRaw<{ n: string | null }[]>`SELECT max("number") AS n FROM "SupplierCreditNote" WHERE "number" LIKE ${like}`;
   const last = rows[0]?.n ? Number(rows[0].n.slice(-6)) : 0;
   return `${prefix}-${y}-${String(last + 1).padStart(6, "0")}`;
 }
 
-export type CleanLine = { kind: InvoiceLineInput["kind"]; purchaseRecordId: string | null; stockKind: string | null; stockItemId: string | null; expenseCategoryId: string | null; description: string; quantity: Decimal | null; net: Decimal; vatRate: Decimal; vat: Decimal; gross: Decimal; taxCategoryId: string; treatment: string | null; customsValue: Decimal | null; selfAssessedVat: Decimal | null; targetPurchaseRecordId: string | null; landedCostType: string | null };
+export type CleanLine = { kind: InvoiceLineInput["kind"]; purchaseRecordId: string | null; stockKind: string | null; stockItemId: string | null; expenseCategoryId: string | null; description: string; quantity: Decimal | null; net: Decimal; vatRate: Decimal; vat: Decimal; gross: Decimal; taxCategoryId: string; treatment: string | null; customsValue: Decimal | null; selfAssessedVat: Decimal | null; targetPurchaseRecordId: string | null; landedCostType: string | null; shortfall: LineShortfall | null };
+/**
+ * «نقص من المورد» (20261119090000_supplier_shortfall): a one-step purchase invoice's GRN line billed for more than it
+ * received. Only the purchase-invoice service sets it (never the request body): the line's net is the billed value,
+ * the receipt's the received one, and `net` here their difference at the line's unit cost.
+ */
+export type LineShortfall = { billedQty: Decimal; qty: Decimal; net: Decimal; treatment: "CLAIM" | "LOSS" | "ABSORBED"; reason: string | null };
 
 /**
  * Validate and price the lines (VAT per line, rounded once — lineVat, the central money rule). Phase 2: each line has a
@@ -93,7 +102,7 @@ export type CleanLine = { kind: InvoiceLineInput["kind"]; purchaseRecordId: stri
  *   self-assessed (not payable to the supplier, so the line's VAT is 0). A LANDED_COST line names a receipt of any
  *   supplier and takes P-S15, P-S15-NR, P-O or P-RC15.
  */
-export async function cleanLines(tx: Tx, supplier: InvoiceSupplier, lines: unknown, customs: { no: string | null } = { no: null }): Promise<CleanLine[]> {
+export async function cleanLines(tx: Tx, supplier: InvoiceSupplier, lines: unknown, customs: { no: string | null } = { no: null }, shortfalls: (LineShortfall | null)[] = []): Promise<CleanLine[]> {
   if (!Array.isArray(lines) || lines.length === 0 || lines.length > 200) throw opsRefuse("INVOICE_LINES_REQUIRED");
   const supplierId = supplier.id;
   const tax = await purchaseTaxCategories(tx);
@@ -134,6 +143,8 @@ export async function cleanLines(tx: Tx, supplier: InvoiceSupplier, lines: unkno
       if (!pr) throw opsRefuse("GRN_NOT_FOUND");
       if (pr.supplierId !== supplierId) throw opsRefuse("GRN_OTHER_SUPPLIER");
       if (await receiptReversed(tx, pr.id)) throw opsRefuse("RECEIPT_REVERSED");
+      // «نقص من المورد»: replacement goods for a claim are already paid for (the invoice the claim came from).
+      if (await tx.supplierClaimSettlement.count({ where: { purchaseRecordId: pr.id, kind: "REPLACEMENT", voidedAt: null } })) throw opsRefuse("GRN_CLAIM_REPLACEMENT");
       quantity = quantity ?? qty4(pr.quantity);
       description = description ?? `استلام ${pr.id.slice(-6)} · ${pr.quantity} ${pr.type === "GREEN_BEAN" ? "كغ" : ""}`.trim();
     } else if (kind === "STOCK") {
@@ -163,7 +174,11 @@ export async function cleanLines(tx: Tx, supplier: InvoiceSupplier, lines: unkno
     if (treatment === "IMPORT") { net = ZERO; vat = lineVat(customsValue as Decimal, vatRate); }
     else if (treatment === "REVERSE_CHARGE") { vat = ZERO; selfAssessedVat = lineVat(net, vatRate); }
     else vat = lineVat(net, vatRate);
-    out.push({ kind, purchaseRecordId, stockKind, stockItemId, expenseCategoryId, description: description ?? "—", quantity, net, vatRate, vat, gross: net.plus(vat), taxCategoryId: tc.id, treatment, customsValue, selfAssessedVat, targetPurchaseRecordId, landedCostType });
+    // A shortfall is a GRN line's (the service received it) or a draft's STOCK line's; its VAT is claimed on the billed value, so the claim can be
+    // credited back with it — a recoverable or no-VAT category only (a not-recoverable VAT would be part of the cost).
+    const shortfall = shortfalls[i] ?? null;
+    if (shortfall && ((kind !== "GRN" && kind !== "STOCK") || (treatment !== "RECOVERABLE" && treatment !== "NONE"))) throw opsRefuse("SHORTFALL_TAX", `Line ${i + 1}.`, `السطر ${i + 1}.`);
+    out.push({ kind, purchaseRecordId, stockKind, stockItemId, expenseCategoryId, description: description ?? "—", quantity, net, vatRate, vat, gross: net.plus(vat), taxCategoryId: tc.id, treatment, customsValue, selfAssessedVat, targetPurchaseRecordId, landedCostType, shortfall });
   }
   if (out.every((l) => l.gross.isZero() && !(l.selfAssessedVat ?? ZERO).gt(0))) throw opsRefuse("INVOICE_LINES_REQUIRED");
   return out;
@@ -192,7 +207,8 @@ export async function refDuplicate(tx: Tx, supplierId: string, ref: string, exce
 }
 
 export const totals = (lines: CleanLine[]) => ({ netTotal: lines.reduce((s, l) => s.plus(l.net), ZERO), vatTotal: lines.reduce((s, l) => s.plus(l.vat), ZERO), grossTotal: lines.reduce((s, l) => s.plus(l.gross), ZERO) });
-export const lineRows = (lines: CleanLine[]) => lines.map((l, i) => ({ lineNo: i + 1, kind: l.kind, purchaseRecordId: l.purchaseRecordId, stockKind: l.stockKind, stockItemId: l.stockItemId, expenseCategoryId: l.expenseCategoryId, description: l.description, quantity: l.quantity, net: l.net, vatRate: l.vatRate, vat: l.vat, gross: l.gross, taxCategoryId: l.taxCategoryId, customsValue: l.customsValue, selfAssessedVat: l.selfAssessedVat, targetPurchaseRecordId: l.targetPurchaseRecordId, landedCostType: l.landedCostType }));
+export const lineRows = (lines: CleanLine[]) => lines.map((l, i) => ({ lineNo: i + 1, kind: l.kind, purchaseRecordId: l.purchaseRecordId, stockKind: l.stockKind, stockItemId: l.stockItemId, expenseCategoryId: l.expenseCategoryId, description: l.description, quantity: l.quantity, net: l.net, vatRate: l.vatRate, vat: l.vat, gross: l.gross, taxCategoryId: l.taxCategoryId, customsValue: l.customsValue, selfAssessedVat: l.selfAssessedVat, targetPurchaseRecordId: l.targetPurchaseRecordId, landedCostType: l.landedCostType,
+  ...(l.shortfall ? { billedQty: l.shortfall.billedQty, shortfallQty: l.shortfall.qty, shortfallNet: l.shortfall.net, shortfallTreatment: l.shortfall.treatment, shortfallReason: l.shortfall.reason } : {}) }));
 
 /**
  * SA1 — a one-step purchase invoice (origin PURCHASES) whose STOCK lines are still to be received goes through the
@@ -345,6 +361,9 @@ export async function postInvoiceTx(tx: Tx, id: string, ctx: AuditContext) {
     // capitalised into the cost (not recoverable), or none; the category is snapshotted on the line here.
     const tax = await purchaseTaxCategories(tx);
     let vat = ZERO, selfAssessed = ZERO;
+    const claims: { line: (typeof inv.lines)[number]; kind: string; entityId: string; net: Decimal; recoverable: boolean }[] = [];
+    let lossVat: boolean | null = null;
+    const reverseVatOnLoss = async () => (lossVat ??= supplierShortfallFromRow(await tx.systemConfig.findUnique({ where: { id: "singleton" }, select: { purchaseShortfallTolerancePercent: true, purchaseAbandonReverseVat: true } })).abandonReverseVat);
     for (const l of inv.lines) {
       const tc = l.taxCategoryId ? tax.byId.get(l.taxCategoryId) : undefined;
       // A line the migration could not classify (a legacy rate other than 15 / 0) is not posted on a guess.
@@ -362,7 +381,24 @@ export async function postInvoiceTx(tx: Tx, id: string, ctx: AuditContext) {
         if (await receiptReversed(tx, l.purchaseRecordId as string)) throw opsRefuse("RECEIPT_REVERSED");
         const grn = grns.get(l.purchaseRecordId as string)!;
         matched = new Decimal(grn.value).abs();
-        variance = net.minus(matched);
+        // «نقص من المورد»: the billed-but-not-received part is the supplier's to make good (CLAIM → SUPPLIER_CLAIMS) or
+        // an abnormal loss (LOSS → PURCHASE_SHORTAGE) — never the stock's cost (IAS 2). ABSORBED (within the weight
+        // tolerance) stays in the variance and is capitalised like any price difference.
+        const shortRole = l.shortfallTreatment === "CLAIM" ? "SUPPLIER_CLAIMS" : l.shortfallTreatment === "LOSS" ? "PURCHASE_SHORTAGE" : null;
+        const shortNet = shortRole && l.shortfallNet ? new Decimal(l.shortfallNet) : ZERO;
+        variance = net.minus(matched).minus(shortNet);
+        if (shortRole && shortNet.gt(0)) {
+          // A LOSS with the abandonment's VAT setting on (default): the goods never came, so the input VAT on them is
+          // reversed too — Dr loss net + VAT share, the VAT input claimed less (council F2; a box-7 adjustment).
+          let vatShare = ZERO;
+          if (shortRole === "PURCHASE_SHORTAGE" && treatment === "RECOVERABLE" && (await reverseVatOnLoss())) {
+            vatShare = Decimal.min(new Decimal(l.vat), lineVat(shortNet, new Decimal(l.vatRate)));
+            vat = vat.minus(vatShare);
+            await tx.supplierInvoiceLine.update({ where: { id: l.id }, data: { shortfallVatReversed: vatShare } });
+          }
+          posting.push(side(shortRole, shortNet.plus(vatShare), { party }));
+          if (shortRole === "SUPPLIER_CLAIMS") claims.push({ line: l, kind: grn.costItem.kind, entityId: grn.costItem.entityId, net: shortNet, recoverable: treatment === "RECOVERABLE" });
+        }
         // A VAT that is not recoverable is part of the cost: it follows the stock like a price variance.
         const toCost = variance.plus(nonRecoverable);
         const h = holderOf(grn.costItem.kind, grn.costItem.entityId);
@@ -423,6 +459,16 @@ export async function postInvoiceTx(tx: Tx, id: string, ctx: AuditContext) {
     const now = new Date();
     await tx.supplierInvoice.update({ where: { id }, data: { status: "POSTED", postedBy: ctx.actorId, postedAt: now, journalEntryId, ...(inv.status === "DRAFT" ? { submittedBy: ctx.actorId, submittedAt: now } : {}) } });
     await logPurchaseActivity(tx, ctx, "PURCHASE_INVOICE_POSTED", id);
+    // The open claims (one per CLAIM line): what the supplier owes back — the shortfall at the line's unit cost and the
+    // input VAT claimed on it (lineVat, the line's rate; none for a no-VAT category).
+    for (const c of claims) {
+      const qty = new Decimal(c.line.shortfallQty as Prisma.Decimal);
+      const claim = await tx.supplierClaim.create({ data: {
+        invoiceId: id, invoiceLineId: c.line.id, supplierId: inv.supplierId, stockKind: c.kind === "GREEN_BEAN" ? "GREEN_BEAN" : "MATERIAL", stockItemId: c.entityId,
+        qty, unitCost: c.net.div(qty).toDecimalPlaces(6), net: c.net, vatRate: c.line.vatRate, vat: c.recoverable ? lineVat(c.net, new Decimal(c.line.vatRate)) : ZERO, createdBy: ctx.actorId,
+      }, select: { id: true } });
+      await logPurchaseActivity(tx, ctx, "PURCHASE_CLAIM_OPENED", id, { claimId: claim.id, lineNo: c.line.lineNo, qty: qty.toFixed() });
+    }
     return getInvoice(id, tx);
   }
 }
@@ -439,6 +485,11 @@ export async function cancelInvoice(id: string, reason: string, ctx: AuditContex
     const inv = await lockInvoice(tx, id);
     if (inv.status !== "POSTED") throw opsRefuse("INVOICE_STATE");
     if (new Decimal(inv.paidTotal).gt(0)) throw opsRefuse("INVOICE_PAID");
+    // «نقص من المورد»: a claim already settled in any part (a credit note, replacement goods, an abandonment) keeps
+    // the invoice — undo the settlement first. Open claims are voided with the posting they came from.
+    const claimRows = await tx.$queryRaw<{ id: string; status: string; settledNet: Prisma.Decimal }[]>`SELECT "id", "status", "settledNet" FROM "SupplierClaim" WHERE "invoiceId" = ${id} ORDER BY "id" FOR UPDATE`;
+    if (new Decimal(inv.creditedTotal).gt(0) || claimRows.some((c) => c.status === "SETTLED" || new Decimal(c.settledNet).gt(0))) throw opsRefuse("CLAIM_SETTLED");
+    for (const c of claimRows.filter((c) => c.status === "OPEN")) await tx.supplierClaim.update({ where: { id: c.id }, data: { status: "VOID", voidedAt: new Date(), voidReason: r } });
     const src = { module: "purchasing" as const, type: "SUPPLIER_INVOICE", id, event: "CANCELLED" };
     const moveIds: string[] = [];
     const correction: (PostingLineInput | null)[] = [];
@@ -512,9 +563,9 @@ export async function recordPayment(input: PaymentInput, ctx: AuditContext) {
     }
     for (const a of [...allocs].sort((x, y) => (x.invoiceId < y.invoiceId ? -1 : 1))) {
       const rows = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "SupplierInvoice" WHERE "id" = ${a.invoiceId} FOR UPDATE`;
-      const inv = rows.length ? await tx.supplierInvoice.findUnique({ where: { id: a.invoiceId }, select: { supplierId: true, status: true, grossTotal: true, paidTotal: true } }) : null;
+      const inv = rows.length ? await tx.supplierInvoice.findUnique({ where: { id: a.invoiceId }, select: { supplierId: true, status: true, grossTotal: true, paidTotal: true, creditedTotal: true } }) : null;
       if (!inv || inv.supplierId !== supplierId || inv.status !== "POSTED") throw opsRefuse("PAYMENT_ALLOCATION");
-      if (a.amount.gt(new Decimal(inv.grossTotal).minus(inv.paidTotal))) throw opsRefuse("PAYMENT_ALLOCATION");
+      if (a.amount.gt(new Decimal(inv.grossTotal).minus(inv.paidTotal).minus(inv.creditedTotal))) throw opsRefuse("PAYMENT_ALLOCATION");
     }
     const number = await nextNumber(tx, "SPAY", paymentDate);
     const pay = await tx.supplierPayment.create({ data: { number, supplierId, paymentDate, amount, method, reference: str(input.reference, 120), createdBy: ctx.actorId, allocations: { create: allocs.map((a) => ({ invoiceId: a.invoiceId, amount: a.amount })) } }, select: { id: true } });
@@ -557,9 +608,10 @@ export async function getInvoice(id: string, db: Tx | typeof prisma = prisma) {
   const inv = await db.supplierInvoice.findUnique({ where: { id }, include: { supplier: { select: { id: true, name: true, vatNumber: true } }, receivingLocation: { select: { id: true, code: true, nameAr: true, nameEn: true, isActive: true } }, lines: { orderBy: { lineNo: "asc" }, include: { expenseCategory: { select: { code: true, nameAr: true, account: { select: { code: true, nameAr: true, nameEn: true } } } }, taxCategory: { select: { code: true, nameAr: true, nameEn: true, inputVatTreatment: true, vatReturnBox: true } }, targetPurchaseRecord: { select: { id: true, type: true, itemId: true, materialItemId: true, quantity: true, purchaseDate: true, supplier: { select: { name: true } } } } } }, allocations: { include: { payment: { select: { id: true, number: true, paymentDate: true, status: true } } } } } });
   if (!inv) throw opsRefuse("OPS_NOT_FOUND");
   return {
-    ...inv, invoiceDate: dayText(inv.invoiceDate), dueDate: dayText(inv.dueDate), customsDeclarationDate: inv.customsDeclarationDate ? dayText(inv.customsDeclarationDate) : null, receivedDate: inv.receivedDate ? dayText(inv.receivedDate) : null, updatedAt: inv.updatedAt.toISOString(), netTotal: f2(inv.netTotal), vatTotal: f2(inv.vatTotal), grossTotal: f2(inv.grossTotal), paidTotal: f2(inv.paidTotal),
-    outstanding: f2(new Decimal(inv.grossTotal).minus(inv.paidTotal)),
-    lines: inv.lines.map((l) => ({ ...l, quantity: l.quantity ? new Decimal(l.quantity).toFixed() : null, net: f2(l.net), vatRate: new Decimal(l.vatRate).toFixed(), vat: f2(l.vat), gross: f2(l.gross), matchedValue: f2(l.matchedValue), variance: f2(l.variance), capitalized: f2(l.capitalized), customsValue: f2(l.customsValue), selfAssessedVat: f2(l.selfAssessedVat), taxCode: l.taxCategory?.code ?? null })),
+    ...inv, invoiceDate: dayText(inv.invoiceDate), dueDate: dayText(inv.dueDate), customsDeclarationDate: inv.customsDeclarationDate ? dayText(inv.customsDeclarationDate) : null, receivedDate: inv.receivedDate ? dayText(inv.receivedDate) : null, updatedAt: inv.updatedAt.toISOString(), netTotal: f2(inv.netTotal), vatTotal: f2(inv.vatTotal), grossTotal: f2(inv.grossTotal), paidTotal: f2(inv.paidTotal), creditedTotal: f2(inv.creditedTotal),
+    outstanding: f2(new Decimal(inv.grossTotal).minus(inv.paidTotal).minus(inv.creditedTotal)),
+    lines: inv.lines.map((l) => ({ ...l, quantity: l.quantity ? new Decimal(l.quantity).toFixed() : null, net: f2(l.net), vatRate: new Decimal(l.vatRate).toFixed(), vat: f2(l.vat), gross: f2(l.gross), matchedValue: f2(l.matchedValue), variance: f2(l.variance), capitalized: f2(l.capitalized), customsValue: f2(l.customsValue), selfAssessedVat: f2(l.selfAssessedVat), taxCode: l.taxCategory?.code ?? null,
+      billedQty: l.billedQty ? new Decimal(l.billedQty).toFixed() : null, shortfallQty: l.shortfallQty ? new Decimal(l.shortfallQty).toFixed() : null, shortfallNet: f2(l.shortfallNet), shortfallVatReversed: f2(l.shortfallVatReversed) })),
     allocations: inv.allocations.map((a) => ({ id: a.id, amount: f2(a.amount), payment: { ...a.payment, paymentDate: dayText(a.payment.paymentDate) } })),
   };
 }
@@ -585,7 +637,7 @@ export async function listInvoices(q: { status?: string | null; supplierId?: str
     include: { supplier: { select: { name: true } } },
   });
   const today = riyadhDay();
-  const counts = await prisma.supplierInvoice.groupBy({ by: ["status"], _count: { _all: true }, _sum: { grossTotal: true, paidTotal: true } });
+  const counts = await prisma.supplierInvoice.groupBy({ by: ["status"], _count: { _all: true }, _sum: { grossTotal: true, paidTotal: true, creditedTotal: true } });
   // Which of these received their goods themselves (one-step), in one query.
   const ids = rows.map((r) => r.id);
   const received = new Set(ids.length ? (await prisma.$queryRaw<{ id: string }[]>`
@@ -595,11 +647,11 @@ export async function listInvoices(q: { status?: string | null; supplierId?: str
        AND NOT EXISTS (SELECT 1 FROM "CostMove" r WHERE r."sourceType" = 'GRN' AND r."sourceId" = l."purchaseRecordId" AND r."sourceEvent" = 'REVERSED')`).map((r) => r.id) : []);
   return {
     rows: rows.map((r) => {
-      const outstanding = new Decimal(r.grossTotal).minus(r.paidTotal);
+      const outstanding = new Decimal(r.grossTotal).minus(r.paidTotal).minus(r.creditedTotal);
       const overdueDays = r.status === "POSTED" && outstanding.gt(0) ? Math.max(0, Math.floor((today.getTime() - r.dueDate.getTime()) / 86_400_000)) : 0;
-      return { id: r.id, number: r.number, supplierId: r.supplierId, supplierName: r.supplier.name, supplierRef: r.supplierRef, invoiceDate: dayText(r.invoiceDate), dueDate: dayText(r.dueDate), status: r.status, netTotal: f2(r.netTotal), vatTotal: f2(r.vatTotal), received: received.has(r.id), grossTotal: f2(r.grossTotal), paidTotal: f2(r.paidTotal), outstanding: f2(outstanding), overdueDays, createdBy: r.createdBy, submittedBy: r.submittedBy };
+      return { id: r.id, number: r.number, supplierId: r.supplierId, supplierName: r.supplier.name, supplierRef: r.supplierRef, invoiceDate: dayText(r.invoiceDate), dueDate: dayText(r.dueDate), status: r.status, netTotal: f2(r.netTotal), vatTotal: f2(r.vatTotal), received: received.has(r.id), grossTotal: f2(r.grossTotal), paidTotal: f2(r.paidTotal), creditedTotal: f2(r.creditedTotal), outstanding: f2(outstanding), overdueDays, createdBy: r.createdBy, submittedBy: r.submittedBy };
     }),
-    summary: Object.fromEntries(counts.map((c) => [c.status, { count: c._count._all, gross: f2(c._sum.grossTotal ?? ZERO), outstanding: f2(new Decimal(c._sum.grossTotal ?? 0).minus(c._sum.paidTotal ?? 0)) }])),
+    summary: Object.fromEntries(counts.map((c) => [c.status, { count: c._count._all, gross: f2(c._sum.grossTotal ?? ZERO), outstanding: f2(new Decimal(c._sum.grossTotal ?? 0).minus(c._sum.paidTotal ?? 0).minus(c._sum.creditedTotal ?? 0)) }])),
   };
 }
 
@@ -624,9 +676,17 @@ export async function apAging(asOfText: string | null, supplierId: string | null
   const asOf = asOfText ? day(asOfText, "asOf") : riyadhDay();
   const invoices = await prisma.supplierInvoice.findMany({
     where: { status: "POSTED", invoiceDate: { lte: asOf }, ...(supplierId ? { supplierId } : {}) },
-    include: { supplier: { select: { name: true } }, allocations: { include: { payment: { select: { paymentDate: true, status: true } } } } },
+    include: { supplier: { select: { name: true } }, allocations: { include: { payment: { select: { paymentDate: true, status: true } } } }, creditNotes: { where: { status: "POSTED", noteDate: { lte: asOf } }, select: { gross: true } } },
     orderBy: { dueDate: "asc" },
   });
+  // «نقص من المورد»: the open claims next to what is payable (net + VAT still to come back), per supplier and invoice.
+  const claimRows = await prisma.supplierClaim.findMany({ where: { status: "OPEN", ...(supplierId ? { supplierId } : {}) }, select: { invoiceId: true, supplierId: true, net: true, vat: true, settledNet: true, settledVat: true, createdAt: true } });
+  const claimOpen = (c: (typeof claimRows)[number]) => new Decimal(c.net).minus(c.settledNet).plus(new Decimal(c.vat).minus(c.settledVat));
+  const claimBySupplier = new Map<string, Decimal>(), claimByInvoice = new Map<string, Decimal>();
+  for (const c of claimRows) {
+    claimBySupplier.set(c.supplierId, (claimBySupplier.get(c.supplierId) ?? ZERO).plus(claimOpen(c)));
+    claimByInvoice.set(c.invoiceId, (claimByInvoice.get(c.invoiceId) ?? ZERO).plus(claimOpen(c)));
+  }
   const empty = () => Object.fromEntries(AGING_BUCKETS.map((b) => [b, ZERO])) as Record<AgingBucket, Decimal>;
   const total = empty();
   const counts = Object.fromEntries(AGING_BUCKETS.map((b) => [b, 0])) as Record<AgingBucket, number>;
@@ -634,21 +694,23 @@ export async function apAging(asOfText: string | null, supplierId: string | null
   const items = [];
   for (const inv of invoices) {
     const paid = inv.allocations.filter((a) => a.payment.status === "POSTED" && a.payment.paymentDate <= asOf).reduce((s, a) => s.plus(a.amount), ZERO);
-    const open = new Decimal(inv.grossTotal).minus(paid);
+    const credited = inv.creditNotes.reduce((s, n) => s.plus(n.gross), ZERO);
+    const open = new Decimal(inv.grossTotal).minus(paid).minus(credited);
     if (!open.gt(0)) continue;
     const b = agingBucket(inv.dueDate, asOf);
     total[b] = total[b].plus(open); counts[b] += 1;
     const s = bySupplier.get(inv.supplierId) ?? { supplierId: inv.supplierId, name: inv.supplier.name, buckets: empty(), total: ZERO };
     s.buckets[b] = s.buckets[b].plus(open); s.total = s.total.plus(open);
     bySupplier.set(inv.supplierId, s);
-    items.push({ id: inv.id, number: inv.number, supplierId: inv.supplierId, supplierName: inv.supplier.name, supplierRef: inv.supplierRef, invoiceDate: dayText(inv.invoiceDate), dueDate: dayText(inv.dueDate), open: open.toFixed(2), bucket: b, daysOverdue: Math.max(0, Math.floor((asOf.getTime() - inv.dueDate.getTime()) / 86_400_000)) });
+    items.push({ id: inv.id, number: inv.number, supplierId: inv.supplierId, supplierName: inv.supplier.name, supplierRef: inv.supplierRef, invoiceDate: dayText(inv.invoiceDate), dueDate: dayText(inv.dueDate), open: open.toFixed(2), openClaim: (claimByInvoice.get(inv.id) ?? ZERO).toFixed(2), bucket: b, daysOverdue: Math.max(0, Math.floor((asOf.getTime() - inv.dueDate.getTime()) / 86_400_000)) });
   }
   const docTotal = AGING_BUCKETS.reduce((s, b) => s.plus(total[b]), ZERO);
   const gl = await apGlBalance(asOf, supplierId);
   const fmt = (r: Record<AgingBucket, Decimal>) => Object.fromEntries(AGING_BUCKETS.map((b) => [b, r[b].toFixed(2)]));
   return {
     asOf: dayText(asOf), buckets: fmt(total), counts, total: docTotal.toFixed(2),
-    suppliers: [...bySupplier.values()].sort((a, b) => b.total.comparedTo(a.total)).map((s) => ({ supplierId: s.supplierId, name: s.name, buckets: fmt(s.buckets), total: s.total.toFixed(2) })),
+    suppliers: [...bySupplier.values()].sort((a, b) => b.total.comparedTo(a.total)).map((s) => ({ supplierId: s.supplierId, name: s.name, buckets: fmt(s.buckets), total: s.total.toFixed(2), openClaim: (claimBySupplier.get(s.supplierId) ?? ZERO).toFixed(2) })),
+    openClaims: [...claimBySupplier.values()].reduce((s, v) => s.plus(v), ZERO).toFixed(2),
     items,
     gl: gl === null ? null : { balance: gl.toFixed(2), difference: docTotal.minus(gl).toFixed(2) },
   };
@@ -694,6 +756,7 @@ export async function openReceipts(supplierId: string | null) {
       JOIN "PurchaseRecord" p ON p."id" = m."sourceId"
       JOIN "Supplier" s ON s."id" = p."supplierId"
      WHERE m."sourceType" = 'GRN' AND m."sourceEvent" = 'RECEIVED' AND m."value" > 0
+       AND coalesce(m."lineKey", '') NOT LIKE 'CLAIM:%'
        AND (${supplierId}::text IS NULL OR p."supplierId" = ${supplierId})
        AND NOT EXISTS (SELECT 1 FROM "SupplierInvoiceLine" l JOIN "SupplierInvoice" v ON v."id" = l."invoiceId" WHERE l."purchaseRecordId" = p."id" AND v."status" = 'POSTED')
        AND NOT EXISTS (SELECT 1 FROM "CostMove" r WHERE r."sourceType" = 'GRN' AND r."sourceId" = p."id" AND r."sourceEvent" = 'REVERSED')

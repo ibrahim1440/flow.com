@@ -6,14 +6,14 @@
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { OpsLoading, Btn } from "@/components/ops/ui";
+import { OpsLoading, Btn, Notice } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
 import { Select } from "@/components/ui/Select";
 import { LEGACY_AP_TAB } from "@/lib/accounting/source-links";
 import { AcctShell, Msg, money, todayRiyadh, useApi, useLang, useWrite, type Setup } from "../_ui/shell";
 import { InvoiceList, type InvoiceRow } from "../_ui/ap";
 
-type Aging = { asOf: string; total: string; buckets: Record<string, string>; counts: Record<string, number>; suppliers: { supplierId: string; name: string; buckets: Record<string, string>; total: string }[]; gl: { balance: string; difference: string } | null };
+type Aging = { asOf: string; total: string; buckets: Record<string, string>; counts: Record<string, number>; suppliers: { supplierId: string; name: string; buckets: Record<string, string>; total: string; openClaim?: string }[]; openClaims?: string; gl: { balance: string; difference: string } | null };
 type Statement = { supplier: { name: string }; from: string; to: string; opening: string; closing: string; lines: { entryId: string; date: string; ref: string; description: string | null; sourceType: string | null; debit: string; credit: string; balance: string }[] };
 type Payment = { id: string; number: string; supplierName: string; paymentDate: string; amount: string; method: string; reference: string | null; status: string; journalEntryId: string | null; invoices: string[] };
 type Supplier = { id: string; name: string; openingOutstanding?: string };
@@ -81,14 +81,15 @@ function AgingView({ asOf, supplierId, go }: { asOf: string; supplierId: string;
           </div>
           <div className="hr-tablewrap">
             <table className="hr-table is-dense" data-testid="aging-table">
-              <thead><tr><th>{L("المورد", "Supplier")}</th>{BUCKETS.map(([k, ar, en]) => <th key={k} className={`num${k === "current" ? "" : " acct-hide-m"}`}>{L(ar, en)}</th>)}<th className="num">{L("الإجمالي", "Total")}</th></tr></thead>
+              <thead><tr><th>{L("المورد", "Supplier")}</th>{BUCKETS.map(([k, ar, en]) => <th key={k} className={`num${k === "current" ? "" : " acct-hide-m"}`}>{L(ar, en)}</th>)}<th className="num">{L("الإجمالي", "Total")}</th><th className="num">{L("مطالبة مفتوحة", "Open claim")}</th></tr></thead>
               <tbody>
                 {aging.data.suppliers.map((s) => (
                   <tr key={s.supplierId} className="is-clickable" onClick={() => go({ supplierId: s.supplierId })}>
                     <td>{s.name}</td>{BUCKETS.map(([k]) => <td key={k} className={`num hr-num${k === "current" ? "" : " acct-hide-m"}`}>{money(s.buckets[k], true)}</td>)}<td className="num hr-num">{money(s.total)}</td>
+                    <td className="num hr-num" data-testid={`aging-claim-${s.supplierId}`}>{Number(s.openClaim ?? 0) ? <span className="acct-bad">{money(s.openClaim)}</span> : <span className="hr-caption">—</span>}</td>
                   </tr>
                 ))}
-                <tr className="is-total"><td>{L("الإجمالي", "Total")}</td>{BUCKETS.map(([k]) => <td key={k} className={`num hr-num${k === "current" ? "" : " acct-hide-m"}`}>{money(aging.data!.buckets[k])}</td>)}<td className="num hr-num" data-testid="aging-total">{money(aging.data.total)}</td></tr>
+                <tr className="is-total"><td>{L("الإجمالي", "Total")}</td>{BUCKETS.map(([k]) => <td key={k} className={`num hr-num${k === "current" ? "" : " acct-hide-m"}`}>{money(aging.data!.buckets[k])}</td>)}<td className="num hr-num" data-testid="aging-total">{money(aging.data.total)}</td><td className="num hr-num" data-testid="aging-claims-total">{money(aging.data.openClaims ?? 0)}</td></tr>
               </tbody>
             </table>
           </div>
@@ -125,6 +126,9 @@ function PaymentsView() {
   const [f, setF] = useState({ supplierId: "", paymentDate: todayRiyadh(), method: "BANK_TRANSFER", reference: "", alloc: {} as Record<string, string> });
   const inv = useApi<List>(f.supplierId ? `/api/accounting/ap/invoices?status=POSTED&supplierId=${f.supplierId}` : null);
   const openInv = (inv.data?.rows ?? []).filter((r) => Number(r.outstanding) > 0);
+  // «نقص من المورد»: the supplier's open claims — pay what the invoice owes less what the supplier still owes back.
+  const claims = useApi<{ rows: { invoice: { id: string }; openGross: string }[]; openGross: string }>(f.supplierId ? `/api/purchases/claims?supplierId=${f.supplierId}` : null);
+  const claimOn = (invoiceId: string) => (claims.data?.rows ?? []).filter((c) => c.invoice.id === invoiceId).reduce((a, c) => a + Number(c.openGross), 0);
   // A5: the part paying the supplier's opening balance (no invoice in the system), capped by what it still owes.
   const [toOpening, setToOpening] = useState("");
   const openingOutstanding = Number((sups.data ?? []).find((s) => s.id === f.supplierId)?.openingOutstanding ?? 0);
@@ -167,9 +171,10 @@ function PaymentsView() {
             <label className="hr-field"><span className="hr-label">{L("الطريقة", "Method")}</span><Select value={f.method} onChange={(e) => setF({ ...f, method: e.target.value })}>{Object.entries(METHOD).map(([k, [ar, en]]) => <option key={k} value={k}>{L(ar, en)}</option>)}</Select></label>
             <label className="hr-field"><span className="hr-label">{L("المرجع", "Reference")}</span><input className="hr-input" value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} /></label>
           </div>
+          {f.supplierId && Number(claims.data?.openGross ?? 0) > 0 ? <Notice tone="warning"><span data-testid="pay-claim-warning">{L(`لدى هذا المورد مطالبات مفتوحة بقيمة ${money(claims.data?.openGross)} ر.س (نقص فوترَه ولم يصل). انتظر إشعاره الدائن أو اخصمها قبل سداد كامل الفاتورة.`, `This supplier has open claims of SAR ${money(claims.data?.openGross)} (billed, not delivered). Wait for its credit note or hold it back before paying the invoice in full.`)}</span></Notice> : null}
           {f.supplierId ? (openInv.length ? (
             <table className="hr-table is-dense"><thead><tr><th>{L("الفاتورة", "Invoice")}</th><th className="num">{L("المتبقي", "Open")}</th><th className="num">{L("المسدَّد", "Apply")}</th></tr></thead>
-              <tbody>{openInv.map((r) => <tr key={r.id}><td className="acct-code">{r.number} · {r.supplierRef}</td><td className="num hr-num">{money(r.outstanding)}</td><td className="num"><input className="hr-input acct-amount" style={{ width: 110 }} inputMode="decimal" value={f.alloc[r.id] ?? ""} placeholder={r.outstanding} onChange={(e) => setF({ ...f, alloc: { ...f.alloc, [r.id]: e.target.value } })} data-testid={`pay-alloc-${r.number}`} /></td></tr>)}</tbody></table>
+              <tbody>{openInv.map((r) => <tr key={r.id}><td className="acct-code">{r.number} · {r.supplierRef}{claimOn(r.id) ? <span className="hr-caption"> · {L(`مطالبة ${money(claimOn(r.id))}`, `claim ${money(claimOn(r.id))}`)}</span> : null}</td><td className="num hr-num">{money(r.outstanding)}</td><td className="num"><input className="hr-input acct-amount" style={{ width: 110 }} inputMode="decimal" value={f.alloc[r.id] ?? ""} placeholder={r.outstanding} onChange={(e) => setF({ ...f, alloc: { ...f.alloc, [r.id]: e.target.value } })} data-testid={`pay-alloc-${r.number}`} /></td></tr>)}</tbody></table>
           ) : <p className="acct-hint">{L("لا فواتير مرحّلة مفتوحة لهذا المورد.", "No open posted invoices for this supplier.")}</p>) : null}
           {f.supplierId && openingOutstanding > 0 ? (
             <label className="hr-field"><span className="hr-label">{L(`من الرصيد الافتتاحي (المتبقي ${money(openingOutstanding)})`, `Against the opening balance (open ${money(openingOutstanding)})`)}</span>

@@ -7,6 +7,7 @@
 //   receipts      unapplied customer receipts and credits (AR)                                     WARN
 //   grni          received, not yet billed in the books: open receipts vs the GRNI account                   WARN (review)
 //   inventory     inventory sub-ledger = GL (A3 reconciliation: no UNEXPLAINED difference)         FAIL
+//   supplierClaims open supplier claims (net) = SUPPLIER_CLAIMS («نقص من المورد»)                 FAIL (WARN: opening pending)
 //   ar / ap       AR sub-ledger = GL (AR − customer advances); AP open items = GL                  WARN / FAIL
 //   vat           the month's VAT documents = the VAT accounts' movement from documents             FAIL
 //   zatca         the e-invoicing queue holds nothing pending / failed for the month (A4)          FAIL (NA while off)
@@ -72,6 +73,12 @@ export async function closeChecklist(periodId: string) {
     `بضاعة مستلمة لم تُرحَّل فاتورتها: ${recon.grni.count} استلامًا (بلا فاتورة ${recon.grni.noInvoice.count}، فاتورة بانتظار الاعتماد ${recon.grni.awaitingApproval.count}) — راجعها (رصيد الحساب ${recon.grni.gl}، الفرق ${recon.grni.difference})`,
     `Received, not yet billed in the books: ${recon.grni.count} receipts (no invoice ${recon.grni.noInvoice.count}, invoice awaiting approval ${recon.grni.awaitingApproval.count}) — review them (account ${recon.grni.gl}, difference ${recon.grni.difference})`,
     "/dashboard/accounting/inventory?view=grni", recon.grni.count, recon.grni.gl));
+  // «نقص من المورد» (council F1): open supplier claims (net) = the SUPPLIER_CLAIMS account.
+  const sc = recon.supplierClaims;
+  out.push(check("supplierClaims", !sc.account ? "NA" : sc.status === "MATCHED" ? "PASS" : sc.status === "EXPLAINED" ? "WARN" : "FAIL",
+    sc.status === "MATCHED" ? `مطالبات الموردين المفتوحة = الحساب (${sc.openClaims})` : `مطالبات الموردين المفتوحة ${sc.openClaims} ≠ الحساب ${sc.gl} (الفرق ${sc.difference}${Number(sc.openingPending) ? `، منها ${sc.openingPending} بانتظار الأرصدة الافتتاحية` : ""})`,
+    sc.status === "MATCHED" ? `Open supplier claims = the account (${sc.openClaims})` : `Open supplier claims ${sc.openClaims} ≠ the account ${sc.gl} (difference ${sc.difference}${Number(sc.openingPending) ? `, of which ${sc.openingPending} awaits the opening balances` : ""})`,
+    "/dashboard/purchases?tab=claims", sc.count, sc.difference));
   const unexplained = recon.inventory.filter((r) => r.status === "UNEXPLAINED");
   out.push(check("inventory", unexplained.length ? "FAIL" : recon.inventory.some((r) => r.status === "EXPLAINED") ? "WARN" : "PASS",
     unexplained.length ? `فرق غير مفسَّر بين سجل تكلفة المخزون ودفتر الأستاذ في ${unexplained.length} حساب` : "سجل تكلفة المخزون = دفتر الأستاذ",

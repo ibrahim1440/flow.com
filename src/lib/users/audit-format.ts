@@ -67,6 +67,13 @@ export const AUDIT_ACTIONS: Record<string, Def> = {
   PURCHASE_LOT_CREATED: { ar: "أنشأ لوط بن أخضر من فاتورة", en: "Created a green lot from an invoice", cat: "purchases" },
   PURCHASE_LOT_RETIRED: { ar: "أوقف لوطًا بلا رصيد بعد الإلغاء", en: "Deactivated an empty lot after the cancel", cat: "purchases" },
   PURCHASE_ACTION_DENIED: { ar: "رُفض إجراء على فاتورة مشتريات", en: "A purchase invoice action was refused", cat: "purchases" },
+  // «نقص من المورد» (20261119090000_supplier_shortfall).
+  PURCHASE_CLAIM_OPENED: { ar: "فتح مطالبة على المورد بنقص في فاتورة", en: "Opened a supplier claim for a shortfall on an invoice", cat: "purchases" },
+  PURCHASE_CREDIT_NOTE_POSTED: { ar: "سجّل إشعارًا دائنًا من المورد", en: "Recorded a supplier credit note", cat: "purchases" },
+  PURCHASE_CREDIT_NOTE_CANCELLED: { ar: "ألغى إشعارًا دائنًا من المورد", en: "Cancelled a supplier credit note", cat: "purchases" },
+  PURCHASE_CLAIM_REPLACED: { ar: "استلم بضاعة بديلة عن مطالبة مورد", en: "Received replacement goods for a supplier claim", cat: "purchases" },
+  PURCHASE_CLAIM_ABANDONED: { ar: "تنازل عن مطالبة مورد", en: "Abandoned a supplier claim", cat: "purchases" },
+  PURCHASE_CLAIM_REFUNDED: { ar: "سجّل استردادًا من المورد عن مطالبة", en: "Recorded a supplier refund for a claim", cat: "purchases" },
   // Unified inventory phase 3 (20261115090000_stock_locations): the location master and the transfers.
   STOCK_LOCATION_CREATED: { ar: "أضاف موقع مخزون", en: "Added a stock location", cat: "inventory" },
   STOCK_LOCATION_UPDATED: { ar: "عدّل موقع مخزون", en: "Changed a stock location", cat: "inventory" },
@@ -214,7 +221,8 @@ export function describe(r: Row, names: Map<string, string>, lang: "ar" | "en" =
     // Unified inventory phase 2: the purchase invoice's activity — the document, its totals, and what changed.
     case "PURCHASE_INVOICE_SAVED": case "PURCHASE_INVOICE_SUBMITTED": case "PURCHASE_INVOICE_RECEIVED": case "PURCHASE_INVOICE_EDITED_AFTER_RECEIPT":
     case "PURCHASE_INVOICE_POSTED": case "PURCHASE_INVOICE_RETURNED": case "PURCHASE_INVOICE_CANCELLED": case "PURCHASE_INVOICE_CANCELLED_POSTED":
-    case "PURCHASE_INVOICE_DELETED": case "PURCHASE_RECEIPT_REVERSED": case "PURCHASE_LOT_CREATED": case "PURCHASE_LOT_RETIRED": case "PURCHASE_ACTION_DENIED": {
+    case "PURCHASE_INVOICE_DELETED": case "PURCHASE_RECEIPT_REVERSED": case "PURCHASE_LOT_CREATED": case "PURCHASE_LOT_RETIRED": case "PURCHASE_ACTION_DENIED":
+    case "PURCHASE_CLAIM_OPENED": case "PURCHASE_CREDIT_NOTE_POSTED": case "PURCHASE_CREDIT_NOTE_CANCELLED": case "PURCHASE_CLAIM_REPLACED": case "PURCHASE_CLAIM_ABANDONED": case "PURCHASE_CLAIM_REFUNDED": {
       target = m.number ? T(`فاتورة ${m.number}`, `invoice ${m.number}`) : T("فاتورة مشتريات", "purchase invoice");
       const a = (m.after ?? null) as { supplierName?: string; grossTotal?: string; lines?: { quantity: string | null; net: string; description: string }[] } | null;
       const b = (m.before ?? null) as { grossTotal?: string; lines?: unknown[] } | null;
@@ -222,11 +230,16 @@ export function describe(r: Row, names: Map<string, string>, lang: "ar" | "en" =
       const parts: string[] = [];
       if (r.action === "PURCHASE_ACTION_DENIED") {
         const what: Record<string, [string, string]> = { save: ["الحفظ", "save"], edit: ["تعديل فاتورة مستلمة", "editing a received invoice"], cancel: ["الإلغاء", "cancel"], post: ["الاعتماد والترحيل", "approve and post"] };
-        const why: Record<string, [string, string]> = { RECEIVED_CHANGE_REQUIRED: ["بلا صلاحية إلغاء/تعديل فاتورة مستلمة", "without the received-change permission"], SOD_OWN_INVOICE: ["فصل المهام: فاتورته", "segregation of duties: their own invoice"], INVOICE_STALE: ["عدّلها غيره منذ فتحها", "changed by someone else since it was opened"], RECEIVE_REQUIRED: ["بلا صلاحية الاستلام", "without the receive permission"] };
+        const why: Record<string, [string, string]> = { RECEIVED_CHANGE_REQUIRED: ["بلا صلاحية إلغاء/تعديل فاتورة مستلمة", "without the received-change permission"], SOD_OWN_INVOICE: ["فصل المهام: فاتورته", "segregation of duties: their own invoice"], INVOICE_STALE: ["عدّلها غيره منذ فتحها", "changed by someone else since it was opened"], RECEIVE_REQUIRED: ["بلا صلاحية الاستلام", "without the receive permission"], SHORTFALL_LOSS_REQUIRED: ["خسارة نقص بلا صلاحية التسوية", "a shortfall loss without the adjust permission"] };
         const w = what[String(m.attempted)] ?? [String(m.attempted ?? "—"), String(m.attempted ?? "—")];
         const y = why[String(m.code)] ?? [String(m.code ?? "—"), String(m.code ?? "—")];
         parts.push(T(`${w[0]} · ${y[0]}`, `${w[1]} · ${y[1]}`));
       } else if (r.action === "PURCHASE_LOT_CREATED" || r.action === "PURCHASE_LOT_RETIRED") parts.push(T(`اللوط ${m.lot?.serialNumber ?? "—"}`, `lot ${m.lot?.serialNumber ?? "—"}`));
+      else if (r.action === "PURCHASE_CLAIM_OPENED") parts.push(T(`السطر ${m.lineNo ?? "—"} · نقص ${m.qty ?? "—"}`, `line ${m.lineNo ?? "—"} · short ${m.qty ?? "—"}`));
+      else if (r.action === "PURCHASE_CREDIT_NOTE_POSTED" || r.action === "PURCHASE_CREDIT_NOTE_CANCELLED") parts.push(T(`الإشعار ${m.creditNoteNumber ?? "—"}`, `credit note ${m.creditNoteNumber ?? "—"}`));
+      else if (r.action === "PURCHASE_CLAIM_REPLACED") parts.push(T(`بضاعة بديلة ${m.qty ?? "—"}`, `replacement ${m.qty ?? "—"}`));
+      else if (r.action === "PURCHASE_CLAIM_REFUNDED") parts.push(m.method === "CASH" ? T("نقدًا", "in cash") : T("تحويل بنكي", "bank transfer"));
+      else if (r.action === "PURCHASE_CLAIM_ABANDONED") parts.push(m.reverseVat ? T("مع عكس ضريبة المدخلات", "input VAT reversed") : T("دون عكس الضريبة", "VAT kept"));
       else if (r.action === "PURCHASE_RECEIPT_REVERSED") parts.push(T(`الاستلام ${String(m.purchaseRecordId ?? "").slice(-6)}`, `receipt ${String(m.purchaseRecordId ?? "").slice(-6)}`));
       else {
         if (a?.supplierName) parts.push(a.supplierName);

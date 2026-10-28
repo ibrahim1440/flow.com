@@ -1032,10 +1032,10 @@ model SystemConfig {
   /// Settings › Inventory: green coffee below this many kg is flagged «مخزون منخفض» on the
   /// inventory screen. NULL = not set by the owner: the built-in 20 kg applies, exactly as
   /// before this column existed. CHECK > 0 and ≤ 100000.
-  inventoryLowStockGreenKg Decimal? @db.Decimal(10, 3)
+  inventoryLowStockGreenKg          Decimal? @db.Decimal(10, 3)
   /// Settings › Invoicing & tax: the VAT percent a NEW quotation line starts with. NULL = the
   /// built-in 15%. Issued documents keep the rate each line carries. CHECK 0–100.
-  invoiceDefaultVatPercent Decimal? @db.Decimal(5, 2)
+  invoiceDefaultVatPercent          Decimal? @db.Decimal(5, 2)
   /// Settings › Inventory «حد النقص عند الاستلام» (20261118090000_shortfall_threshold): a receiver's shortfall on a transfer
   /// line above any of these needs inventory › adjust and the stock-change gate. NULL = the default (2 %, 500 SAR, on).
   /// CHECK percent 0–100, value ≥ 0.
@@ -1045,6 +1045,12 @@ model SystemConfig {
   /// The rolling limit per receiver: Σ of their shortfall value over 30 days more than this × the value limit needs a
   /// supervisor. NULL = 2. CHECK 0–1000.
   inventoryShortfallRollingMultiple Decimal? @db.Decimal(6, 2)
+  /// «نقص من المورد» (20261119090000_supplier_shortfall): a stock line's shortfall (billed − received) within this percent of
+  /// the billed quantity, with no treatment chosen, is absorbed into the cost (IAS 2: normal weight loss). NULL = 0.5 %.
+  /// CHECK 0–100.
+  purchaseShortfallTolerancePercent Decimal? @db.Decimal(5, 2)
+  /// Abandoning a supplier claim reverses its input VAT (Dr purchase shortage net + VAT). NULL = on.
+  purchaseAbandonReverseVat         Boolean?
 
   // ─── QC (additive, migration 20261023090000_production_qc_simplify) ─────────────────────
   /// Settings › Production & roasting › QC: the minimum number of evaluators a batch needs before
@@ -1344,15 +1350,18 @@ model Supplier {
 
   // ── Accounting A3 (20261104090000_ops_posting): the supplier as an AP party ──
   /// The supplier's VAT registration number (15 digits in KSA), shown on its invoices and statement.
-  vatNumber        String?
+  vatNumber           String?
   /// Default credit terms in days (the due date a new supplier invoice proposes). NULL = 30.
-  paymentTermsDays Int?
+  paymentTermsDays    Int?
   /// Phase 2 (20261113090000_purchase_invoice_phase2): a non-resident supplier — its services are reverse-charged (P-RC15).
-  isNonResident    Boolean           @default(false)
+  isNonResident       Boolean              @default(false)
   /// GOODS_SERVICES (default) | CUSTOMS | CLEARING_AGENT — import VAT (P-IMP15) is billed by customs / a clearing agent only.
-  kind             String            @default("GOODS_SERVICES")
-  supplierInvoices SupplierInvoice[]
-  supplierPayments SupplierPayment[]
+  kind                String               @default("GOODS_SERVICES")
+  supplierInvoices    SupplierInvoice[]
+  supplierPayments    SupplierPayment[]
+  /// «نقص من المورد» (20261119090000_supplier_shortfall).
+  supplierClaims      SupplierClaim[]
+  supplierCreditNotes SupplierCreditNote[]
 }
 
 model PurchaseRecord {
@@ -1969,10 +1978,10 @@ model StockTransfer {
 }
 
 model StockTransferLine {
-  id         String        @id @default(cuid())
-  transferId String
-  transfer   StockTransfer @relation(fields: [transferId], references: [id], onDelete: Restrict)
-  lineNo     Int
+  id             String            @id @default(cuid())
+  transferId     String
+  transfer       StockTransfer     @relation(fields: [transferId], references: [id], onDelete: Restrict)
+  lineNo         Int
   /// GREEN_BEAN | MATERIAL | FG_LOT (CHECK). FG_LOT: a finished-goods lot, `entityId` the source lot, `qty` in units.
   itemKind       String
   entityId       String
@@ -1985,7 +1994,7 @@ model StockTransferLine {
   /// The shortfall's value as judged at the receipt (20261118090000_shortfall_threshold): the write-off's own value at the
   /// moving average, else the last known cost; NULL = no shortfall, or no cost known. Read by the rolling 30-day sum
   /// per receiver. CHECK ≥ 0.
-  shortfallValue Decimal? @db.Decimal(18, 2)
+  shortfallValue Decimal?          @db.Decimal(18, 2)
   /// FG_LOT: the lot that travels (the source lot moved whole, or the part split off it).
   fgLotId        String?
   fgLot          FinishedGoodsLot? @relation("TransferLineLot", fields: [fgLotId], references: [id], onDelete: Restrict)
@@ -7570,11 +7579,16 @@ model SupplierInvoice {
   /// Phase 3 (20261115090000_stock_locations): «موقع الاستلام» — the site its goods are received at (NULL: the default).
   receivingLocationId    String?
   receivingLocation      StockLocation? @relation(fields: [receivingLocationId], references: [id], onDelete: Restrict)
+  /// «نقص من المورد» (20261119090000_supplier_shortfall): what posted supplier credit notes took off the bill. The open
+  /// amount is gross − paid − credited. CHECK ≥ 0.
+  creditedTotal          Decimal        @default(0) @db.Decimal(18, 2)
   createdAt              DateTime       @default(now())
   updatedAt              DateTime       @updatedAt
 
   lines       SupplierInvoiceLine[]
   allocations SupplierPaymentAllocation[]
+  claims      SupplierClaim[]
+  creditNotes SupplierCreditNote[]
 
   @@index([supplierId, status])
   @@index([status, dueDate])
@@ -7620,11 +7634,131 @@ model SupplierInvoiceLine {
   targetPurchaseRecord   PurchaseRecord?  @relation("LandedCostTarget", fields: [targetPurchaseRecordId], references: [id], onDelete: Restrict)
   /// LANDED_COST lines: FREIGHT | DUTY | CLEARANCE | INSURANCE.
   landedCostType         String?
+  // ── «نقص من المورد» (20261119090000_supplier_shortfall): STOCK / GRN lines billed for more than was received ──
+  /// The quantity on the supplier's invoice (NULL = as received, i.e. "quantity"); net = billedQty × unit cost.
+  billedQty              Decimal?         @db.Decimal(18, 4)
+  /// billedQty − quantity (the received), and its value at the line's unit cost.
+  shortfallQty           Decimal?         @db.Decimal(18, 4)
+  shortfallNet           Decimal?         @db.Decimal(18, 2)
+  /// CLAIM (Dr SUPPLIER_CLAIMS) | LOSS (Dr PURCHASE_SHORTAGE, reason ≥ 3) | ABSORBED (within tolerance, into the cost).
+  shortfallTreatment     String?
+  shortfallReason        String?
+  /// LOSS lines: the input VAT on the shortfall reversed at posting (the abandonment's VAT setting); NULL otherwise.
+  shortfallVatReversed   Decimal?         @db.Decimal(18, 2)
+  claim                  SupplierClaim?
 
   @@unique([invoiceId, lineNo])
   @@index([purchaseRecordId])
   @@index([taxCategoryId])
   @@index([targetPurchaseRecordId])
+}
+
+/// «نقص من المورد» (20261119090000_supplier_shortfall): the open claim on the supplier for a CLAIM line's shortfall,
+/// written when the invoice posts (Dr SUPPLIER_CLAIMS net). Settled by a supplier credit note, replacement goods or an
+/// abandonment (SupplierClaimSettlement). OPEN → SETTLED; VOID when the invoice's posting is undone. Never deleted.
+model SupplierClaim {
+  id            String                    @id @default(cuid())
+  tenantId      String                    @default("hiqbah")
+  invoiceId     String
+  invoice       SupplierInvoice           @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  invoiceLineId String                    @unique
+  invoiceLine   SupplierInvoiceLine       @relation(fields: [invoiceLineId], references: [id], onDelete: Restrict)
+  supplierId    String
+  supplier      Supplier                  @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  /// GREEN_BEAN | MATERIAL
+  stockKind     String
+  stockItemId   String
+  qty           Decimal                   @db.Decimal(18, 4)
+  unitCost      Decimal                   @db.Decimal(18, 6)
+  net           Decimal                   @db.Decimal(18, 2)
+  vatRate       Decimal                   @db.Decimal(5, 2)
+  /// The input VAT on the shortfall (claimed on the invoice; a credit note or an abandonment reverses it).
+  vat           Decimal                   @db.Decimal(18, 2)
+  settledQty    Decimal                   @default(0) @db.Decimal(18, 4)
+  settledNet    Decimal                   @default(0) @db.Decimal(18, 2)
+  settledVat    Decimal                   @default(0) @db.Decimal(18, 2)
+  /// OPEN | SETTLED | VOID
+  status        String                    @default("OPEN")
+  createdBy     String
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @default(now()) @updatedAt
+  voidedAt      DateTime?
+  voidReason    String?
+  settlements   SupplierClaimSettlement[]
+  creditNotes   SupplierCreditNote[]
+
+  @@index([supplierId, status])
+  @@index([invoiceId])
+}
+
+/// A settlement of a supplier claim: CREDIT_NOTE (its SupplierCreditNote), REPLACEMENT (goods received against the claim,
+/// Dr inventory / Cr claims, no VAT) or ABANDON (Dr purchase shortage; with reverseVat also Cr VAT input).
+model SupplierClaimSettlement {
+  id               String              @id @default(cuid())
+  tenantId         String              @default("hiqbah")
+  claimId          String
+  claim            SupplierClaim       @relation(fields: [claimId], references: [id], onDelete: Restrict)
+  /// CREDIT_NOTE | REPLACEMENT | ABANDON | REFUND
+  kind             String
+  qty              Decimal?            @db.Decimal(18, 4)
+  net              Decimal             @db.Decimal(18, 2)
+  vat              Decimal             @default(0) @db.Decimal(18, 2)
+  reverseVat       Boolean             @default(false)
+  creditNoteId     String?
+  creditNote       SupplierCreditNote? @relation(fields: [creditNoteId], references: [id], onDelete: Restrict)
+  /// REPLACEMENT: the receipt (PurchaseRecord.id, no FK like the invoice lines).
+  purchaseRecordId String?
+  journalEntryId   String?
+  reason           String?
+  /// REFUND: BANK_TRANSFER | CASH (Dr BANK / CASH) and the bank reference.
+  method           String?
+  reference        String?
+  createdBy        String
+  createdAt        DateTime            @default(now())
+  voidedAt         DateTime?
+  voidedBy         String?
+  voidReason       String?
+
+  @@index([claimId])
+  @@index([purchaseRecordId])
+}
+
+/// «إشعار دائن من المورد»: the supplier's credit note against a claim of one of its posted invoices. Its own number series
+/// «SCN-2026-000001». Dr AP (gross) / Cr SUPPLIER_CLAIMS (net) / Cr VAT_INPUT (VAT); lowers the invoice's open amount.
+/// POSTED → CANCELLED (reversed). Never deleted.
+model SupplierCreditNote {
+  id             String                    @id @default(cuid())
+  tenantId       String                    @default("hiqbah")
+  number         String                    @unique
+  supplierId     String
+  supplier       Supplier                  @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  invoiceId      String
+  invoice        SupplierInvoice           @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  claimId        String
+  claim          SupplierClaim             @relation(fields: [claimId], references: [id], onDelete: Restrict)
+  /// The supplier's own credit note number.
+  supplierRef    String
+  noteDate       DateTime                  @db.Date
+  net            Decimal                   @db.Decimal(18, 2)
+  vat            Decimal                   @db.Decimal(18, 2)
+  gross          Decimal                   @db.Decimal(18, 2)
+  /// The part of the gross above what the invoice still owed (it was paid): Dr SUPPLIER_ADVANCES, to be applied later.
+  advanceAmount  Decimal                   @default(0) @db.Decimal(18, 2)
+  /// POSTED | CANCELLED
+  status         String                    @default("POSTED")
+  journalEntryId String?
+  notes          String?
+  createdBy      String
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @default(now()) @updatedAt
+  cancelledBy    String?
+  cancelledAt    DateTime?
+  cancelReason   String?
+  settlements    SupplierClaimSettlement[]
+
+  @@index([supplierId, status])
+  @@index([invoiceId])
+  @@index([noteDate])
 }
 
 /// A payment to a supplier, applied in full to its posted invoices. POSTED → VOIDED (reversed).

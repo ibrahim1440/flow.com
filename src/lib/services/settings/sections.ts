@@ -8,6 +8,7 @@
 //
 // Parsing is pure (asserted without a database); reading takes any Prisma client or transaction.
 import { parseFiniteDecimal, Decimal } from "../commissions/engine";
+import { SHORTFALL_TOLERANCE_MAX } from "@/lib/accounting/ops/supplier-shortfall";
 
 /** The inventory screen's «أصناف أقل من 20 كغ» (src/app/dashboard/inventory/_parts/green.tsx). */
 export const LOW_STOCK_GREEN_KG_DEFAULT = 20;
@@ -75,6 +76,8 @@ export type InventoryPatch = {
   inventoryShortfallValueSar?: Decimal | null;
   inventoryShortfallZeroNeedsAdjust?: boolean | null;
   inventoryShortfallRollingMultiple?: Decimal | null;
+  purchaseShortfallTolerancePercent?: Decimal | null;
+  purchaseAbandonReverseVat?: boolean | null;
 };
 
 /**
@@ -117,6 +120,25 @@ export function parseInventoryPatch(b: Record<string, unknown>): { ok: true; dat
       }
       data.inventoryShortfallRollingMultiple = d;
     }
+  }
+  // «نقص من المورد» (20261119090000_supplier_shortfall): the weight tolerance (0–100 %, 2 decimals) and whether abandoning
+  // a supplier claim reverses its input VAT.
+  if ("purchaseShortfallTolerancePercent" in b) {
+    const v = b.purchaseShortfallTolerancePercent;
+    if (v === null || v === "") data.purchaseShortfallTolerancePercent = null;
+    else {
+      const d = decimalOf(v);
+      // Council F5: at most 2 % (the CHECK too) — a larger «weight loss» is a claim or a loss, never the cost.
+      if (!d || d.isNegative() || d.greaterThan(SHORTFALL_TOLERANCE_MAX) || d.decimalPlaces() > 2) {
+        return { ok: false, field: "purchaseShortfallTolerancePercent", error: "The supplier shortfall tolerance is a percentage from 0 to 2, with at most two decimals.", errorAr: "حد التسامح في نقص المورد نسبة من 0 إلى 2، بمنزلتين عشريتين على الأكثر." };
+      }
+      data.purchaseShortfallTolerancePercent = d;
+    }
+  }
+  if ("purchaseAbandonReverseVat" in b) {
+    const v = b.purchaseAbandonReverseVat;
+    if (v !== null && typeof v !== "boolean") return { ok: false, field: "purchaseAbandonReverseVat", error: "«Abandoning a claim reverses its input VAT» is on or off.", errorAr: "«التنازل عن المطالبة يعكس ضريبة مدخلاتها» تشغيل أو إيقاف." };
+    data.purchaseAbandonReverseVat = v as boolean | null;
   }
   if ("shortfallZeroNeedsAdjust" in b) {
     const v = b.shortfallZeroNeedsAdjust;

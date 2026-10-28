@@ -96,7 +96,7 @@ export async function vatReturn(year: number, quarter: number) {
     // quarter is read too. (Verify the timing rule on zatca.gov.sa: the declaration date is the generally published one.)
     where: { postedAt: { not: null }, OR: [{ status: { in: ["POSTED", "CANCELLED"] }, invoiceDate: { gte: from, lte: q.to } }, { status: { in: ["POSTED", "CANCELLED"] }, customsDeclarationDate: { gte: from, lte: q.to } }, { status: "CANCELLED", cancelledAt: { gte: riyadh.start, lte: riyadh.end } }] },
     select: { id: true, status: true, invoiceDate: true, customsDeclarationDate: true, cancelledAt: true, journalEntryId: true, supplier: { select: { vatNumber: true } },
-      lines: { select: { net: true, vat: true, vatRate: true, customsValue: true, selfAssessedVat: true, taxSnapshot: true, taxCategory: { select: { inputVatTreatment: true, vatReturnBox: true } } } } },
+      lines: { select: { net: true, vat: true, vatRate: true, customsValue: true, selfAssessedVat: true, taxSnapshot: true, shortfallNet: true, shortfallVatReversed: true, taxCategory: { select: { inputVatTreatment: true, vatReturnBox: true } } } } },
   });
   const P = { standard: box(7, "purchasesStandard", "المشتريات المحلية الخاضعة للنسبة الأساسية", "Standard-rated domestic purchases"),
     imports: box(8, "imports", "الواردات الخاضعة للضريبة المدفوعة في الجمارك", "Imports subject to VAT paid at customs"),
@@ -111,6 +111,7 @@ export async function vatReturn(year: number, quarter: number) {
   // The VAT the boxes carry in this quarter by the customs-declaration rule, less what the ledger (by invoice date)
   // carries: a timing difference the accountant sees, never a reconciliation failure.
   const importTiming = { count: 0, vat: ZERO };
+  const lossAdj = { count: 0, net: ZERO, vat: ZERO };
   for (const b of bills) {
     const dated = b.invoiceDate >= from && b.invoiceDate <= q.to;
     const customsDated = !!b.customsDeclarationDate && b.customsDeclarationDate >= from && b.customsDeclarationDate <= q.to;
@@ -144,6 +145,14 @@ export async function vatReturn(year: number, quarter: number) {
         if (sign > 0) target.amount = target.amount.plus(amount); else target.adjustment = target.adjustment.minus(amount);
         target.vat = target.vat.plus(lineVatAmt.times(sign));
         if (!isImport) claimed = claimed.plus(lineVatAmt.times(sign));
+        // «نقص من المورد» (council F2): a LOSS line whose input VAT on the shortfall was reversed at posting — the same
+        // negative adjustment as an abandonment (less purchases, less input VAT).
+        if (l.shortfallVatReversed && new Decimal(l.shortfallVatReversed).gt(0)) {
+          const n = new Decimal(l.shortfallNet ?? 0), v = new Decimal(l.shortfallVatReversed);
+          target.adjustment = target.adjustment.minus(n.times(sign)); target.vat = target.vat.minus(v.times(sign));
+          claimed = claimed.minus(v.times(sign));
+          lossAdj.count++; lossAdj.net = lossAdj.net.minus(n.times(sign)); lossAdj.vat = lossAdj.vat.minus(v.times(sign));
+        }
         if (treatment === "REVERSE_CHARGE") {
           rc = rc.plus(lineVatAmt.times(sign));
           if (sign > 0) reverseOutput.amount = reverseOutput.amount.plus(amount); else reverseOutput.adjustment = reverseOutput.adjustment.minus(amount);
@@ -161,6 +170,37 @@ export async function vatReturn(year: number, quarter: number) {
     if (b.journalEntryId) { input.postedVat = input.postedVat.plus(claimed); reverseOutput.postedVat = reverseOutput.postedVat.plus(rc); }
     else { input.unposted.count++; input.unposted.vat = input.unposted.vat.plus(claimed); }
   }
+
+  // ── «نقص من المورد» (20261119090000_supplier_shortfall) ── a supplier credit note dated in the quarter, and a claim
+  //    abandoned in it with its input VAT reversed (or refunded in cash with its VAT), take their net and VAT off the claim line's box (the adjustment
+  //    column — box 7 for P-S15) and off the input VAT; a credit note cancelled in the quarter adds them back. Their
+  //    entries are engine entries (purchasing), so the reconciliation to VAT_INPUT still matches.
+  const notes = await prisma.supplierCreditNote.findMany({
+    where: { OR: [{ noteDate: { gte: from, lte: q.to } }, { status: "CANCELLED", cancelledAt: { gte: riyadh.start, lte: riyadh.end } }] },
+    select: { net: true, vat: true, noteDate: true, status: true, cancelledAt: true, journalEntryId: true, claim: { select: { invoiceLine: { select: { vatRate: true, taxSnapshot: true } } } } },
+  });
+  const abandoned = await prisma.supplierClaimSettlement.findMany({
+    where: { kind: { in: ["ABANDON", "REFUND"] }, reverseVat: true, voidedAt: null, createdAt: { gte: riyadh.start, lte: riyadh.end } },
+    select: { net: true, vat: true, journalEntryId: true, claim: { select: { invoiceLine: { select: { vatRate: true, taxSnapshot: true } } } } },
+  });
+  const supplierAdjustments = { ...lossAdj };
+  const adjustPurchases = (line: { vatRate: Prisma.Decimal; taxSnapshot: Prisma.JsonValue }, net: Decimal, vatAmt: Decimal, sign: number, posted: boolean) => {
+    const snap = (line.taxSnapshot ?? null) as { vatReturnBox?: string | null } | null;
+    const boxNo = snap ? snap.vatReturnBox ?? null : new Decimal(line.vatRate).gt(0) ? "7" : "10";
+    const target = boxNo === "7" ? P.standard : boxNo === "10" ? P.zero : boxNo === "11" ? P.exempt : null;
+    // sign −1: a credit note or an abandonment (less purchases, less input VAT); +1: a credit note cancelled.
+    if (target) { target.adjustment = target.adjustment.plus(net.times(sign)); target.vat = target.vat.plus(vatAmt.times(sign)); }
+    input.vat = input.vat.plus(vatAmt.times(sign));
+    if (posted) input.postedVat = input.postedVat.plus(vatAmt.times(sign));
+    else { input.unposted.vat = input.unposted.vat.plus(vatAmt.times(sign)); }
+    supplierAdjustments.count++; supplierAdjustments.net = supplierAdjustments.net.plus(net.times(sign)); supplierAdjustments.vat = supplierAdjustments.vat.plus(vatAmt.times(sign));
+  };
+  for (const n of notes) {
+    const line = n.claim.invoiceLine;
+    if (n.noteDate >= from && n.noteDate <= q.to) adjustPurchases(line, new Decimal(n.net), new Decimal(n.vat), -1, !!n.journalEntryId);
+    if (n.status === "CANCELLED" && inQ(n.cancelledAt)) adjustPurchases(line, new Decimal(n.net), new Decimal(n.vat), 1, !!n.journalEntryId);
+  }
+  for (const a of abandoned) adjustPurchases(a.claim.invoiceLine, new Decimal(a.net), new Decimal(a.vat), -1, !!a.journalEntryId);
 
   // ── ledger ──
   const gl = await prisma.$queryRaw<{ role: string; engine: boolean; v: Prisma.Decimal }[]>`
@@ -202,7 +242,7 @@ export async function vatReturn(year: number, quarter: number) {
     },
     reconciliation: {
       output: { documents: fix2(output.vat.plus(reverseOutput.vat)), postedDocuments: fix2(output.postedVat.plus(reverseOutput.postedVat)), unposted: bucket(output.unposted), glFromDocuments: fix2(glOutputDocs), glOther: fix2(glOutputOther), difference: fix2(output.postedVat.plus(reverseOutput.postedVat).minus(glOutputDocs)), matched: output.postedVat.plus(reverseOutput.postedVat).equals(glOutputDocs), reverseCharge: fix2(reverseOutput.vat) },
-      input: { notClaimable: { count: notClaimable.count, amount: fix2(notClaimable.amount), vat: fix2(notClaimable.vat) }, importTiming: { count: importTiming.count, vat: fix2(importTiming.vat) }, documents: fix2(input.vat), postedDocuments: fix2(input.postedVat), unposted: bucket(input.unposted), noSupplierVatNumber: bucket(input.noSupplierVat), glFromDocuments: fix2(glInputDocs), glOther: fix2(glInputOther), difference: fix2(input.postedVat.minus(glInputDocs)), matched: input.postedVat.equals(glInputDocs) },
+      input: { notClaimable: { count: notClaimable.count, amount: fix2(notClaimable.amount), vat: fix2(notClaimable.vat) }, importTiming: { count: importTiming.count, vat: fix2(importTiming.vat) }, supplierAdjustments: { count: supplierAdjustments.count, net: fix2(supplierAdjustments.net), vat: fix2(supplierAdjustments.vat) }, documents: fix2(input.vat), postedDocuments: fix2(input.postedVat), unposted: bucket(input.unposted), noSupplierVatNumber: bucket(input.noSupplierVat), glFromDocuments: fix2(glInputDocs), glOther: fix2(glInputOther), difference: fix2(input.postedVat.minus(glInputDocs)), matched: input.postedVat.equals(glInputDocs) },
       zatca: { accepted: bucket(zatca.accepted), pending: bucket(zatca.pending), rejected: bucket(zatca.rejected), notEInvoiced: bucket(zatca.notEInvoiced), returnVsAccepted: fix2(output.vat.minus(zatca.accepted.vat)) },
     },
     counts: { salesDocuments: output.docs, purchaseInvoices: input.docs },

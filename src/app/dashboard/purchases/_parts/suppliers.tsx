@@ -9,8 +9,10 @@ import { Dialog } from "@/components/hr/ui";
 import { Select } from "@/components/ui/Select";
 import { acctFetch, money, useApi, useLang } from "../../accounting/_ui/shell";
 import type { PurchaseCan } from "./invoices";
+import Link from "next/link";
+import { ReliabilityBlock } from "./claims";
 
-export type SupplierRow = { id: string; name: string; contact: string | null; vatNumber: string | null; isNonResident?: boolean; kind?: string; paymentTermsDays: number | null; receipts: number; openBalance: string | null; awaitingApproval: string | null };
+export type SupplierRow = { id: string; name: string; contact: string | null; vatNumber: string | null; isNonResident?: boolean; kind?: string; paymentTermsDays: number | null; receipts: number; openBalance: string | null; awaitingApproval: string | null; openClaims?: string | null };
 
 /** Create or edit a supplier: name and contact (inventory duty), VAT number and terms (accounts payable). */
 export function SupplierDialog({ initial, can, onClose, onSaved }: { initial: SupplierRow | null; can: PurchaseCan; onClose: () => void; onSaved: (s: { id: string; name: string }) => void }) {
@@ -91,7 +93,7 @@ export function SuppliersTab() {
           <thead><tr>
             <th>{L("المورد", "Supplier")}</th><th>{L("الرقم الضريبي", "VAT number")}</th><th className="hr-hide-compact">{L("شروط الدفع", "Terms")}</th>
             <th className="hr-hide-compact">{L("التواصل", "Contact")}</th><th className="num hr-hide-compact">{L("الاستلامات", "Receipts")}</th>
-            {can.read ? <><th className="num hr-hide-compact">{L("بانتظار الاعتماد", "Awaiting approval")}</th><th className="num">{L("الرصيد المفتوح", "Open balance")}</th></> : null}
+            {can.read ? <><th className="num hr-hide-compact">{L("بانتظار الاعتماد", "Awaiting approval")}</th><th className="num">{L("الرصيد المفتوح", "Open balance")}</th><th className="num">{L("مطالبات مفتوحة", "Open claims")}</th></> : null}
             <th />
           </tr></thead>
           <tbody>
@@ -102,16 +104,18 @@ export function SuppliersTab() {
                 <td className="hr-hide-compact">{L(`${r.paymentTermsDays ?? 30} يومًا`, `${r.paymentTermsDays ?? 30} days`)}{r.paymentTermsDays === null ? <span className="hr-caption"> {L("(افتراضي)", "(default)")}</span> : null}</td>
                 <td className="hr-hide-compact">{r.contact ? <bdi dir="ltr">{r.contact}</bdi> : "—"}</td>
                 <td className="num hr-hide-compact hr-num">{r.receipts}</td>
-                {can.read ? <><td className="num hr-hide-compact hr-num">{money(r.awaitingApproval ?? 0)}</td><td className="num hr-num m-end" style={{ fontWeight: 600 }}>{money(r.openBalance ?? 0)}</td></> : null}
+                {can.read ? <><td className="num hr-hide-compact hr-num">{money(r.awaitingApproval ?? 0)}</td><td className="num hr-num m-end" style={{ fontWeight: 600 }}>{money(r.openBalance ?? 0)}</td>
+                  <td className="num hr-num" data-testid={`supplier-claims-${r.id}`}>{Number(r.openClaims ?? 0) ? <Link className="pur-inv-link" href={`/dashboard/purchases?tab=claims&supplier=${r.id}`}>{money(r.openClaims ?? 0)}</Link> : <span className="hr-caption">—</span>}</td></> : null}
                 <td>{can.suppliers || can.ap ? <Btn size="sm" variant="ghost" onClick={() => setEdit(r)} data-testid={`supplier-edit-${r.id}`}>{L("تعديل", "Edit")}</Btn> : null}</td>
               </tr>
             ))}
-            {!rows.length ? <tr><td colSpan={8} className="acct-hint">{q ? L("لا نتائج.", "No results.") : L("لا موردين بعد.", "No suppliers yet.")}</td></tr> : null}
+            {!rows.length ? <tr><td colSpan={9} className="acct-hint">{q ? L("لا نتائج.", "No results.") : L("لا موردين بعد.", "No suppliers yet.")}</td></tr> : null}
           </tbody>
-          {can.read ? <tfoot><tr><td colSpan={6}>{L(`${rows.length} مورد`, `${rows.length} suppliers`)}</td><td className="num stk-tot hr-num">{money(open)}</td><td /></tr></tfoot> : null}
+          {can.read ? <tfoot><tr><td colSpan={6}>{L(`${rows.length} مورد`, `${rows.length} suppliers`)}</td><td className="num stk-tot hr-num">{money(open)}</td><td className="num hr-num">{money(rows.reduce((a, r) => a + Number(r.openClaims ?? 0), 0))}</td><td /></tr></tfoot> : null}
         </table>
       </div>
-      <p className="acct-hint">{L("الرصيد المفتوح: الفواتير المعتمدة غير المسددة. الرصيد الافتتاحي للمورد وكشف حسابه من «المحاسبة › الذمم الدائنة».", "Open balance: approved invoices not yet paid. The supplier's opening balance and statement are under «Accounting › Payables».")}</p>
+      <p className="acct-hint">{L("الرصيد المفتوح: الفواتير المعتمدة غير المسددة (بعد الإشعارات الدائنة). مطالبات مفتوحة: ما فوترَه المورد ولم يصل بعد. الرصيد الافتتاحي للمورد وكشف حسابه من «المحاسبة › الذمم الدائنة».", "Open balance: approved invoices not yet paid (after credit notes). Open claims: what the supplier billed and has not delivered. The supplier's opening balance and statement are under «Accounting › Payables».")}</p>
+      {can.read ? <ReliabilityBlock /> : null}
       {edit ? <SupplierDialog initial={edit === "new" ? null : edit} can={can} onClose={() => setEdit(null)} onSaved={(s) => { setEdit(null); setDone(L(`حُفظ المورد «${s.name}».`, `Supplier «${s.name}» saved.`)); list.reload(); }} /> : null}
     </div>
   );

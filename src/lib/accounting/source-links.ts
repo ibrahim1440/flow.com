@@ -16,6 +16,8 @@ export const SOURCE_DOC: Record<string, Pair> = {
   GRN: ["استلام بضاعة", "Goods receipt"],
   SUPPLIER_INVOICE: ["فاتورة مشتريات", "Purchase invoice"],
   SUPPLIER_PAYMENT: ["سداد مورد", "Supplier payment"],
+  SUPPLIER_CREDIT_NOTE: ["إشعار دائن من المورد", "Supplier credit note"],
+  SUPPLIER_CLAIM: ["مطالبة مورد", "Supplier claim"],
   ROAST_BATCH: ["دفعة تحميص", "Roast"],
   BLEND: ["خلطة", "Blend"],
   PACKAGING_RUN: ["تعبئة", "Packing"],
@@ -49,6 +51,7 @@ export const SOURCE_EVENT: Record<string, Pair> = {
   SPLIT_OUT: ["فصل جزء من اللوط", "Part split off the lot"], SPLIT_IN: ["لوط مفصول", "Split lot"],
   TRANSFER_SHORTFALL: ["عجز تحويل", "Transfer shortfall"],
   ACCRUED: ["استحقاق", "Accrued"], PAID: ["سداد", "Paid"], ISSUED: ["إصدار", "Issued"],
+  REPLACED: ["بضاعة بديلة", "Replacement goods"], ABANDONED: ["تنازل", "Abandoned"], REFUNDED: ["استرداد من المورد", "Refund received"],
 };
 
 export const MOVE_KIND: Record<string, Pair> = {
@@ -84,6 +87,7 @@ export function sourceDocHref(sourceType: string | null | undefined, sourceId: s
     case "SALES_INVOICE": case "CREDIT_NOTE": case "DEBIT_NOTE": return `/dashboard/sales/invoices/${id}`;
     case "SUPPLIER_INVOICE": return `/dashboard/purchases/invoices/${id}`;
     case "SUPPLIER_PAYMENT": return "/dashboard/accounting/ap?view=payments";
+    case "SUPPLIER_CREDIT_NOTE": case "SUPPLIER_CLAIM": return "/dashboard/purchases?tab=claims";
     // A receipt is part of its purchase invoice (phase 2, one step); a receipt without an invoice is in «الاستلامات».
     case "GRN": return extra.invoiceId ? `/dashboard/purchases/invoices/${encodeURIComponent(extra.invoiceId)}` : "/dashboard/purchases?tab=receipts";
     case "ROAST_BATCH": case "BLEND": return `/dashboard/accounting/inventory?view=batches${range}`;

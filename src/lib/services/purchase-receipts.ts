@@ -149,6 +149,8 @@ export async function reverseReceipt(tx: Tx, user: ReceiptUser, a: { purchaseRec
     // A landed cost (freight, duty…) capitalised — or waiting to be — onto this receipt by another live invoice.
     const landed = await tx.supplierInvoiceLine.count({ where: { targetPurchaseRecordId: pr.id, invoice: { status: { not: "CANCELLED" }, ...(a.exceptInvoiceId ? { id: { not: a.exceptInvoiceId } } : {}) } } });
     if (landed) throw appError(409, "Landed costs were added to this receipt on another invoice: cancel that invoice first, then the receipt can be reversed.", "أُضيفت تكاليف إضافية إلى هذا الاستلام في فاتورة أخرى: ألغِ تلك الفاتورة أولًا ثم يمكن عكس الاستلام.", "RECEIPT_HAS_LANDED_COST");
+    // «نقص من المورد»: replacement goods for a supplier claim settle it — the receipt stays (the claim would reopen).
+    if (await tx.supplierClaimSettlement.count({ where: { purchaseRecordId: pr.id, kind: "REPLACEMENT", voidedAt: null } })) throw appError(409, "This receipt is replacement goods for a supplier claim and settles it, so it is not reversed; correct a difference with a stock count.", "هذا الاستلام بضاعة بديلة عن مطالبة مورد ويسوّيها، فلا يُعكس؛ تُصحَّح الفروقات بالجرد.", "RECEIPT_REPLACES_CLAIM");
     const previousQuantity = onHand;
     const newQuantity = Number((onHand - pr.quantity).toFixed(4));
     const note = `Receipt reversed · ${a.reason}`.slice(0, 1000);

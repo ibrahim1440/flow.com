@@ -13,6 +13,10 @@
 // post — only when the SoD setting lets the preparer post), «حفظ كمسودة» (nothing moves). On the detail page: approve,
 // return to draft, edit / cancel a received un-posted invoice (its receipts reversed), cancel a posted one (accounts
 // payable; the goods stay), the payments. On the phone the line editor is a stack of cards.
+// «نقص من المورد» (20261119090000_supplier_shortfall): a stock line's «المستلم أقل من الفاتورة» takes the quantity on the
+// supplier's invoice (the line is billed at it; stock takes what arrived) and the treatment — «مطالبة المورد» (default),
+// «خسارة» (inventory › adjust + a reason) or, within the weight tolerance, into the cost. The invoice then shows its
+// claims, their timeline and the credit note / replacement / abandonment actions (./claims.tsx).
 import Link from "next/link";
 import { PrintLabelButton } from "@/components/print/QuickPrint";
 import { useMemo, useState } from "react";
@@ -29,9 +33,10 @@ import { PI_STATUS, type PurchaseCan } from "./invoices";
 import { SupplierDialog } from "./suppliers";
 import { fmtDate, fmtTime } from "../../employees/_ui/shared";
 import { LocationSelect, useLocations } from "../../inventory/_parts/locations";
+import { InvoiceClaims, type Claim, type CreditNoteRow } from "./claims";
 import { locationName } from "@/lib/inventory/locations";
 
-type Meta = { can: PurchaseCan; sodSelfAllowed: boolean; simpleMode: boolean; viewer: { id: string } };
+type Meta = { can: PurchaseCan; sodSelfAllowed: boolean; simpleMode: boolean; viewer: { id: string }; shortfall?: { tolerancePercent: number; abandonReverseVat: boolean } };
 type Supplier = { id: string; name: string; vatNumber: string | null; isNonResident?: boolean; kind?: string; paymentTermsDays: number | null };
 /** A receipt a landed cost can be added to (the receipts register: any supplier). */
 type RegisterReceipt = { id: string; type: string; supplier: { name: string }; purchaseDate: string; quantity: number; reversed: boolean; value: string | null; item: { code: string; name: string; nameAr: string | null; unit: string } | null };
@@ -47,6 +52,7 @@ type ServerLine = {
   kind: "GRN" | "STOCK" | "EXPENSE" | "IMPORT_VAT" | "LANDED_COST"; purchaseRecordId: string | null; targetPurchaseRecordId?: string | null; landedCostType?: string | null; stockKind: string | null; stockItemId: string | null; expenseCategoryId: string | null; description: string;
   quantity: string | null; net: string; vatRate: string; vat: string; gross: string; matchedValue: string | null; variance: string | null;
   taxCode: string | null; customsValue: string | null; selfAssessedVat: string | null;
+  billedQty?: string | null; shortfallQty?: string | null; shortfallNet?: string | null; shortfallTreatment?: string | null; shortfallReason?: string | null;
   receipt: { id: string; own: boolean; reversed: boolean; quantity: number; costPerUnit: number; date: string } | null;
   item: { stockKind: string; id: string; bean: { serialNumber: string; beanType: string; beanTypeAr: string | null } | null; material: { code: string; name: string; nameAr: string | null; unitOfMeasure: string; categoryId: string | null } | null } | null;
 };
@@ -54,7 +60,7 @@ type Invoice = {
   id: string; number: string; supplierId: string; supplier: { name: string; vatNumber: string | null }; supplierRef: string; invoiceDate: string; dueDate: string; status: string; notes: string | null;
   customsDeclarationNo: string | null; customsDeclarationDate: string | null; origin: string; receivedDate: string | null; updatedAt: string;
   receivingLocationId?: string | null; receivingLocation?: { id: string; code: string; nameAr: string; nameEn: string | null } | null;
-  netTotal: string; vatTotal: string; grossTotal: string; paidTotal: string; outstanding: string; createdBy: string; lastEditedBy: string | null; submittedBy: string | null; postedBy: string | null;
+  netTotal: string; vatTotal: string; grossTotal: string; paidTotal: string; creditedTotal?: string; outstanding: string; claims?: Claim[]; creditNotes?: CreditNoteRow[]; createdBy: string; lastEditedBy: string | null; submittedBy: string | null; postedBy: string | null;
   journalEntryId: string | null; received: boolean; reversedReceipts: number; cancelReason: string | null; cancelledAt: string | null; cancelledBy: string | null; lines: ServerLine[];
   allocations: { id: string; amount: string; payment: { number: string; paymentDate: string; status: string } }[];
 };
@@ -71,9 +77,11 @@ type Line = {
   purchaseRecordId: string; net: string; expenseCategoryId: string;
   /** A received line (editing a received invoice): its receipt and the values it was received with. */
   receipt: { id: string; itemId: string; quantity: string; unitCost: string; reversed?: boolean } | null;
+  /** «المستلم أقل من الفاتورة»: the quantity on the supplier's invoice and the treatment ("" = the default / tolerance). */
+  short: boolean; billedQty: string; shortTreatment: "" | "CLAIM" | "LOSS"; shortReason: string;
 };
 let seq = 0;
-const blankLine = (pick = ""): Line => ({ key: `l${++seq}`, pick, stockItemId: "", newLot: null, quantity: "", unitCost: "", taxCode: "", customsValue: "", description: "", purchaseRecordId: "", net: "", expenseCategoryId: "", receipt: null, targetPurchaseRecordId: "", landedCostType: "FREIGHT" });
+const blankLine = (pick = ""): Line => ({ key: `l${++seq}`, pick, stockItemId: "", newLot: null, quantity: "", unitCost: "", taxCode: "", customsValue: "", description: "", purchaseRecordId: "", net: "", expenseCategoryId: "", receipt: null, targetPurchaseRecordId: "", landedCostType: "FREIGHT", short: false, billedQty: "", shortTreatment: "", shortReason: "" });
 const lineKindOf = (pick: string): PurchaseLineKind => (pick === "EXPENSE" ? "EXPENSE" : pick === "GRN" ? "GRN" : pick === "IMPORT" ? "IMPORT_VAT" : pick === "LANDED" ? "LANDED_COST" : "STOCK");
 const UNIT: Record<string, [string, string]> = { KG: ["كغ", "kg"], GRAM: ["غ", "g"], PIECE: ["حبة", "pcs"], UNIT: ["وحدة", "units"], LITER: ["لتر", "L"] };
 const addDays = (d: string, n: number) => new Date(Date.parse(d) + n * 86_400_000).toISOString().slice(0, 10);
@@ -128,12 +136,13 @@ export function PurchaseInvoiceForm({ id }: { id: string | null }) {
         const kind = l.item?.stockKind;
         const catId = kind === "GREEN_BEAN" ? greenCat?.id : l.item?.material?.categoryId;
         const pick = catId ? `cat:${catId}` : "";
+        const short = l.billedQty ? { short: true, billedQty: l.billedQty, shortTreatment: (l.shortfallTreatment === "LOSS" ? "LOSS" : "") as Line["shortTreatment"], shortReason: l.shortfallReason ?? "" } : {};
         if (l.kind === "GRN" && l.receipt?.own) {
           const q = String(l.receipt.quantity), u = String(l.receipt.costPerUnit);
-          return { ...b, pick, stockItemId: l.item?.id ?? "", quantity: q, unitCost: u, taxCode: vatRate, description: "", receipt: { id: l.receipt.id, itemId: l.item?.id ?? "", quantity: q, unitCost: u, reversed: l.receipt.reversed } };
+          return { ...b, ...short, pick, stockItemId: l.item?.id ?? "", quantity: q, unitCost: u, taxCode: vatRate, description: "", receipt: { id: l.receipt.id, itemId: l.item?.id ?? "", quantity: q, unitCost: u, reversed: l.receipt.reversed } };
         }
         if (l.kind === "GRN") return { ...b, pick: "GRN", purchaseRecordId: l.purchaseRecordId ?? "", net: l.net, taxCode: vatRate, description: "" };
-        return { ...b, pick, stockItemId: l.stockItemId ?? "", quantity: l.quantity ?? "", unitCost: impliedUnitCost(l.net, l.quantity), taxCode: vatRate };
+        return { ...b, ...short, pick, stockItemId: l.stockItemId ?? "", quantity: l.quantity ?? "", unitCost: impliedUnitCost(l.net, l.billedQty ?? l.quantity), taxCode: vatRate };
       }),
     };
   }
@@ -165,7 +174,22 @@ export function PurchaseInvoiceForm({ id }: { id: string | null }) {
     if (k === "IMPORT_VAT") return "P-IMP15";
     return isPurchaseTaxCode(l.taxCode) && lineTaxChoices(k, supplier).includes(l.taxCode) ? l.taxCode : defaultLineTaxCode(k, supplier);
   };
-  const netOf = (l: Line) => (l.pick === "IMPORT" ? "0.00" : isStock(l) ? lineNet(l.quantity, l.unitCost) ?? "0.00" : plainNumber(l.net) || "0.00");
+  // A short line is billed at the supplier's quantity; stock takes the received one.
+  const billedOf = (l: Line) => (isStock(l) && l.short && Number(plainNumber(l.billedQty)) > Number(plainNumber(l.quantity)) ? plainNumber(l.billedQty) : null);
+  const netOf = (l: Line) => (l.pick === "IMPORT" ? "0.00" : isStock(l) ? lineNet(billedOf(l) ?? l.quantity, l.unitCost) ?? "0.00" : plainNumber(l.net) || "0.00");
+  const tolerance = meta.data?.shortfall?.tolerancePercent ?? 0.5;
+  /** The shortfall of a short line: quantity, value, % of the billed and the treatment it gets (as the server resolves it). */
+  const shortOf = (l: Line) => {
+    const billed = billedOf(l);
+    if (!billed) return null;
+    const qty = Number(billed) - Number(plainNumber(l.quantity));
+    // Halalas as integers: the billed and the received values are each rounded once, as the server rounds them.
+    const value = (Math.round(Number(lineNet(billed, l.unitCost) ?? 0) * 100) - Math.round(Number(lineNet(l.quantity, l.unitCost) ?? 0) * 100)) / 100;
+    const pct = (qty / Number(billed)) * 100;
+    const within = pct <= tolerance + 1e-9;
+    const treatment = l.shortTreatment === "LOSS" ? "LOSS" : l.shortTreatment === "CLAIM" || !within ? "CLAIM" : "ABSORBED";
+    return { qty: Number(qty.toFixed(4)), value, pct, within, treatment };
+  };
   // Import VAT: no net, the VAT on the customs value · reverse charge: nothing on the invoice, the VAT self-assessed.
   const calc = f.lines.map((l) => {
     const code = codeOf(l), rate = PURCHASE_TAX_INFO[code].rate, net = netOf(l);
@@ -178,6 +202,8 @@ export function PurchaseInvoiceForm({ id }: { id: string | null }) {
   const notClaimable = sumAmounts(calc.map((c) => (c.code === "P-S15-NR" ? c.vat : "0")));
   /** What the line debits on approval: its net, plus its VAT when that VAT is not recoverable (capitalised). */
   const costOf = (i: number) => (calc[i].code === "P-S15-NR" ? calc[i].gross : calc[i].net);
+  // «نقص من المورد» in the entry preview: the claim and the loss leave the received goods' row.
+  const shortTotal = (t: "CLAIM" | "LOSS") => f.lines.reduce((a, l) => { const x = shortOf(l); return a + (x && x.treatment === t ? x.value : 0); }, 0).toFixed(2);
   const selfTotal = sumAmounts(calc.map((c) => c.self));
   const hasImport = f.lines.some((l) => l.pick === "IMPORT");
   const importOk = mayBillImportVat(supplier);
@@ -211,6 +237,7 @@ export function PurchaseInvoiceForm({ id }: { id: string | null }) {
     return `${r.date} · ${name} · ${r.quantity} · ${money(r.value)}`;
   };
 
+  const shortPayload = (l: Line) => (billedOf(l) ? { billedQty: billedOf(l), shortfallTreatment: l.shortTreatment || null, shortfallReason: l.shortTreatment === "LOSS" ? l.shortReason.trim() || null : null } : {});
   // ── The payload: a received line unchanged stays its receipt (GRN); a changed one is received again ──────
   const payload = (action: "draft" | "receive" | "post") => ({
     action, supplierId: f.supplierId, supplierRef: f.supplierRef, invoiceDate: f.invoiceDate, dueDate: f.dueTouched ? f.dueDate || null : null, notes: f.notes || null,
@@ -228,9 +255,9 @@ export function PurchaseInvoiceForm({ id }: { id: string | null }) {
       const green = c?.template === "GREEN_COFFEE";
       // A received line unchanged (same supplier, item, quantity and unit cost) keeps its receipt.
       if (l.receipt && (!data || data.supplierId === f.supplierId) && l.receipt.itemId === l.stockItemId && l.receipt.quantity === l.quantity && l.receipt.unitCost === l.unitCost) {
-        return { kind: "GRN", purchaseRecordId: l.receipt.id, net: lineNet(l.quantity, l.unitCost), vatRate, taxCode, description: l.description || null };
+        return { kind: "GRN", purchaseRecordId: l.receipt.id, net: lineNet(billedOf(l) ?? l.quantity, l.unitCost), vatRate, taxCode, description: l.description || null, ...shortPayload(l) };
       }
-      return { kind: "STOCK", stockKind: green ? "GREEN_BEAN" : "MATERIAL", stockItemId: l.newLot ? null : l.stockItemId, newLot: l.newLot, quantity: plainNumber(l.quantity), unitCost: plainNumber(l.unitCost), vatRate, taxCode, description: l.description || null };
+      return { kind: "STOCK", stockKind: green ? "GREEN_BEAN" : "MATERIAL", stockItemId: l.newLot ? null : l.stockItemId, newLot: l.newLot, quantity: plainNumber(l.quantity), unitCost: plainNumber(l.unitCost), vatRate, taxCode, description: l.description || null, ...shortPayload(l) };
     }),
   });
 
@@ -244,6 +271,8 @@ export function PurchaseInvoiceForm({ id }: { id: string | null }) {
         if (!l.stockItemId && !l.newLot) return L(`السطر ${n}: اختر الصنف.`, `Line ${n}: choose the item.`);
         if (!(Number(plainNumber(l.quantity)) > 0)) return L(`السطر ${n}: الكمية أكبر من صفر.`, `Line ${n}: the quantity is above zero.`);
         if (!(Number(plainNumber(l.unitCost)) > 0)) return L(`السطر ${n}: تكلفة الوحدة قبل الضريبة أكبر من صفر.`, `Line ${n}: the unit cost before VAT is above zero.`);
+        if (l.short && !billedOf(l)) return L(`السطر ${n}: الكمية في فاتورة المورد أكبر من الكمية المستلمة.`, `Line ${n}: the quantity on the supplier's invoice is more than the quantity received.`);
+        if (l.short && l.shortTreatment === "LOSS" && l.shortReason.trim().length < 3) return L(`السطر ${n}: سبب الخسارة مطلوب (3 أحرف على الأقل).`, `Line ${n}: the loss needs a reason (3 characters or more).`);
       }
       if (l.pick === "GRN" && !l.purchaseRecordId) return L(`السطر ${n}: اختر الاستلام.`, `Line ${n}: choose the receipt.`);
       if (l.pick === "EXPENSE" && !l.expenseCategoryId) return L(`السطر ${n}: اختر فئة المصروف.`, `Line ${n}: choose the expense category.`);
@@ -397,6 +426,46 @@ export function PurchaseInvoiceForm({ id }: { id: string | null }) {
           <span className="hr-caption hr-num">{L("صافي", "net")} {money(calc[i]?.net ?? 0)} · {L("ضريبة", "VAT")} {money(calc[i]?.vat ?? 0)}{Number(calc[i]?.self) ? <> · {L("محتسبة ذاتيًا", "self-assessed")} {money(calc[i].self)}</> : null}</span>
         </div>
         {editable ? <Btn variant="ghost" size="sm" className="pi-remove" aria-label={L(`حذف السطر ${i + 1}`, `Remove line ${i + 1}`)} title={L("حذف السطر", "Remove line")} disabled={f.lines.length === 1} onClick={() => set({ lines: f.lines.filter((x) => x.key !== l.key) })} data-testid={`pi-remove-${i}`}><span aria-hidden="true">✕</span><span className="pi-remove-word">{L("حذف", "Remove")}</span></Btn> : <span />}
+        {isStock(l) ? shortEditor(l, i, ro) : null}
+      </div>
+    );
+  }
+
+  // «المستلم أقل من الفاتورة»: the billed quantity, the shortfall and its treatment, under the line.
+  function shortEditor(l: Line, i: number, ro: boolean) {
+    const x = shortOf(l);
+    const server = data?.lines[i];
+    if (ro && !l.short) return null;
+    const unit = unitOf(l);
+    const tName = (t: string) => (t === "LOSS" ? L("خسارة", "Loss") : t === "ABSORBED" ? L("ضمن حد التسامح — على التكلفة", "Within tolerance — into the cost") : L("مطالبة المورد", "Claim from the supplier"));
+    return (
+      <div className="pi-short" data-testid={`pi-short-box-${i}`}>
+        {ro ? null : (
+          <label className="pur-check">
+            <input type="checkbox" checked={l.short} onChange={() => setLine(l.key, { short: !l.short, billedQty: l.short ? "" : l.billedQty, shortTreatment: "", shortReason: "" })} data-testid={`pi-short-${i}`} />
+            <span>{L("المستلم أقل من الفاتورة", "Received less than billed")}</span>
+          </label>
+        )}
+        {l.short ? <div className="pi-short-row">
+          <label className="pi-cell"><span className="pi-lbl is-shown">{L("الكمية في فاتورة المورد", "Quantity on the supplier's invoice")} {unit ? `· ${unit}` : ""}</span>
+            {ro ? <span className="hr-num" data-testid={`pi-billed-ro-${i}`}>{l.billedQty} {unit}</span> : <input className="hr-input acct-amount" inputMode="decimal" value={l.billedQty} onChange={(e) => setLine(l.key, { billedQty: e.target.value })} placeholder="0" data-testid={`pi-billed-${i}`} aria-label={L("الكمية في فاتورة المورد", "Quantity on the supplier's invoice")} />}
+          </label>
+          <label className="pi-cell"><span className="pi-lbl is-shown">{L("معالجة النقص", "Shortfall treatment")}</span>
+            {ro ? <span data-testid={`pi-short-treat-ro-${i}`}>{tName(server?.shortfallTreatment ?? x?.treatment ?? "CLAIM")}</span> : (
+              <Select value={l.shortTreatment} onChange={(e) => setLine(l.key, { shortTreatment: e.target.value as Line["shortTreatment"] })} data-testid={`pi-short-treat-${i}`} aria-label={L("معالجة النقص", "Shortfall treatment")}>
+                <option value="">{x?.within ? L("ضمن حد التسامح — على التكلفة (افتراضي)", "Within tolerance — into the cost (default)") : L("مطالبة المورد (افتراضي)", "Claim from the supplier (default)")}</option>
+                {x?.within ? <option value="CLAIM">{L("مطالبة المورد", "Claim from the supplier")}</option> : null}
+                {can?.adjust ? <option value="LOSS">{L("خسارة", "Loss")}</option> : null}
+              </Select>
+            )}
+          </label>
+          {l.shortTreatment === "LOSS" ? <label className="pi-cell pi-short-reason"><span className="pi-lbl is-shown">{L("سبب الخسارة", "Reason for the loss")} *</span>
+            {ro ? <span>{l.shortReason || server?.shortfallReason || "—"}</span> : <input className="hr-input" value={l.shortReason} onChange={(e) => setLine(l.key, { shortReason: e.target.value })} placeholder={L("مثال: تلف أثناء الشحن ولا يعوّض المورد", "e.g. damaged in transit, not covered by the supplier")} data-testid={`pi-short-reason-${i}`} />}
+          </label> : null}
+          <span className="hr-caption pi-short-hint" data-testid={`pi-short-hint-${i}`}>{x
+            ? <>{L("النقص", "Short")} <bdi className="hr-num">{x.qty} {unit}</bdi> · <bdi className="hr-num">{money(x.value)}</bdi> {L("ر.س", "SAR")} · <bdi className="hr-num">{x.pct.toFixed(2)}%</bdi> {L(`(حد التسامح ${tolerance}%)`, `(tolerance ${tolerance}%)`)} · {tName(x.treatment)}{x.treatment === "LOSS" ? L(" — يحتاج «المخزون › تسوية»", " — needs Inventory › Adjust") : ""}</>
+            : L("أدخل كمية أكبر من المستلمة.", "Enter more than the quantity received.")}</span>
+        </div> : null}
       </div>
     );
   }
@@ -502,6 +571,7 @@ export function PurchaseInvoiceForm({ id }: { id: string | null }) {
           <div className="is-grand"><span>{L("الإجمالي (ر.س)", "Total (SAR)")}</span><strong className="hr-num" data-testid="inv-gross-total">{money(tot.gross)}</strong></div>
           {data?.status === "POSTED" ? <>
             <div><span>{L("المدفوع", "Paid")}</span><strong className="hr-num">{money(data.paidTotal)}</strong></div>
+            {Number(data.creditedTotal ?? 0) ? <div><span>{L("إشعارات دائنة من المورد", "Supplier credit notes")}</span><strong className="hr-num" data-testid="pi-credited">{money(data.creditedTotal)}</strong></div> : null}
             <div><span>{L("المتبقي", "Remaining")}</span><strong className="hr-num" data-testid="pi-outstanding">{money(data.outstanding)}</strong></div>
           </> : null}
         </div>
@@ -524,7 +594,7 @@ export function PurchaseInvoiceForm({ id }: { id: string | null }) {
           </> : null}
           {data && data.received && (data.status === "SUBMITTED" || data.status === "DRAFT") && can?.draft && can.receive && can.changeReceived ? <Btn variant="danger" onClick={() => setDialog("cancel")} data-testid="pi-cancel">{L("إلغاء الفاتورة والاستلام", "Cancel the invoice and the receipt")}</Btn> : null}
           {data && !data.received && data.status === "DRAFT" && can?.draft ? <Btn variant="ghost" onClick={() => setDialog("cancel")} data-testid="pi-cancel-draft">{L("إلغاء المسودة", "Cancel the draft")}</Btn> : null}
-          {data && data.status === "POSTED" && can?.ap && Number(data.paidTotal) === 0 ? <Btn variant="danger" onClick={() => setDialog("cancelPosted")} data-testid="inv-cancel">{L("إلغاء الفاتورة", "Cancel the invoice")}</Btn> : null}
+          {data && data.status === "POSTED" && can?.ap && Number(data.paidTotal) === 0 && !(data.claims ?? []).some((c) => c.settlements.some((s) => !s.voidedAt)) ? <Btn variant="danger" onClick={() => setDialog("cancelPosted")} data-testid="inv-cancel">{L("إلغاء الفاتورة", "Cancel the invoice")}</Btn> : null}
           {data && data.status === "POSTED" && can?.ap && Number(data.outstanding) > 0 ? <Link className="hr-btn" href="/dashboard/accounting/ap?view=payments">{L("تسجيل سداد", "Record a payment")}</Link> : null}
         </div>
         {own && data?.status === "SUBMITTED" ? <p className="acct-hint" data-testid="pi-sod-note">{L("أدخلت هذه الفاتورة أو عدّلتها أو قدّمتها؛ يعتمدها محاسب آخر (فصل المهام).", "You entered, edited or submitted this invoice; another accountant approves it (segregation of duties).")}</p> : null}
@@ -534,6 +604,8 @@ export function PurchaseInvoiceForm({ id }: { id: string | null }) {
         {data && data.received && (data.status === "SUBMITTED" || data.status === "DRAFT") && can?.draft && !can.changeReceived ? <p className="acct-hint" data-testid="pi-change-note">{L("تعديل أو إلغاء فاتورة مستلمة يحتاج صلاحية «المشتريات › إلغاء/تعديل فاتورة مستلمة».", "Editing or cancelling a received invoice needs Purchases › Cancel or edit a received purchase invoice.")}</p> : null}
         {data?.allocations.length ? <p className="acct-hint">{L("السداد", "Payments")}: {data.allocations.map((a) => `${a.payment.number} (${money(a.amount)}${a.payment.status === "VOIDED" ? L(" — ملغى", " — voided") : ""})`).join("، ")}</p> : null}
 
+        {data ? <InvoiceClaims invoice={data} claims={data.claims ?? []} creditNotes={data.creditNotes ?? []} can={{ ap: can?.ap, receive: can?.receive, adjust: can?.adjust }} settings={meta.data?.shortfall ?? null}
+          onChanged={(m) => { w.setDone(m); inv.reload(); activity.reload(); }} /> : null}
         {id ? (
           <section aria-labelledby="pi-activity-h" data-testid="pi-activity">
             <h2 className="pi-h2" id="pi-activity-h">{L("سجل النشاط", "Activity")} <span className="acct-hint">{L("من فعل ماذا ومتى — يظهر أيضًا في سجل التدقيق", "Who did what and when — also in the audit log")}</span></h2>
@@ -563,7 +635,9 @@ export function PurchaseInvoiceForm({ id }: { id: string | null }) {
           <thead><tr><th>{L("الحساب", "Account")}</th><th className="num">{L("مدين", "Debit")}</th><th className="num">{L("دائن", "Credit")}</th></tr></thead>
           <tbody>
             {f.lines.some((l) => l.pick === "LANDED") ? <tr><td>{L("المخزون · تكلفة إضافية (الجزء المستهلك ← فروقات المخزون)", "Inventory · landed cost (the consumed share → inventory variance)")}</td><td className="num hr-num">{money(sumAmounts(f.lines.map((l, i) => (l.pick === "LANDED" ? costOf(i) : "0"))))}</td><td /></tr> : null}
-            {f.lines.some((l) => isStock(l) || l.pick === "GRN") ? <tr><td>{L("بضاعة مستلمة لم تصل فاتورتها", "Goods received not invoiced")}</td><td className="num hr-num">{money(sumAmounts(f.lines.map((l, i) => (isStock(l) || l.pick === "GRN" ? costOf(i) : "0"))))}</td><td /></tr> : null}
+            {f.lines.some((l) => isStock(l) || l.pick === "GRN") ? <tr><td>{L("بضاعة مستلمة لم تصل فاتورتها", "Goods received not invoiced")}</td><td className="num hr-num">{money(((Math.round(Number(sumAmounts(f.lines.map((l, i) => (isStock(l) || l.pick === "GRN" ? costOf(i) : "0")))) * 100) - Math.round(Number(shortTotal("CLAIM")) * 100) - Math.round(Number(shortTotal("LOSS")) * 100)) / 100).toFixed(2))}</td><td /></tr> : null}
+            {Number(shortTotal("CLAIM")) ? <tr data-testid="inv-preview-claims"><td>{L("مطالبات الموردين", "Supplier claims")}</td><td className="num hr-num">{money(shortTotal("CLAIM"))}</td><td /></tr> : null}
+            {Number(shortTotal("LOSS")) ? <tr data-testid="inv-preview-loss"><td>{L("خسائر نقص المشتريات", "Purchase shortage losses")}</td><td className="num hr-num">{money(shortTotal("LOSS"))}</td><td /></tr> : null}
             {f.lines.map((l, i) => { if (l.pick !== "EXPENSE") return null; const x = exps.data?.find((e) => e.id === l.expenseCategoryId); return <tr key={l.key}><td>{x ? `${x.account.code} ${lang === "ar" ? x.account.nameAr ?? x.account.nameEn : x.account.nameEn}` : L("حساب المصروف", "Expense account")}</td><td className="num hr-num">{money(costOf(i))}</td><td /></tr>; })}
             {Number(claimable) || Number(selfTotal) ? <tr><td>{L("ضريبة المدخلات", "VAT input")}</td><td className="num hr-num">{money(sumAmounts([claimable, selfTotal]))}</td><td /></tr> : null}
             {Number(selfTotal) ? <tr><td>{L("ضريبة المخرجات · احتساب عكسي", "VAT output · reverse charge")}</td><td /><td className="num hr-num">{money(selfTotal)}</td></tr> : null}

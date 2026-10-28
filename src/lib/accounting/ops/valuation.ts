@@ -15,6 +15,7 @@ import { qty4, unitCost } from "./costing";
 import { costSet, lockHolder, type CostKind, type InventoryRole } from "./cost-ledger";
 import { opsRefuse } from "./refusals";
 import { apAging, openReceipts } from "./ap";
+import { apNotInBooks, claimsNotInBooks } from "./supplier-claims";
 import { materialInventoryRole } from "@/lib/inventory/item-categories";
 
 export const INVENTORY_ROLES: InventoryRole[] = ["INVENTORY_GREEN", "INVENTORY_PACKAGING", "INVENTORY_CAFE", "INVENTORY_ROASTED", "INVENTORY_PACKED"];
@@ -84,7 +85,7 @@ async function glByRole(roles: string[], asOf: Date): Promise<Map<string, { acco
 /** The sub-ledgers ↔ the GL control accounts. Sub-ledger = what the operations hold; GL = what the books hold. */
 export async function reconciliation(asOfText: string | null) {
   const asOf = asOfText ? parseBusinessDay(asOfText) : riyadhDay();
-  const roles = [...INVENTORY_ROLES, "WIP_ROASTING", "GRNI", "AP"];
+  const roles = [...INVENTORY_ROLES, "WIP_ROASTING", "GRNI", "AP", "SUPPLIER_CLAIMS"];
   const gl = await glByRole(roles, asOf);
   const applied = (await prisma.costingSettings.findUnique({ where: { id: "singleton" }, select: { openingAppliedAt: true } }))?.openingAppliedAt ?? null;
   // Movements up to the opening valuation are summed into the opening grid (the valuation sets absolute values);
@@ -114,6 +115,13 @@ export async function reconciliation(asOfText: string | null) {
   const grniGl = (gl.get("GRNI")?.balance ?? ZERO).negated();
   const ap = await apAging(dayText(asOf), null);
   const apGl = ap.gl ? new Decimal(ap.gl.balance) : ZERO;
+  // «نقص من المورد» (council F1): the open claims (net) against SUPPLIER_CLAIMS; claims the books do not hold yet
+  // (approved before go-live) are a reconciling item until the opening carrying them is posted.
+  const openClaims = await prisma.supplierClaim.findMany({ where: { status: "OPEN", createdAt: { lte: new Date(asOf.getTime() + 86_399_999 - 3 * 3600_000) } }, select: { net: true, settledNet: true } });
+  const claimsSub = openClaims.reduce((t, c) => t.plus(c.net).minus(c.settledNet), ZERO);
+  const claimsGl = gl.get("SUPPLIER_CLAIMS")?.balance ?? ZERO;
+  const claimsPending = openingPosted ? ZERO : [...(await claimsNotInBooks()).values()].reduce((t, v) => t.plus(v), ZERO);
+  const claimsDiff = claimsSub.minus(claimsGl);
   return {
     asOf: dayText(asOf), active: !!settings?.accountingActive, goLiveDate: settings?.goLiveDate ? dayText(settings.goLiveDate) : null, openingPosted, openingAppliedAt: applied?.toISOString() ?? null,
     inventory,
@@ -127,6 +135,11 @@ export async function reconciliation(asOfText: string | null) {
       awaitingApproval: { count: receipts.filter((r) => !!r.invoice).length, value: f2(receipts.filter((r) => !!r.invoice).reduce((a, r) => a.plus(r.value), ZERO)) },
     },
     ap: { account: gl.get("AP") ? { code: gl.get("AP")!.code, name: gl.get("AP")!.name } : null, openItems: ap.total, gl: f2(apGl), difference: f2(new Decimal(ap.total).minus(apGl)) },
+    supplierClaims: {
+      account: gl.get("SUPPLIER_CLAIMS") ? { code: gl.get("SUPPLIER_CLAIMS")!.code, name: gl.get("SUPPLIER_CLAIMS")!.name } : null, count: openClaims.length,
+      openClaims: f2(claimsSub), gl: f2(claimsGl), difference: f2(claimsDiff), openingPending: f2(claimsPending), unexplained: f2(claimsDiff.minus(claimsPending)),
+      status: claimsDiff.isZero() ? "MATCHED" : claimsDiff.minus(claimsPending).isZero() ? "EXPLAINED" : "UNEXPLAINED",
+    },
   };
 }
 
@@ -238,10 +251,21 @@ export async function openingPreview() {
   const cs = await getCostingSettings();
   const byRole = INVENTORY_ROLES.map((role) => ({ role, value: f2(rows.filter((r) => r.role === role).reduce((s, r) => s.plus(r.value), ZERO)), count: rows.filter((r) => r.role === role).length }));
   const grni = (await openReceipts(null)).filter((r) => r.glState !== "POSTED");
+  // «نقص من المورد» (council F1): the open claims the books do not hold yet (Dr SUPPLIER_CLAIMS per supplier), and the AP
+  // opening the pre-go-live invoices imply per supplier (gross − paid − credited) against the AP lines of the grid.
+  const claimsMap = await claimsNotInBooks();
+  const apMap = await apNotInBooks();
+  const apRole = await prisma.accountRole.findUnique({ where: { tenantId_role: { tenantId: "hiqbah", role: "AP" } }, select: { accountId: true } });
+  const apGrid = apRole ? await prisma.openingBalanceLine.groupBy({ by: ["partyId"], where: { accountId: apRole.accountId, partyType: "SUPPLIER" }, _sum: { credit: true, debit: true } }) : [];
+  const gridOf = new Map(apGrid.map((g) => [g.partyId ?? "", new Decimal(g._sum.credit ?? 0).minus(g._sum.debit ?? 0)]));
+  const supIds = [...new Set([...claimsMap.keys(), ...apMap.keys()])];
+  const names = new Map((supIds.length ? await prisma.supplier.findMany({ where: { id: { in: supIds } }, select: { id: true, name: true } }) : []).map((x) => [x.id, x.name]));
   return {
     goLiveDate: st?.goLiveDate ? dayText(st.goLiveDate) : null, openingPosted: !!st?.openingEntryId, appliedAt: cs.openingAppliedAt,
     rows, byRole, total: f2(rows.reduce((s, r) => s.plus(r.value), ZERO)), missing: rows.filter((r) => r.source === "NONE").length,
     grni: { count: grni.length, value: f2(grni.reduce((s, r) => s.plus(r.value), ZERO)) },
+    supplierClaims: { count: claimsMap.size, value: f2([...claimsMap.values()].reduce((t, v) => t.plus(v), ZERO)), suppliers: [...claimsMap].map(([id, v]) => ({ supplierId: id, name: names.get(id) ?? id, value: f2(v) })) },
+    apOpening: [...apMap].map(([id, v]) => ({ supplierId: id, name: names.get(id) ?? id, expected: f2(v), grid: f2(gridOf.get(id) ?? ZERO), difference: f2(v.minus(gridOf.get(id) ?? ZERO)) })),
   };
 }
 
@@ -269,6 +293,7 @@ export async function saveOpeningCosts(list: unknown, ctx: AuditContext) {
 
 const TOOL_MARK = "مخزون افتتاحي";
 const GRNI_MARK = "بضاعة مستلمة لم تصل فاتورتها (افتتاحي)";
+const CLAIMS_MARK = "مطالبات الموردين المفتوحة (افتتاحي)";
 
 /**
  * Apply the valuation: every holder is set to its on-hand × unit cost (OPENING movements; holders no longer on hand
@@ -299,12 +324,12 @@ export async function applyOpening(ctx: AuditContext) {
       await costSet(tx, { holder: h, src: src(s.kind, s.entityId), kind: "OPENING", qty: ZERO, value: ZERO, actor: ctx.actorId, day, reason: "تقييم افتتاحي: لا رصيد" });
     }
     // The opening grid: replace the tool's own lines, keep everything the owner entered.
-    const roleRows = await tx.accountRole.findMany({ where: { tenantId: "hiqbah", role: { in: [...INVENTORY_ROLES, "GRNI"] } }, select: { role: true, accountId: true } });
+    const roleRows = await tx.accountRole.findMany({ where: { tenantId: "hiqbah", role: { in: [...INVENTORY_ROLES, "GRNI", "SUPPLIER_CLAIMS"] } }, select: { role: true, accountId: true } });
     const acc = new Map(roleRows.map((r) => [r.role, r.accountId]));
-    const missing = [...INVENTORY_ROLES, "GRNI"].filter((r) => !acc.has(r) && (r === "GRNI" ? Number(preview.grni.value) > 0 : Number(preview.byRole.find((b) => b.role === r)?.value ?? 0) > 0));
+    const missing = [...INVENTORY_ROLES, "GRNI", "SUPPLIER_CLAIMS"].filter((r) => !acc.has(r) && (r === "GRNI" ? Number(preview.grni.value) > 0 : r === "SUPPLIER_CLAIMS" ? Number(preview.supplierClaims.value) > 0 : Number(preview.byRole.find((b) => b.role === r)?.value ?? 0) > 0));
     if (missing.length) throw opsRefuse("OPS_BAD_INPUT", `Map these roles first: ${missing.join(", ")}.`, `اربط هذه الأدوار أولًا: ${missing.join("، ")}.`);
     const grid = await tx.openingBalanceLine.findMany({ orderBy: { lineNo: "asc" } });
-    const kept = grid.filter((l) => !(l.description ?? "").startsWith(TOOL_MARK) && l.description !== GRNI_MARK);
+    const kept = grid.filter((l) => !(l.description ?? "").startsWith(TOOL_MARK) && l.description !== GRNI_MARK && l.description !== CLAIMS_MARK);
     const add: { accountId: string; debit: Decimal; credit: Decimal; partyType: string | null; partyId: string | null; description: string }[] = [];
     // The grid carries what the GL does not hold yet: the valuation, less what the engine already posted (a tool
     // applied after go-live day would otherwise count those movements twice).
@@ -319,6 +344,8 @@ export async function applyOpening(ctx: AuditContext) {
     const bySupplier = new Map<string, Decimal>();
     for (const g of grni) bySupplier.set(g.supplierId, (bySupplier.get(g.supplierId) ?? ZERO).plus(g.value));
     for (const [sid, v] of bySupplier) if (v.gt(0)) add.push({ accountId: acc.get("GRNI") as string, debit: ZERO, credit: v, partyType: "SUPPLIER", partyId: sid, description: GRNI_MARK });
+    // «نقص من المورد» (council F1): the open claims the books do not hold yet — Dr SUPPLIER_CLAIMS per supplier at the net.
+    for (const [sid, v] of await claimsNotInBooks(tx)) if (v.gt(0)) add.push({ accountId: acc.get("SUPPLIER_CLAIMS") as string, debit: v, credit: ZERO, partyType: "SUPPLIER", partyId: sid, description: CLAIMS_MARK });
     const all = [...kept.map((l) => ({ accountId: l.accountId, debit: new Decimal(l.debit), credit: new Decimal(l.credit), partyType: l.partyType, partyId: l.partyId, branchId: l.branchId, costCenterId: l.costCenterId, description: l.description })), ...add.map((a) => ({ ...a, branchId: null, costCenterId: null }))];
     const accounts = await loadAccounts(tx, all.map((l) => l.accountId));
     const dims = (l: (typeof all)[number]): NormalLine["dims"] => ({ branchId: l.branchId, costCenterId: l.costCenterId, partyType: (l.partyType as NormalLine["dims"]["partyType"]) ?? null, partyId: l.partyId, itemType: null, itemId: null });

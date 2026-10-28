@@ -5,8 +5,10 @@ import { requireApRead } from "@/lib/accounting/ops/http";
 import { listInvoices } from "@/lib/accounting/ops/ap";
 import { savePurchaseInvoice, type PurchaseInvoiceInput } from "@/lib/accounting/ops/purchase-invoice";
 import { sodPolicy } from "@/lib/accounting/sod";
+import { prisma } from "@/lib/db";
+import { shortfallSettings } from "@/lib/accounting/ops/supplier-claims";
 import { isSimpleMode } from "@/lib/simple-mode";
-import { purchaseCan, purchaseSaveGate } from "@/lib/purchases/gates";
+import { purchaseCan, purchaseSaveGate, shortfallLossGate } from "@/lib/purchases/gates";
 
 /**
  * Phase 2 — «الفواتير», the purchases screen's default tab: the purchase invoices (status, supplier, period, search),
@@ -20,7 +22,9 @@ export async function GET(request: Request) {
   try {
     const r = await listInvoices({ status: qp(request, "status"), supplierId: qp(request, "supplierId"), from: qp(request, "from"), to: qp(request, "to"), q: qp(request, "q") });
     const sod = await sodPolicy();
-    return NextResponse.json({ ...r, viewer: { id: user.id }, simpleMode: isSimpleMode(), sodSelfAllowed: sod.allowSelfApproval, can: purchaseCan(user.permissions) });
+    // «نقص من المورد»: the weight tolerance and the abandonment's VAT rule (the form states both).
+    const shortfall = await shortfallSettings(prisma);
+    return NextResponse.json({ ...r, viewer: { id: user.id }, simpleMode: isSimpleMode(), sodSelfAllowed: sod.allowSelfApproval, can: purchaseCan(user.permissions), shortfall: { tolerancePercent: shortfall.tolerancePercent, abandonReverseVat: shortfall.abandonReverseVat } });
   } catch (err) {
     return acctError(err);
   }
@@ -31,8 +35,10 @@ export async function POST(request: Request) {
   try { body = await jsonBody(request); } catch (err) { return acctError(err); }
   const { user, error, mayReceive, mayChangeReceived } = await purchaseSaveGate(String(body.action ?? "draft"));
   if (error) return error;
+  const loss = await shortfallLossGate(user, body);
+  if (loss.error) return loss.error;
   try {
-    const r = await savePurchaseInvoice(body as unknown as PurchaseInvoiceInput, null, user, auditFromRequest(request, user.id), { mayReceive, mayChangeReceived });
+    const r = await savePurchaseInvoice(body as unknown as PurchaseInvoiceInput, null, user, auditFromRequest(request, user.id), { mayReceive, mayChangeReceived, mayWriteOffShortfall: loss.mayWriteOffShortfall });
     return NextResponse.json(r, { status: r.replayed ? 200 : 201 });
   } catch (err) {
     return acctError(err);

@@ -228,6 +228,9 @@ export const API_ERRORS_AR: Readonly<Record<string, string>> = {
   "The shortfall value limit is an amount in SAR of 0 or more, with at most two decimals.": "حد قيمة النقص مبلغ بالريال من صفر فأكثر، بمنزلتين عشريتين على الأكثر.",
   "«Received at zero needs a supervisor» is on or off.": "«الاستلام بصفر يحتاج مشرفًا» تشغيل أو إيقاف.",
   "The 30-day multiple is a number from 0 to 1000, with at most two decimals.": "مضاعف الثلاثين يومًا رقم من 0 إلى 1000، بمنزلتين عشريتين على الأكثر.",
+  // «نقص من المورد» (20261119090000_supplier_shortfall).
+  "The supplier shortfall tolerance is a percentage from 0 to 2, with at most two decimals.": "حد التسامح في نقص المورد نسبة من 0 إلى 2، بمنزلتين عشريتين على الأكثر.",
+  "«Abandoning a claim reverses its input VAT» is on or off.": "«التنازل عن المطالبة يعكس ضريبة مدخلاتها» تشغيل أو إيقاف.",
   // Settings › Organisation › the sign-in line (owner language decision 1).
   "The sign-in line must be text.": "شعار صفحة الدخول يجب أن يكون نصًا.",
   "The sign-in line cannot contain < > or control characters.": "لا يقبل شعار صفحة الدخول الرمزين < > ولا رموز التحكم.",

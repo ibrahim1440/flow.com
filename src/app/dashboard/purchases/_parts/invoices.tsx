@@ -8,7 +8,7 @@ import { FilterChip, Notice, OpsLoading } from "@/components/ops/ui";
 import { DownloadIcon } from "../../inventory/_parts/shared";
 import { money, todayRiyadh, useApi, useLang } from "../../accounting/_ui/shell";
 
-export type PurchaseCan = { draft: boolean; ap: boolean; receive: boolean; inventory: boolean; read: boolean; suppliers: boolean; changeReceived?: boolean };
+export type PurchaseCan = { draft: boolean; ap: boolean; receive: boolean; inventory: boolean; read: boolean; suppliers: boolean; changeReceived?: boolean; adjust?: boolean };
 export type InvoiceListRow = {
   id: string; number: string; supplierId: string; supplierName: string; supplierRef: string; invoiceDate: string; dueDate: string; status: string; received: boolean;
   netTotal: string; vatTotal: string; grossTotal: string; paidTotal: string; outstanding: string; overdueDays: number;

@@ -5,6 +5,7 @@ import { hasModuleAccess } from "@/lib/auth-shared";
 import { handleDomainError } from "@/lib/api-error";
 import { inventoryFromRow, LOW_STOCK_GREEN_KG_DEFAULT, LOW_STOCK_GREEN_KG_MAX, parseInventoryPatch } from "@/lib/services/settings/sections";
 import { changedKeys, writeSettingsAudit } from "@/lib/services/settings/audit";
+import { ABANDON_REVERSE_VAT_DEFAULT, SHORTFALL_TOLERANCE_DEFAULT, supplierShortfallFromRow } from "@/lib/accounting/ops/supplier-shortfall";
 import { SHORTFALL_PERCENT_DEFAULT, SHORTFALL_ROLLING_MULTIPLE_DEFAULT, SHORTFALL_VALUE_SAR_DEFAULT, SHORTFALL_ZERO_DEFAULT, highLimits, shortfallLimitsFromRow } from "@/lib/inventory/shortfall-threshold";
 
 /**
@@ -16,6 +17,9 @@ import { SHORTFALL_PERCENT_DEFAULT, SHORTFALL_ROLLING_MULTIPLE_DEFAULT, SHORTFAL
  *     shortfall needs inventory › adjust and the stock-change gate; shortfallRollingMultiple (0–1000, default 2): a
  *     receiver whose 30 days pass this many times the value limit needs a supervisor. "" / null = back to the default.
  *     A warning (shortfall.high) when percent ≥ 50, value ≥ 10,000 or the zero rule is off — never a block.
+ *   · «نقص من المورد» (20261119090000_supplier_shortfall) — purchaseShortfallTolerancePercent (0–100, default 0.5): a
+ *     purchase line's shortfall within it, with no treatment chosen, is absorbed into the cost; purchaseAbandonReverseVat
+ *     (default on): abandoning a supplier claim reverses its input VAT.
  *
  * GET: the admin role or the inventory module (the inventory screen states the line).
  * PUT: the admin role, by a verified individual after a recent step-up — the same gate as the
@@ -23,16 +27,20 @@ import { SHORTFALL_PERCENT_DEFAULT, SHORTFALL_ROLLING_MULTIPLE_DEFAULT, SHORTFAL
  */
 const range = { min: 0, max: LOW_STOCK_GREEN_KG_MAX, default: LOW_STOCK_GREEN_KG_DEFAULT };
 const shortfallDefaults = { percent: SHORTFALL_PERCENT_DEFAULT, valueSar: SHORTFALL_VALUE_SAR_DEFAULT, zeroNeedsAdjust: SHORTFALL_ZERO_DEFAULT, rollingMultiple: SHORTFALL_ROLLING_MULTIPLE_DEFAULT };
-type Row = Parameters<typeof inventoryFromRow>[0] & Parameters<typeof shortfallLimitsFromRow>[0];
+type Row = Parameters<typeof inventoryFromRow>[0] & Parameters<typeof shortfallLimitsFromRow>[0] & Parameters<typeof supplierShortfallFromRow>[0];
 /** The section as the screen reads it: the low-stock line and the shortfall threshold (stored values and those in force). */
 function view(row: Row) {
   const s = shortfallLimitsFromRow(row);
   const effective = { percent: s.percent, valueSar: s.valueSar, zeroNeedsAdjust: s.zeroNeedsAdjust, rollingMultiple: s.rollingMultiple };
   // Council F3: a warning (never a block) when a limit lets a large shortfall pass without a supervisor.
-  return { ...inventoryFromRow(row), shortfall: { stored: s.stored, effective, defaults: shortfallDefaults, high: highLimits(effective) } };
+  const p = supplierShortfallFromRow(row);
+  return {
+    ...inventoryFromRow(row), shortfall: { stored: s.stored, effective, defaults: shortfallDefaults, high: highLimits(effective) },
+    supplierShortfall: { stored: p.stored, effective: { tolerancePercent: p.tolerancePercent, abandonReverseVat: p.abandonReverseVat }, defaults: { tolerancePercent: SHORTFALL_TOLERANCE_DEFAULT, abandonReverseVat: ABANDON_REVERSE_VAT_DEFAULT } },
+  };
 }
 /** The audited facts of the section (stored values; null = the default). */
-const facts = (v: ReturnType<typeof view>) => ({ lowStockGreenKg: v.lowStockGreenKg, shortfallPercent: v.shortfall.stored.percent, shortfallValueSar: v.shortfall.stored.valueSar, shortfallZeroNeedsAdjust: v.shortfall.stored.zeroNeedsAdjust, shortfallRollingMultiple: v.shortfall.stored.rollingMultiple });
+const facts = (v: ReturnType<typeof view>) => ({ lowStockGreenKg: v.lowStockGreenKg, shortfallPercent: v.shortfall.stored.percent, shortfallValueSar: v.shortfall.stored.valueSar, shortfallZeroNeedsAdjust: v.shortfall.stored.zeroNeedsAdjust, shortfallRollingMultiple: v.shortfall.stored.rollingMultiple, purchaseShortfallTolerancePercent: v.supplierShortfall.stored.tolerancePercent, purchaseAbandonReverseVat: v.supplierShortfall.stored.abandonReverseVat });
 
 export async function GET() {
   const { user, error } = await requireAuth();

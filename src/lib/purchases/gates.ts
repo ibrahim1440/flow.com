@@ -11,7 +11,7 @@
 //   • approve = post in the same save               accounting › ap through requireSub (verified individual +
 //                                                    step-up), the gate of POST …/invoices/:id/post; the SoD
 //                                                    setting decides in the service whether the preparer may post.
-import { requireSub } from "@/lib/auth-server";
+import { requireSub, stockChangeGate } from "@/lib/auth-server";
 import { hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
 import { requireDraftWriter } from "@/lib/accounting/ops/http";
 
@@ -33,7 +33,7 @@ export async function purchaseSaveGate(action: string): Promise<Gate> {
   };
 }
 
-export type PurchaseCan = { draft: boolean; ap: boolean; receive: boolean; inventory: boolean; read: boolean; suppliers: boolean; changeReceived: boolean };
+export type PurchaseCan = { draft: boolean; ap: boolean; receive: boolean; inventory: boolean; read: boolean; suppliers: boolean; changeReceived: boolean; adjust: boolean };
 export function purchaseCan(permissions: Parameters<typeof hasSubPrivilege>[0]): PurchaseCan {
   return {
     draft: hasSubPrivilege(permissions, "purchases", "invoices") || hasSubPrivilege(permissions, "accounting", "ap"),
@@ -44,5 +44,20 @@ export function purchaseCan(permissions: Parameters<typeof hasSubPrivilege>[0]):
     // POST /api/suppliers and the name / contact edit: inventory › receive or adjust.
     suppliers: hasSubPrivilege(permissions, "inventory", "receive") || hasSubPrivilege(permissions, "inventory", "adjust"),
     changeReceived: hasSubPrivilege(permissions, "purchases", "received_change"),
+    // «نقص من المورد»: a shortfall written off as a loss, or a claim abandoned — inventory › adjust (+ step-up, the route).
+    adjust: hasSubPrivilege(permissions, "inventory", "adjust"),
   };
+}
+
+/**
+ * «نقص من المورد» (20261119090000_supplier_shortfall): a save that writes a supplier shortfall off as a LOSS («خسارة»)
+ * is a stock write-off — inventory › adjust through the stock-change gate (verified individual, step-up), the gate of
+ * a stock adjustment. Only asked when the body has such a line; the service refuses the line without the grant.
+ */
+export async function shortfallLossGate(user: Parameters<typeof stockChangeGate>[0], body: Record<string, unknown>): Promise<{ error: Response | null; mayWriteOffShortfall: boolean }> {
+  const lines = Array.isArray(body.lines) ? (body.lines as Record<string, unknown>[]) : [];
+  const wants = lines.some((l) => l && l.shortfallTreatment === "LOSS" && l.billedQty !== undefined && l.billedQty !== null && l.billedQty !== "");
+  if (!wants) return { error: null, mayWriteOffShortfall: false };
+  const refused = await stockChangeGate(user, "inventory", "adjust");
+  return refused ? { error: refused, mayWriteOffShortfall: false } : { error: null, mayWriteOffShortfall: true };
 }
