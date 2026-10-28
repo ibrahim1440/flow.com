@@ -1,4 +1,4 @@
-// Accounting A3 — the inventory read models and the go-live tool (Figma ACC-100 «المخزون والتكلفة»):
+// Accounting A3 — the inventory read models and the go-live tool (Figma ACC-100; «تقييم المخزون» since phase 4):
 //   • valuation        — every costed holder: on-hand (cost ledger and operations), average cost, value, by role;
 //   • reconciliation   — the cost / AP / GRNI sub-ledgers against their GL control accounts, with the reconciling
 //                        items (movements the engine skipped, an opening not yet posted) and what is left unexplained;
@@ -20,22 +20,23 @@ import { materialInventoryRole } from "@/lib/inventory/item-categories";
 export const INVENTORY_ROLES: InventoryRole[] = ["INVENTORY_GREEN", "INVENTORY_PACKAGING", "INVENTORY_CAFE", "INVENTORY_ROASTED", "INVENTORY_PACKED"];
 const f2 = (d: Decimal | Prisma.Decimal | number) => new Decimal(d).toFixed(2);
 
-type Entity = { label: string; sub: string | null; opsQty: Decimal | null; unit: string; exists: boolean };
+/** `labelCode` (a green lot's page), `categoryId` / `category` (a material's), `locationId` (a finished lot's site): phase 4. */
+export type Entity = { label: string; sub: string | null; opsQty: Decimal | null; unit: string; exists: boolean; labelCode?: string | null; categoryId?: string | null; category?: string | null; locationId?: string | null; splitFromLotId?: string | null; lotStatus?: string | null };
 
 /** Names and operational on-hand of the holders' entities (one query per kind). */
-async function entities(list: { kind: string; entityId: string }[]): Promise<Map<string, Entity>> {
+export async function entities(list: { kind: string; entityId: string }[]): Promise<Map<string, Entity>> {
   const ids = (k: string) => list.filter((x) => x.kind === k).map((x) => x.entityId);
   const out = new Map<string, Entity>();
   const [g, m, b, l] = await Promise.all([
-    prisma.greenBean.findMany({ where: { id: { in: ids("GREEN_BEAN") } }, select: { id: true, serialNumber: true, beanType: true, beanTypeAr: true, countryAr: true, country: true, quantityKg: true } }),
-    prisma.materialItem.findMany({ where: { id: { in: ids("MATERIAL") } }, select: { id: true, code: true, name: true, nameAr: true, quantityOnHand: true, unitOfMeasure: true } }),
+    prisma.greenBean.findMany({ where: { id: { in: ids("GREEN_BEAN") } }, select: { id: true, serialNumber: true, beanType: true, beanTypeAr: true, countryAr: true, country: true, quantityKg: true, labelCode: true } }),
+    prisma.materialItem.findMany({ where: { id: { in: ids("MATERIAL") } }, select: { id: true, code: true, name: true, nameAr: true, quantityOnHand: true, unitOfMeasure: true, categoryId: true, category: true } }),
     prisma.roastingBatch.findMany({ where: { id: { in: ids("ROASTED_BATCH") } }, select: { id: true, batchNumber: true, roastedAvailableKg: true, status: true, product: { select: { productNameEn: true, productNameAr: true } } } }),
-    prisma.finishedGoodsLot.findMany({ where: { id: { in: ids("FG_LOT") } }, select: { id: true, batchNumber: true, status: true, isUnitTracked: true, unitsAvailable: true, availableQty: true, actualContentGrams: true, productSku: { select: { skuCode: true, weightGrams: true, nameAr: true, name: true } }, product: { select: { productNameEn: true, productNameAr: true } } } }),
+    prisma.finishedGoodsLot.findMany({ where: { id: { in: ids("FG_LOT") } }, select: { id: true, batchNumber: true, status: true, isUnitTracked: true, unitsAvailable: true, locationId: true, splitFromLotId: true, availableQty: true, actualContentGrams: true, productSku: { select: { skuCode: true, weightGrams: true, nameAr: true, name: true } }, product: { select: { productNameEn: true, productNameAr: true } } } }),
   ]);
-  for (const x of g) out.set(`GREEN_BEAN:${x.id}`, { label: `${x.beanTypeAr ?? x.beanType} · ${x.countryAr ?? x.country}`, sub: x.serialNumber, opsQty: qty4(x.quantityKg), unit: "kg", exists: true });
-  for (const x of m) out.set(`MATERIAL:${x.id}`, { label: x.nameAr ?? x.name, sub: x.code, opsQty: qty4(x.quantityOnHand), unit: String(x.unitOfMeasure).toLowerCase(), exists: true });
+  for (const x of g) out.set(`GREEN_BEAN:${x.id}`, { label: `${x.beanTypeAr ?? x.beanType} · ${x.countryAr ?? x.country}`, sub: x.serialNumber, opsQty: qty4(x.quantityKg), unit: "kg", exists: true, labelCode: x.labelCode });
+  for (const x of m) out.set(`MATERIAL:${x.id}`, { label: x.nameAr ?? x.name, sub: x.code, opsQty: qty4(x.quantityOnHand), unit: String(x.unitOfMeasure).toLowerCase(), exists: true, categoryId: x.categoryId, category: String(x.category) });
   for (const x of b) out.set(`ROASTED_BATCH:${x.id}`, { label: x.product ? (x.product.productNameAr ?? x.product.productNameEn) : "—", sub: x.batchNumber, opsQty: qty4(x.roastedAvailableKg), unit: "kg", exists: true });
-  for (const x of l) out.set(`FG_LOT:${x.id}`, { label: x.productSku ? (x.productSku.nameAr ?? x.productSku.name ?? x.productSku.skuCode) : x.product.productNameAr ?? x.product.productNameEn, sub: `${x.productSku?.skuCode ?? ""} · ${x.batchNumber}`, opsQty: qty4(lotKg(x)), unit: "kg", exists: true });
+  for (const x of l) out.set(`FG_LOT:${x.id}`, { label: x.productSku ? (x.productSku.nameAr ?? x.productSku.name ?? x.productSku.skuCode) : x.product.productNameAr ?? x.product.productNameEn, sub: `${x.productSku?.skuCode ?? ""} · ${x.batchNumber}`, opsQty: qty4(lotKg(x)), unit: "kg", exists: true, locationId: x.locationId, splitFromLotId: x.splitFromLotId, lotStatus: x.status });
   return out;
 }
 
@@ -118,7 +119,13 @@ export async function reconciliation(asOfText: string | null) {
     inventory,
     totals: { subLedger: f2(inventory.reduce((s, r) => s.plus(r.subLedger), ZERO)), gl: f2(inventory.reduce((s, r) => s.plus(r.gl), ZERO)), difference: f2(inventory.reduce((s, r) => s.plus(r.difference), ZERO)) },
     wip: { account: wip ? { id: wip.accountId, code: wip.code, name: wip.name } : null, gl: f2(wip?.balance ?? ZERO), expected: "0.00" },
-    grni: { account: gl.get("GRNI") ? { code: gl.get("GRNI")!.code, name: gl.get("GRNI")!.name } : null, openReceipts: f2(grniDocs), gl: f2(grniGl), difference: f2(grniDocs.minus(grniGl)), count: receipts.length },
+    // «بضاعة مستلمة لم تُرحَّل فاتورتها» (phase 4, council F2): split into receipts with no invoice yet and receipts whose
+    // invoice exists but is not posted (a draft, or awaiting approval).
+    grni: {
+      account: gl.get("GRNI") ? { code: gl.get("GRNI")!.code, name: gl.get("GRNI")!.name } : null, openReceipts: f2(grniDocs), gl: f2(grniGl), difference: f2(grniDocs.minus(grniGl)), count: receipts.length,
+      noInvoice: { count: receipts.filter((r) => !r.invoice).length, value: f2(receipts.filter((r) => !r.invoice).reduce((a, r) => a.plus(r.value), ZERO)) },
+      awaitingApproval: { count: receipts.filter((r) => !!r.invoice).length, value: f2(receipts.filter((r) => !!r.invoice).reduce((a, r) => a.plus(r.value), ZERO)) },
+    },
     ap: { account: gl.get("AP") ? { code: gl.get("AP")!.code, name: gl.get("AP")!.name } : null, openItems: ap.total, gl: f2(apGl), difference: f2(new Decimal(ap.total).minus(apGl)) },
   };
 }

@@ -1,5 +1,6 @@
 import { Prisma } from "@/generated/prisma/client";
 import { productionGateRefusal } from "@/lib/services/order-operations";
+import { offSiteUnitLots, promiseSiteId } from "@/lib/services/fg-site";
 
 type Db = Prisma.TransactionClient;
 
@@ -51,6 +52,12 @@ export type QueueCoffee = {
   pipelineKg: number;
   inQcKg: number;
   passedUnpackedKg: number;
+  /**
+   * Council F1: free packages of this coffee at OTHER sites — «في موقع آخر — يحتاج تحويل». They do NOT reduce the
+   * demand (the shelf is the production site's); moving them is the person's choice (the transfer link).
+   */
+  elsewhereKg: number;
+  elsewhere: { lotId: string; batchNumber: string; skuCode: string; nameAr: string; nameEn: string | null; units: number; kg: number; transferHref: string }[];
   /** Order numbers this coffee's demand serves, oldest first. */
   orders: { orderId: string; orderNumber: number; customerName: string; needKg: number }[];
   /** The line a new batch of this coffee is attributed to, or null (none producible). */
@@ -89,10 +96,15 @@ export async function roastQueue(db: Db, opts: { productId?: string } = {}): Pro
   const reservedBy = new Map(reserved.map((r) => [r.orderItemId, r._sum.quantityUnits ?? 0]));
 
   const skuIds = [...new Set(lines.map((l) => l.productSkuId!))];
+  // Council F1: the shelf is the production site's — where the dispatch ships from by default. Lots elsewhere are
+  // reported (elsewhere) but never subtracted from the demand.
+  const site = await promiseSiteId(db);
   const shelf = skuIds.length === 0 ? [] : await db.finishedGoodsLot.findMany({
-    where: { productSkuId: { in: skuIds }, isUnitTracked: true, status: "AVAILABLE" },
+    where: { productSkuId: { in: skuIds }, isUnitTracked: true, status: "AVAILABLE", ...(site ? { locationId: site } : {}) },
     select: { productSkuId: true, unitsAvailable: true, unitsReserved: true },
   });
+  const offSite = await offSiteUnitLots(db, skuIds, site);
+  const skuOf = new Map(lines.map((l) => [l.productSkuId!, l.productSku!]));
   const freeBySku = new Map<string, number>();
   for (const l of shelf) {
     if (!l.productSkuId) continue;
@@ -193,6 +205,13 @@ export async function roastQueue(db: Db, opts: { productId?: string } = {}): Pro
       pipelineKg: r3(inQcKg + passedKg),
       inQcKg: r3(inQcKg),
       passedUnpackedKg: r3(passedKg),
+      ...(() => {
+        const mine = offSite.filter((o) => skuOf.get(o.productSkuId)?.productId === pid).map((o) => {
+          const s = skuOf.get(o.productSkuId)!;
+          return { lotId: o.lotId, batchNumber: o.batchNumber, skuCode: s.skuCode, nameAr: o.nameAr, nameEn: o.nameEn, units: o.freeUnits, kg: r3((o.freeUnits * s.weightGrams) / 1000), transferHref: o.transferHref };
+        });
+        return { elsewhere: mine, elsewhereKg: r3(mine.reduce((a, o) => a + o.kg, 0)) };
+      })(),
       orders,
       allocateTo: needing.find((q) => q.producible) ?? null,
       lines: queueLines,

@@ -94,6 +94,8 @@ export type FulfillmentOptions = {
   outstandingUnits?: number;
   freeToPromiseUnits?: number;
   coverableFromShelfUnits?: number;
+  /** Council F1: free units of the line's SKU at other sites — «في موقع آخر — يحتاج تحويل» (not counted as available). */
+  elsewhere?: { lotId: string; batchNumber: string; locationId: string; nameAr: string; nameEn: string | null; units: number; kg: number; transferHref: string }[];
   matchingLots: {
     id: string;
     batchNumber: string;

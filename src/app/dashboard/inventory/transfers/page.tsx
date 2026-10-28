@@ -11,7 +11,7 @@ import "@/components/ops/stock.css";
 import { useUser } from "../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
-import { locationName } from "@/lib/inventory/locations";
+import { TRANSFER_STATUS_LABEL, locationName, type TransferStatus } from "@/lib/inventory/locations";
 import { LocationSelect, useLocations } from "../_parts/locations";
 import { unitWord } from "../_parts/shared";
 
@@ -26,10 +26,16 @@ export default function TransfersPage() {
   const router = useRouter();
   const { lang } = useI18n();
   const L = useL();
-  const canWrite = !!user && (hasSubPrivilege(user.permissions, "inventory", "receive") || hasSubPrivilege(user.permissions, "inventory", "adjust"));
+  const canWrite = !!user && hasSubPrivilege(user.permissions, "inventory", "transfer_send");
   const { state } = useLocations(true);
   const [loc, setLoc] = useState("");
   const [status, setStatus] = useState("");
+  // ?status=IN_TRANSIT (the «في الطريق» links): the filter the page opens on.
+  useEffect(() => {
+    const s = new URLSearchParams(window.location.search).get("status");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read once from the address
+    if (s) setStatus(s);
+  }, []);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [by, setBy] = useState("");
@@ -78,7 +84,9 @@ export default function TransfersPage() {
           <Field label={L("الحالة", "Status")}>
             <Select className="hr-select" value={status} onChange={(e) => setStatus(e.target.value)} aria-label={L("الحالة", "Status")}>
               <option value="">{L("الكل", "All")}</option>
-              <option value="POSTED">{L("منفّذ", "Posted")}</option>
+              <option value="IN_TRANSIT">{L("في الطريق", "In transit")}</option>
+              <option value="RECEIVED">{L("مُستلَم", "Received")}</option>
+              <option value="POSTED">{L("منفّذ (فوري)", "Posted (instant)")}</option>
               <option value="CANCELLED">{L("ملغى", "Cancelled")}</option>
             </Select>
           </Field>
@@ -113,7 +121,7 @@ export default function TransfersPage() {
                   <tr key={r.id} {...rowOpen(() => router.push(`/dashboard/inventory/transfers/${r.id}`))} data-testid={`trfrow-${r.ref}`}>
                     <td className="m-title">
                       <span className="strong hr-id">{r.ref}</span>
-                      {r.status === "CANCELLED" ? <> <span className="stk-flag tone-warning">{L("ملغى", "Cancelled")}</span></> : null}
+                      {r.status === "CANCELLED" ? <> <span className="stk-flag tone-warning">{L("ملغى", "Cancelled")}</span></> : r.status === "IN_TRANSIT" ? <> <span className="stk-flag tone-info" data-testid={`transfer-row-transit-${r.ref}`}>{L("في الطريق", "In transit")}</span></> : null}
                       <span className="hr-msub">{opsDate(r.transferDate, lang)} · {name(r.fromLocation)} ← {name(r.toLocation)}</span>
                       <span className="hr-msub">{r.items.map((i) => `${lang === "ar" ? i.name : i.nameEn} ${Number(i.qty.toFixed(3))} ${unitWord(i.unit, lang, i.qty)}`).join(" · ")}{r.lineCount > 3 ? " …" : ""}</span>
                     </td>
@@ -121,7 +129,7 @@ export default function TransfersPage() {
                     <td className="hr-hide-mobile"><span className="trf-route">{name(r.fromLocation)} <span aria-hidden="true">←</span><span className="hr-sr">{L("إلى", "to")}</span> {name(r.toLocation)}</span></td>
                     <td className="hr-hide-compact hr-caption">{r.items.map((i) => `${i.code} · ${Number(i.qty.toFixed(3))} ${unitWord(i.unit, lang, i.qty)}`).join("، ")}{r.lineCount > 3 ? ` (+${r.lineCount - 3})` : ""}</td>
                     <td className="hr-hide-compact">{r.createdByName ?? "—"}</td>
-                    <td className="hr-hide-mobile">{r.status === "CANCELLED" ? L("ملغى", "Cancelled") : L("منفّذ", "Posted")}</td>
+                    <td className="hr-hide-mobile">{TRANSFER_STATUS_LABEL[r.status as TransferStatus]?.[lang === "ar" ? 0 : 1] ?? r.status}</td>
                   </tr>
                 ))}
               </tbody>

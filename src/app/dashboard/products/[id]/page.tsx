@@ -15,6 +15,7 @@ import "@/components/ops/stock.css";
 import { useI18n } from "@/lib/i18n/context";
 import { useD21Phone, useD21Title } from "@/components/shell/page-context";
 import { PlusIcon } from "../../_components/stock-materials";
+import { SiteReorderEditor } from "../../inventory/_parts/locations";
 import {
   BomDialog, COUNTRIES, PROCESSES, api, catName, money2, packLabel, pName, shortDate, useCanEditCatalog,
   type CategoryList, type CategoryRef,
@@ -288,6 +289,8 @@ function SkuDialog({ sku, productId, onClose, onSaved }: { sku?: Sku; productId:
         </Field>
         <label className="hr-field is-wide cat-checkline"><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> <span>{L("نشط · يظهر في الطلبات الجديدة", "Active · offered on new orders")}</span></label>
       </div>
+      {/* Reorder point per location for a finished SKU (units of AVAILABLE stock at each site) — saved on its own. */}
+      {sku ? <SiteReorderEditor itemKind="PRODUCT_SKU" entityId={sku.id} unit={L("وحدة", "units")} canEdit /> : null}
     </Dialog>
   );
 }

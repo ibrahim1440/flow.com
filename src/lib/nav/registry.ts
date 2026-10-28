@@ -481,6 +481,17 @@ export const NAV: NavNode[] = [
         anyOf: [ACCOUNTING],
         shell: { icon: "invoice" },
       },
+      {
+        // Unified inventory phase 4 (the owner, before release): «تقييم المخزون» names itself in the top bar — «المالية /
+        // تقييم المخزون». A tab of «المحاسبة» (no sidebar item: place "none"; it lights «المحاسبة»); reached from the
+        // tab and the quick jump. The same audience as «المحاسبة» (the accounting module) — the route guard is unchanged.
+        id: "finance.accountingInventory",
+        ar: "تقييم المخزون", en: "Inventory valuation",
+        href: "/dashboard/accounting/inventory",
+        anyOf: [ACCOUNTING],
+        highlightAs: ["finance.accounting"],
+        shell: { icon: "invoice", place: "none" },
+      },
     ],
   },
 
@@ -597,6 +608,18 @@ export const NAV: NavNode[] = [
         // invoices, accounting › ap — the audience of «فواتير الموردين»); each tab and every API keeps its own gate.
         anyOf: [{ module: "inventory" }, { module: "purchases", sub: "invoices" }, { module: "accounting", sub: "ap" }],
         shell: { icon: "truck", trailRoot: "inventory" },
+      },
+      {
+        // Unified inventory phase 4 (council F7; the owner, before release): the same «تقييم المخزون» for the inventory ›
+        // valuation duty, opened from the inventory page header — «المخزون والمشتريات / تقييم المخزون» in the top bar.
+        // No sidebar item; it lights «المخزون». Offered to the valuation duty; the route guard stays the inventory
+        // module's (as every /dashboard/inventory page); the API checks the duty.
+        id: "stock.valuation",
+        ar: "تقييم المخزون", en: "Inventory valuation",
+        href: "/dashboard/inventory/valuation",
+        anyOf: [{ module: "inventory", sub: "valuation" }],
+        highlightAs: ["stock.inventory"],
+        shell: { icon: "box", trailRoot: "inventory", place: "none" },
       },
       {
         // Accounting A3: supplier invoices — entered by purchasing (purchases › invoices), approved and posted by

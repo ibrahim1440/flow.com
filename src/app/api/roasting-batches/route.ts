@@ -33,7 +33,7 @@ import { linkBatchToSlot, ScheduleError } from "@/lib/services/schedule/schedule
 import { scheduleError } from "@/lib/services/schedule/http";
 import { lossVerdict } from "@/lib/station/shared";
 import { onRoast } from "@/lib/accounting/ops/inventory-events";
-import { assertLocationHas, productionLocation, setStockLocation } from "@/lib/services/stock-locations";
+import { assertLocationHas, roasterSiteId, setStockLocation, workSite } from "@/lib/services/stock-locations";
 
 /**
  * The single live production order raised from this order line, or null when there is
@@ -132,9 +132,12 @@ function evaluateSurplusOverride(
 const QUEUE_SURPLUS_TOLERANCE = { minKg: 1, share: 0.2 };
 const queueTolerance = (demandKg: number) => Math.max(QUEUE_SURPLUS_TOLERANCE.minKg, QUEUE_SURPLUS_TOLERANCE.share * demandKg);
 
-/** Phase 3: the roast draws at the production site (stock_balance_sync books the decrement there). */
-async function drawAtProductionSite(tx: Prisma.TransactionClient, greenBeanId: string, qty: number, companyKg: number) {
-  const site = await productionLocation(tx);
+/**
+ * Phase 3: the roast draws at its site — the roaster's / station's location (20261117090000, owner decision 5), else the
+ * production site (stock_balance_sync books the decrement there).
+ */
+async function drawAtRoastSite(tx: Prisma.TransactionClient, greenBeanId: string, qty: number, companyKg: number, siteId: string | null) {
+  const site = await workSite(tx, siteId);
   await setStockLocation(tx, site.id);
   if (companyKg >= qty) await assertLocationHas(tx, { kind: "GREEN_BEAN", entityId: greenBeanId, locationId: site.id, need: qty });
 }
@@ -597,6 +600,8 @@ export async function POST(request: Request) {
     // which is what stops two concurrent roasts being handed the same serial.
     const batchNumber = await nextRoastBatchNumber(tx);
 
+    // Where this roast draws green (the roaster's / its station's location, else the production site).
+    const roastSiteId = await roasterSiteId(tx, roasterCheck ? roasterCheck.roaster.id : roasterId);
     let previousQuantity: number | null = null;
     let newQuantity:      number | null = null;
 
@@ -604,7 +609,7 @@ export async function POST(request: Request) {
     let greenBeanId: string = statedGreenBeanId ?? "";
     let greenSource: { source: "stated" | "default" | "fifo_fallback"; fallbackFrom: string | null } = { source: "stated", fallbackFrom: null };
     if (!statedGreenBeanId) {
-      const src = isStockBatch ? { productId: productId as string } : { orderItemId: orderItemId as string };
+      const src = isStockBatch ? { productId: productId as string, siteId: roastSiteId } : { orderItemId: orderItemId as string, siteId: roastSiteId };
       const pick = expectedGreenBeanId ? await resolveExpectedLot(tx, src, qty, expectedGreenBeanId) : await resolveGreenLot(tx, src, qty);
       greenBeanId = pick.lot.id;
       greenSource = { source: pick.source, fallbackFrom: pick.source === "fifo_fallback" ? pick.defaultLot?.serialNumber ?? null : null };
@@ -621,7 +626,7 @@ export async function POST(request: Request) {
 
       // Phase 3 (stock locations): the green is drawn at the production site (the roastery). Enough coffee in the
       // company but not there → a clear refusal naming where it is, with a prefilled transfer (STOCK_LOCATION_SHORT).
-      await drawAtProductionSite(tx, greenBeanId, qty, bean.quantityKg);
+      await drawAtRoastSite(tx, greenBeanId, qty, bean.quantityKg, roastSiteId);
 
       // Step 2: conditional update — WHERE quantityKg >= qty is evaluated atomically at write time
       const updated = await tx.greenBean.updateMany({

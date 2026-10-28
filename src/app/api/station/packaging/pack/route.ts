@@ -20,6 +20,6 @@ export async function POST(request: Request) {
   const packages = Number(body.packages);
   if (!batchId || !skuId || !Number.isInteger(packages) || packages <= 0) return NextResponse.json({ error: "اختر الصنف وأدخل عدد العبوات.", errorEn: "Choose the size and enter the number of packages." }, { status: 400 });
   const url = new URL(`/api/roasting-batches/${encodeURIComponent(batchId)}/pack`, request.url);
-  const forwarded = new Request(url, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": k.key }, body: JSON.stringify({ lines: [{ productSkuId: skuId, packages }] }) });
+  const forwarded = new Request(url, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": k.key }, body: JSON.stringify({ lines: [{ productSkuId: skuId, packages }], ...(g.station ? { stationId: g.station.id } : {}) }) });
   return asStation(g, () => packPost(forwarded, { params: Promise.resolve({ id: batchId }) }));
 }

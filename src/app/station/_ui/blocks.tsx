@@ -25,6 +25,10 @@ export function StationBar(props: {
   emp?: { name: string; tag: string }; lockLabel?: string; switchLabel?: string; onLock?: () => void; onSwitch?: () => void; extra?: ReactNode;
   /** The device screens (before anybody signs in) pass their language; a session's bar reads it from the session. */
   lang?: "ar" | "en";
+  /** «الموقع: …» — the stock site this station draws from and books into (20261117090000; the owner's decision). */
+  site?: string | null;
+  /** Why this site (shown on hover / long-press), e.g. the packing station's fallback to the batch's roasting site. */
+  siteTitle?: string | null;
 }) {
   // W3 (owner decision 7): the bar always says WHICH station and WHO — «المحطة: … · المستخدم: …» —
   // and a device that serves several stations offers «تبديل المحطة» (the S5 handover, then the
@@ -36,6 +40,7 @@ export function StationBar(props: {
     <header className="ws-bar" data-testid="station-bar">
       <span className="ws-mark"><BrandMark /></span>
       <div className="ws-id"><span className="ws-k">{en ? "Station: " : "المحطة: "}</span><b data-testid="station-name">{props.station}</b>{props.location ? <div className="ws-loc">{props.location}</div> : null}</div>
+      {props.site ? <span className="ws-site" data-testid="station-site" title={props.siteTitle ?? undefined}><span className="ws-k">{en ? "Location: " : "الموقع: "}</span><bdi>{props.site}</bdi>{props.siteTitle ? <span className="ws-k" aria-hidden="true"> *</span> : null}{props.siteTitle ? <span className="sr-only">{` — ${props.siteTitle}`}</span> : null}</span> : null}
       {props.extra}
       <span className="ws-sp" />
       {/* The quick language switch: a personal session only (the context has no switcher on a shared device). */}

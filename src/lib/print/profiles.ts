@@ -213,6 +213,15 @@ export const PRESET_NAMES: Record<string, { ar: string; en: string }> = {
   THERMAL_100x70: { ar: "لفافة حرارية 100 × 70 mm", en: "Thermal roll 100 × 70" },
   COMPACT_50x30: { ar: "لفافة حرارية 50 × 30 mm", en: "Thermal roll 50 × 30" },
 };
+/**
+ * The profile a label opens on (owner decision 6, 20261117090000): the green-lot sack label and the cupping card on the
+ * 100 × 70 mm thermal roll, the material shelf label on 50 × 30 mm, the coffee label on the A4 sheet of 8. The
+ * migration makes sure both thermal presets exist with exactly those sizes.
+ */
+export function defaultPresetKey(template: string): "THERMAL_100x70" | "COMPACT_50x30" | "A4_L7165" {
+  return template === "CUPPING_RESULTS" || template === "GREEN_LOT" ? "THERMAL_100x70" : template === "MATERIAL_SHELF" ? "COMPACT_50x30" : "A4_L7165";
+}
+
 export function profileDisplayName(p: Pick<PrintProfileData, "name" | "presetKey" | "isPreset">, lang: "ar" | "en"): string {
   return p.isPreset && p.presetKey && PRESET_NAMES[p.presetKey] ? PRESET_NAMES[p.presetKey][lang] : p.name;
 }

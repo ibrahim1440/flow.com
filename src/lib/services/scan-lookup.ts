@@ -6,7 +6,7 @@
 import { prisma } from "@/lib/db";
 import { parseScan } from "@/lib/scan/codes";
 import { QTY_EPSILON, covers } from "@/lib/inventory/locations";
-import { assertLocationHas, locationQty, productionLocation } from "./stock-locations";
+import { assertLocationHas, locationQty, roasterSiteId, workSite } from "./stock-locations";
 
 export type ScanHit =
   | { kind: "GREEN_LOT"; id: string; code: string; serialNumber: string; beanType: string; beanTypeAr: string | null; country: string; countryAr: string | null; quantityKg: number; isActive: boolean; sackCount: number | null; sackWeightKg: number | null }
@@ -76,8 +76,9 @@ type ShortFail = { location?: Record<string, unknown> & { from?: { nameAr: strin
  * too — the company total is not enough. Refused (STOCK_LOCATION_SHORT) with where the coffee is and the prefilled
  * transfer, as the roast itself would be.
  */
-async function productionSiteCheck(lot: { id: string; serialNumber: string }, need: number): Promise<DrawCheck | null> {
-  const site = await productionLocation(prisma);
+async function productionSiteCheck(lot: { id: string; serialNumber: string }, need: number, siteId: string | null): Promise<DrawCheck | null> {
+  // The roaster's / station's site (20261117090000, owner decision 5), else the production site.
+  const site = await workSite(prisma, siteId);
   const have = await locationQty(prisma, "GREEN_BEAN", lot.id, site.id);
   if (need > 0 ? covers(have, need) : have > QTY_EPSILON) return null;
   try {
@@ -90,12 +91,12 @@ async function productionSiteCheck(lot: { id: string; serialNumber: string }, ne
     const whereEn = from ? ` The coffee is at «${from.nameEn || from.nameAr}» (${Math.round(from.qty * 100) / 100} kg) — transfer it to «${site.nameEn || site.nameAr}» first.` : "";
     const h = Math.round(have * 100) / 100;
     return need > 0
-      ? { ok: false, code: "STOCK_LOCATION_SHORT", ar: `لا يكفي البن في «${site.nameAr}» (موقع الإنتاج): المتوفر ${h} كغ والمطلوب ${need} كغ.${whereAr}`, en: `Not enough at «${site.nameEn || site.nameAr}» (the production site): ${h} kg available, ${need} kg needed.${whereEn}`, location: f.location }
-      : { ok: false, code: "STOCK_LOCATION_SHORT", ar: `اللوت ${lot.serialNumber} ليس في «${site.nameAr}» (موقع الإنتاج).${whereAr}`, en: `Lot ${lot.serialNumber} is not at «${site.nameEn || site.nameAr}» (the production site).${whereEn}`, location: f.location };
+      ? { ok: false, code: "STOCK_LOCATION_SHORT", ar: `لا يكفي البن في «${site.nameAr}» (${site.isProduction ? "موقع الإنتاج" : "موقع التحميص"}): المتوفر ${h} كغ والمطلوب ${need} كغ.${whereAr}`, en: `Not enough at «${site.nameEn || site.nameAr}» (${site.isProduction ? "the production site" : "the roasting site"}): ${h} kg available, ${need} kg needed.${whereEn}`, location: f.location }
+      : { ok: false, code: "STOCK_LOCATION_SHORT", ar: `اللوت ${lot.serialNumber} ليس في «${site.nameAr}» (${site.isProduction ? "موقع الإنتاج" : "موقع التحميص"}).${whereAr}`, en: `Lot ${lot.serialNumber} is not at «${site.nameEn || site.nameAr}» (${site.isProduction ? "the production site" : "the roasting site"}).${whereEn}`, location: f.location };
   }
 }
 
-export async function greenDrawCheck(lot: { id: string; beanType: string; country: string; quantityKg: number; isActive: boolean; serialNumber: string }, productId: string | null, kg: number, allowOtherCoffee = false): Promise<DrawCheck> {
+export async function greenDrawCheck(lot: { id: string; beanType: string; country: string; quantityKg: number; isActive: boolean; serialNumber: string }, productId: string | null, kg: number, allowOtherCoffee = false, roasterId: string | null = null): Promise<DrawCheck> {
   if (!lot.isActive) return { ok: false, code: "LOT_INACTIVE", ar: `اللوت ${lot.serialNumber} غير نشط — لا يُسحب منه. اطلب من المشرف تفعيله أو اختر لوتًا آخر.`, en: `Lot ${lot.serialNumber} is inactive — nothing is drawn from it. Ask the supervisor to reactivate it, or scan another lot.` };
   const need = Number.isFinite(kg) && kg > 0 ? kg : 0;
   if (lot.quantityKg <= 0 || lot.quantityKg + 1e-9 < need) {
@@ -104,7 +105,7 @@ export async function greenDrawCheck(lot: { id: string; beanType: string; countr
       ? { ok: false, code: "LOT_SHORT", ar: `لا يكفي اللوت ${lot.serialNumber}: المطلوب ${need} كغ والمتاح ${have} كغ.`, en: `Lot ${lot.serialNumber} is short: ${need} kg needed, ${have} kg available.` }
       : { ok: false, code: "LOT_SHORT", ar: `اللوت ${lot.serialNumber} فارغ (0 كغ).`, en: `Lot ${lot.serialNumber} is empty (0 kg).` };
   }
-  const atSite = await productionSiteCheck(lot, need);
+  const atSite = await productionSiteCheck(lot, need, await roasterSiteId(prisma, roasterId));
   if (atSite) return atSite;
   return otherCoffeeCheck(lot, productId, allowOtherCoffee);
 }

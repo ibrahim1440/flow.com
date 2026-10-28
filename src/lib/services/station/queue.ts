@@ -4,6 +4,7 @@ import { hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 import { roastQueue } from "@/lib/services/roast-queue";
 import { productionProgressMany } from "@/lib/services/production-planning";
 import { greenSourceFacts, pickFromFacts } from "@/lib/services/green-source";
+import { roasterEffectiveSite, roasterSiteId } from "@/lib/services/stock-locations";
 import { greenRefusal, sackRange } from "@/lib/green-source";
 import { readStationSettings } from "@/lib/services/settings/sections";
 import { ROASTING_STATION } from "@/lib/station/shared";
@@ -97,6 +98,8 @@ export type StationQueue = {
   today: { batches: number; rejected: number; greenKg: number; roastedKg: number };
   /** «تأكيد الكيس بالمسح» (Settings › Production, 20261116090000_station_lot_scan): off → the station shows no scan. */
   lotScan: boolean;
+  /** Where this roaster draws green and books roasted coffee (roasterEffectiveSite) — the station's «الموقع» badge. */
+  site: { id: string; nameAr: string; nameEn: string | null; source: "roaster" | "station" | "production" } | null;
 };
 
 const r3 = (n: number) => +n.toFixed(3);
@@ -126,9 +129,12 @@ export async function stationQueue(user: Actor, opts: { roasterId?: string | nul
   const roasters = opts.fixedRoaster ? all.filter((r) => r.id === opts.roasterId) : all;
   const roaster = roasters.find((r) => r.id === opts.roasterId) ?? (opts.fixedRoaster ? null : roasters[0] ?? null);
   const plannedGreenKg = roaster ? roaster.defaultTargetKg : null;
+  // Where this roaster draws green (its / its station's location, else the production site — 20261117090000).
+  const siteId = roaster ? await roasterSiteId(prisma, roaster.id) : null;
 
   const canStock = hasSubPrivilege(user.permissions, "production", "roast_to_stock");
-  const canMove = hasSubPrivilege(user.permissions, "inventory", "receive") || hasSubPrivilege(user.permissions, "inventory", "adjust");
+  // The «اسحب من» transfer link: whoever may send a transfer (inventory › transfer_send, 20261117090000).
+  const canMove = hasSubPrivilege(user.permissions, "inventory", "transfer_send");
   const [coffees, stockPos, claims] = await Promise.all([
     roastQueue(prisma),
     prisma.productionOrder.findMany({
@@ -144,7 +150,7 @@ export async function stationQueue(user: Actor, opts: { roasterId?: string | nul
 
   // Green for the usual charge, per coffee (the same choice the roast will make).
   const greenFor = async (productId: string, chargeKg: number | null = plannedGreenKg) => {
-    const facts = await greenSourceFacts(prisma, { productId });
+    const facts = await greenSourceFacts(prisma, { productId, siteId });
     const kg = chargeKg ?? 0;
     const pick = pickFromFacts(facts, kg);
     if (pick.ok) {
@@ -276,7 +282,8 @@ export async function stationQueue(user: Actor, opts: { roasterId?: string | nul
   };
 
   const lotScan = (await readStationSettings(prisma)).lotScanRequired;
-  const body = { roasters, roaster, slots, items, mine, today, lotScan };
+  const site = roaster ? await roasterEffectiveSite(prisma, roaster.id) : null;
+  const body = { roasters, roaster, slots, items, mine, today, lotScan, site };
   const version = createHash("sha1").update(JSON.stringify(body)).digest("hex").slice(0, 16);
   return { serverTime: new Date().toISOString(), version, ...body };
 }

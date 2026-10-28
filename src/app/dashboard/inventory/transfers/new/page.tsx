@@ -1,8 +1,10 @@
 "use client";
-// «تحويل مخزون» — the one-step transfer form («تحويل فوري», unified inventory phase 3). From a location, to another, the
-// date, the lines (a green lot or a material, a quantity — never more than the source holds), notes. Both balances move in
-// one transaction (POST /api/inventory/transfers). Prefilled from the address (?from=&to=&kind=&item=&qty=) — the link a
-// refusal offers («انقل الرصيد أولًا», a roast short of green at the roastery).
+// «تحويل مخزون» — the transfer form (unified inventory phase 3; two-step and finished goods 20261117090000). From a
+// location, to another, the date, the lines (a green lot, a material, or a finished-goods lot in whole packages — never
+// more than the source holds / has free), notes. Two ways (owner decision 1): «إرسال» (default) — the goods leave the
+// source into «في الطريق» and the destination receives them («استلام»); or «تحويل فوري» — both sides in one step.
+// POST /api/inventory/transfers. Prefilled from the address (?from=&to=&kind=&item=&qty=) — the link a refusal offers
+// («انقل الرصيد أولًا», a roast short of green at the roastery).
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -14,14 +16,15 @@ import "@/components/ops/stock.css";
 import { useUser } from "../../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
-import { covers, locationName } from "@/lib/inventory/locations";
+import { covers, locationName, pickerLocations, type TransferMode } from "@/lib/inventory/locations";
 import { LocationSelect, useBalances, useLocations } from "../../_parts/locations";
 import { unitWord } from "../../_parts/shared";
 
 type Bean = { id: string; serialNumber: string; beanType: string; beanTypeAr: string | null; quantityKg: number; isActive: boolean };
 type Mat = { id: string; code: string; name: string; nameAr?: string | null; unitOfMeasure: string; quantityOnHand: number; isActive: boolean };
 type Line = { key: string; item: string; qty: string };
-type Opt = { value: string; kind: "GREEN_BEAN" | "MATERIAL"; id: string; label: string; unit: string; whole: boolean };
+type Opt = { value: string; kind: "GREEN_BEAN" | "MATERIAL" | "FG_LOT"; id: string; label: string; unit: string; whole: boolean; free?: number };
+type FgLot = { id: string; batchNumber: string; free: number; skuCode: string | null; name: string; nameAr: string | null };
 
 const today = () => new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10);
 const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, "");
@@ -36,7 +39,10 @@ function NewTransfer() {
   const sp = useSearchParams();
   const { lang } = useI18n();
   const L = useL();
-  const canWrite = !!user && (hasSubPrivilege(user.permissions, "inventory", "receive") || hasSubPrivilege(user.permissions, "inventory", "adjust"));
+  // inventory › transfer_send (owner decision 4, 20261117090000).
+  const canWrite = !!user && hasSubPrivilege(user.permissions, "inventory", "transfer_send");
+  const [mode, setMode] = useState<TransferMode>(sp.get("mode") === "IMMEDIATE" ? "IMMEDIATE" : "TWO_STEP");
+  const [fgLots, setFgLots] = useState<FgLot[]>([]);
   const { state } = useLocations(false);
   const bal = useBalances(0);
   const [beans, setBeans] = useState<Bean[] | null>(null);
@@ -60,20 +66,32 @@ function NewTransfer() {
     return () => { off = true; };
   }, []);
 
-  const at = (kind: "GREEN_BEAN" | "MATERIAL", id: string, loc: string) => ((kind === "GREEN_BEAN" ? bal?.green : bal?.material)?.[id] ?? []).find((r) => r.locationId === loc)?.qty ?? 0;
+  const at = (kind: Opt["kind"], id: string, loc: string) => kind === "FG_LOT"
+    ? fgLots.find((l) => l.id === id)?.free ?? 0
+    : ((kind === "GREEN_BEAN" ? bal?.green : bal?.material)?.[id] ?? []).find((r) => r.locationId === loc)?.qty ?? 0;
   const options: Opt[] = useMemo(() => {
     const out: Opt[] = [];
+    // Finished goods at the source: whole packages of a lot's free units (20261117090000, owner decision 2).
+    for (const l of fgLots) out.push({ value: `FG_LOT:${l.id}`, kind: "FG_LOT", id: l.id, label: `${lang === "ar" && l.nameAr ? l.nameAr : l.name}${l.skuCode ? ` · ${l.skuCode}` : ""} · ${l.batchNumber}`, unit: "UNIT", whole: true, free: l.free });
     for (const b of beans ?? []) out.push({ value: `GREEN_BEAN:${b.id}`, kind: "GREEN_BEAN", id: b.id, label: `${lang === "ar" && b.beanTypeAr ? b.beanTypeAr : b.beanType} · ${b.serialNumber}`, unit: "KG", whole: false });
     for (const m of mats ?? []) out.push({ value: `MATERIAL:${m.id}`, kind: "MATERIAL", id: m.id, label: `${lang === "ar" && m.nameAr ? m.nameAr : m.name} · ${m.code}`, unit: m.unitOfMeasure, whole: m.unitOfMeasure === "PIECE" || m.unitOfMeasure === "UNIT" });
     return out;
-  }, [beans, mats, lang]);
+  }, [beans, mats, fgLots, lang]);
   // An item is offered when the source holds some of it and no other line has it (or it is this line's).
   const offered = (current: string) => options.filter((o) => o.value === current || (at(o.kind, o.id, from) > 0 && !lines.some((ln) => ln.item === o.value)));
 
   const locs = state?.locations ?? [];
-  // The source defaults to the default site, the destination to another active one (until the person picks).
-  const from = fromPicked || state?.defaultId || locs.find((l) => l.isActive)?.id || "";
-  const to = toPicked ?? locs.find((l) => l.isActive && l.id !== from)?.id ?? "";
+  // The source defaults to the default site, the destination to another active one (until the person picks); never
+  // «في الطريق».
+  const sites = pickerLocations(locs);
+  const from = fromPicked || state?.defaultId || sites[0]?.id || "";
+  const to = toPicked ?? sites.find((l) => l.id !== from)?.id ?? "";
+  useEffect(() => {
+    let off = false;
+    if (!from) return;
+    fetch(`/api/inventory/transfers/lots?location=${encodeURIComponent(from)}`).then(async (r) => { if (!off) setFgLots(r.ok ? ((await r.json()) as { lots: FgLot[] }).lots : []); }).catch(() => { if (!off) setFgLots([]); });
+    return () => { off = true; };
+  }, [from]);
   const fromL = locs.find((l) => l.id === from), toL = locs.find((l) => l.id === to);
   const checked = lines.map((ln) => {
     const o = options.find((x) => x.value === ln.item);
@@ -88,7 +106,7 @@ function NewTransfer() {
     setSaving(true);
     setError("");
     const body = {
-      fromLocationId: from, toLocationId: to, transferDate: date, notes: notes.trim() || null, requestKey: requestKey.current,
+      mode, fromLocationId: from, toLocationId: to, transferDate: date, notes: notes.trim() || null, requestKey: requestKey.current,
       lines: checked.map((c) => ({ itemKind: c.o!.kind, entityId: c.o!.id, qty: c.q })),
     };
     const r = await fetch("/api/inventory/transfers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -99,18 +117,28 @@ function NewTransfer() {
   }
 
   if (!canWrite) {
-    return <OpsRoot className="stk-inventory"><div className="hr-page"><Notice tone="info">{L("التحويل لمن يملك صلاحية استلام المخزون أو تسويته.", "Transfers need the inventory receive or adjust permission.")}</Notice></div></OpsRoot>;
+    return <OpsRoot className="stk-inventory"><div className="hr-page"><Notice tone="info">{L("التحويل لمن يملك صلاحية «إنشاء تحويلات المخزون وإرسالها».", "Transfers need the «Create and send stock transfers» permission.")}</Notice></div></OpsRoot>;
   }
   return (
     <OpsRoot className="stk-inventory">
       <div className="hr-page">
         <PageHeader title={L("تحويل مخزون", "Stock transfer")} actions={<Link className="hr-btn is-ghost" href="/dashboard/inventory/transfers">{L("كل التحويلات", "All transfers")}</Link>}>
-          <span className="hr-caption">{L("تحويل فوري: ينقص الرصيد من الموقع الأول ويزيد في الثاني في خطوة واحدة. لا قيد محاسبي — التكلفة للشركة كلها.", "Instant transfer: the balance leaves the first location and arrives at the second in one step. No journal entry — cost is company-wide.")}</span>
+          <span className="hr-caption">{mode === "TWO_STEP"
+            ? L("إرسال: ينقص الرصيد من الموقع الأول ويبقى «في الطريق» حتى يستلمه الموقع الثاني. لا قيد محاسبي — التكلفة للشركة كلها.", "Send: the stock leaves the first location and stays «in transit» until the second one receives it. No journal entry — cost is company-wide.")
+            : L("تحويل فوري: ينقص الرصيد من الموقع الأول ويزيد في الثاني في خطوة واحدة. لا قيد محاسبي — التكلفة للشركة كلها.", "Instant transfer: the balance leaves the first location and arrives at the second in one step. No journal entry — cost is company-wide.")}</span>
         </PageHeader>
 
         {error ? <Notice tone="danger"><span data-testid="transfer-error">{error}</span></Notice> : null}
         {!state || !beans || !mats || !bal ? <OpsLoading /> : (
           <div className="hr-stack" style={{ gap: 16 }}>
+            <div className="hr-row" role="radiogroup" aria-label={L("طريقة التحويل", "Transfer type")} style={{ gap: 8, flexWrap: "wrap" }} data-testid="transfer-mode">
+              {(["TWO_STEP", "IMMEDIATE"] as const).map((m) => (
+                <label key={m} className="trf-mode-opt" data-testid={`transfer-mode-${m}`}>
+                  <input type="radio" name="transfer-mode" checked={mode === m} onChange={() => setMode(m)} />
+                  <span>{m === "TWO_STEP" ? L("إرسال ثم استلام", "Send, then receive") : L("تحويل فوري", "Instant transfer")}</span>
+                </label>
+              ))}
+            </div>
             <div className="hr-form">
               <Field label={`${L("من موقع", "From location")} *`}>
                 <LocationSelect locations={locs} value={from} onChange={(v) => { setFrom(v); if (v === to) setTo(""); }} label={L("من موقع", "From location")} testId="transfer-from" />
@@ -140,7 +168,7 @@ function NewTransfer() {
                         onChange={(e) => setLines((ls) => ls.map((x) => (x.key === ln.key ? { ...x, qty: e.target.value } : x)))} />
                     </Field>
                     <span className={`trf-have${short ? " is-short" : ""}`} data-testid={`transfer-have-${i}`}>
-                      {o ? <>{L("المتوفر في", "Available at")} {fromL ? locationName(fromL, lang) : "—"}: <span className="hr-num">{Number(have.toFixed(4))}</span> {unitWord(o.unit, lang, have)}{short ? ` — ${L("لا يكفي", "not enough")}` : ""}{o.whole && ln.qty && !Number.isInteger(q) ? ` — ${L("كمية صحيحة", "a whole number")}` : ""}</> : null}
+                      {o ? <>{o.kind === "FG_LOT" ? L("الحر في", "Free at") : L("المتوفر في", "Available at")} {fromL ? locationName(fromL, lang) : "—"}: <span className="hr-num">{Number(have.toFixed(4))}</span> {unitWord(o.unit, lang, have)}{short ? ` — ${L("لا يكفي", "not enough")}` : ""}{o.whole && ln.qty && !Number.isInteger(q) ? ` — ${L("كمية صحيحة", "a whole number")}` : ""}</> : null}
                     </span>
                     <Btn size="sm" variant="ghost" className="hr-iconbtn" aria-label={L("حذف السطر", "Remove line")} title={L("حذف السطر", "Remove line")} disabled={lines.length === 1}
                       onClick={() => setLines((ls) => ls.filter((x) => x.key !== ln.key))}><Trash2 size={16} /></Btn>
@@ -155,8 +183,8 @@ function NewTransfer() {
             </Field>
 
             <div className="hr-row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <Btn variant="primary" busy={saving} disabled={!ready} onClick={submit} data-testid="transfer-submit">{L("تحويل فوري", "Transfer now")}</Btn>
-              <span className="hr-caption">{fromL && toL ? `${locationName(fromL, lang)} ← ${locationName(toL, lang)}` : L("اختر الموقعين.", "Choose both locations.")}</span>
+              <Btn variant="primary" busy={saving} disabled={!ready} onClick={submit} data-testid="transfer-submit">{mode === "TWO_STEP" ? L("إرسال", "Send") : L("تحويل فوري", "Transfer now")}</Btn>
+              <span className="hr-caption">{fromL && toL ? `${locationName(fromL, lang)} ${lang === "en" ? "→" : "←"} ${locationName(toL, lang)}` : L("اختر الموقعين.", "Choose both locations.")}</span>
             </div>
           </div>
         )}

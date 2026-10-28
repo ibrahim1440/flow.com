@@ -77,6 +77,10 @@ export type NotificationEventDef = {
   scope?: "customer";
   /** Where it is raised (documentation; the report's table). */
   trigger: string;
+  /** The e-mail choice of a person who never set one for the category (overrides EMAIL_DEFAULT for this event). */
+  emailDefault?: boolean;
+  /** What the e-mail shows instead of the stored row (e.g. free text clipped); the in-app notification is unchanged. */
+  emailView?: (r: { titleAr: string; titleEn: string; bodyAr: string; bodyEn: string }) => { titleAr: string; titleEn: string; bodyAr: string; bodyEn: string };
   render(f: Facts): Rendered;
 };
 
@@ -319,6 +323,26 @@ export const EVENTS: NotificationEventDef[] = [
       bodyEn: [`${s(f.needKg)} kg needed to roast`, `${s(f.atSiteKg)} kg at the production site`, f.fromName ? `the coffee is at «${sEn(f, "fromName")}»` : "", s(f.lotCode)].filter(Boolean).join(" · ") + ". Open the suggested transfer and confirm it with one tap."
         + (Number(f.restKg ?? 0) > 0 ? ` The remaining ${s(f.restKg)} kg are needed from another site: ${s(f.othersEn)}.` : ""),
       link: s(f.transferHref) || "/dashboard/inventory/transfers/new",
+    }),
+  },
+  {
+    // The owner's decision (round 2 of the locations, before release): a receiver records a shortfall without the adjust
+    // duty; the supervisors hear of it at once, in the app and by e-mail (when e-mail is configured).
+    key: "inventory.transfer_shortfall", category: "production", severity: "warning", emailDefault: true,
+    label: { ar: "استُلم تحويل مخزون وفيه نقص", en: "A stock transfer was received short" },
+    // Council F1(d): the owner / every active admin too, named by the caller — whatever their stored permissions — so
+    // someone other than the actor always hears of it (no `requires`: an adjust / transfer_cancel holder has inventory).
+    recipients: [{ perm: [{ module: "inventory", sub: "adjust" }, { module: "inventory", sub: "transfer_cancel" }] }, { person: "admins" }],
+    trigger: "receiveTransfer (lib/services/stock-transfers.ts): a two-step transfer received with a shortfall — once per transfer",
+    // Council F4: the receiver's free-text reason is clipped to ~200 characters in the e-mail (in full in the app).
+    emailView: (r) => ({ ...r, titleAr: clipAfter(r.titleAr, " — السبب: ", REASON_EMAIL_MAX), titleEn: clipAfter(r.titleEn, " — reason: ", REASON_EMAIL_MAX) }),
+    render: (f) => ({
+      titleAr: `استلم ${s(f.byName)} التحويل ${s(f.ref)} وفيه نقص: ${s(f.itemsAr)} — السبب: ${s(f.reasonsAr)}`,
+      // The person and the reason may be Arabic: isolated (FSI … PDI) so the English line keeps its order.
+      titleEn: `\u2068${sEn(f, "byName")}\u2069 received transfer ${s(f.ref)} short: ${s(f.itemsEn)} — reason: \u2068${sEn(f, "reasonsAr")}\u2069`,
+      bodyAr: `من «${s(f.fromName)}» إلى «${s(f.toName)}». شُطبت الكمية الناقصة من «في الطريق» بقيد فرق مخزون. راجع التحويل.`,
+      bodyEn: `From «${sEn(f, "fromName")}» to «${sEn(f, "toName")}». The missing quantity was written off from «in transit» as an inventory variance. Review the transfer.`,
+      link: `/dashboard/inventory/transfers/${enc(s(f.transferId))}`,
     }),
   },
   {
@@ -729,4 +753,15 @@ export function holdsAbility(perms: Permissions, a: Ability): boolean {
   if (a.edit && level !== "edit") return false;
   if (a.sub) return !!p?.sub && p.sub[a.sub] === true;
   return true;
+}
+
+/** The e-mail's cap on a free-text reason (council F4). */
+export const REASON_EMAIL_MAX = 200;
+/** `text` with whatever follows `marker` clipped to `max` characters (an ellipsis marks the cut). */
+export function clipAfter(text: string, marker: string, max: number): string {
+  const i = text.indexOf(marker);
+  if (i < 0) return text;
+  const head = text.slice(0, i + marker.length);
+  const tail = [...text.slice(i + marker.length)];
+  return tail.length <= max ? text : `${head}${tail.slice(0, max).join("")}…`;
 }

@@ -363,7 +363,7 @@ export async function planPreview(db: Db, req: PlanRequest, now = new Date()) {
   return {
     now: now.toISOString(),
     product: { id: facts.product.id, name: productName(facts.product), expectedLossPct: facts.q.expectedLossPct },
-    demand: facts.coffee ? { openKg: kg2(facts.coffee.openKg), shelfKg: kg2(facts.coffee.shelfKg), pipelineKg: kg2(facts.coffee.pipelineKg), orders: facts.coffee.orders.slice(0, 6).map((o) => ({ orderNumber: o.orderNumber, customerName: o.customerName, needKg: kg2(o.needKg) })) } : null,
+    demand: facts.coffee ? { openKg: kg2(facts.coffee.openKg), shelfKg: kg2(facts.coffee.shelfKg), pipelineKg: kg2(facts.coffee.pipelineKg), elsewhereKg: kg2(facts.coffee.elsewhereKg), elsewhereHref: facts.coffee.elsewhere[0]?.transferHref ?? null, orders: facts.coffee.orders.slice(0, 6).map((o) => ({ orderNumber: o.orderNumber, customerName: o.customerName, needKg: kg2(o.needKg) })) } : null,
     quantities: { ...strQ(facts.q), running: facts.running, approvedSlots: facts.approvedCount },
     override: override !== null ? kg2(override) : null,
     greenKg: kg2(greenKg),

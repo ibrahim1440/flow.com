@@ -5,7 +5,7 @@
 //   journals      no draft / submitted / approved journal left in the month                      FAIL (A1 refuses too)
 //   documents     no sales-invoice draft supplied in the month, no supplier invoice still a draft / submitted   WARN
 //   receipts      unapplied customer receipts and credits (AR)                                     WARN
-//   grni          goods received not invoiced: open receipts vs the GRNI account                   WARN (review)
+//   grni          received, not yet billed in the books: open receipts vs the GRNI account                   WARN (review)
 //   inventory     inventory sub-ledger = GL (A3 reconciliation: no UNEXPLAINED difference)         FAIL
 //   ar / ap       AR sub-ledger = GL (AR − customer advances); AP open items = GL                  WARN / FAIL
 //   vat           the month's VAT documents = the VAT accounts' movement from documents             FAIL
@@ -59,7 +59,7 @@ export async function closeChecklist(periodId: string) {
     prisma.salesInvoice.count({ where: { status: "DRAFT", OR: [{ supplyDate: { gte: from, lte: toDay } }, { supplyDate: null, createdAt: { gte: from, lte: to } }] } }),
     prisma.supplierInvoice.count({ where: { status: { in: ["DRAFT", "SUBMITTED"] }, invoiceDate: { lte: toDay } } }),
   ]);
-  out.push(check("documents", salesDrafts + apOpen ? "WARN" : "PASS", `مستندات غير صادرة: ${salesDrafts} مسودة فاتورة مبيعات، ${apOpen} فاتورة مورد لم تُرحَّل`, `Unissued documents: ${salesDrafts} sales-invoice drafts, ${apOpen} supplier invoices not posted`, apOpen ? "/dashboard/accounting/ap" : "/dashboard/sales/invoices?status=DRAFT", salesDrafts + apOpen));
+  out.push(check("documents", salesDrafts + apOpen ? "WARN" : "PASS", `مستندات غير صادرة: ${salesDrafts} مسودة فاتورة مبيعات، ${apOpen} فاتورة مشتريات لم تُرحَّل`, `Unissued documents: ${salesDrafts} sales-invoice drafts, ${apOpen} purchase invoices not posted`, apOpen ? "/dashboard/accounting/ap" : "/dashboard/sales/invoices?status=DRAFT", salesDrafts + apOpen));
 
   // 3–5. AR: unapplied receipts / credits; sub-ledger = GL
   const aging = await agingReport(prisma, null, asOf);
@@ -69,14 +69,14 @@ export async function closeChecklist(periodId: string) {
   const recon = await reconciliation(asOf);
   const grniOpen = new Decimal(recon.grni.openReceipts), grniGl = new Decimal(recon.grni.gl);
   out.push(check("grni", !recon.grni.account ? "NA" : !grniGl.isZero() || !grniOpen.isZero() ? (grniOpen.minus(grniGl).isZero() ? "WARN" : "FAIL") : "PASS",
-    `بضاعة مستلمة لم تصل فاتورتها: ${recon.grni.count} استلامًا مفتوحًا — راجعها (رصيد الحساب ${recon.grni.gl}، الفرق ${recon.grni.difference})`,
-    `Goods received not invoiced: ${recon.grni.count} open receipts — review them (account ${recon.grni.gl}, difference ${recon.grni.difference})`,
-    "/dashboard/accounting/ap?tab=receipts", recon.grni.count, recon.grni.gl));
+    `بضاعة مستلمة لم تُرحَّل فاتورتها: ${recon.grni.count} استلامًا (بلا فاتورة ${recon.grni.noInvoice.count}، فاتورة بانتظار الاعتماد ${recon.grni.awaitingApproval.count}) — راجعها (رصيد الحساب ${recon.grni.gl}، الفرق ${recon.grni.difference})`,
+    `Received, not yet billed in the books: ${recon.grni.count} receipts (no invoice ${recon.grni.noInvoice.count}, invoice awaiting approval ${recon.grni.awaitingApproval.count}) — review them (account ${recon.grni.gl}, difference ${recon.grni.difference})`,
+    "/dashboard/accounting/inventory?view=grni", recon.grni.count, recon.grni.gl));
   const unexplained = recon.inventory.filter((r) => r.status === "UNEXPLAINED");
   out.push(check("inventory", unexplained.length ? "FAIL" : recon.inventory.some((r) => r.status === "EXPLAINED") ? "WARN" : "PASS",
-    unexplained.length ? `فرق غير مفسَّر بين دفتر تكلفة المخزون والأستاذ العام في ${unexplained.length} حساب` : "دفتر تكلفة المخزون = الأستاذ العام",
-    unexplained.length ? `Unexplained inventory sub-ledger vs GL difference in ${unexplained.length} account(s)` : "Inventory cost sub-ledger = GL",
-    "/dashboard/accounting/inventory?tab=reconciliation", unexplained.length, recon.totals.difference));
+    unexplained.length ? `فرق غير مفسَّر بين سجل تكلفة المخزون ودفتر الأستاذ في ${unexplained.length} حساب` : "سجل تكلفة المخزون = دفتر الأستاذ",
+    unexplained.length ? `Unexplained difference between the inventory cost ledger and the general ledger in ${unexplained.length} account(s)` : "Inventory cost ledger = general ledger",
+    "/dashboard/accounting/inventory", unexplained.length, recon.totals.difference));
   const roles = await prisma.accountRole.findMany({ where: { tenantId: "hiqbah", role: { in: ["AR", "CUSTOMER_ADVANCES"] } }, select: { accountId: true } });
   const arGl = roles.length ? await prisma.$queryRaw<{ v: Prisma.Decimal }[]>`
     SELECT coalesce(sum(l."debit" - l."credit"), 0) AS v FROM "JournalEntryLine" l JOIN "JournalEntry" j ON j."id" = l."journalEntryId"
@@ -104,7 +104,7 @@ export async function closeChecklist(periodId: string) {
   const apDiff = new Decimal(recon.ap.difference).plus(String(apOpening?.v ?? 0));
   out.push(check("ap", !recon.ap.account || beforeGoLive ? "NA" : apDiff.isZero() ? "PASS" : "WARN",
     `الذمم الدائنة (الفواتير المفتوحة + الأرصدة الافتتاحية غير المسددة) = الأستاذ العام؛ الفرق ${fix2(apDiff)}`, `AP (open invoices + unpaid opening balances) = GL; difference ${fix2(apDiff)}`,
-    "/dashboard/accounting/ap?tab=reconciliation", null, apDiff));
+    "/dashboard/accounting/ap?view=aging", null, apDiff));
 
   // 6. VAT: the month's documents = the VAT accounts' movement from documents
   const vat = await vatMonth(from, to);

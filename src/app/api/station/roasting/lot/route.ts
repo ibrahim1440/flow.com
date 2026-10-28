@@ -26,7 +26,7 @@ export async function GET(request: Request) {
       }, { status: r.code === "EMPTY" ? 400 : 404 });
     }
     if (r.hit.kind !== "GREEN_LOT") return NextResponse.json({ error: "ليس لوت بن أخضر.", errorEn: "Not a green-coffee lot.", code: "SCAN_NOT_FOUND" }, { status: 404 });
-    const draw = await greenDrawCheck(r.hit, sp.get("productId"), Number(sp.get("kg") ?? 0), hasSubPrivilege(user.permissions, "production", "roast_to_stock"));
+    const draw = await greenDrawCheck(r.hit, sp.get("productId"), Number(sp.get("kg") ?? 0), hasSubPrivilege(user.permissions, "production", "roast_to_stock"), sp.get("roasterId"));
     if (!draw.ok) return NextResponse.json({ error: draw.ar, errorEn: draw.en, code: draw.code, lot: r.hit }, { status: 409 });
     return NextResponse.json({ lot: r.hit, draw });
   } catch (err) {

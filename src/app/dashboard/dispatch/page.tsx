@@ -10,6 +10,8 @@ import { hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
 import { PRINT_PHASE1_NOTE_ID, PrintPhase1Notice, usePrintDocuments } from "@/components/print/Certification";
 import { deliveryShipments } from "@/lib/print/delivery-note";
 import { useI18n } from "@/lib/i18n/context";
+import { LocationSelect, useLocations } from "../inventory/_parts/locations";
+import { pickerLocations } from "@/lib/inventory/locations";
 
 // ─── Dispatch without lots (production simplification, Phase D item 7) ───────────────────────
 //
@@ -99,10 +101,17 @@ export default function DispatchPage() {
   const keysRef = useRef<Record<string, string>>({});
   const shippedRef = useRef<Record<string, { id: string; quantity: number; lots: LotRef[] }>>({});
 
-  useEffect(() => { loadData(); }, []);
+  // «الشحن من» (20261117090000_locations_enhancements): the site the dispatch draws finished lots from. Starts on the
+  // production site (where packing puts them); the list and the POST both use it.
+  const { state: locs } = useLocations(false);
+  const [shipFrom, setShipFrom] = useState("");
+  const site = shipFrom || locs?.productionId || "";
+  const multiSite = !!locs && pickerLocations(locs.locations).length > 1;
+
+  useEffect(() => { loadData(); }, [site]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadData() {
-    const [readyRes, delRes] = await Promise.all([fetch("/api/deliveries/ready"), fetch("/api/deliveries")]);
+    const [readyRes, delRes] = await Promise.all([fetch(`/api/deliveries/ready${site ? `?location=${encodeURIComponent(site)}` : ""}`), fetch("/api/deliveries")]);
     const take = async (r: Response) => (r.ok ? r.json() : (await r.text(), null));
     const [readyJ, delJ] = await Promise.all([readyRes, delRes].map(take));
     setLoadError(readyJ === null || delJ === null);
@@ -166,6 +175,7 @@ export default function DispatchPage() {
               orderItemId: l.orderItemId,
               ...(l.isUnitLine ? { quantityUnits: Math.trunc(q) } : { quantityKg: q }),
               notes: notes.trim() || null,
+              ...(site ? { locationId: site } : {}),
             }),
           });
         } catch {
@@ -292,6 +302,13 @@ export default function DispatchPage() {
 
       {/* ── Ready to deliver: one card per order ── */}
       {loaded && tab === "ready" ? <section className="hr-stack" style={{ gap: 12 }} aria-label={t("readyForDelivery")}>
+        {multiSite && locs ? (
+          <div className="hr-filterbar" data-testid="dispatch-ship-from">
+            <span className="hr-caption">{L("الشحن من", "Ship from")}</span>
+            <LocationSelect locations={locs.locations} value={site} onChange={(id) => { if (!open) setShipFrom(id); }} label={L("الشحن من", "Ship from")} testId="dispatch-site" disabled={!!open} />
+            <span className="hr-caption">{L("تُحسب الكميات الجاهزة من لوتات هذا الموقع فقط.", "Ready quantities count only the lots at this site.")}</span>
+          </div>
+        ) : null}
         {ready.length > 4 ? (
           <div className="hr-filterbar">
             <input type="search" className="hr-input hr-search" placeholder={L("ابحث برقم الطلب أو العميل", "Search by order or customer")} aria-label={L("بحث", "Search")} value={readySearch} onChange={(e) => setReadySearch(e.target.value)} />

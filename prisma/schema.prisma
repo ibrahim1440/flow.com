@@ -1111,12 +1111,16 @@ model Roaster {
   /// NULL = not set by the owner: the built-in Sunday–Thursday 07:00–15:00 applies (ROASTERS.md §4,
   /// illustrative until confirmed, D6). Changing it never moves an approved slot (§5.11).
   workingHours      Json?
+  /// Where this roaster draws green coffee (20261117090000_locations_enhancements); NULL = the production site.
+  locationId        String?
+  location          StockLocation?       @relation(fields: [locationId], references: [id], onDelete: Restrict)
   maintenance       RoasterMaintenance[]
   scheduledSlots    ScheduledSlot[]
   roastPlans        RoastPlan[]
   operators         RoasterOperator[]
 
   @@index([type, status])
+  @@index([locationId])
 }
 
 /// A maintenance window of a roaster (RM4 «الصيانة»): planned, in progress, done or cancelled.
@@ -1521,6 +1525,8 @@ enum LotStatus {
   AVAILABLE
   RESERVED
   SHIPPED
+  /// On its way between two sites in a two-step transfer (at "loc_transit"): neither promised nor shipped until received.
+  IN_TRANSIT
 
   /// A physical package that exists but is not a complete sellable unit — a 1 KG bag
   /// holding 250 g, for instance. It is real inventory: the coffee left the roast and the
@@ -1625,12 +1631,20 @@ model FinishedGoodsLot {
   locationId String        @default(dbgenerated("stock_location_current()"))
   location   StockLocation @relation(fields: [locationId], references: [id])
 
+  /// A lot split off this one by a transfer (part of its units sent to another site): traceability to the source lot
+  /// and, through it, the roast. NULL for a packed lot.
+  splitFromLotId String?
+  splitFrom      FinishedGoodsLot?   @relation("LotSplit", fields: [splitFromLotId], references: [id], onDelete: Restrict)
+  splits         FinishedGoodsLot[]  @relation("LotSplit")
+  transferLines  StockTransferLine[] @relation("TransferLineLot")
+
   @@index([status])
   @@index([createdAt])
   @@index([productSkuId, status])
   @@index([isUnitTracked, status])
   @@index([packedFromBatchId])
   @@index([locationId])
+  @@index([splitFromLotId])
 }
 
 /// One roast's contribution to one packaged lot.
@@ -1847,7 +1861,9 @@ model StockLocation {
   code               String    @unique
   nameAr             String
   nameEn             String?
-  /// ROASTERY | WAREHOUSE | CAFE | BRANCH | OTHER (CHECK).
+  /// ROASTERY | WAREHOUSE | CAFE | BRANCH | OTHER | TRANSIT (CHECK). TRANSIT: the one system location «في الطريق»
+  /// ("loc_transit", 20261117090000_locations_enhancements) holding what a two-step transfer has sent and not yet
+  /// received — never a site anyone picks, never default / production, never deactivated or deleted.
   type               String
   address            String?
   notes              String?
@@ -1875,6 +1891,9 @@ model StockLocation {
   supplierInvoices SupplierInvoice[]
   transfersOut     StockTransfer[]         @relation("TransferFrom")
   transfersIn      StockTransfer[]         @relation("TransferTo")
+  reorderPoints    StockReorderPoint[]
+  roasters         Roaster[]
+  stations         Station[]
 
   @@index([isActive, sortOrder])
 }
@@ -1910,8 +1929,15 @@ model StockTransfer {
   toLocationId    String
   toLocation      StockLocation @relation("TransferTo", fields: [toLocationId], references: [id])
   transferDate    DateTime      @db.Date
-  /// POSTED | CANCELLED (CHECK).
+  /// IMMEDIATE («تحويل فوري»: POSTED | CANCELLED) | TWO_STEP (send → IN_TRANSIT → RECEIVED, or CANCELLED in transit).
+  mode            String        @default("IMMEDIATE")
+  /// POSTED | IN_TRANSIT | RECEIVED | CANCELLED (CHECK, per mode).
   status          String        @default("POSTED")
+  sentAt          DateTime?
+  receivedAt      DateTime?
+  receivedBy      String?
+  receivedByName  String?
+  receiveNote     String?
   notes           String?
   /// Client idempotency key: the same request twice returns the first transfer.
   requestKey      String?       @unique
@@ -1930,6 +1956,7 @@ model StockTransfer {
   @@index([transferDate])
   @@index([fromLocationId])
   @@index([toLocationId])
+  @@index([status])
 }
 
 model StockTransferLine {
@@ -1937,13 +1964,40 @@ model StockTransferLine {
   transferId String
   transfer   StockTransfer @relation(fields: [transferId], references: [id], onDelete: Restrict)
   lineNo     Int
-  /// GREEN_BEAN | MATERIAL (CHECK).
-  itemKind   String
-  entityId   String
-  qty        Float
-  notes      String?
+  /// GREEN_BEAN | MATERIAL | FG_LOT (CHECK). FG_LOT: a finished-goods lot, `entityId` the source lot, `qty` in units.
+  itemKind       String
+  entityId       String
+  qty            Float
+  notes          String?
+  /// Two-step receipt: what arrived, and the shortfall written off from transit with its reason (green / materials).
+  qtyReceived    Float?
+  qtyShort       Float?
+  varianceReason String?
+  /// FG_LOT: the lot that travels (the source lot moved whole, or the part split off it).
+  fgLotId        String?
+  fgLot          FinishedGoodsLot? @relation("TransferLineLot", fields: [fgLotId], references: [id], onDelete: Restrict)
 
   @@unique([transferId, lineNo])
+  @@index([itemKind, entityId])
+  @@index([fgLotId])
+}
+
+/// A reorder point per item per location (20261117090000_locations_enhancements): «تحت حد إعادة الطلب» at that site.
+/// The item's company-wide reorder point stays as it is.
+model StockReorderPoint {
+  id           String        @id @default(cuid())
+  locationId   String
+  location     StockLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  /// GREEN_BEAN | MATERIAL | PRODUCT_SKU (CHECK). A finished SKU's point is in units (its AVAILABLE units at the site).
+  itemKind     String
+  /// GreenBean.id, MaterialItem.id or ProductSKU.id.
+  entityId     String
+  reorderPoint Float
+  updatedBy    String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @default(now()) @updatedAt
+
+  @@unique([locationId, itemKind, entityId])
   @@index([itemKind, entityId])
 }
 
@@ -2231,6 +2285,9 @@ model Station {
   type          String
   place         String?
   roasterId     String?
+  /// Where this workstation draws from and books into (20261117090000); NULL = the production site.
+  locationId    String?
+  location      StockLocation?         @relation(fields: [locationId], references: [id], onDelete: Restrict)
   /// ACTIVE | RETIRED
   status        String                 @default("ACTIVE")
   createdById   String?
@@ -2242,6 +2299,7 @@ model Station {
   deviceLinks   StationDeviceStation[]
 
   @@index([status])
+  @@index([locationId])
 }
 
 /// A shared device registered to one station (UR-14). Registered by the administrator with the code

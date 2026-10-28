@@ -1,14 +1,15 @@
 "use client";
 
-// «الذمم الدائنة» (Figma ACC-50 · ACC-53): supplier invoices, AP aging with the supplier statement (from the books,
+// «الذمم الدائنة» (Figma ACC-50 · ACC-53): purchase invoices (the purchases screen's documents, phase 2), AP aging with the supplier statement (from the books,
 // checked against the AP control account), and supplier payments (record — applied in full to posted invoices —
 // and void). The API re-checks every duty (accounting › ap for payments, with a step-up).
 import Link from "next/link";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { OpsLoading, Btn } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
 import { Select } from "@/components/ui/Select";
+import { LEGACY_AP_TAB } from "@/lib/accounting/source-links";
 import { AcctShell, Msg, money, todayRiyadh, useApi, useLang, useWrite, type Setup } from "../_ui/shell";
 import { InvoiceList, type InvoiceRow } from "../_ui/ap";
 
@@ -25,7 +26,18 @@ function Ap() {
   const router = useRouter();
   const path = usePathname();
   const sp = useSearchParams();
-  const view = sp.get("view") === "aging" ? "aging" : sp.get("view") === "payments" ? "payments" : "invoices";
+  // An old address (?tab=payments|reconciliation…, before phase 4) lands on the view that holds it now.
+  const legacy = sp.get("tab");
+  const asked = sp.get("view") ?? (legacy ? LEGACY_AP_TAB[legacy] ?? null : null);
+  const view = asked === "aging" ? "aging" : asked === "payments" ? "payments" : "invoices";
+  useEffect(() => {
+    if (!legacy) return;
+    const p = new URLSearchParams(sp.toString());
+    p.delete("tab");
+    const v = LEGACY_AP_TAB[legacy];
+    if (v && v !== "invoices") p.set("view", v);
+    router.replace(p.toString() ? `${path}?${p}` : path);
+  }, [legacy, path, router, sp]);
   const go = (patch: Record<string, string | null>) => {
     const p = new URLSearchParams(sp.toString());
     for (const [k, v] of Object.entries(patch)) { if (v === null || v === "") p.delete(k); else p.set(k, v); }
@@ -34,10 +46,10 @@ function Ap() {
   const setup = useApi<Setup>("/api/accounting/setup");
   return (
     <AcctShell setup={setup.data} title={L("الذمم الدائنة", "Accounts payable")}
-      actions={<Link className="hr-btn is-primary" href="/dashboard/purchases/invoices/new" data-testid="ap-new-invoice">+ {L("فاتورة مورد", "Supplier invoice")}</Link>}>
+      actions={<Link className="hr-btn is-primary" href="/dashboard/purchases/invoices/new" data-testid="ap-new-invoice">+ {L("فاتورة مشتريات", "Purchase invoice")}</Link>}>
       <div className="acct-row">
         <div className="acct-seg" role="group" aria-label={L("القسم", "Section")}>
-          <button type="button" aria-pressed={view === "invoices"} onClick={() => go({ view: null })} data-testid="ap-view-invoices">{L("فواتير الموردين", "Supplier invoices")}</button>
+          <button type="button" aria-pressed={view === "invoices"} onClick={() => go({ view: null })} data-testid="ap-view-invoices">{L("فواتير المشتريات", "Purchase invoices")}</button>
           <button type="button" aria-pressed={view === "aging"} onClick={() => go({ view: "aging" })} data-testid="ap-view-aging">{L("أعمار الدائنين وكشف المورد", "AP aging & statement")}</button>
           <button type="button" aria-pressed={view === "payments"} onClick={() => go({ view: "payments" })} data-testid="ap-view-payments">{L("المدفوعات", "Payments")}</button>
         </div>

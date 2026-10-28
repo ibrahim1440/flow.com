@@ -112,7 +112,8 @@ export function RoastSheet({ mode, products, beans, canChangeGreen, isAdmin, onC
   const roaster = roasters.find((r) => r.id === roasterId) ?? null;
   const quick = roaster ? [...new Set([roaster.minKg, roaster.defaultTargetKg, roaster.maxKg].filter((x) => Number.isFinite(x) && x > 0))].sort((a, b) => a - b) : [];
 
-  const subject = mode.kind === "order" ? `orderItemId=${encodeURIComponent(mode.line.id)}` : productId ? `productId=${encodeURIComponent(productId)}` : null;
+  // The roaster's site (20261117090000): the preview is decided where this roaster draws green, as the roast POST is.
+  const subject = mode.kind === "order" ? `orderItemId=${encodeURIComponent(mode.line.id)}${roasterId ? `&roasterId=${encodeURIComponent(roasterId)}` : ""}` : productId ? `productId=${encodeURIComponent(productId)}${roasterId ? `&roasterId=${encodeURIComponent(roasterId)}` : ""}` : null;
   useEffect(() => {
     if (!subject) return;
     let live = true;

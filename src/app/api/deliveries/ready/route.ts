@@ -7,6 +7,8 @@ import { lotMatchFilter, roundKg } from "@/lib/services/shelf-allocation";
 import { packSizeLabel } from "@/lib/services/finished-products";
 import { planDispatch, type PlanCandidate } from "@/lib/services/delivery-lots";
 import { openHandoffs } from "@/lib/services/station/prep";
+import { activeLocation, productionLocation } from "@/lib/services/stock-locations";
+import { handleDomainError } from "@/lib/api-error";
 
 /**
  * GET /api/deliveries/ready — the dispatch screen's «جاهز للتسليم» list (Phase D).
@@ -18,10 +20,20 @@ import { openHandoffs } from "@/lib/services/station/prep";
  *
  * Read gate: the dispatch module, as for GET /api/deliveries; customer name only (owner policy F4).
  * Read-only: no lock, no write.
+ *
+ * ?location=<id> (20261117090000_locations_enhancements): the ship-from site — only finished lots there count (the
+ * POST draws from the same site). Without it: the production site, the POST's own default.
  */
-export async function GET() {
+export async function GET(request: Request) {
   const { error } = await requireModule("dispatch");
   if (error) return error;
+  let site: { id: string };
+  try {
+    const asked = new URL(request.url).searchParams.get("location");
+    site = asked ? await activeLocation(prisma, asked) : await productionLocation(prisma);
+  } catch (err) {
+    return handleDomainError(err);
+  }
 
   const orders = await prisma.order.findMany({
     where: { status: { in: DELIVERY_ALLOWED_STATUSES }, items: { some: { deliveryStatus: { not: "Delivered" } } } },
@@ -50,7 +62,7 @@ export async function GET() {
   const [unitLots, unitHeld] = await Promise.all([
     skuIds.length
       ? prisma.finishedGoodsLot.findMany({
-          where: { productSkuId: { in: skuIds }, isUnitTracked: true, status: "AVAILABLE", unitsAvailable: { gt: 0 } },
+          where: { productSkuId: { in: skuIds }, isUnitTracked: true, status: "AVAILABLE", unitsAvailable: { gt: 0 }, locationId: site.id },
           select: { id: true, batchNumber: true, createdAt: true, productSkuId: true, unitsAvailable: true, unitsReserved: true },
         })
       : [],
@@ -106,7 +118,7 @@ export async function GET() {
     const outstanding = Math.max(0, roundKg(i.quantityKg - i.deliveredQty));
     const [lots, heldRows] = await Promise.all([
       prisma.finishedGoodsLot.findMany({
-        where: { ...lotMatchFilter(i), availableQty: { gt: 0 } },
+        where: { ...lotMatchFilter(i), availableQty: { gt: 0 }, locationId: site.id },
         select: { id: true, batchNumber: true, createdAt: true, availableQty: true, reservedQty: true },
       }),
       prisma.stockAllocation.groupBy({
@@ -151,5 +163,5 @@ export async function GET() {
   }
   // Handed-off orders first: they are staged and waiting for the dispatch team.
   out.sort((a, b) => Number(!!b.handoff) - Number(!!a.handoff));
-  return NextResponse.json({ orders: out });
+  return NextResponse.json({ orders: out, locationId: site.id });
 }

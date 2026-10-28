@@ -8,15 +8,17 @@ import { ScanInput, lookupScanCode, type ScanFeedback } from "@/components/scan/
 export type ScannedLot = { id: string; serial: string; code: string; nameAr: string | null; nameEn: string; kg: number };
 type Hit = { id: string; code: string; serialNumber: string; beanType: string; beanTypeAr: string | null; quantityKg: number };
 
-export function StationLotScan({ lang, productId, greenKg, auto, lot, onLot }: {
+export function StationLotScan({ lang, productId, greenKg, auto, lot, onLot, roasterId }: {
   lang: "ar" | "en"; productId: string | null; greenKg: number;
+  /** The roaster this station roasts on: the sack is checked at its site (20261117090000). */
+  roasterId?: string | null;
   /** The lot the server would pick by itself (product default / FIFO), shown until a sack is scanned. */
   auto: { serial: string; nameAr: string | null; nameEn: string } | null;
   lot: ScannedLot | null; onLot: (l: ScannedLot | null) => void;
 }) {
   const L = (ar: string, en: string) => (lang === "ar" ? ar : en);
   async function onCode(code: string): Promise<ScanFeedback> {
-    const r = await lookupScanCode<Hit>(code, lang, { productId: productId ?? undefined, kg: greenKg > 0 ? +greenKg.toFixed(3) : undefined }, "/api/station/roasting/lot");
+    const r = await lookupScanCode<Hit>(code, lang, { productId: productId ?? undefined, kg: greenKg > 0 ? +greenKg.toFixed(3) : undefined, roasterId: roasterId ?? undefined }, "/api/station/roasting/lot");
     if (!r.ok) return { tone: "danger", text: r.message };
     const h = r.hit;
     onLot({ id: h.id, serial: h.serialNumber, code: h.code, nameAr: h.beanTypeAr, nameEn: h.beanType, kg: h.quantityKg });

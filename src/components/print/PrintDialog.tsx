@@ -17,7 +17,7 @@ import { BLOCKING_CODES, type LabelData, type PrintWarning, type WarningCode } f
 import { itemRef, type ItemIn } from "@/lib/print/items";
 import { jobTotals, layoutWarnings, paginate, pageSize, perPage, validateJob, type LayoutError } from "@/lib/print/layout";
 import { LOGO_MIN_HEIGHT_MM } from "@/lib/print/logo";
-import { profileDisplayName, usesStartSlot, type PrintProfileData } from "@/lib/print/profiles";
+import { defaultPresetKey, profileDisplayName, usesStartSlot, type PrintProfileData } from "@/lib/print/profiles";
 import { FIELD_DEFS, TEMPLATES, defaultFields, defaultNotesLines, isRecordLabel, normalizeFields, notesMaxLines, sizeClass, type FieldConfig, type FieldKey, type TemplateKey } from "@/lib/print/templates";
 import { mmToCssPx } from "@/lib/print/units";
 import { PRINT_NOT_CERTIFIED_CODE, PRINT_NOT_CERTIFIED_MESSAGE } from "@/lib/print/certification";
@@ -177,9 +177,12 @@ export function PrintDialog({ open, onClose, items, initialTemplate, subtitle, o
       if (!alive) return;
       if (!p.ok || !s.ok) { setMetaErr({ status: p.ok ? s.status : p.status, message: (p.ok ? s : p).body.error ?? "" }); return; }
       setMeta({ profiles: p.body.profiles, canManage: p.body.canManage, presets: pr.ok ? pr.body.presets : [], canManagePresets: pr.ok ? pr.body.canManage : false, maxLabels: s.body.maxLabelsPerJob });
-      const want = template === "CUPPING_RESULTS" || template === "GREEN_LOT" ? "THERMAL_100x70" : template === "MATERIAL_SHELF" ? "COMPACT_50x30" : "A4_L7165";
+      // The owner's defaults (20261117090000): the green-lot sack label on the 100 × 70 mm thermal roll, the material
+      // shelf label on 50 × 30 mm. Applied every time the dialog opens for a template — a profile picked for another
+      // label (the dialog stays mounted on a page that prints several kinds) never carries over.
+      const want = defaultPresetKey(template);
       const def = p.body.profiles.find((x) => x.presetKey === want) ?? p.body.profiles[0];
-      setProfileId((cur) => cur ?? def?.id ?? null);
+      setProfileId(def?.id ?? null);
     })().catch((e) => alive && setMetaErr({ status: 0, message: String(e) }));
     return () => { alive = false; };
   }, [open, template]);

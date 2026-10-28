@@ -5,6 +5,7 @@
  */
 export const API_ERRORS_AR: Readonly<Record<string, string>> = {
   "lotScanRequired is true or false.": "قيمة «تأكيد الكيس بالمسح» نعم أو لا.",
+  "locationId must be a string when it is given.": "موقع الشحن غير صالح.",
   "A MATERIAL component requires a materialItemId.": "مكوّن المادة يحتاج تحديد المادة.",
   "A ROASTED_COFFEE component requires a coffeeProductId.": "مكوّن البن المحمّص يحتاج تحديد القهوة.",
   "A collection cannot be dated in the future.": "لا يُؤرَّخ التحصيل بتاريخ مستقبلي.",

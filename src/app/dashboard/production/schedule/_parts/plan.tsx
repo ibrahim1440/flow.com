@@ -20,7 +20,7 @@ type Draft = { index: number; startsAt: string; endsAt: string; kg: string; oper
 export type Preview = {
   now: string;
   product: { id: string; name: { ar: string; en: string }; expectedLossPct: number };
-  demand: { openKg: string; shelfKg: string; pipelineKg: string; orders: { orderNumber: number; customerName: string; needKg: string }[] } | null;
+  demand: { openKg: string; shelfKg: string; pipelineKg: string; elsewhereKg?: string; elsewhereHref?: string | null; orders: { orderNumber: number; customerName: string; needKg: string }[] } | null;
   quantities: { remainingKg: string; requiredGreenKg: string; inProgressKg: string; approvedKg: string; greenToPlanKg: string; expectedLossPct: number; running: { id: string; startsAt: string; startedAt: string | null; kg: string }[]; approvedSlots: number };
   override: string | null; greenKg: string; purpose: "DEMAND" | "STOCK";
   roasters: RoasterInfo[]; roaster: RoasterInfo; operators: { id: string; name: string }[]; operatorId: string | null;
@@ -167,7 +167,7 @@ export function PlanView({ initialProduct }: { initialProduct: string | null }) 
                 </Field>
                 <dl className="rs-kv" data-testid="plan-inputs">
                   <dt>{L("المتبقي للتحميص", "Remaining to roast")}</dt>
-                  <dd><N>{q!.remainingKg}</N> {kg}{p.demand && Number(q!.remainingKg) > 0 ? <> = <N>{p.demand.openKg}</N> {L("مطلوب", "ordered")}{Number(p.demand.shelfKg) > 0 ? <> − <N>{p.demand.shelfKg}</N> {L("على الرف", "on the shelf")}</> : null}{Number(p.demand.pipelineKg) > 0 ? <> − <N>{p.demand.pipelineKg}</N> {L("مسجّلة", "recorded")}</> : null}</> : null}</dd>
+                  <dd><N>{q!.remainingKg}</N> {kg}{p.demand && Number(q!.remainingKg) > 0 ? <> = <N>{p.demand.openKg}</N> {L("مطلوب", "ordered")}{Number(p.demand.shelfKg) > 0 ? <> − <N>{p.demand.shelfKg}</N> {L("على الرف", "on the shelf")}</> : null}{Number(p.demand.pipelineKg) > 0 ? <> − <N>{p.demand.pipelineKg}</N> {L("مسجّلة", "recorded")}</> : null}</> : null}{p.demand && Number(p.demand.elsewhereKg ?? 0) > 0 ? <span className="hr-caption" style={{ display: "block" }} data-testid="plan-elsewhere">{L("في موقع آخر — يحتاج تحويل: ", "At another site — needs a transfer: ")}<N>{p.demand.elsewhereKg}</N> {kg}{p.demand.elsewhereHref ? <> · <a className="ops-link" href={p.demand.elsewhereHref}>{L("تحويل", "Transfer")}</a></> : null}</span> : null}</dd>
                   <dt>{L("الأخضر المطلوب", "Green required")}</dt>
                   <dd><N>{q!.requiredGreenKg}</N> {kg} = <N>{q!.remainingKg}</N> ÷ (1 − <N>{q!.expectedLossPct}%</N>)</dd>
                   <dt>{L("في دفعة جارية", "In a running batch")}</dt>

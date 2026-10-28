@@ -13,10 +13,11 @@ import { Dialog } from "@/components/hr/ui";
 import { Select } from "@/components/ui/Select";
 import { NoAccess, PasswordConfirmField, ReasonField, SectionHead, UsersFrame, api, errText, fmtDate, fmtWhen, useLangL, usePasswordConfirm, useUsersChrome, type Lang } from "../_ui/shared";
 
-type Station = { id: string; name: string; type: string; place: string | null; status: string; roasterId: string | null; roasterName: string | null; assigned: number; createdAt: string; createdByName: string | null };
+type Station = { id: string; name: string; type: string; place: string | null; status: string; roasterId: string | null; roasterName: string | null; assigned: number; createdAt: string; createdByName: string | null; locationId?: string | null; locationNameAr?: string | null; locationNameEn?: string | null };
+type SiteRow = { id: string; nameAr: string; nameEn: string | null; isProduction: boolean };
 type Device = { id: string; name: string; deviceCode: string; status: "PENDING" | "ACTIVE" | "REVOKED"; stationId: string; stationName: string; stationType: string; place: string | null; codeLive: boolean; codeExpiresAt: string | null; activatedAt: string | null; lastSeenAt: string | null; registeredAt: string; registeredByName: string | null; revokedAt: string | null; revokedByName: string | null; revokeReason: string | null; alsoStationIds?: string[] };
 type Policy = { idleMinutes: number; pinMaxAttempts: number; activationMinutes: number; stored: { idleMinutes: number | null; pinMaxAttempts: number | null; activationMinutes: number | null } };
-type Overview = { stations: Station[]; devices: Device[]; policy: Policy; roasters: { id: string; name: string; status: string }[] };
+type Overview = { stations: Station[]; devices: Device[]; policy: Policy; roasters: { id: string; name: string; status: string }[]; locations?: SiteRow[] };
 type Code = { device: { id: string; name: string; stationName: string; deviceCode: string }; activationCode: string; expiresAt: string };
 
 const TYPE: Record<string, { ar: string; en: string }> = { ROASTING: { ar: "التحميص", en: "Roasting" }, QUALITY: { ar: "الجودة", en: "Quality" }, PACKAGING: { ar: "التعبئة والتجهيز", en: "Packaging & fulfilment" } };
@@ -28,7 +29,7 @@ export default function StationDevicesPage() {
   const [error, setError] = useState<{ text: string; status: number } | null>(null);
   const [reload, setReload] = useState(0);
   const [counts, setCounts] = useState<{ users?: number; roles?: number }>({});
-  const [dlg, setDlg] = useState<null | "station" | "register" | "policy" | { newCode: Device } | { revoke: Device } | { retire: Station } | { serves: Device }>(null);
+  const [dlg, setDlg] = useState<null | "station" | "register" | "policy" | { newCode: Device } | { revoke: Device } | { retire: Station } | { serves: Device } | { site: Station }>(null);
   const [code, setCode] = useState<Code | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const refresh = useCallback(() => setReload((x) => x + 1), []);
@@ -106,7 +107,7 @@ export default function StationDevicesPage() {
               <h2 className="ur-h2" id="ur-stations-h">{L("المحطات", "Stations")}</h2>
               <div className="hr-tablewrap">
                 <table className="hr-table ur-table" aria-labelledby="ur-stations-h">
-                  <thead><tr><th>{L("المحطة", "Station")}</th><th>{L("النوع", "Type")}</th><th>{L("الموقع", "Place")}</th><th>{L("الحمّاصة", "Roaster")}</th><th>{L("المكلّفون", "Assigned")}</th><th>{L("الحالة", "Status")}</th><th aria-label={L("إجراء", "Action")} /></tr></thead>
+                  <thead><tr><th>{L("المحطة", "Station")}</th><th>{L("النوع", "Type")}</th><th>{L("الموقع", "Place")}</th><th>{L("الحمّاصة", "Roaster")}</th><th>{L("موقع المخزون", "Stock location")}</th><th>{L("المكلّفون", "Assigned")}</th><th>{L("الحالة", "Status")}</th><th aria-label={L("إجراء", "Action")} /></tr></thead>
                   <tbody>
                     {data.stations.map((s) => (
                       <tr key={s.id} data-testid={`ur-station-${s.id}`}>
@@ -114,6 +115,10 @@ export default function StationDevicesPage() {
                         <td>{typeWord(s.type, lang)}</td>
                         <td>{s.place ?? "—"}</td>
                         <td>{s.roasterName ?? "—"}</td>
+                        <td data-testid={`ur-station-site-${s.id}`}>
+                          <span>{s.locationId ? (lang === "en" ? s.locationNameEn || s.locationNameAr : s.locationNameAr) ?? "—" : L("موقع الإنتاج (افتراضي)", "Production site (default)")}</span>
+                          {s.status === "ACTIVE" && (data.locations?.length ?? 0) > 1 ? <> <Btn size="sm" onClick={() => setDlg({ site: s })} data-testid={`ur-station-site-edit-${s.id}`}>{L("تغيير", "Change")}</Btn></> : null}
+                        </td>
                         <td style={{ fontFamily: "var(--f-num)" }}>{s.assigned}</td>
                         <td>{s.status === "ACTIVE" ? <Dot tone="success">{L("نشطة", "Active")}</Dot> : <Dot tone="neutral">{L("موقوفة", "Retired")}</Dot>}</td>
                         <td style={{ textAlign: "end" }}>{s.status === "ACTIVE" ? <Btn size="sm" onClick={() => setDlg({ retire: s })}>{L("إيقاف المحطة", "Retire")}</Btn> : null}</td>
@@ -147,6 +152,7 @@ export default function StationDevicesPage() {
       {dlg && typeof dlg === "object" && "serves" in dlg ? <ServesDialog device={dlg.serves} stations={data?.stations.filter((x) => x.status === "ACTIVE" && x.id !== dlg.serves.stationId) ?? []} onClose={() => setDlg(null)} onDone={() => { setDlg(null); setNotice(L("حُفظت محطات الجهاز.", "The device's stations were saved.")); refresh(); }} /> : null}
       {dlg && typeof dlg === "object" && "revoke" in dlg ? <RevokeDialog device={dlg.revoke} onClose={() => setDlg(null)} onDone={(n) => { setDlg(null); setNotice(L(`أُلغي الجهاز وأُنهيت ${n} جلسة.`, `Device revoked; ${n} session(s) ended.`)); refresh(); }} /> : null}
       {dlg && typeof dlg === "object" && "retire" in dlg ? <RetireDialog station={dlg.retire} onClose={() => setDlg(null)} onDone={() => { setDlg(null); refresh(); }} /> : null}
+      {dlg && typeof dlg === "object" && "site" in dlg ? <SiteDialog station={dlg.site} sites={data?.locations ?? []} onClose={() => setDlg(null)} onDone={() => { setDlg(null); refresh(); }} /> : null}
       {code ? <CodeDialog code={code} onClose={() => { setCode(null); refresh(); }} /> : null}
     </UsersFrame>
   );
@@ -346,6 +352,43 @@ function ServesDialog({ device, stations, onClose, onDone }: { device: Device; s
           </label>
         ))}
       </div>
+      <PasswordConfirmField pc={pc} />
+      {err ? <div className="hr-notice tone-danger" role="alert">{err}</div> : null}
+    </Dialog>
+  );
+}
+
+/**
+ * «موقع المحطة» (20261117090000, owner decision 5): where this station draws stock from and books into — roasting draws
+ * green there, packing draws materials and makes the finished lots there. Empty = the production site. Audited
+ * (STATION_UPDATED, before / after); the password is asked again.
+ */
+function SiteDialog({ station, sites, onClose, onDone }: { station: Station; sites: SiteRow[]; onClose: () => void; onDone: () => void }) {
+  const { lang, L } = useLangL();
+  const [site, setSite] = useState(station.locationId ?? "");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const pc = usePasswordConfirm();
+  async function go() {
+    setBusy(true); setErr(null);
+    if (!(await pc.confirm())) { setBusy(false); return; }
+    const r = await api(`/api/stations/${station.id}`, { method: "PATCH", body: { locationId: site || null, ...(reason.trim() ? { reason } : {}) } });
+    setBusy(false);
+    if (!r.ok) { setErr(errText(r.data, lang, L("تعذّر الحفظ.", "Could not save."))); return; }
+    onDone();
+  }
+  const name = (l: SiteRow) => (lang === "en" ? l.nameEn || l.nameAr : l.nameAr);
+  return (
+    <Dialog open onClose={onClose} title={L(`موقع «${station.name}»`, `Location of “${station.name}”`)} sub={L("تسحب المحطة البن والمواد من هذا الموقع وتسجّل فيه ما تنتجه. بلا موقع: موقع الإنتاج.", "The station draws coffee and materials from this location and books what it makes there. None: the production site.")} className="ur-dlg" testId="ur-site-dialog"
+      actions={<><Btn onClick={onClose}>{L("رجوع", "Back")}</Btn><Btn variant="primary" busy={busy} disabled={(station.locationId ?? "") === site} onClick={go} data-testid="ur-site-save">{L("حفظ الموقع", "Save the location")}</Btn></>}>
+      <label className="hr-field"><span className="hr-label">{L("موقع المخزون", "Stock location")}</span>
+        <Select value={site} onChange={(e) => setSite(e.target.value)} data-testid="ur-site-select">
+          <option value="">{L("موقع الإنتاج (افتراضي)", "Production site (default)")}</option>
+          {sites.map((l) => <option key={l.id} value={l.id}>{name(l)}{l.isProduction ? L(" · موقع الإنتاج", " · production site") : ""}</option>)}
+        </Select>
+      </label>
+      <ReasonField value={reason} onChange={setReason} />
       <PasswordConfirmField pc={pc} />
       {err ? <div className="hr-notice tone-danger" role="alert">{err}</div> : null}
     </Dialog>

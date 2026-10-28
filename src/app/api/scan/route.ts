@@ -28,7 +28,7 @@ export async function GET(request: Request) {
     }
     const productId = sp.get("productId");
     if (r.hit.kind === "GREEN_LOT" && (productId || sp.get("kg"))) {
-      const draw = await greenDrawCheck(r.hit, productId, Number(sp.get("kg") ?? 0), hasSubPrivilege(user.permissions, "production", "roast_to_stock"));
+      const draw = await greenDrawCheck(r.hit, productId, Number(sp.get("kg") ?? 0), hasSubPrivilege(user.permissions, "production", "roast_to_stock"), sp.get("roasterId"));
       return NextResponse.json({ ...r, draw });
     }
     return NextResponse.json(r);

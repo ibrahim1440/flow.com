@@ -97,3 +97,26 @@
   .acct .acct-kv > div { grid-template-columns: 100px minmax(0, 1fr); }
 }
 .acct .acct-banner-note { border: 1px solid var(--hr-border-subtle); background: var(--hr-warning-tint); border-radius: var(--hr-r-md); padding: 8px 12px; }
+/* Unified inventory phase 4 — «تقييم المخزون»: the plain term with its technical tooltip, the money-only scope line,
+   the category / location groups and the cost-ledger drill-down. */
+.acct .acct-term { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
+.acct .acct-term:focus-visible { outline: 2px solid var(--hr-focus, currentColor); outline-offset: 2px; border-radius: 2px; }
+.acct .acct-scope { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: 13px; color: var(--hr-text-2); margin: 0; padding: 8px 12px; border: 1px solid var(--hr-border-subtle); border-radius: var(--hr-r-md); background: var(--hr-subtle); }
+.acct .acct-estimate { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 500; background: var(--hr-warning-tint); color: var(--hr-warning); white-space: nowrap; }
+.acct .hr-table tr.is-child td:first-child { padding-inline-start: 28px; }
+.acct .hr-table td .acct-sub { display: block; font-size: 12px; color: var(--hr-muted); }
+.acct .acct-linkbtn { appearance: none; border: 0; background: none; padding: 0; font: inherit; color: var(--hr-link, var(--hr-text)); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; text-align: start; }
+.acct .acct-nowrap { white-space: nowrap; }
+.acct .acct-qtydiff { margin: 6px 0 0; padding-inline-start: 18px; font-size: 13px; }
+.acct .acct-show-m, .acct .hr-table td .acct-show-m { display: none; }
+.acct .hr-table td.acct-acc { min-width: 150px; }
+@media (max-width: 767px) { .acct .hr-table td.acct-acc { min-width: 110px; } }
+.acct .acct-filters { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.acct .acct-filters > .hr-field { min-width: 200px; }
+@media (max-width: 767px) {
+  .acct .acct-seg { flex-wrap: wrap; }
+  .acct .acct-filters > .hr-field { min-width: 0; flex: 1 1 100%; }
+  .acct .acct-show-m, .acct .hr-table td .acct-show-m { display: block; }
+  .acct .hr-table td .acct-sub.acct-hide-m { display: none; }
+  .acct .hr-table tr.is-child td:first-child { padding-inline-start: 16px; }
+}

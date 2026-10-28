@@ -104,6 +104,9 @@ export async function roasterHistory(db: Db, roasterId: string, take = 30) {
     for (const k of ["defaultOperatorId", "requestedById", "employeeId"]) if (typeof o[k] === "string") ids.push(o[k] as string);
   }
   const names = Object.fromEntries(await employeeNames(db, ids));
+  // «موقع الحمّاصة» (20261117090000): the location ids named in the rows → their names.
+  const locIds = [...new Set(rows.flatMap((r) => [r.before, r.after].map((s) => ((s ?? {}) as Record<string, unknown>).locationId)).filter((x): x is string => typeof x === "string"))];
+  if (locIds.length) for (const l of await db.stockLocation.findMany({ where: { id: { in: locIds } }, select: { id: true, nameAr: true } })) names[l.id] = l.nameAr;
   return rows.map((r) => ({ id: r.id, action: r.action, changed: r.changed, before: r.before, after: r.after, reason: r.reason, actorName: r.actorName, createdAt: r.createdAt.toISOString(), names }));
 }
 

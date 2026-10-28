@@ -9,7 +9,7 @@ import { OpsLoading, Btn, Field } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
 import { Select } from "@/components/ui/Select";
 import { roleDef } from "@/lib/accounting/roles";
-import { AcctShell, ACCOUNT_TYPE_AR, Msg, todayRiyadh, useApi, useLang, useWrite, type Setup } from "../_ui/shell";
+import { AcctShell, ACCOUNT_TYPE_AR, Msg, Term, todayRiyadh, useApi, useLang, useWrite, type Setup } from "../_ui/shell";
 
 type Acc = { id: string; code: string; nameAr: string | null; nameEn: string; type: string; allowPosting: boolean; isActive: boolean; children: number };
 const PHASE_AR: Record<string, [string, string]> = { A1: ["المرحلة 1 · النواة", "Phase A1 · core"], A2: ["المرحلة 2 · المبيعات والذمم المدينة", "Phase A2 · sales & receivables"], A3: ["المرحلة 3 · المشتريات والمخزون والإنتاج والرواتب", "Phase A3 · purchasing, inventory, production, payroll"] };
@@ -34,7 +34,7 @@ export default function SettingsPage() {
 
   async function saveRoles() {
     const roles = Object.fromEntries(changed.map((r) => [r.key, map[r.key] || null]));
-    const r = await w.run("roles", "/api/accounting/roles", "PUT", { roles }, L("حُفظ ربط الحسابات.", "The role mapping is saved."));
+    const r = await w.run("roles", "/api/accounting/roles", "PUT", { roles }, L("حُفظ ربط الحسابات.", "The account mapping is saved."));
     if (r) { setMapEdit({}); setup.reload(); }
   }
   async function saveGoLive() {
@@ -83,20 +83,19 @@ export default function SettingsPage() {
 
           <section className="acct-card" data-testid="acct-roles">
             <div className="acct-foot" style={{ borderTop: 0, paddingTop: 0 }}>
-              <h2>{L("ربط الحسابات (أدوار الترحيل)", "Account mapping (posting roles)")}</h2>
+              <h2>{L("ربط الحسابات", "Account mapping")}</h2>
               {can ? <Btn variant="primary" disabled={!changed.length} busy={w.busy === "roles"} onClick={saveRoles} data-testid="roles-save">{L(`حفظ الربط${changed.length ? ` (${changed.length})` : ""}`, `Save mapping${changed.length ? ` (${changed.length})` : ""}`)}</Btn> : null}
             </div>
-            <p className="acct-hint">{L("كل حدث تشغيلي يُرحَّل بالدور لا برقم الحساب. تغيير الربط لا يغيّر أي قيد مرحّل، ويُسجَّل.", "Every operational event posts by role, never by account number. A change of mapping never changes a posted entry, and is recorded.")}</p>
+            <p className="acct-hint">{L("لكل بند حساب واحد يُرحَّل عليه تلقائيًا (مثل «البن الأخضر» أو «الذمم الدائنة»). تغيير الحساب لا يغيّر أي قيد مرحّل، ويُسجَّل. الرمز التقني للبند يظهر عند الوقوف عليه.", "Each item has one account it posts to automatically (such as «Green coffee» or «Accounts payable»). Changing it never changes a posted entry, and is recorded. The item's technical key shows on hover or focus.")}</p>
             {(["A1", "A2", "A3"] as const).map((ph) => (
               <div key={ph} className="hr-tablewrap">
                 <table className="hr-table is-dense">
                   <caption className="hr-label" style={{ textAlign: "start", padding: "8px 0" }}>{L(PHASE_AR[ph][0], PHASE_AR[ph][1])}{s.readiness.missingByPhase[ph]?.length ? <span className="hr-flag tone-warning" style={{ marginInlineStart: 8 }}><span>{L(`${s.readiness.missingByPhase[ph].length} غير مربوط`, `${s.readiness.missingByPhase[ph].length} unmapped`)}</span></span> : null}</caption>
-                  <thead><tr><th>{L("الدور", "Role")}</th><th className="acct-hide-m">{L("المفتاح", "Key")}</th><th>{L("الحساب", "Account")}</th></tr></thead>
+                  <thead><tr><th>{L("البند", "Item")}</th><th>{L("الحساب", "Account")}</th></tr></thead>
                   <tbody>
                     {s.readiness.roles.filter((r) => r.phase === ph).map((r) => (
                       <tr key={r.key} data-role={r.key}>
-                        <td>{L(r.ar, r.en)}</td>
-                        <td className="acct-hide-m acct-code">{r.key}</td>
+                        <td><Term tech={r.key}>{L(r.ar, r.en)}</Term></td>
                         <td style={{ minWidth: 240 }}>
                           {can ? (
                             <Select value={map[r.key] ?? ""} onChange={(e) => setMap({ ...map, [r.key]: e.target.value })} aria-label={L(r.ar, r.en)} placeholder={L("غير مربوط", "Not mapped")}>
@@ -111,14 +110,14 @@ export default function SettingsPage() {
                 </table>
               </div>
             ))}
-            <p className="acct-hint">{L("أنواع الحسابات المقبولة لكل دور: ", "Account types each role accepts: ")}{Object.values(ACCOUNT_TYPE_AR).map((v) => L(v[0], v[1])).join(" · ")}</p>
+            <p className="acct-hint">{L("أنواع الحسابات المقبولة لكل بند: ", "Account types each item accepts: ")}{Object.values(ACCOUNT_TYPE_AR).map((v) => L(v[0], v[1])).join(" · ")}</p>
           </section>
         </>
       )}
       <Dialog open={!!confirm} title={confirm === "activate" ? L("تفعيل المحاسبة", "Activate accounting") : L("إلغاء التفعيل", "Undo activation")} onClose={() => setConfirm(null)}
         sub={confirm === "activate" ? L(`من ${goLive}: كل حدث تشغيلي مربوط يُرحَّل قيده تلقائيًا. لا يتغير تاريخ البدء بعد أول ترحيل.`, `From ${goLive}: every connected operational event posts its entry. The go-live date is final after the first posting.`) : L("ممكن فقط قبل أي ترحيل من المحرك.", "Possible only before the engine has posted anything.")}
         actions={<><Btn variant={confirm === "activate" ? "primary" : "danger"} disabled={confirm === "deactivate" && reason.trim().length < 3} busy={w.busy === "activate" || w.busy === "deactivate"} onClick={doConfirm} data-testid="activation-confirm">{confirm === "activate" ? L("تفعيل", "Activate") : L("إلغاء التفعيل", "Undo")}</Btn><Btn onClick={() => setConfirm(null)}>{L("إلغاء", "Cancel")}</Btn></>}>
-        {confirm === "deactivate" ? <Field label={L("السبب", "Reason")}><textarea className="hr-input hr-textarea" value={reason} onChange={(e) => setReason(e.target.value)} /></Field> : <p>{L("تأكد من مراجعة دليل الحسابات وربط الأدوار مع المحاسب قبل التفعيل.", "Review the chart and the role mapping with the accountant before activating.")}</p>}
+        {confirm === "deactivate" ? <Field label={L("السبب", "Reason")}><textarea className="hr-input hr-textarea" value={reason} onChange={(e) => setReason(e.target.value)} /></Field> : <p>{L("تأكد من مراجعة دليل الحسابات وربط الحسابات مع المحاسب قبل التفعيل.", "Review the chart and the account mapping with the accountant before activating.")}</p>}
       </Dialog>
     </AcctShell>
   );

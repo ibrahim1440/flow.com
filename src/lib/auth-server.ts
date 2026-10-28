@@ -179,6 +179,8 @@ export const STEP_UP_KEYS: ReadonlySet<string> = new Set([
   "sales.quote_approve_discount",
   "settings.reset", "settings.training_reset",
   "inventory.adjust", "inventory.override", "orders.approve",
+  // M-2: cancelling a stock transfer (its movements reversed at both sites) steps up.
+  "inventory.transfer_cancel",
   "accounting.journal_approve", "accounting.journal_post", "accounting.journal_reverse", "accounting.period_lock", "accounting.period_close",
   // Accounting core A1: reopening a closed period steps up (activation, role mapping, the chart seed and the
   // opening post step up inline, requirePrivilegedAction).

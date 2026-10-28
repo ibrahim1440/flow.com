@@ -74,6 +74,12 @@ export type DeliveryIntent = {
   quantityUnits: number | null;
   quantityKg: number | null;
   notes: string | null;
+  /**
+   * The ship-from location (20261117090000_locations_enhancements): the dispatch draws only from finished lots there.
+   * Null = the server's default (a named lot's own site, else the production site) — and then the hash is exactly
+   * what it was before this field existed.
+   */
+  locationId?: string | null;
 };
 
 export type IntentDecision =
@@ -151,6 +157,10 @@ export function normalizeDeliveryIntent(body: Record<string, unknown>): IntentDe
   }
 
   const rawNotes = typeof body.notes === "string" ? body.notes.trim() : "";
+  if (body.locationId !== undefined && body.locationId !== null && typeof body.locationId !== "string") {
+    return { ok: false, message: "locationId must be a string when it is given." };
+  }
+  const rawLoc = typeof body.locationId === "string" ? body.locationId.trim().slice(0, 64) : "";
 
   return {
     ok: true,
@@ -161,6 +171,7 @@ export function normalizeDeliveryIntent(body: Record<string, unknown>): IntentDe
       quantityUnits,
       quantityKg,
       notes: rawNotes === "" ? null : rawNotes,
+      locationId: rawLoc === "" ? null : rawLoc,
     },
   };
 }
@@ -181,6 +192,8 @@ export function deliveryIntentHash(intent: DeliveryIntent): string {
     intent.quantityUnits,
     intent.quantityKg,
     intent.notes,
+    // Appended only when given, so a dispatch without a ship-from site hashes as it always did.
+    ...(intent.locationId ? [intent.locationId] : []),
   ];
   return createHash("sha256").update(JSON.stringify(positional)).digest("hex");
 }

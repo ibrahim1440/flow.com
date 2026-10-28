@@ -11,6 +11,7 @@ import { parseFiniteDecimal } from "@/lib/services/commissions/engine";
 import { normaliseNumberText } from "@/lib/services/settings/sections";
 import { cancelSlotsForRoasterStatus } from "@/lib/services/schedule/schedule-db";
 import { Prisma } from "@/generated/prisma/client";
+import { roasterEffectiveSite } from "@/lib/services/stock-locations";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -35,7 +36,7 @@ export async function GET(_request: Request, { params }: Params) {
     const r = await prisma.roaster.findUnique({ where: { id } });
     if (!r) return notFound("roaster");
     const names = await employeeNames(prisma, [r.defaultOperatorId]);
-    return NextResponse.json({ roaster: roasterOut(r, names), history: await roasterHistory(prisma, id), can: { edit: user.role === "admin" } });
+    return NextResponse.json({ roaster: { ...roasterOut(r, names), effectiveSite: await roasterEffectiveSite(prisma, id) }, history: await roasterHistory(prisma, id), can: { edit: user.role === "admin" } });
   } catch (err) {
     return handleDomainError(err);
   }
@@ -118,6 +119,16 @@ export async function PATCH(request: Request, { params }: Params) {
         await writeSettingsAudit(tx, { section: "production", action: "ROASTER_UPDATED", entityType: "Roaster", entityId: other.id, changed: ["isDefault"], before: { isDefault: true }, after: { isDefault: false }, actor: { id: user.id, name: user.name } });
       }
 
+      // «موقع الحمّاصة» (20261117090000, owner decision 5): where it draws green; null = the production site.
+      let locationId = cur.locationId;
+      if ("locationId" in body) {
+        if (body.locationId === null || body.locationId === "") locationId = null;
+        else {
+          const l = typeof body.locationId === "string" ? await tx.stockLocation.findUnique({ where: { id: body.locationId }, select: { id: true, isActive: true, type: true } }) : null;
+          if (!l || !l.isActive || l.type === "TRANSIT") throw new RouteError(fieldErrors([{ field: "locationId", ar: "اختر موقعًا نشطًا.", en: "Choose an active location.", summaryAr: "موقع الحمّاصة غير صالح", summaryEn: "Roaster location is not valid" }]));
+          locationId = l.id;
+        }
+      }
       const statusChanged = values.status !== cur.status;
       const row = await tx.roaster.update({
         where: { id },
@@ -127,7 +138,7 @@ export async function PATCH(request: Request, { params }: Params) {
           cycleMinutes: values.cycleMinutes, defaultOperatorId: values.defaultOperatorId,
           status: values.status, statusReason: values.statusReason,
           ...(statusChanged ? { statusSince: new Date(), statusUntil: null } : {}),
-          isDefault, updatedById: user.id,
+          isDefault, updatedById: user.id, locationId,
           workingHours: values.workingHours ?? Prisma.DbNull,
         },
       });
@@ -153,7 +164,7 @@ export async function PATCH(request: Request, { params }: Params) {
       return row;
     }, TX_OPTS);
     const names = await employeeNames(prisma, [saved.defaultOperatorId]);
-    return NextResponse.json({ roaster: roasterOut(saved, names), history: await roasterHistory(prisma, id) });
+    return NextResponse.json({ roaster: { ...roasterOut(saved, names), effectiveSite: await roasterEffectiveSite(prisma, id) }, history: await roasterHistory(prisma, id) });
   } catch (err) {
     const r = routeErrorResponse(err);
     if (r) return r;

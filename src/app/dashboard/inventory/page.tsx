@@ -32,8 +32,9 @@ import { PackagingTab } from "./_parts/packaging";
 import { FinishedTab } from "./_parts/finished";
 import { LedgerTab } from "./_parts/ledger";
 import { CountsTab, StartCountDialog } from "./_parts/counts";
-import { LocationBreakdown, LocationSelect, useBalances, useLocations } from "./_parts/locations";
+import { InTransitPanel, LocationBreakdown, LocationSelect, SiteLowStock, useBalances, useLocations } from "./_parts/locations";
 import { locationName } from "@/lib/inventory/locations";
+import { unitWord } from "./_parts/shared";
 import { ScanInput, lookupScanCode, type ScanFeedback } from "@/components/scan/ScanInput";
 import { lotPagePath } from "@/lib/scan/codes";
 
@@ -345,6 +346,8 @@ export default function InventoryPage() {
       <Link className="hr-btn is-ghost" href="/dashboard/inventory/categories" data-testid="inventory-categories-link">{L("التصنيفات", "Categories")}</Link>
       <Link className="hr-btn is-ghost" href="/dashboard/inventory/locations" data-testid="inventory-locations-link">{L("المواقع", "Locations")}</Link>
       <Link className="hr-btn is-ghost" href="/dashboard/inventory/transfers" data-testid="inventory-transfers-link">{L("التحويلات", "Transfers")}</Link>
+      {/* Unified inventory phase 4 (council F7): the money of this stock, for the inventory › valuation duty. */}
+      {user && hasSubPrivilege(user.permissions, "inventory", "valuation") ? <Link className="hr-btn is-ghost" href="/dashboard/inventory/valuation" data-testid="inventory-valuation-link">{L("تقييم المخزون", "Inventory valuation")}</Link> : null}
       {canMaintain ? (
         <Btn onClick={() => setStartCount(true)} data-testid="start-count"><CheckIcon />{L("إجراء جرد", "Start a count")}</Btn>
       ) : null}
@@ -458,6 +461,7 @@ export default function InventoryPage() {
           onSave={handleEdit}
           onClose={() => setEditTarget(null)}
           saving={saving}
+          reorderFor={{ entityId: editTarget.id, canEdit: true }}
         />
       )}
       {deleteTarget && (
@@ -519,6 +523,8 @@ export default function InventoryPage() {
           </span>
         </div>
       ) : null}
+      {view === "stock" ? <InTransitPanel refreshKey={refreshKey} unitLabel={(u, q) => unitWord(u, lang, q)} /> : null}
+      {view === "stock" ? <SiteLowStock locationId={locFilter || null} unitLabel={(u, q) => unitWord(u, lang, q)} /> : null}
       {view === "stock" ? (
         <div className="inv-layout">
           {categories ? <CategoryRail categories={cats} value={sel} onChange={openCategory} totalItems={activeBeans.length + activeMaterials.length} greenLow={greenLow} canManage={canMaintain} /> : <div />}

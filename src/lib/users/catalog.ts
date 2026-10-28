@@ -63,7 +63,7 @@ export const SUB_AR: Record<string, Record<string, string>> = {
     cancel_batch: "إلغاء الدفعات وحذفها", edit_date: "تعديل تاريخ الدفعة بأثر رجعي",
     manage_roasters: "إدارة المحامص وصيانتها وإسناد المشغّلين", manage_schedule: "إدارة جدول التحميص واعتماد الخطط",
   },
-  inventory: { receive: "استلام البن الأخضر", adjust: "تسوية المخزون وتعديله", override: "تجاوز المخزون للدفعات الملغاة", valuation: "تقييم المخزون وتكلفة الإنتاج" },
+  inventory: { receive: "استلام البن الأخضر", adjust: "تسوية المخزون وتعديله", override: "تجاوز المخزون للدفعات الملغاة", valuation: "تقييم المخزون وتكلفة الإنتاج", transfer_send: "إنشاء تحويلات المخزون وإرسالها", transfer_receive: "استلام تحويلات المخزون", transfer_cancel: "إلغاء تحويلات المخزون" },
   purchases: { invoices: "إدخال فواتير الموردين وتقديمها للاعتماد", received_change: "إلغاء/تعديل فاتورة مستلمة (يعكس استلامها)" },
   workspace: { assign_any: "إسناد المهام لأي موظف وإدارة أي مهمة", team_view: "عرض مهام وتقويم وأعباء جميع الموظفين" },
   sales: {

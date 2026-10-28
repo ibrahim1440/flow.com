@@ -22,6 +22,10 @@ export type Roaster = {
   isDefault: boolean; createdAt: string; updatedAt: string;
   /** Scheduling hours (Asia/Riyadh, 0 = Sunday); null = the built-in Sunday–Thursday 07:00–15:00. */
   workingHours?: { days: number[]; start: string; end: string } | null;
+  /** 20261117090000: the roaster's own stock location (null = its station's, else the production site) and the site it
+   * effectively draws green at, with where that comes from. */
+  locationId?: string | null;
+  effectiveSite?: { id: string; nameAr: string; nameEn: string | null; source: "roaster" | "station" | "production" } | null;
 };
 export type Maintenance = {
   id: string; roasterId: string; title: string; kind: "ROUTINE" | "ONE_OFF"; recurrenceWeeks: number | null;

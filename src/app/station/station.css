@@ -20,6 +20,8 @@
 .d21 .ws-bar .ws-mark { width: 28px; height: 28px; border-radius: 8px; background: var(--surface); box-shadow: var(--shadow-sheet); flex: none; display: grid; place-items: center; overflow: hidden; }
 .d21 .ws-bar .ws-mark img { width: 22px; height: 22px; }
 .d21 .ws-bar .ws-id { line-height: 20px; min-width: 0; }
+/* The station name is never squeezed by the site badge: the badge gives way first (ellipsis). */
+.d21 .ws-bar:has(.ws-site) .ws-id { flex: none; }
 .d21 .ws-bar .ws-id b { font-weight: 600; }
 .d21 .ws-bar .ws-loc { font-size: 12.5px; color: var(--text-muted); }
 .d21 .ws-bar .ws-sp { flex: 1; }
@@ -349,6 +351,10 @@
    Values follow the approved markup (stations.py qc_* helpers); tokens only.
    ───────────────────────────────────────────────────────────────────────── */
 .d21 .ws-bar .ws-k { font-size: 12.5px; color: var(--text-muted); font-weight: 400; }
+/* The stock site badge (20261117090000): where the station draws from and books into. Never hidden — it shrinks. */
+.d21 .ws-bar .ws-site { flex: 0 1 auto; display: inline-flex; align-items: center; gap: 2px; min-width: 0; max-width: 260px; height: 28px; padding: 0 10px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border-subtle); font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+.d21 .ws-bar .ws-site bdi { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 900px) { .d21 .ws-bar .ws-site { max-width: 100%; order: 1; } }
 .d21 .ws-stchoice { display: grid; gap: 8px; width: min(640px, 100%); }
 .d21 .ws-stchoice .ws-choice { min-width: 200px; }
 
@@ -401,3 +407,4 @@
   .d21 .ws-qrow > .ws-ql { width: 100%; }
   .d21 .ws-grid3 { grid-template-columns: 1fr; }
 }
+.d21 .ws-bar .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

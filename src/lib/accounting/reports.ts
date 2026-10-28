@@ -8,6 +8,7 @@ import { Decimal, ZERO, fix2 } from "./money";
 import { dayText, parseBusinessDay } from "./dates";
 import { refuse } from "./refusals";
 import { postingRef } from "./posting-engine";
+import { sourceDocHref } from "./source-links";
 
 const POSTED = Prisma.sql`j."status" IN ('POSTED', 'REVERSED')`;
 
@@ -114,25 +115,11 @@ export async function generalLedger(accountId: string, from: Date, to: Date, pag
   };
 }
 
-/** Where a source document lives in the app (the journal → source link). Null when the module has no page. */
+/**
+ * Where a source document lives in the app (the journal → source link). Null when the module has no page. Phase 4: one
+ * table for the journal, the statement and the cost-ledger drill-down (./source-links.ts) — the old `?tab=` targets of
+ * the payables and inventory screens (which those pages never read) now name the view that holds the document.
+ */
 export function sourceHref(sourceType: string | null, sourceId: string | null, sourceModule?: string | null): string | null {
-  if (!sourceType || !sourceId) return null;
-  const id = encodeURIComponent(sourceId);
-  // Only pages that exist today; A2 / A3 add theirs (sales invoices, GRNs, roast batches …) with their events.
-  switch (sourceType) {
-    case "OPENING_BALANCE": return "/dashboard/accounting/opening";
-    case "COLLECTION": return `/dashboard/sales/collections?focus=${id}`;
-    case "ORDER": case "DELIVERY": return `/dashboard/orders?focus=${id}`;
-    case "PAYROLL_RUN": return "/dashboard/hr/payroll";
-    // A2 / A3 / A5 (feat/accounting-reports): the statement drill-down reaches every source document that has a page.
-    case "SALES_INVOICE": case "CREDIT_NOTE": case "DEBIT_NOTE": return `/dashboard/sales/invoices/${id}`;
-    case "SUPPLIER_INVOICE": return `/dashboard/purchases/invoices/${id}`;
-    case "SUPPLIER_PAYMENT": return "/dashboard/accounting/ap?tab=payments";
-    case "GRN": return "/dashboard/accounting/ap?tab=receipts";
-    case "ROAST_BATCH": case "PACKAGING_RUN": case "BLEND": return "/dashboard/accounting/inventory?tab=batches";
-    case "STOCK_ADJUSTMENT": case "QC_DISPOSITION": case "OPENING_VALUATION": return "/dashboard/accounting/inventory";
-    case "COMMISSION": return "/dashboard/commissions";
-    case "YEAR_END": return "/dashboard/accounting/periods";
-    default: return sourceModule === "hr" ? "/dashboard/hr/payroll" : null;
-  }
+  return sourceDocHref(sourceType, sourceId, {}, sourceModule);
 }

@@ -6,7 +6,7 @@
 // issues) leads the page.
 import Link from "next/link";
 import { OpsLoading } from "@/components/ops/ui";
-import { AccountingDashboard } from "./_ui/dashboard";
+import { AccountingDashboard, InventorySummary } from "./_ui/dashboard";
 import { AcctShell, StatusTag, STATUS_AR, TYPE_AR, money, useApi, useLang, type Setup } from "./_ui/shell";
 import { ZatcaTile } from "./zatca/_ui/zatca";
 
@@ -20,7 +20,7 @@ export default function AccountingOverview() {
   const pending = (journals.data?.byStatus.SUBMITTED ?? 0) + (journals.data?.byStatus.APPROVED ?? 0);
   const steps = s ? [
     { ok: s.readiness.accounts > 0, ar: "تهيئة دليل الحسابات", en: "Set up the chart of accounts", href: "/dashboard/accounting/chart" },
-    { ok: s.readiness.missingByPhase.A1.length === 0, ar: "ربط أدوار الترحيل بالحسابات", en: "Map the posting roles", href: "/dashboard/accounting/settings" },
+    { ok: s.readiness.missingByPhase.A1.length === 0, ar: "ربط الحسابات", en: "Map the accounts", href: "/dashboard/accounting/settings" },
     { ok: !!s.readiness.goLivePeriod || s.readiness.checks.find((c) => c.key === "period")?.ok === true, ar: "إنشاء السنة المالية", en: "Create the fiscal year", href: "/dashboard/accounting/periods" },
     { ok: s.readiness.active, ar: "تحديد تاريخ البدء وتفعيل المحاسبة", en: "Set the go-live date and activate", href: "/dashboard/accounting/settings" },
     { ok: s.readiness.openingPosted, ar: "ترحيل الأرصدة الافتتاحية", en: "Post the opening balances", href: "/dashboard/accounting/opening" },
@@ -30,7 +30,8 @@ export default function AccountingOverview() {
       {setup.error ? <p role="alert" className="hr-err">{setup.error}</p> : null}
       {!s ? <OpsLoading /> : (
         <>
-          {s.settings.accountingActive ? <AccountingDashboard /> : null}
+          {/* Phase 4: the inventory summary also before activation (the cost ledger runs; nothing posts yet). */}
+          {s.settings.accountingActive ? <AccountingDashboard /> : <InventorySummary />}
           <div className="acct-cards">
             <section className="acct-card" data-testid="acct-setup-steps">
               <h2>{L("خطوات التهيئة", "Setup steps")}</h2>

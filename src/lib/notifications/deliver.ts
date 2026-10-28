@@ -16,7 +16,7 @@
 import type { Prisma as PrismaNS, PrismaClient } from "@/generated/prisma/client";
 import { alertEmailHtml, sendEmail, type EmailResult } from "@/lib/notify/email";
 import { recipientFor } from "@/lib/notify/recipients";
-import { EMAIL_DEFAULT, isCategory } from "./catalog";
+import { EMAIL_DEFAULT, eventDef, isCategory } from "./catalog";
 
 type Db = PrismaClient | PrismaNS.TransactionClient;
 
@@ -32,10 +32,12 @@ function appBaseUrl(): string | null {
   return process.env.APP_BASE_URL?.trim() || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : null);
 }
 
-/** The e-mail choice of a person for a category, defaults applied. Pure. */
-export function wantsEmail(own: Map<string, Map<string, boolean>>, employeeId: string, category: string): boolean {
+/** The e-mail choice of a person for a category, defaults applied (an event may default to e-mail — `emailDefault`). Pure. */
+export function wantsEmail(own: Map<string, Map<string, boolean>>, employeeId: string, category: string, kind?: string): boolean {
   const v = own.get(employeeId)?.get(category);
   if (v !== undefined) return v;
+  const ev = kind ? eventDef(kind)?.emailDefault : undefined;
+  if (ev !== undefined) return ev;
   return isCategory(category) ? EMAIL_DEFAULT[category] : false;
 }
 
@@ -57,7 +59,7 @@ async function sendClaimed(db: Db, claimed: Claimed[]): Promise<GroupResult[]> {
   for (const c of claimed) groups.set(c.dedupeKey, [...(groups.get(c.dedupeKey) ?? []), c]);
   const base = appBaseUrl();
   for (const [dedupeKey, rows] of groups) {
-    const off = rows.filter((r) => !wantsEmail(choices, r.recipientId, r.category));
+    const off = rows.filter((r) => !wantsEmail(choices, r.recipientId, r.category, r.kind));
     await set(off.map((r) => r.id), "OFF");
     const addressed: { row: Claimed; email: string }[] = [];
     const noAddress: string[] = [];
@@ -68,7 +70,9 @@ async function sendClaimed(db: Db, claimed: Claimed[]): Promise<GroupResult[]> {
     }
     await set(noAddress, "NO_ADDRESS");
     if (addressed.length === 0) { out.push({ dedupeKey, status: "NO_RECIPIENTS", emailed: 0 }); continue; }
-    const a = addressed[0].row;
+    const first = addressed[0].row;
+    const view = eventDef(first.kind)?.emailView;
+    const a = view ? { ...first, ...view(first) } : first;
     const status = await sendEmail({
       to: addressed.map((x) => x.email),
       subject: `حِقبة · ${a.titleAr}`,

@@ -3,9 +3,10 @@ import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { greenSourceFacts, pickFromFacts } from "@/lib/services/green-source";
+import { roasterSiteId } from "@/lib/services/stock-locations";
 
 /**
- * GET /api/roasting-batches/green-source?productId=… | ?orderItemId=…[&kg=…]
+ * GET /api/roasting-batches/green-source?productId=… | ?orderItemId=…[&kg=…][&roasterId=…]
  *
  * What the roast sheet shows as its info line (production simplification item 1): the product's
  * default green lot, the active lots of the same bean and origin (for the O1 FIFO fallback the
@@ -26,7 +27,9 @@ export async function GET(request: Request) {
   const kg = kgRaw === null ? 0 : Number(kgRaw);
   if (!Number.isFinite(kg) || kg < 0) return NextResponse.json({ error: "kg must be a non-negative number." }, { status: 400 });
   try {
-    const facts = await greenSourceFacts(prisma, productId ? { productId } : { orderItemId });
+    // 20261117090000: the roaster's site (its own location, else its station's, else the production site).
+    const siteId = await roasterSiteId(prisma, url.searchParams.get("roasterId"));
+    const facts = await greenSourceFacts(prisma, productId ? { productId, siteId } : { orderItemId, siteId });
     if (!facts) return NextResponse.json({ error: "Product or order line not found." }, { status: 404 });
     // Phase 3 (stock locations): the facts carry the production site and each lot's quantity there (`siteKg`); the
     // pick is the one the roast POST makes (pickFromFacts), so the sheet and the server cannot disagree.

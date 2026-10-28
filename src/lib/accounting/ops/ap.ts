@@ -678,10 +678,17 @@ export async function supplierStatement(supplierId: string, fromText: string | n
 }
 
 /** Costed receipts of a supplier not yet matched by a posted invoice (GRNI open items), for matching and the GRNI report. One query. */
+/**
+ * Costed receipts whose purchase invoice is not POSTED. Phase 4 (council F2): with the one-step invoice a receipt can
+ * already carry its invoice, still a draft or awaiting approval — `invoice` names it (null: no invoice at all).
+ */
 export async function openReceipts(supplierId: string | null) {
-  const rows = await prisma.$queryRaw<{ purchaseRecordId: string; supplierId: string; supplierName: string; type: string; day: Date; qty: Decimal; value: Decimal; glState: string; itemKind: string; itemId: string; notes: string | null }[]>`
+  const rows = await prisma.$queryRaw<{ purchaseRecordId: string; supplierId: string; supplierName: string; type: string; day: Date; qty: Decimal; value: Decimal; glState: string; itemKind: string; itemId: string; notes: string | null; invoiceId: string | null; invoiceNumber: string | null; invoiceStatus: string | null }[]>`
     SELECT m."sourceId" AS "purchaseRecordId", p."supplierId", s."name" AS "supplierName", p."type"::text AS "type", m."businessDay" AS "day", m."qty", m."value", m."glState",
-           i."kind" AS "itemKind", i."entityId" AS "itemId", p."notes"
+           i."kind" AS "itemKind", i."entityId" AS "itemId", p."notes",
+           (SELECT v."id" FROM "SupplierInvoiceLine" l JOIN "SupplierInvoice" v ON v."id" = l."invoiceId" WHERE l."purchaseRecordId" = p."id" AND v."status" IN ('DRAFT', 'SUBMITTED') ORDER BY v."createdAt" DESC LIMIT 1) AS "invoiceId",
+           (SELECT v."number" FROM "SupplierInvoiceLine" l JOIN "SupplierInvoice" v ON v."id" = l."invoiceId" WHERE l."purchaseRecordId" = p."id" AND v."status" IN ('DRAFT', 'SUBMITTED') ORDER BY v."createdAt" DESC LIMIT 1) AS "invoiceNumber",
+           (SELECT v."status"::text FROM "SupplierInvoiceLine" l JOIN "SupplierInvoice" v ON v."id" = l."invoiceId" WHERE l."purchaseRecordId" = p."id" AND v."status" IN ('DRAFT', 'SUBMITTED') ORDER BY v."createdAt" DESC LIMIT 1) AS "invoiceStatus"
       FROM "CostMove" m
       JOIN "CostItem" i ON i."id" = m."costItemId"
       JOIN "PurchaseRecord" p ON p."id" = m."sourceId"
@@ -692,7 +699,8 @@ export async function openReceipts(supplierId: string | null) {
        AND NOT EXISTS (SELECT 1 FROM "CostMove" r WHERE r."sourceType" = 'GRN' AND r."sourceId" = p."id" AND r."sourceEvent" = 'REVERSED')
      ORDER BY m."businessDay" DESC, m."createdAt" DESC
      LIMIT 2000`;
-  return rows.map((r) => ({ purchaseRecordId: r.purchaseRecordId, supplierId: r.supplierId, supplierName: r.supplierName, type: r.type, date: dayText(r.day), quantity: new Decimal(r.qty).toFixed(), value: new Decimal(r.value).toFixed(2), glState: r.glState, itemKind: r.itemKind, itemId: r.itemId, notes: r.notes }));
+  return rows.map((r) => ({ purchaseRecordId: r.purchaseRecordId, supplierId: r.supplierId, supplierName: r.supplierName, type: r.type, date: dayText(r.day), quantity: new Decimal(r.qty).toFixed(), value: new Decimal(r.value).toFixed(2), glState: r.glState, itemKind: r.itemKind, itemId: r.itemId, notes: r.notes,
+    invoice: r.invoiceId ? { id: r.invoiceId, number: r.invoiceNumber, status: r.invoiceStatus } : null }));
 }
 
 // ─── Expense categories ──────────────────────────────────────────────────────────────────────────

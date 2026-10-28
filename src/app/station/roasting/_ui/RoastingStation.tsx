@@ -276,6 +276,7 @@ export function RoastingStation() {
     <StationBar
       station={station?.name ?? t("stationName")}
       location={station ? [roaster?.name ?? station.roaster?.name, station.place].filter(Boolean).join(" · ") || undefined : roaster ? [roaster.name, roaster.statusReason].filter(Boolean).join(" · ") : undefined}
+      site={q?.site ? (lang === "en" ? q.site.nameEn || q.site.nameAr : q.site.nameAr) : null}
       conn={conn} updated={updated || "—"} updatedWord={t("lastUpdate")}
       emp={{ name: user.name, tag: onDevice ? t("stationSession") : t("personalSession") }}
       lockLabel={t("lock")} switchLabel={t("switchEmployee")}
@@ -598,7 +599,7 @@ export function RoastingStation() {
                 an override — «كيس غير المقترح» — never a step: without it the server's pick is recorded. */}
             {online && !wait && q.lotScan ? (
               scanOpen || draft.lot
-                ? <div style={{ marginTop: 12 }}><StationLotScan lang={lang} productId={item?.productId ?? null} greenKg={g}
+                ? <div style={{ marginTop: 12 }}><StationLotScan lang={lang} productId={item?.productId ?? null} greenKg={g} roasterId={roaster?.id ?? null}
                     auto={item?.green ? { serial: item.green.serial, nameAr: item.green.nameAr, nameEn: item.green.nameEn } : null}
                     lot={draft.lot ?? null} onLot={(l) => setDraft({ lot: l })} /></div>
                 : <div style={{ marginTop: 12 }}><Secondary onClick={() => setScanOpen(true)} testId="station-lot-override">{L("كيس غير المقترح؟ امسحه", "A different sack? Scan it")}</Secondary></div>

@@ -1,16 +1,17 @@
 import { NextResponse } from "@/lib/api-response";
-import { requireAnyModule, requireAnySub } from "@/lib/auth-server";
+import { requireAnyModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { auditFromRequest } from "@/lib/accounting/audit";
 import { createTransfer, listTransfers } from "@/lib/services/stock-transfers";
 
 /**
  * «تحويل مخزون» (20261115090000_stock_locations).
- *   GET  /api/inventory/transfers[?location=&from=&to=&status=POSTED|CANCELLED&dateFrom=&dateTo=&by=<creator user id>]
- *   POST /api/inventory/transfers  { fromLocationId, toLocationId, transferDate?, notes?, requestKey?,
- *                                    lines: [{ itemKind: GREEN_BEAN|MATERIAL, entityId, qty, notes? }] } — one step:
- *        both balances move now (no journal entry: valuation is company-wide).
- * Writes: inventory › receive or adjust (moving goods between sites changes no quantity the company holds).
+ *   GET  /api/inventory/transfers[?location=&from=&to=&status=POSTED|IN_TRANSIT|RECEIVED|CANCELLED&dateFrom=&dateTo=&by=<creator id>]
+ *   POST /api/inventory/transfers  { mode?: IMMEDIATE|TWO_STEP, fromLocationId, toLocationId, transferDate?, notes?, requestKey?,
+ *                                    lines: [{ itemKind: GREEN_BEAN|MATERIAL|FG_LOT, entityId, qty, notes? }] } —
+ *        IMMEDIATE («تحويل فوري»): both sides move now; TWO_STEP («إرسال»): the goods leave the source into «في الطريق»
+ *        and are received later (POST …/[id]/receive). No journal entry: valuation is company-wide.
+ * Writes: inventory › transfer_send (20261117090000_locations_enhancements, owner decision 4).
  */
 export async function GET(request: Request) {
   const { error } = await requireAnyModule("inventory", "packaging", "production");
@@ -24,7 +25,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const { user, error } = await requireAnySub("inventory", ["receive", "adjust"]);
+  const { user, error } = await requireSub("inventory", "transfer_send");
   if (error) return error;
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
   if (!body || typeof body !== "object") return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });

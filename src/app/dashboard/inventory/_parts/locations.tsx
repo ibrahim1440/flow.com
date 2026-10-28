@@ -113,3 +113,140 @@ export function ShortStockHint({ location }: { location: ShortLocation | null | 
     </span>
   );
 }
+
+// ─── Reorder points per location (20261117090000_locations_enhancements, owner decision 3) ─────────
+
+type SitePoint = { id: string; code: string; nameAr: string; nameEn: string | null; isProduction: boolean; qty: number; reorderPoint: number | null; low: boolean };
+
+/**
+ * «حد إعادة الطلب في كل موقع»: one row per active site — the item's balance there and its reorder point there (empty =
+ * none). Saved on its own (PUT /api/inventory/reorder-points); shown in the item's settings — and, for a finished SKU, in
+ * the SKU's settings (units: its AVAILABLE units at each site). The company-wide reorder point stays where it is.
+ */
+export function SiteReorderEditor({ itemKind, entityId, unit, canEdit }: { itemKind: "GREEN_BEAN" | "MATERIAL" | "PRODUCT_SKU"; entityId: string; unit: string; canEdit: boolean }) {
+  const L = useL();
+  const { lang } = useI18n();
+  const [sites, setSites] = useState<SitePoint[] | null>(null);
+  const [vals, setVals] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ tone: "success" | "danger"; text: string } | null>(null);
+  const apply = useCallback((j: { sites: SitePoint[] }) => {
+    setSites(j.sites);
+    setVals(Object.fromEntries(j.sites.map((s) => [s.id, s.reorderPoint ? String(s.reorderPoint) : ""])));
+  }, []);
+  const url = `/api/inventory/reorder-points?itemKind=${itemKind}&entityId=${encodeURIComponent(entityId)}`;
+  const load = useCallback(async () => {
+    const r = await fetch(url).catch(() => null);
+    if (r?.ok) apply(await r.json());
+  }, [url, apply]);
+  useEffect(() => {
+    let off = false;
+    fetch(url).then(async (r) => { if (!off && r.ok) apply(await r.json()); }).catch(() => undefined);
+    return () => { off = true; };
+  }, [url, apply]);
+  if (!sites || sites.length < 2) return null;
+  const dirty = sites.some((s) => (vals[s.id] ?? "") !== (s.reorderPoint ? String(s.reorderPoint) : ""));
+  async function save() {
+    setBusy(true); setMsg(null);
+    const r = await fetch("/api/inventory/reorder-points", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ itemKind, entityId, points: sites!.map((s) => ({ locationId: s.id, reorderPoint: (vals[s.id] ?? "").trim() || null })) }) }).catch(() => null);
+    setBusy(false);
+    if (!r?.ok) { const j = await r?.json().catch(() => ({})); setMsg({ tone: "danger", text: (lang === "en" ? j?.errorEn ?? j?.error : j?.error ?? j?.errorEn) ?? L("تعذّر الحفظ.", "Could not save.") }); return; }
+    setMsg({ tone: "success", text: L("حُفظت حدود المواقع.", "Site reorder points saved.") });
+    void load();
+  }
+  return (
+    <div className="loc-reorder" data-testid="site-reorder">
+      <div className="loc-reorder-h">
+        <strong>{L("حد إعادة الطلب في كل موقع", "Reorder point per location")}</strong>
+        <span className="hr-caption">{L("يُنبَّه «تحت حد إعادة الطلب» لكل موقع على حدة. فارغ = بلا حد.", "«Below reorder point» is flagged for each location. Empty = no point.")}</span>
+      </div>
+      <div className="hr-tablewrap">
+        <table className="hr-table" aria-label={L("حد إعادة الطلب في كل موقع", "Reorder point per location")}>
+          <thead><tr><th>{L("الموقع", "Location")}</th><th className="num">{itemKind === "PRODUCT_SKU" ? L("المتاح (غير المحجوز)", "Free (not reserved)") : L("الرصيد", "On hand")}</th><th className="num">{L("حد إعادة الطلب", "Reorder point")}</th><th aria-label={L("التنبيه", "Flag")} /></tr></thead>
+          <tbody>
+            {sites.map((s) => (
+              <tr key={s.id} data-testid={`site-reorder-${s.code}`}>
+                <td>{locationName(s, lang)}</td>
+                <td className={`num${s.low ? " is-low" : ""}`}><span className="hr-num">{Number(s.qty.toFixed(2))}</span> <span className="hr-caption">{unit}</span></td>
+                <td className="num">
+                  <input className="hr-input loc-reorder-in" inputMode={itemKind === "PRODUCT_SKU" ? "numeric" : "decimal"} type="number" min={0} step={itemKind === "PRODUCT_SKU" ? 1 : "any"} disabled={!canEdit} aria-label={`${L("حد إعادة الطلب", "Reorder point")} · ${locationName(s, lang)}`}
+                    data-testid={`site-reorder-input-${s.code}`} value={vals[s.id] ?? ""} onChange={(e) => setVals((v) => ({ ...v, [s.id]: e.target.value }))} />
+                </td>
+                <td style={{ textAlign: "end" }}>{s.low ? <span className="stk-flag">{L("تحت الحد", "Below")}</span> : null}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {canEdit ? (
+        <div className="loc-reorder-f">
+          <button type="button" className="hr-btn is-sm" disabled={!dirty || busy} onClick={save} data-testid="site-reorder-save">{busy ? L("جارٍ الحفظ…", "Saving…") : L("حفظ حدود المواقع", "Save site points")}</button>
+          {msg ? <span className={`hr-caption tone-${msg.tone}`} role="status">{msg.text}</span> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+type SiteLow = { locationId: string; locationNameAr: string; locationNameEn: string | null; itemKind: string; entityId: string; code: string; name: string; nameAr: string | null; unit: string; qty: number; reorderPoint: number };
+
+/** «تحت حد إعادة الطلب» per location: the items at or below a site's own reorder point (only when any are). */
+export function SiteLowStock({ locationId, unitLabel }: { locationId?: string | null; unitLabel: (u: string, qty: number) => string }) {
+  const L = useL();
+  const { lang } = useI18n();
+  const [rows, setRows] = useState<SiteLow[] | null>(null);
+  useEffect(() => {
+    let off = false;
+    fetch(`/api/inventory/reorder-points/low${locationId ? `?location=${encodeURIComponent(locationId)}` : ""}`).then(async (r) => { if (!off && r.ok) setRows(((await r.json()) as { low: SiteLow[] }).low); }).catch(() => undefined);
+    return () => { off = true; };
+  }, [locationId]);
+  if (!rows?.length) return null;
+  return (
+    <section className="loc-lows" aria-label={L("تحت حد إعادة الطلب في المواقع", "Below reorder point by location")} data-testid="site-low-stock">
+      <h3 className="loc-lows-h">{L("تحت حد إعادة الطلب · حسب الموقع", "Below reorder point · by location")} <span className="hr-num">{rows.length}</span></h3>
+      <ul className="loc-lows-l">
+        {rows.map((r) => (
+          <li key={`${r.locationId}:${r.itemKind}:${r.entityId}`} data-testid={`site-low-${r.code}`}>
+            <span className="loc-chip">{lang === "en" ? r.locationNameEn || r.locationNameAr : r.locationNameAr}</span>
+            <span className="strong">{lang === "en" ? r.name : r.nameAr || r.name}</span> <span className="hr-id">{r.code}</span>
+            <span className="hr-caption"> · <span className="hr-num">{Number(r.qty.toFixed(2))}</span> {unitLabel(r.unit, r.qty)} {L("من حد", "of point")} <span className="hr-num">{r.reorderPoint}</span></span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+type InTransit = { id: string; ref: string; sentAt: string | null; from: { nameAr: string; nameEn: string | null }; to: { nameAr: string; nameEn: string | null }; lines: { code: string; name: string; nameEn: string; qty: number; unit: string }[] };
+
+/**
+ * «في الطريق» (20261117090000_locations_enhancements): what two-step transfers have sent and not yet received — still
+ * the company's stock (in the totals and the valuation), at no site. Each transfer opens to «استلام».
+ */
+export function InTransitPanel({ refreshKey, unitLabel }: { refreshKey: number; unitLabel: (u: string, qty: number) => string }) {
+  const L = useL();
+  const { lang } = useI18n();
+  const [rows, setRows] = useState<InTransit[] | null>(null);
+  useEffect(() => {
+    let off = false;
+    fetch("/api/inventory/transfers/lots").then(async (r) => { if (!off && r.ok) setRows(((await r.json()) as { inTransit: InTransit[] }).inTransit); }).catch(() => undefined);
+    return () => { off = true; };
+  }, [refreshKey]);
+  if (!rows?.length) return null;
+  const nm = (l: { nameAr: string; nameEn: string | null }) => (lang === "en" ? l.nameEn || l.nameAr : l.nameAr);
+  return (
+    <section className="loc-transit" aria-label={L("في الطريق", "In transit")} data-testid="in-transit">
+      <h3 className="loc-lows-h">{L("في الطريق", "In transit")} <span className="hr-num">{rows.length}</span></h3>
+      <p className="hr-caption" style={{ margin: 0 }}>{L("أُرسلت ولم تُستلم بعد — ضمن إجمالي المخزون وقيمته.", "Sent and not yet received — counted in the stock totals and value.")}</p>
+      <ul className="loc-transit-l">
+        {rows.map((t) => (
+          <li key={t.id} data-testid={`in-transit-${t.ref}`}>
+            <Link className="ops-link hr-id" href={`/dashboard/inventory/transfers/${t.id}`}>{t.ref}</Link>
+            <span>{nm(t.from)} {lang === "en" ? "→" : "←"} {nm(t.to)}</span>
+            <span className="hr-caption">{t.lines.map((l) => `${lang === "en" ? l.nameEn : l.name} ${Number(l.qty.toFixed(3))} ${unitLabel(l.unit, l.qty)}`).join(L("، ", ", "))}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}

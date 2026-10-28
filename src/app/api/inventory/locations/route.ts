@@ -14,7 +14,8 @@ import { createLocation, lastReceivingLocationId, listLocations } from "@/lib/se
  * Writes: inventory › adjust (the owner's privilege for the stock master data); each one in the person audit.
  */
 export async function GET(request: Request) {
-  const { user, error } = await requireAnyModule("inventory", "packaging", "production", "purchases", "accounting");
+  // dispatch (20261117090000): the dispatch screen's «الشحن من» picker.
+  const { user, error } = await requireAnyModule("inventory", "packaging", "production", "purchases", "accounting", "dispatch");
   if (error) return error;
   try {
     const all = new URL(request.url).searchParams.get("all") === "1";

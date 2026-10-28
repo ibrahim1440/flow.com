@@ -9,6 +9,7 @@ import { GROUP_LABEL } from "@/lib/accounting/report-groups";
 import { OpsLoading, Btn, Field } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
 import { Select } from "@/components/ui/Select";
+import { roleDef } from "@/lib/accounting/roles";
 import { AcctShell, ACCOUNT_TYPE_AR, CONTROL_AR, Msg, money, useApi, useLang, useWrite, type Setup } from "../_ui/shell";
 
 type Acc = { id: string; code: string; nameAr: string | null; nameEn: string; type: string; normalBalance: string; parentId: string | null; allowPosting: boolean; isActive: boolean; controlType: string | null; allowManualJournal: boolean; description: string | null; reportGroup?: string | null; lines: number; balance: string; roles: string[]; children: number };
@@ -54,7 +55,7 @@ export default function ChartPage() {
     if (r) setSeed(r);
   }
   async function doSeed() {
-    const r = await w.run("seed", "/api/accounting/coa/seed", "POST", {}, L("هُيّئ دليل الحسابات وربطت أدوار الترحيل.", "The chart is set up and the posting roles mapped."));
+    const r = await w.run("seed", "/api/accounting/coa/seed", "POST", {}, L("هُيّئ دليل الحسابات وربطت الحسابات.", "The chart is set up and the accounts mapped."));
     if (r) { setSeed(null); chart.reload(); setup.reload(); }
   }
   async function save() {
@@ -100,7 +101,7 @@ export default function ChartPage() {
           </div>
           <div className="hr-tablewrap">
             <table className="hr-table is-dense" data-testid="coa-table">
-              <thead><tr><th>{L("الرمز", "Code")}</th><th>{L("الحساب", "Account")}</th><th className="acct-hide-m">{L("النوع", "Type")}</th><th className="acct-hide-m">{L("المراقبة", "Control")}</th><th className="acct-hide-m">{L("القيد اليدوي", "Manual journal")}</th><th className="acct-hide-m">{L("أدوار الترحيل", "Posting roles")}</th><th className="num">{L("الرصيد", "Balance")}</th>{can?.coa ? <th><span className="hr-sr">{L("تعديل", "Edit")}</span></th> : null}</tr></thead>
+              <thead><tr><th>{L("الرمز", "Code")}</th><th>{L("الحساب", "Account")}</th><th className="acct-hide-m">{L("النوع", "Type")}</th><th className="acct-hide-m">{L("المراقبة", "Control")}</th><th className="acct-hide-m">{L("القيد اليدوي", "Manual journal")}</th><th className="acct-hide-m">{L("يُرحَّل عليه تلقائيًا", "Posted to automatically for")}</th><th className="num">{L("الرصيد", "Balance")}</th>{can?.coa ? <th><span className="hr-sr">{L("تعديل", "Edit")}</span></th> : null}</tr></thead>
               <tbody>
                 {shown.map((a) => {
                   const header = !a.allowPosting || a.children > 0;
@@ -111,7 +112,7 @@ export default function ChartPage() {
                       <td className="acct-hide-m">{L(ACCOUNT_TYPE_AR[a.type]?.[0] ?? a.type, ACCOUNT_TYPE_AR[a.type]?.[1] ?? a.type)}{header ? <span className="acct-hint"> · {L("رئيسي · لا يُرحَّل عليه", "Header · not postable")}</span> : null}</td>
                       <td className="acct-hide-m">{a.controlType ? L(CONTROL_AR[a.controlType]?.[0] ?? a.controlType, CONTROL_AR[a.controlType]?.[1] ?? a.controlType) : "—"}</td>
                       <td className="acct-hide-m">{header ? "" : a.allowManualJournal ? L("مسموح", "Allowed") : <span className="hr-flag tone-warning"><span>{L("لا قيد يدوي", "No manual journal")}</span></span>}</td>
-                      <td className="acct-hide-m acct-hint">{a.roles.join(" · ") || ""}</td>
+                      <td className="acct-hide-m acct-hint" title={a.roles.join(" · ") || undefined}>{a.roles.map((k) => { const d = roleDef(k); return d ? L(d.ar, d.en) : k; }).join(" · ")}</td>
                       <td className="num hr-num">{a.lines ? money(a.balance) : <span className="acct-hint">{header ? "" : L("لا حركات", "No movement")}</span>}</td>
                       {can?.coa ? <td><button type="button" className="hr-btn is-ghost is-sm" onClick={() => edit(a)} aria-label={L(`تعديل ${a.code}`, `Edit ${a.code}`)}>{L("تعديل", "Edit")}</button></td> : null}
                     </tr>
@@ -126,7 +127,7 @@ export default function ChartPage() {
       <Dialog open={!!seed} title={L("تهيئة دليل الحسابات", "Set up the chart of accounts")} onClose={() => setSeed(null)}
         sub={L("القالب الافتراضي لمحمصة ومقهى في المملكة. يمكن تعديل كل حساب بعد التهيئة.", "The default KSA roastery + café template. Every account stays editable.")}
         actions={<><Btn variant="primary" busy={w.busy === "seed"} onClick={doSeed} data-testid="coa-seed-confirm">{L("تهيئة", "Set up")}</Btn><Btn onClick={() => setSeed(null)}>{L("إلغاء", "Cancel")}</Btn></>}>
-        {seed ? <p>{L(`سيُنشأ ${seed.accounts} حسابًا (${seed.postable} قابلًا للترحيل) وتُربط ${seed.roles} من أدوار الترحيل.`, `${seed.accounts} accounts (${seed.postable} postable) will be created and ${seed.roles} posting roles mapped.`)}</p> : null}
+        {seed ? <p>{L(`سيُنشأ ${seed.accounts} حسابًا (${seed.postable} قابلًا للترحيل) ويُربط ${seed.roles} بندًا بحساباتها.`, `${seed.accounts} accounts (${seed.postable} postable) will be created and ${seed.roles} items mapped to their accounts.`)}</p> : null}
       </Dialog>
       <Dialog open={!!form} title={form?.id ? L(`تعديل حساب · ${form.code}`, `Edit account · ${form?.code}`) : L("حساب جديد", "New account")} onClose={() => setForm(null)}
         actions={<><Btn variant="primary" busy={w.busy === "save"} onClick={save} data-testid="coa-save">{L("حفظ", "Save")}</Btn><Btn onClick={() => setForm(null)}>{L("إلغاء", "Cancel")}</Btn></>}>

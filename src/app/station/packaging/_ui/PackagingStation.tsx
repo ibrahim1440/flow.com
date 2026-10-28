@@ -19,7 +19,7 @@ import type { PackBatch, PackPending, PackBlocked } from "@/lib/services/station
 import type { PrepOrder, PrepQueue, MatchAnswer, HandoffView } from "@/lib/services/station/prep";
 
 type Tab = "packaging" | "preparation";
-type PackQueue = { batches: PackBatch[]; pending: PackPending[]; blocked: PackBlocked[]; serverTime: string; version: string };
+type PackQueue = { batches: PackBatch[]; pending: PackPending[]; blocked: PackBlocked[]; serverTime: string; version: string; site?: { id: string; nameAr: string; nameEn: string | null; source: "station" | "roast" } | null };
 type Api = { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any -- API bodies are read field by field
 
 const TZ = "Asia/Riyadh";
@@ -120,6 +120,8 @@ export function PackagingStation() {
   ) : null;
   const bar = (
     <StationBar station={station?.name ?? L("محطة التعبئة والتجهيز", "Packaging & preparation station")} location={station?.place ?? undefined}
+      site={packQ?.site ? L(packQ.site.nameAr, packQ.site.nameEn || packQ.site.nameAr) : null}
+      siteTitle={packQ?.site && packQ.site.source !== "station" ? L(`لا موقع للمحطة: يُعبَّأ في موقع تحميص الدفعة (افتراضيًا ${packQ.site.nameAr})`, `No site set on the station: packed at the batch's roasting site (default ${packQ.site.nameEn || packQ.site.nameAr})`) : null}
       conn={conn} updated={updated || "—"} updatedWord={st("lastUpdate", lang)}
       emp={{ name: user.name, tag: onDevice ? st("stationSession", lang) : st("personalSession", lang) }}
       lockLabel={st("lock", lang)} switchLabel={st("switchEmployee", lang)} onLock={() => void lock()} onSwitch={() => switchEmployee()} extra={tabBar} />

@@ -1,6 +1,7 @@
 import { LOT_NOT_HELD } from "@/lib/services/qc/hold-guard";
 import { Prisma } from "@/generated/prisma/client";
 import { lockLotsInIdOrder, lockAllocationsInIdOrder } from "./order-operations";
+import { atPromiseSite } from "./fg-site";
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -117,7 +118,9 @@ export async function partialPackagesBySku(
  */
 export async function availableUnitsBySku(
   tx: PrismaTx,
-  skuIds: string[]
+  skuIds: string[],
+  /** "promise" (ordering, preparation): only the production site's lots (council F1); default: every site. */
+  scope: "all" | "promise" = "all",
 ): Promise<Map<string, SkuAvailability>> {
   const out = new Map<string, SkuAvailability>();
   if (skuIds.length === 0) return out;
@@ -130,6 +133,7 @@ export async function availableUnitsBySku(
       status: "AVAILABLE",
       // QC W3: nothing packed from a held batch is promised (hold-guard.ts).
       ...LOT_NOT_HELD,
+      ...(scope === "promise" ? await atPromiseSite(tx) : {}),
     },
     _sum: { unitsAvailable: true, unitsReserved: true },
   });
@@ -192,6 +196,8 @@ export async function reserveFinishedUnits(
       isUnitTracked: true,
       status: "AVAILABLE",
       ...LOT_NOT_HELD,
+      // Council F1: promised from the production site only; a lot elsewhere needs a transfer first.
+      ...(await atPromiseSite(tx)),
     },
     select: { id: true, batchNumber: true, unitsAvailable: true, unitsReserved: true },
     // FIFO — roasted coffee degrades, so the oldest free lot leaves the shelf next.
@@ -740,7 +746,7 @@ export async function planFulfilment(
         product: { select: { productNameEn: true } },
       },
     }),
-    availableUnitsBySku(tx, skuIds),
+    availableUnitsBySku(tx, skuIds, "promise"),
   ]);
   const skuById = new Map(skus.map((s) => [s.id, s]));
 

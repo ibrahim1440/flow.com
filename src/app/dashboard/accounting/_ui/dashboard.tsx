@@ -6,10 +6,10 @@
 // is the P&L) — and the issues panel: the close-checklist items that fail or need review, each linking to its fix.
 // Recharts draws SVG attributes, so the token value is read from the page's computed style (as the finance board).
 import Link from "next/link";
-import { useMemo, useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore, type ReactNode } from "react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, LabelList } from "recharts";
 import { OpsLoading } from "@/components/ops/ui";
-import { money, useApi, useLang } from "./shell";
+import { Term, money, useApi, useLang } from "./shell";
 import { CheckStatus, type Check } from "./close";
 
 type Dash = {
@@ -30,7 +30,7 @@ function useTokens() {
   return useMemo(() => JSON.parse(key) as { bar: string; grid: string; muted: string }, [key]);
 }
 
-function Kpi({ k, v, s, testId, bad }: { k: string; v: string; s?: string; testId: string; bad?: boolean }) {
+function Kpi({ k, v, s, testId, bad }: { k: ReactNode; v: string; s?: string; testId: string; bad?: boolean }) {
   return <div className="acct-metric" data-testid={testId}><span className="k">{k}</span><span className={`v${bad ? " is-bad" : ""}`}>{v}</span>{s ? <span className="s">{s}</span> : null}</div>;
 }
 
@@ -63,6 +63,7 @@ export function AccountingDashboard() {
           <Kpi testId="kpi-roast" k={L("تكلفة الكيلو المحمص", "Roasted cost per kg")} v={k.roastCostPerKg ? money(k.roastCostPerKg) : "—"} s={k.roastedKg ? L(`${k.roastedKg} كغ هذا الشهر · فاقد ${pct(k.roastLossPct)}`, `${k.roastedKg} kg this month · loss ${pct(k.roastLossPct)}`) : L("لا تحميص هذا الشهر", "No roasting this month")} />
         </div>
       </section>
+      <InventorySummary />
       <div className="acct-split">
         <section className="acct-card" data-testid="acct-trend">
           <h2>{L("الإيرادات حسب الشهر · آخر ستة أشهر", "Revenue by month · last six months")}</h2>
@@ -98,5 +99,59 @@ export function AccountingDashboard() {
         </section>
       </div>
     </>
+  );
+}
+
+type InvRec = {
+  asOf: string;
+  inventory: { role: string; account: { code: string; name: string } | null; subLedger: string; gl: string; unexplained: string; status: string }[];
+  totals: { subLedger: string; gl: string; difference: string };
+  grni: { account: { code: string } | null; gl: string; openReceipts: string; count: number; noInvoice: { count: number; value: string }; awaitingApproval: { count: number; value: string } };
+};
+const INV_ROLE: Record<string, [string, string]> = {
+  INVENTORY_GREEN: ["البن الأخضر", "Green coffee"], INVENTORY_PACKAGING: ["مواد التغليف", "Packaging"], INVENTORY_CAFE: ["مواد المقهى", "Café consumables"],
+  INVENTORY_ROASTED: ["البن المحمص", "Roasted coffee"], INVENTORY_PACKED: ["المنتجات المعبأة", "Packed goods"],
+};
+
+/**
+ * Unified inventory phase 4 — «ملخص المخزون للمحاسب»: the inventory value per account (the cost ledger, and the general
+ * ledger beside it), what is left unreconciled, and the goods received whose invoice is not posted (no invoice / awaiting approval). One read of the A3 reconciliation;
+ * the detail is «تقييم المخزون».
+ */
+export function InventorySummary() {
+  const { L } = useLang();
+  const r = useApi<InvRec>("/api/accounting/inventory/reconciliation");
+  if (r.error) return null;
+  if (!r.data) return <OpsLoading rows={2} />;
+  const d = r.data;
+  const unexplained = d.inventory.reduce((s, x) => s + Number(x.unexplained), 0);
+  const rows = d.inventory.filter((x) => Number(x.subLedger) || Number(x.gl));
+  return (
+    <section className="acct-card" data-testid="acct-inventory-summary">
+      <div className="acct-foot" style={{ borderTop: 0, paddingTop: 0 }}>
+        <h2>{L("ملخص المخزون للمحاسب", "Inventory summary for the accountant")}</h2>
+        <Link className="hr-btn is-sm" href="/dashboard/accounting/inventory">{L("تقييم المخزون", "Inventory valuation")}</Link>
+      </div>
+      <div className="acct-metrics">
+        <Kpi testId="inv-sum-total" k={L("قيمة المخزون بالتكلفة", "Inventory value at cost")} v={money(d.totals.subLedger)} s={L(`دفتر الأستاذ ${money(d.totals.gl)}`, `General ledger ${money(d.totals.gl)}`)} />
+        <Kpi testId="inv-sum-unexplained" k={L("فرق غير مسوّى", "Unreconciled difference")} v={money(unexplained)} bad={Math.abs(unexplained) > 0.004} s={Math.abs(unexplained) > 0.004 ? L("يُبحث قبل إقفال الفترة", "Investigate before the period close") : L(`الفرق الكلي ${money(d.totals.difference)} مفسَّر`, `Total difference ${money(d.totals.difference)}, explained`)} />
+        <Kpi testId="inv-sum-grni" k={<Term tech="GRNI">{L("بضاعة مستلمة لم تُرحَّل فاتورتها", "Received, not yet billed in the books")}</Term>} v={money(d.grni.gl)} s={L(`بلا فاتورة ${d.grni.noInvoice.count} (${money(d.grni.noInvoice.value)}) · بانتظار الاعتماد ${d.grni.awaitingApproval.count} (${money(d.grni.awaitingApproval.value)})`, `No invoice ${d.grni.noInvoice.count} (${money(d.grni.noInvoice.value)}) · awaiting approval ${d.grni.awaitingApproval.count} (${money(d.grni.awaitingApproval.value)})`)} />
+      </div>
+      {rows.length ? (
+        <div className="hr-tablewrap">
+          <table className="hr-table is-dense" data-testid="inv-sum-accounts">
+            <thead><tr><th>{L("حساب المخزون", "Inventory account")}</th><th className="num">{L("سجل التكلفة", "Cost ledger")}</th><th className="num">{L("دفتر الأستاذ", "General ledger")}</th></tr></thead>
+            <tbody>
+              {rows.map((x) => (
+                <tr key={x.role}>
+                  <td>{x.account ? <><span className="acct-code">{x.account.code}</span> {x.account.name}</> : L(INV_ROLE[x.role]?.[0] ?? x.role, INV_ROLE[x.role]?.[1] ?? x.role)}</td>
+                  <td className="num hr-num">{money(x.subLedger)}</td><td className={`num hr-num${Number(x.unexplained) ? " acct-bad" : ""}`}>{money(x.gl)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </section>
   );
 }

@@ -6,7 +6,7 @@ import { Languages } from "lucide-react";
 import { Btn, Field, Notice, useL } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
 import { useI18n } from "@/lib/i18n/context";
-import { OpeningSiteField } from "./locations";
+import { OpeningSiteField, SiteReorderEditor } from "./locations";
 
 export type FormState = {
   serialNumber: string; beanType: string; beanTypeAr: string;
@@ -51,8 +51,10 @@ async function callTranslate(text: string, target: "ar" | "en"): Promise<string 
 // ─── BeanForm (Add / Edit) ───────────────────────────────────────────────────
 
 export function BeanForm({
-  title, initial, onSave, onClose, saving, error, hideQuantity, saveLabel, openingSite,
+  title, initial, onSave, onClose, saving, error, hideQuantity, saveLabel, openingSite, reorderFor,
 }: {
+  /** The edit form of an existing lot: its reorder point per location (20261117090000), saved on its own. */
+  reorderFor?: { entityId: string; canEdit: boolean };
   /** A new lot with a starting quantity: offer «موقع الرصيد الافتتاحي» (the add flow; never the edit form). */
   openingSite?: boolean;
   title: string;
@@ -166,6 +168,7 @@ export function BeanForm({
         ))}
         <SackFields form={form} set={set} hideQuantity={hideQuantity} />
       </form>
+      {reorderFor ? <SiteReorderEditor itemKind="GREEN_BEAN" entityId={reorderFor.entityId} unit={L("كغ", "kg")} canEdit={reorderFor.canEdit} /> : null}
     </Dialog>
   );
 }

@@ -1,6 +1,6 @@
 import { flushPostings } from "@/lib/accounting/ops/cost-ledger";
 import { onDelivery } from "@/lib/accounting/ops/inventory-events";
-import { productionLocation, setStockLocation } from "@/lib/services/stock-locations";
+import { activeLocation, productionLocation, setStockLocation } from "@/lib/services/stock-locations";
 import { autoCloseAfterDelivery, autoPrepareOrder } from "@/lib/services/orders/preparation";
 import { settleProductionOrders } from "@/lib/services/production-schedule";
 import { assertLotsNotHeld } from "@/lib/services/qc/hold-guard";
@@ -79,6 +79,13 @@ async function withLines<T extends { id: string }>(delivery: T) {
   return row;
 }
 
+/** A named lot that is not at the ship-from site (or is on its way between sites). */
+function shipFromRefusal(site: { id: string; nameAr: string; nameEn: string | null }, inTransit: boolean) {
+  return inTransit
+    ? { _appCode: 409, code: "DISPATCH_LOT_IN_TRANSIT", message: "اللوت المختار في الطريق بين موقعين؛ يُشحن بعد استلامه.", errorEn: "The selected lot is in transit between two sites; it ships once it is received." }
+    : { _appCode: 409, code: "DISPATCH_LOT_ELSEWHERE", message: `اللوت المختار ليس في «${site.nameAr}».`, errorEn: `The selected lot is not at «${site.nameEn || site.nameAr}».`, location: { locationId: site.id } };
+}
+
 export async function POST(request: Request) {
   // Authorization first, before the key is even read: possession of an Idempotency-Key
   // is not authority, and an unauthorized caller must not be able to learn whether one
@@ -116,9 +123,16 @@ export async function POST(request: Request) {
 
   try {
     const outcome: DeliveryOutcome = await prisma.$transaction(async (tx) => {
-      // Phase 3 (stock locations): a dispatch ships from the production site, where the finished lots are
-      // (Delivery.locationId and its movements take it; finished lots are not moved between sites yet).
-      await setStockLocation(tx, (await productionLocation(tx)).id);
+      // Ship-from (20261117090000_locations_enhancements, owner decision 2): the dispatcher's choice, else a named lot's
+      // own site, else the production site. The dispatch draws only from finished lots there; Delivery.locationId and
+      // its movements take it.
+      let shipFrom: { id: string; nameAr: string; nameEn: string | null };
+      if (intent.locationId) shipFrom = await activeLocation(tx, intent.locationId);
+      else {
+        const named = finishedGoodsLotId ? await tx.finishedGoodsLot.findUnique({ where: { id: finishedGoodsLotId }, select: { location: { select: { id: true, nameAr: true, nameEn: true, isActive: true, type: true } } } }) : null;
+        shipFrom = named?.location.isActive && named.location.type !== "TRANSIT" ? named.location : await productionLocation(tx);
+      }
+      await setStockLocation(tx, shipFrom.id);
       const orderItem = await tx.orderItem.findUnique({
         where: { id: orderItemId },
         include: {
@@ -210,19 +224,24 @@ export async function POST(request: Request) {
         if (finishedGoodsLotId) {
           const lot = await tx.finishedGoodsLot.findUnique({
             where: { id: finishedGoodsLotId },
-            select: { id: true, productSkuId: true, isUnitTracked: true },
+            select: { id: true, productSkuId: true, isUnitTracked: true, status: true, locationId: true },
           });
           if (!lot) throw { _appCode: 404, message: "Finished goods lot not found." };
           if (!lot.isUnitTracked || lot.productSkuId !== sku.id) {
             throw { _appCode: 409, message: `Selected lot does not hold units of ${sku.skuCode}.` };
           }
+          // A lot on its way between sites, or at another site, does not ship from here.
+          if (lot.status !== "AVAILABLE" || lot.locationId !== shipFrom.id) throw shipFromRefusal(shipFrom, lot.status === "IN_TRANSIT");
           plan = [{ lotId: finishedGoodsLotId, units }];
         } else {
-          const picked = planDispatch(await unitPlanCandidates(tx, orderItemId, sku.id, lockSet), units);
+          const picked = planDispatch(await unitPlanCandidates(tx, orderItemId, sku.id, lockSet, shipFrom.id), units);
           if (picked.covered < units) {
             throw {
               _appCode: 409,
+              code: "DISPATCH_SITE_SHORT",
               message: `Only ${picked.ready} unit(s) of ${sku.skuCode} are ready to ship for this line (its reservations plus free stock). Nothing was delivered.`,
+              // The ship-from site the figure is about (20261117090000): the dispatch screen names it.
+              location: { locationId: shipFrom.id, nameAr: shipFrom.nameAr, nameEn: shipFrom.nameEn, ready: picked.ready, requested: units },
             };
           }
           plan = picked.lots.map((l) => ({ lotId: l.lotId, units: l.quantity }));
@@ -382,14 +401,15 @@ export async function POST(request: Request) {
         // the reservation path uses.
         const matches = await tx.finishedGoodsLot.findFirst({
           where: { id: finishedGoodsLotId, ...lotMatchFilter(orderItem) },
-          select: { id: true },
+          select: { id: true, locationId: true },
         });
         if (!matches) {
           throw { _appCode: 409, message: "Selected finished goods lot does not match this order item." };
         }
+        if (matches.locationId !== shipFrom.id) throw shipFromRefusal(shipFrom, false);
         kgPlan = [{ lotId: finishedGoodsLotId, kg: qty }];
       } else {
-        const picked = planDispatch(await kgPlanCandidates(tx, orderItem, lockSet), qty, true);
+        const picked = planDispatch(await kgPlanCandidates(tx, orderItem, lockSet, shipFrom.id), qty, true);
         if (picked.covered + 0.0005 < qty) {
           throw {
             _appCode: 409,
@@ -518,8 +538,8 @@ export async function POST(request: Request) {
     return NextResponse.json(await withLines(outcome.delivery), { status: outcome.replayed ? 200 : 201 });
   } catch (err: unknown) {
     if (err && typeof err === "object" && "_appCode" in err) {
-      const e = err as { _appCode: number; message: string; errorEn?: string; code?: string };
-      return NextResponse.json({ error: e.message, ...(e.errorEn ? { errorEn: e.errorEn } : {}), ...(e.code ? { code: e.code } : {}) }, { status: e._appCode });
+      const e = err as { _appCode: number; message: string; errorEn?: string; code?: string; location?: Record<string, unknown> };
+      return NextResponse.json({ error: e.message, ...(e.errorEn ? { errorEn: e.errorEn } : {}), ...(e.code ? { code: e.code } : {}), ...(e.location ? { location: e.location } : {}) }, { status: e._appCode });
     }
 
     // ── The unique index had the last word ────────────────────────────────

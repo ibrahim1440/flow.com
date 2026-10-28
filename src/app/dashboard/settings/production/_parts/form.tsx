@@ -3,7 +3,7 @@
 // label-column sections (الهوية · النوع · السعة والحدود · التشغيل · الحالة), the error summary,
 // inline errors, the unsaved bar (edit) and the save / cancel row. The rules are the API's; the
 // page shows the field errors it returns (ROASTERS.md §7) and keeps every input on a failure.
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Btn, Field } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
@@ -18,6 +18,8 @@ export type Draft = {
   defaultOperatorId: string; status: "AVAILABLE" | "MAINTENANCE" | "STOPPED"; statusReason: string; isDefault: boolean;
   /** Scheduling hours (RM6–RM8): «0,1,2,3,4», «07:00», «15:00». */
   workDays: string; workStart: string; workEnd: string;
+  /** «موقع الحمّاصة» (council F6): "" = automatic (its station's, else the production site). */
+  locationId: string;
 };
 
 /** ROASTERS.md §4 example (illustrative until the owner confirms, D6). */
@@ -29,12 +31,13 @@ export const draftOf = (r: Roaster): Draft => ({
   cycleMinutes: String(r.cycleMinutes), defaultOperatorId: r.defaultOperatorId ?? "",
   status: r.status === "RETIRED" ? "STOPPED" : r.status, statusReason: r.statusReason ?? "", isDefault: r.isDefault,
   workDays: (r.workingHours ?? DEFAULT_HOURS).days.join(","), workStart: (r.workingHours ?? DEFAULT_HOURS).start, workEnd: (r.workingHours ?? DEFAULT_HOURS).end,
+  locationId: r.locationId ?? "",
 });
 
 export const emptyDraft = (type: "PRODUCTION" | "SAMPLE" = "PRODUCTION"): Draft => ({
   name: "", manufacturerModel: "", type, nominalCapacityKg: "", defaultTargetKg: "", minBatchKg: "", maxBatchKg: "",
   cycleMinutes: "", defaultOperatorId: "", status: "AVAILABLE", statusReason: "", isDefault: false,
-  workDays: DEFAULT_HOURS.days.join(","), workStart: DEFAULT_HOURS.start, workEnd: DEFAULT_HOURS.end,
+  workDays: DEFAULT_HOURS.days.join(","), workStart: DEFAULT_HOURS.start, workEnd: DEFAULT_HOURS.end, locationId: "",
 });
 
 const LABELS: Record<keyof Draft, [string, string]> = {
@@ -43,6 +46,7 @@ const LABELS: Record<keyof Draft, [string, string]> = {
   maxBatchKg: ["أعلى كمية مسموحة للتحميص", "Maximum roast quantity"], cycleMinutes: ["الدورة", "Cycle"], defaultOperatorId: ["المشغّل الافتراضي", "Default operator"],
   status: ["الحالة", "Status"], statusReason: ["السبب", "Reason"], isDefault: ["الافتراضية", "Default"],
   workDays: ["أيام العمل", "Working days"], workStart: ["بداية العمل", "Work starts"], workEnd: ["نهاية العمل", "Work ends"],
+  locationId: ["موقع الحمّاصة", "Roaster's location"],
 };
 
 /** «تغيير واحد غير محفوظ · مدة الدورة 30 ← 35 دقيقة» — the changed fields of the draft. */
@@ -77,6 +81,18 @@ export function RoasterForm({
   const [busy, setBusy] = useState(false);
   const [moveDefault, setMoveDefault] = useState<{ id: string; name: string } | null>(null);
   const changed = useMemo(() => changesOf(base, d), [base, d]);
+  // «موقع الحمّاصة» (council F6): the active stock sites (never «في الطريق»).
+  const [sites, setSites] = useState<{ id: string; nameAr: string; nameEn: string | null }[]>([]);
+  useEffect(() => {
+    if (mode === "add") return;
+    let off = false;
+    fetch("/api/inventory/locations").then(async (r) => {
+      if (off || !r.ok) return;
+      const j = (await r.json()) as { locations: { id: string; nameAr: string; nameEn: string | null; type: string; isActive: boolean }[] };
+      setSites(j.locations.filter((l) => l.isActive && l.type !== "TRANSIT"));
+    }).catch(() => undefined);
+    return () => { off = true; };
+  }, [mode]);
   const dirty = mode === "edit" ? changed.length > 0 : changed.length > 0 && !busy;
   useUnsavedGuard(dirty, L("لديك تغييرات غير محفوظة.", "You have unsaved changes."));
 
@@ -101,7 +117,7 @@ export function RoasterForm({
       name: d.name, manufacturerModel: d.manufacturerModel, type: d.type,
       defaultTargetKg: d.defaultTargetKg, minBatchKg: d.minBatchKg, maxBatchKg: d.maxBatchKg, cycleMinutes: d.cycleMinutes,
       defaultOperatorId: d.defaultOperatorId || null, status: d.status, statusReason: d.statusReason, isDefault: d.isDefault,
-      ...(mode === "add" ? { nominalCapacityKg: d.nominalCapacityKg } : { expectedUpdatedAt: current?.updatedAt }),
+      ...(mode === "add" ? { nominalCapacityKg: d.nominalCapacityKg } : { expectedUpdatedAt: current?.updatedAt, locationId: d.locationId || null }),
       ...(confirmMoveDefault ? { confirmMoveDefault: true } : {}),
       // Scheduling hours: sent on add, and on edit only when changed (a roaster never given hours keeps the built-in ones).
       ...(mode === "add" || ["workDays", "workStart", "workEnd"].some((k) => changed.includes(k as keyof Draft))
@@ -161,7 +177,8 @@ export function RoasterForm({
       const k = changed[0];
       const label = k === "cycleMinutes" ? L("مدة الدورة", "Cycle time") : ar ? LABELS[k][0] : LABELS[k][1];
       const show = (v: Draft[keyof Draft]) => k === "status" ? (ar ? STATUS[v as Draft["status"]][0] : STATUS[v as Draft["status"]][1])
-        : k === "defaultOperatorId" ? people.find((p) => p.id === v)?.name ?? "—" : k === "isDefault" ? (v ? L("نعم", "yes") : L("لا", "no")) : String(v) || "—";
+        : k === "defaultOperatorId" ? people.find((p) => p.id === v)?.name ?? "—"
+        : k === "locationId" ? (v ? (sites.find((s) => s.id === v)?.nameAr ?? String(v)) : L("تلقائي", "automatic")) : k === "isDefault" ? (v ? L("نعم", "yes") : L("لا", "no")) : String(v) || "—";
       const unit = k === "cycleMinutes" ? ` ${L("دقيقة", "min")}` : "";
       return <>{L("تغيير واحد غير محفوظ", "1 unsaved change")} · {label} <N>{show(base[k])}</N> ← <N>{show(d[k])}</N>{unit}</>;
     }
@@ -253,6 +270,15 @@ export function RoasterForm({
             {eligible.map((p) => <option key={p.id} value={p.id} disabled={!p.authorized}>{p.name}</option>)}
           </Select>
         </Field>
+        {mode !== "add" ? (
+          <Field label={ar ? LABELS.locationId[0] : LABELS.locationId[1]} error={errMsg("locationId")}
+            help={current?.effectiveSite ? L(`يسحب البن الأخضر الآن من «${current.effectiveSite.nameAr}» — ${current.effectiveSite.source === "roaster" ? "موقع الحمّاصة" : current.effectiveSite.source === "station" ? "موقع محطتها" : "موقع الإنتاج (افتراضي)"}.`, `It draws green coffee at «${current.effectiveSite.nameEn || current.effectiveSite.nameAr}» now — ${current.effectiveSite.source === "roaster" ? "the roaster's location" : current.effectiveSite.source === "station" ? "its station's location" : "the production site (default)"}.`) : undefined}>
+            <Select className="hr-select" value={d.locationId} onChange={(e) => set("locationId", e.target.value)} data-testid="f-locationId">
+              <option value="">{L("تلقائي: موقع محطتها، وإلا موقع الإنتاج", "Automatic: its station's, else the production site")}</option>
+              {sites.map((s) => <option key={s.id} value={s.id}>{ar ? s.nameAr : s.nameEn || s.nameAr}</option>)}
+            </Select>
+          </Field>
+        ) : null}
       </>)}
       {sec(L("الحالة", "Status"), L("الحمّاصة غير المتاحة لا تُجدول عليها دفعات.", "No batches are scheduled on a roaster that is not available."), <>
         <div className="hr-field">

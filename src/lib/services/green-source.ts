@@ -1,7 +1,8 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { greenRefusal, pickGreenLot, type GreenLot, type GreenPick, type GreenSite } from "@/lib/green-source";
-import { assertLocationHas, productionLocation } from "./stock-locations";
+import { TRANSIT_LOCATION_ID } from "@/lib/inventory/locations";
+import { assertLocationHas, workSite } from "./stock-locations";
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -31,7 +32,13 @@ export type GreenSourceFacts = {
  * order-backed one (`orderItemId`). The product's default lot first; a legacy order line whose
  * product names none falls back to the lot the line itself recorded at order time.
  */
-export async function greenSourceFacts(db: Db, args: { productId?: string | null; orderItemId?: string | null }): Promise<GreenSourceFacts | null> {
+export type GreenSourceArgs = {
+  productId?: string | null; orderItemId?: string | null;
+  /** The roaster's / station's own location (20261117090000, owner decision 5); null = the production site. */
+  siteId?: string | null;
+};
+
+export async function greenSourceFacts(db: Db, args: GreenSourceArgs): Promise<GreenSourceFacts | null> {
   let productId = args.productId ?? null;
   let lineLotId: string | null = null;
   if (args.orderItemId) {
@@ -65,8 +72,9 @@ export async function greenSourceFacts(db: Db, args: { productId?: string | null
         take: 50,
       })
     : [];
-  // Phase 3: what each lot holds at the production site, and where else it is (one read for all of them).
-  const siteRow = await productionLocation(db).catch(() => null);
+  // Phase 3: what each lot holds at the roasting site (the roaster's / station's location, else the production site),
+  // and where else it is (one read for all of them). Coffee «في الطريق» is nowhere to draw from yet.
+  const siteRow = await workSite(db, args.siteId).catch(() => null);
   const site: GreenSite | null = siteRow ? { id: siteRow.id, nameAr: siteRow.nameAr, nameEn: siteRow.nameEn } : null;
   const ids = [...new Set([defaultLot?.id, ...candidates.map((c) => c.id)].filter((x): x is string => !!x))];
   const balances = site && ids.length
@@ -79,7 +87,7 @@ export async function greenSourceFacts(db: Db, args: { productId?: string | null
   const withSite = <T extends { id: string }>(l: T): T & { siteKg?: number; elsewhere?: GreenLot["elsewhere"]; elsewhereAll?: GreenLot["elsewhereAll"] } => {
     if (!site) return l;
     const mine = balances.filter((b) => b.entityId === l.id);
-    const away = mine.filter((b) => b.locationId !== site.id && b.location.isActive)
+    const away = mine.filter((b) => b.locationId !== site.id && b.locationId !== TRANSIT_LOCATION_ID && b.location.isActive)
       .map((b) => ({ locationId: b.locationId, nameAr: b.location.nameAr, nameEn: b.location.nameEn, qty: b.qty }));
     return { ...l, siteKg: mine.find((b) => b.locationId === site.id)?.qty ?? 0, elsewhere: away[0] ?? null, elsewhereAll: away };
   };
@@ -104,7 +112,7 @@ export function pickFromFacts(facts: GreenSourceFacts | null, kg: number): Green
  * errorEn, code GREEN_SOURCE_UNAVAILABLE). Read inside the roast transaction; the decrement that
  * follows stays the atomic `quantityKg >= kg` update, so a lot drained in between still refuses.
  */
-export async function resolveGreenLot(db: Db, args: { productId?: string | null; orderItemId?: string | null }, kg: number): Promise<Extract<GreenPick, { ok: true }>> {
+export async function resolveGreenLot(db: Db, args: GreenSourceArgs, kg: number): Promise<Extract<GreenPick, { ok: true }>> {
   const facts = await greenSourceFacts(db, args);
   const pick = pickFromFacts(facts, kg);
   if (!pick.ok) {
@@ -128,7 +136,7 @@ export async function resolveGreenLot(db: Db, args: { productId?: string | null;
  * and the production site still covers `kg`; otherwise the roast is refused (409 GREEN_LOT_CHANGED) and the station
  * refreshes its suggestion. Read inside the roast transaction; the atomic `quantityKg >= kg` decrement still follows.
  */
-export async function resolveExpectedLot(db: Db, args: { productId?: string | null; orderItemId?: string | null }, kg: number, expectedId: string): Promise<Extract<GreenPick, { ok: true }>> {
+export async function resolveExpectedLot(db: Db, args: GreenSourceArgs, kg: number, expectedId: string): Promise<Extract<GreenPick, { ok: true }>> {
   const facts = await greenSourceFacts(db, args);
   const d = facts?.defaultLot ?? null;
   const lot = [d, ...(facts?.candidates ?? [])].find((l): l is GreenLot => !!l && l.id === expectedId) ?? null;

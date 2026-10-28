@@ -976,6 +976,14 @@ export function PreparationReviewTable({
                         ) : (
                           <span className="hr-muted">—</span>
                         )}
+                        {s?.elsewhere?.length ? (
+                          <span className="hr-caption" style={{ display: "block" }} data-testid={`prep-elsewhere-${item.id}`}>
+                            {lang === "ar" ? "في موقع آخر — يحتاج تحويل: " : "At another site — needs a transfer: "}
+                            {s.elsewhere.map((o, j) => (
+                              <span key={o.lotId}>{j ? (lang === "ar" ? "، " : ", ") : ""}<a className="ops-link" href={o.transferHref}>{lang === "ar" ? o.nameAr : o.nameEn || o.nameAr} <span className="hr-num">{o.units}</span></a></span>
+                            ))}
+                          </span>
+                        ) : null}
                       </td>
                       {/* A committed, unblocked line shows stock this order actually holds,
                           so it is styled as owned rather than as a projection. */}

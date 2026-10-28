@@ -145,6 +145,12 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     // Accounting A3: the cost of stock (average costs, values, production cost per roast). A new capability —
     // not part of the inventory role (see buildDefaultPermissions); permission-backfill writes it adminOnly.
     { key: "valuation", label: "See inventory valuation and production costs" },
+    // Stock transfers between locations (20261117090000_locations_enhancements, owner decision 4): their own duties.
+    // The migration writes them true to every account / role holding today's equivalent (send / receive: receive or
+    // adjust; cancel: adjust); the inventory role carries send and receive, not cancel (like adjust).
+    { key: "transfer_send", label: "Create and send stock transfers" },
+    { key: "transfer_receive", label: "Receive stock transfers" },
+    { key: "transfer_cancel", label: "Cancel stock transfers" },
   ],
   orders: [
     { key: "create", label: "Create new orders" },
@@ -378,7 +384,7 @@ export function buildDefaultPermissions(role: string): Permissions {
       // and every view, and signs in with its PIN alone. adjust / override are granted only
       // individually, to an authorised supervisor, through the second-person permission flow.
       return {
-        dashboard: allEdit("dashboard"), inventory: allEdit("inventory", ["adjust", "override", "valuation"]),
+        dashboard: allEdit("dashboard"), inventory: allEdit("inventory", ["adjust", "override", "valuation", "transfer_cancel"]),
         orders: none(), production: none(), qc: none(),
         packaging: none(), dispatch: none(), history: none(),
         analytics: none(), labels: none(), employees: none(), cupping: none(), settings: none(),

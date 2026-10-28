@@ -9,6 +9,7 @@ import {
   roundKg,
 } from "@/lib/services/shelf-allocation";
 import { kgForUnits } from "@/lib/services/finished-products";
+import { offSiteUnitLots, promiseSiteId } from "@/lib/services/fg-site";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -50,14 +51,17 @@ export async function GET(_request: Request, { params }: Params) {
   // are added alongside for callers that want to show whole bags.
   if (orderItem.quantityUnits !== null && orderItem.productSku) {
     const sku = orderItem.productSku;
+    // Council F1: the shelf is the production site's (the dispatch's default ship-from); lots at other sites are listed
+    // as «في موقع آخر — يحتاج تحويل» and never counted as covering the line.
+    const site = await promiseSiteId(prisma);
 
-    const [reservedAgg, lots] = await Promise.all([
+    const [reservedAgg, lots, elsewhereLots] = await Promise.all([
       prisma.stockAllocation.aggregate({
         where: { orderItemId: id, status: "RESERVED", quantityUnits: { not: null } },
         _sum: { quantityUnits: true },
       }),
       prisma.finishedGoodsLot.findMany({
-        where: { productSkuId: sku.id, isUnitTracked: true, status: "AVAILABLE" },
+        where: { productSkuId: sku.id, isUnitTracked: true, status: "AVAILABLE", ...(site ? { locationId: site } : {}) },
         select: {
           id: true, batchNumber: true, unitsAvailable: true, unitsReserved: true,
           productId: true, productSkuId: true,
@@ -65,6 +69,7 @@ export async function GET(_request: Request, { params }: Params) {
         },
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       }),
+      offSiteUnitLots(prisma, [sku.id], site),
     ]);
 
     const reservedUnits = reservedAgg._sum.quantityUnits ?? 0;
@@ -124,6 +129,8 @@ export async function GET(_request: Request, { params }: Params) {
       freeToPromiseUnits: freeUnits,
       coverableFromShelfUnits: coverableUnits,
       shortageUnits,
+      // «في موقع آخر — يحتاج تحويل»: free units at other sites, each with its prefilled transfer (not counted above).
+      elsewhere: elsewhereLots.map((o) => ({ lotId: o.lotId, batchNumber: o.batchNumber, locationId: o.locationId, nameAr: o.nameAr, nameEn: o.nameEn, units: o.freeUnits, kg: kg(o.freeUnits), transferHref: o.transferHref })),
 
       matchingLots: [...lots, ...heldOnlyLots].map((l) => {
         const held = heldByLot.get(l.id) ?? 0;

@@ -9,6 +9,7 @@ import { scheduleCan, startSlot, ScheduleError } from "@/lib/services/schedule/s
 import type { Permissions } from "@/lib/auth-shared";
 import { greenRefusal } from "@/lib/green-source";
 import { greenSourceFacts, pickFromFacts } from "@/lib/services/green-source";
+import { roasterSiteId } from "@/lib/services/stock-locations";
 
 /**
  * The roasting station's coordination records (Workstations W1; owner decision D10 adopts
@@ -161,7 +162,7 @@ export async function startRoast(args: { user: Actor; item: { type: StationItemT
     if (slot) plannedGreenKg = Number(slot.plannedGreenKg);
 
     // J-13: the green has to be there for the usual charge before anything is claimed.
-    const facts = await greenSourceFacts(tx, { productId });
+    const facts = await greenSourceFacts(tx, { productId, siteId: await roasterSiteId(tx, roasterId) });
     const pick = pickFromFacts(facts, plannedGreenKg ?? 0);
     if (!pick.ok && pick.reason === "AT_OTHER_SITE") {
       // Enough in the company, not at the production site: it waits for the supervisor's transfer.

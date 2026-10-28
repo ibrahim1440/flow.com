@@ -26,6 +26,7 @@ import {
 } from "@/lib/services/batch-identity";
 import { reserveFinishedUnitsFromLot } from "@/lib/services/finished-products";
 import { packagingPlan } from "@/lib/services/packaging-plan";
+import { packSiteId } from "@/lib/services/stock-locations";
 import {
   canReserveToOrderLine,
   casUpdateOrderItem,
@@ -65,6 +66,8 @@ export async function POST(request: Request, { params }: Params) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
   const b = (body ?? {}) as Record<string, unknown>;
+  // The packing station (20261117090000): its location is where the materials are drawn and the lots made.
+  const stationId = typeof b.stationId === "string" && b.stationId ? b.stationId.slice(0, 64) : null;
   const isPreview = b.preview === true;
 
   // ── Shape the lines before anything else ──────────────────────────────────
@@ -121,6 +124,7 @@ export async function POST(request: Request, { params }: Params) {
         skus: prepared.skus,
         partialLots: prepared.partialLots,
         identityProductId: identity.ok ? identity.productId : null,
+        siteId: await packSiteId(prisma, id, stationId),
       });
       return NextResponse.json(preview);
     } catch (err) {
@@ -177,12 +181,14 @@ export async function POST(request: Request, { params }: Params) {
       if (!identity.ok) throw { _appCode: identity.status, message: identity.message };
 
       // Re-reconciled against the state this transaction sees, not the state the screen saw.
+      const siteId = await packSiteId(tx, batch.id, stationId);
       const preview = await previewPackaging(tx, {
         batch: prepared.batch,
         lines,
         skus: prepared.skus,
         partialLots: prepared.partialLots,
         identityProductId: identity.productId,
+        siteId,
       });
 
       const committed = await commitPackaging(tx, {
@@ -192,6 +198,7 @@ export async function POST(request: Request, { params }: Params) {
         userId: user.id,
         operationId: null,
         requestKey: key.key,
+        siteId,
       });
 
       // ── Claim the new units for the order they were roasted for ───────────

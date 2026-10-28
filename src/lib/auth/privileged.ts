@@ -47,6 +47,9 @@ export const PRIVILEGED_SUBS: [module: string, sub: string][] = [
   ["settings", "reset"], ["settings", "training_reset"],
   ["automation", "manage_connection"],
   ["inventory", "adjust"], ["inventory", "override"], ["orders", "approve"],
+  // Gate finding M-2 (the owner, before the locations release): cancelling a stock transfer reverses its movements at
+  // both sites — a verified individual and a step-up, like a stock adjustment; never a PIN-only account.
+  ["inventory", "transfer_cancel"],
   ["qc", "finalize_override"],
   // QC station W3 (owner decision 4, UR-S19): the exception approver and the disposal decider.
   ["qc", "approve_exception"], ["qc", "dispose"],

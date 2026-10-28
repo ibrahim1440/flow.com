@@ -16,7 +16,7 @@ import { unitWord } from "../inventory/_parts/shared";
 import { canEdit, hasSubPrivilege } from "@/lib/auth-shared";
 import { PrintLabelButton } from "@/components/print/QuickPrint";
 import { ScanInput, lookupScanCode } from "@/components/scan/ScanInput";
-import { OpeningSiteField } from "../inventory/_parts/locations";
+import { OpeningSiteField, SiteReorderEditor } from "../inventory/_parts/locations";
 
 export type Material = {
   id: string;
@@ -95,6 +95,8 @@ export function MaterialsPanel({
   // account only while it has no stock or cost — the server refuses otherwise and the reason shows here.
   const canMove = !!categories && canEdit(user?.permissions ?? {}, "inventory");
   const [moving, setMoving] = useState<Material | null>(null);
+  // «حدود المواقع» (20261117090000): the item's reorder point per location, in its settings.
+  const [sitePoints, setSitePoints] = useState<Material | null>(null);
   const [moveTo, setMoveTo] = useState("");
   const [moveError, setMoveError] = useState("");
   const [moveBusy, setMoveBusy] = useState(false);
@@ -217,6 +219,11 @@ export function MaterialsPanel({
                       </Btn>
                     )}
                     {canMove && (
+                      <Btn size="sm" variant="ghost" data-testid="material-site-points" onClick={() => setSitePoints(m)}>
+                        {L("حدود المواقع", "Site points")}
+                      </Btn>
+                    )}
+                    {canMove && (
                       <Btn size="sm" variant="ghost" data-testid="material-move"
                         onClick={() => { setMoving(m); setMoveTo(m.categoryId ?? ""); setMoveError(""); }}>
                         {L("نقل", "Move")}
@@ -245,6 +252,16 @@ export function MaterialsPanel({
           </table>
         </div>
       )}
+
+      <Dialog
+        open={!!sitePoints}
+        title={L("حد إعادة الطلب في كل موقع", "Reorder point per location")}
+        sub={sitePoints ? <><span>{lang === "ar" && sitePoints.nameAr ? sitePoints.nameAr : sitePoints.name}</span> · <span className="hr-id">{sitePoints.code}</span> · {L("حد الشركة", "Company point")} <span className="hr-num">{sitePoints.reorderPoint || "—"}</span></> : undefined}
+        onClose={() => setSitePoints(null)}
+        actions={<Btn onClick={() => setSitePoints(null)}>{L("إغلاق", "Close")}</Btn>}
+      >
+        {sitePoints ? <SiteReorderEditor itemKind="MATERIAL" entityId={sitePoints.id} unit={unitWord(sitePoints.unitOfMeasure, lang, 2)} canEdit={canMove} /> : null}
+      </Dialog>
 
       <Dialog
         open={!!moving}

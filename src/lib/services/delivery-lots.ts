@@ -64,12 +64,13 @@ export async function kgCandidateLotIds(tx: Db, item: AllocatableItem): Promise<
  * transaction never reaches for a lot lock while it already holds the OrderItem.
  */
 export async function unitPlanCandidates(
-  tx: Db, orderItemId: string, productSkuId: string, lockedLotIds: readonly string[],
+  tx: Db, orderItemId: string, productSkuId: string, lockedLotIds: readonly string[], locationId?: string | null,
 ): Promise<PlanCandidate[]> {
   if (lockedLotIds.length === 0) return [];
   const [lots, held] = await Promise.all([
+    // 20261117090000: only the lots at the ship-from location (a lot in transit is not AVAILABLE).
     tx.finishedGoodsLot.findMany({
-      where: { id: { in: [...lockedLotIds] }, productSkuId, isUnitTracked: true, status: "AVAILABLE" },
+      where: { id: { in: [...lockedLotIds] }, productSkuId, isUnitTracked: true, status: "AVAILABLE", ...(locationId ? { locationId } : {}) },
       select: { id: true, createdAt: true, unitsAvailable: true, unitsReserved: true },
     }),
     tx.stockAllocation.groupBy({
@@ -86,12 +87,12 @@ export async function unitPlanCandidates(
 }
 
 export async function kgPlanCandidates(
-  tx: Db, item: AllocatableItem, lockedLotIds: readonly string[],
+  tx: Db, item: AllocatableItem, lockedLotIds: readonly string[], locationId?: string | null,
 ): Promise<PlanCandidate[]> {
   if (lockedLotIds.length === 0) return [];
   const [lots, held] = await Promise.all([
     tx.finishedGoodsLot.findMany({
-      where: { AND: [{ id: { in: [...lockedLotIds] } }, lotMatchFilter(item)] },
+      where: { AND: [{ id: { in: [...lockedLotIds] } }, lotMatchFilter(item), ...(locationId ? [{ locationId }] : [])] },
       select: { id: true, createdAt: true, availableQty: true, reservedQty: true },
     }),
     tx.stockAllocation.groupBy({

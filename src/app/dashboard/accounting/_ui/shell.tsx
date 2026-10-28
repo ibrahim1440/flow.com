@@ -10,6 +10,9 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { OpsRoot, PageHeader, Notice } from "@/components/ops/ui";
 import { localizeApiError, networkErrorText } from "@/lib/i18n/api-errors";
 import { useI18n } from "@/lib/i18n/context";
+import { routeAllowed } from "@/lib/nav/registry";
+import { hasModuleAccess } from "@/lib/auth-shared";
+import { useUser } from "../../user-context";
 import "./accounting.css";
 
 export type Setup = {
@@ -110,9 +113,10 @@ export const TABS = [
   { href: "/dashboard/accounting/reports", ar: "التقارير", en: "Reports" },
   // Accounting A5: the quarterly VAT return, reconciled to the GL and ZATCA (Figma «الضريبة»).
   { href: "/dashboard/accounting/tax", ar: "الضريبة", en: "VAT" },
-  // Accounting A3: the AP ledger (Figma ACC-50 / 53) and the inventory cost ledger (ACC-100).
+  // Accounting A3: the AP ledger (Figma ACC-50 / 53) and the inventory cost ledger (ACC-100) — «تقييم المخزون» since
+  // unified inventory phase 4 (money only; the quantities are the operations inventory's).
   { href: "/dashboard/accounting/ap", ar: "الذمم الدائنة", en: "Payables" },
-  { href: "/dashboard/accounting/inventory", ar: "المخزون والتكلفة", en: "Inventory & cost" },
+  { href: "/dashboard/accounting/inventory", ar: "تقييم المخزون", en: "Inventory valuation" },
   { href: "/dashboard/accounting/periods", ar: "الفترات", en: "Periods" },
   { href: "/dashboard/accounting/opening", ar: "الأرصدة الافتتاحية", en: "Opening balances" },
   { href: "/dashboard/accounting/settings", ar: "الإعدادات", en: "Settings" },
@@ -124,6 +128,9 @@ export function AcctShell({ title, meta, actions, children, setup, pendingCount 
   const { L } = useLang();
   const path = usePathname() ?? "";
   const active = setup?.settings.accountingActive;
+  const canOpen = useCanOpen();
+  const user = useUser();
+  const tabs = user ? TABS.filter((t) => canOpen(t.href)) : TABS;
   return (
     <OpsRoot className="acct">
       <div className="hr-page">
@@ -146,9 +153,10 @@ export function AcctShell({ title, meta, actions, children, setup, pendingCount 
           </span>
         )}
       </PageHeader>
-      <nav className="hr-tabs is-underline acct-tabs" aria-label={L("أقسام المحاسبة", "Accounting sections")}>
-        {TABS.map((t) => {
-          const on = t.exact ? path === t.href : path.startsWith(t.href);
+      {/* Only the sections this viewer may open (an inventory › valuation holder reaches «تقييم المخزون» alone). */}
+      {tabs.length > 1 ? <nav className="hr-tabs is-underline acct-tabs" aria-label={L("أقسام المحاسبة", "Accounting sections")}>
+        {tabs.map((t) => {
+          const on = t.exact ? path === t.href : path.startsWith(t.href) || (t.href === "/dashboard/accounting/inventory" && path.startsWith("/dashboard/inventory/valuation"));
           return (
             <Link key={t.href} href={t.href} className="hr-tab" aria-selected={on} aria-current={on ? "page" : undefined}>
               {L(t.ar, t.en)}
@@ -156,7 +164,7 @@ export function AcctShell({ title, meta, actions, children, setup, pendingCount 
             </Link>
           );
         })}
-      </nav>
+      </nav> : null}
       <div className="acct-body">{children}</div>
       </div>
     </OpsRoot>
@@ -197,6 +205,26 @@ export function StatusTag({ map, value }: { map: Record<string, [string, string,
   const { L } = useLang();
   const e = map[value];
   return <span className={`hr-dot tone-${e?.[2] ?? "neutral"}`}><span>{e ? L(e[0], e[1]) : value}</span></span>;
+}
+
+/**
+ * A plain accounting word with its technical term in a tooltip (phase 4: one vocabulary — «بضاعة مستلمة لم تُرحَّل فاتورتها»
+ * reads as such, «GRNI» is the tooltip). Focusable, so the term is reachable without a mouse.
+ */
+export function Term({ tech, children }: { tech: string; children: ReactNode }) {
+  return <abbr className="acct-term" title={tech} tabIndex={0}>{children}</abbr>;
+}
+
+/** Whether the viewer holds the accounting module (the general-ledger side of «تقييم المخزون»; phase 4, council F7). */
+export function useHasAccounting(): boolean {
+  const user = useUser();
+  return !!user && hasModuleAccess(user.permissions, "accounting");
+}
+
+/** Whether the viewer's route guard opens a page (a link to a screen they cannot open is not drawn). */
+export function useCanOpen() {
+  const user = useUser();
+  return useCallback((href: string) => !!user && routeAllowed({ permissions: user.permissions, role: user.role }, href.split("?")[0]), [user]);
 }
 
 /** Today in Riyadh as YYYY-MM-DD (the business day). */

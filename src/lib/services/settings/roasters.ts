@@ -209,6 +209,8 @@ type RoasterRow = {
   id: string; name: string; manufacturerModel: string | null; type: string;
   nominalCapacityKg: { toString(): string }; defaultTargetKg: { toString(): string }; minBatchKg: { toString(): string }; maxBatchKg: { toString(): string };
   cycleMinutes: number; defaultOperatorId: string | null; status: string; statusReason: string | null; statusUntil: Date | null; statusSince: Date;
+  /** 20261117090000: the roaster's location (optional on older callers' rows). */
+  locationId?: string | null;
   isDefault: boolean; createdAt: Date; updatedAt: Date; workingHours?: unknown;
 };
 
@@ -224,6 +226,8 @@ export function roasterOut(r: RoasterRow, names: Map<string, string> = new Map()
     status: r.status, statusReason: r.statusReason, statusUntil: r.statusUntil?.toISOString() ?? null, statusSince: r.statusSince.toISOString(),
     isDefault: r.isDefault, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString(),
     workingHours: parseWorkingHours(r.workingHours ?? null),
+    /** Where it draws green (20261117090000); null = the production site. */
+    locationId: ("locationId" in r ? (r as { locationId?: string | null }).locationId : null) ?? null,
   };
 }
 
@@ -236,6 +240,7 @@ export function roasterAudit(r: RoasterRow | (RoasterValues & { statusUntil?: Da
     defaultOperatorId: r.defaultOperatorId, status: r.status, statusReason: r.statusReason ?? null,
     statusUntil: r.statusUntil ? new Date(r.statusUntil).toISOString() : null, isDefault: r.isDefault,
     workingHours: parseWorkingHours(r.workingHours ?? null),
+    locationId: ("locationId" in r ? (r as { locationId?: string | null }).locationId : null) ?? null,
   };
 }
 

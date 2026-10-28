@@ -8,6 +8,7 @@ import { Suspense, useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { OpsLoading } from "@/components/ops/ui";
 import { Select } from "@/components/ui/Select";
+import { SOURCE_DOC, plain, sourceDocHref } from "@/lib/accounting/source-links";
 import { AcctShell, money, todayRiyadh, useApi, useLang, type Setup } from "../_ui/shell";
 import { BalanceSheet, CashFlow, IncomeStatement } from "../_ui/statements";
 import { SodExceptions } from "../_ui/close";
@@ -17,11 +18,11 @@ const VIEWS: View[] = ["tb", "ledger", "income", "balance", "cashflow", "sod"];
 
 type Tb = { from: string; to: string; balanced: boolean; rows: { accountId: string; code: string; nameAr: string | null; nameEn: string; openingDebit: string; openingCredit: string; periodDebit: string; periodCredit: string; closingDebit: string; closingCredit: string }[]; totals: Record<string, string> };
 type Gl = { account: { id: string; code: string; nameAr: string | null; nameEn: string; normalBalance: string; controlType: string | null }; from: string; to: string; opening: string; closing: string; periodDebit: string; periodCredit: string; total: number;
-  lines: { entryId: string; ref: string; entryDate: string; memo: string | null; lineMemo: string | null; sourceType: string | null; sourceId: string | null; debit: string; credit: string; balance: string; partyType: string | null; partyId: string | null }[] };
+  lines: { entryId: string; ref: string; entryDate: string; memo: string | null; lineMemo: string | null; sourceModule?: string | null; sourceType: string | null; sourceId: string | null; debit: string; credit: string; balance: string; partyType: string | null; partyId: string | null }[] };
 type Acc = { id: string; code: string; nameAr: string | null; nameEn: string };
 
 function Reports() {
-  const { L } = useLang();
+  const { L, lang } = useLang();
   const router = useRouter();
   const path = usePathname();
   const sp = useSearchParams();
@@ -154,7 +155,7 @@ function Reports() {
                     <td className="hr-num">{l.entryDate}</td>
                     <td><Link className="acct-code" href={`/dashboard/accounting/journals/${l.entryId}`}>{l.ref}</Link></td>
                     <td>{l.lineMemo ?? l.memo ?? "—"}</td>
-                    <td className="acct-hide-m acct-code">{l.sourceType ? `${l.sourceType} · ${l.sourceId}` : "—"}</td>
+                    <td className="acct-hide-m" title={l.sourceType ? `${l.sourceType} · ${l.sourceId}` : undefined}>{l.sourceType ? (sourceDocHref(l.sourceType, l.sourceId, {}, l.sourceModule) ? <Link href={sourceDocHref(l.sourceType, l.sourceId, {}, l.sourceModule)!}>{plain(SOURCE_DOC, l.sourceType, lang)}</Link> : plain(SOURCE_DOC, l.sourceType, lang)) : "—"}</td>
                     <td className="num hr-num">{money(l.debit, true)}</td><td className="num hr-num">{money(l.credit, true)}</td><td className="num hr-num">{money(l.balance)}</td>
                   </tr>
                 ))}

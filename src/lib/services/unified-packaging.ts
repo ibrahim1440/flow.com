@@ -168,6 +168,8 @@ export async function previewPackaging(
      * production-order links the resolver needs.
      */
     identityProductId: string | null;
+    /** Where the materials are drawn (20261117090000: the packing site — packSiteId); default the production site. */
+    siteId?: string | null;
   },
 ): Promise<PackagingPreview> {
   const { batch, lines, skus, partialLots, identityProductId } = args;
@@ -371,7 +373,7 @@ export async function previewPackaging(
     });
     const byId = new Map(items.map((i) => [i.id, i]));
     // Phase 3 (stock locations): what the production site holds — packaging draws its materials there.
-    const here = await productionSiteBalances(tx, [...materialNeed.keys()]);
+    const here = await productionSiteBalances(tx, [...materialNeed.keys()], args.siteId);
     for (const [materialItemId, required] of materialNeed) {
       const item = byId.get(materialItemId);
       const available = here ? here.get(materialItemId) ?? 0 : item?.quantityOnHand ?? 0;
@@ -437,12 +439,15 @@ export async function commitPackaging(
     operationId: string | null;
     /** Accounting A3: the submit's idempotency key — the source id of the run's cost movements and entry. */
     requestKey?: string | null;
+    /** The packing site (20261117090000, packSiteId); default the production site. */
+    siteId?: string | null;
   },
 ): Promise<CommitResult> {
   const { batch, preview, skus, userId, operationId } = args;
   const costLots: PackedLot[] = [];
-  // Phase 3 (stock locations): materials are drawn and the finished lots made AT the production site.
-  await setStockLocation(tx, (await productionLocation(tx)).id);
+  // Phase 3 (stock locations): materials are drawn and the finished lots made AT the packing site (the station's own
+  // location, else where the roast was made — 20261117090000; the production site by default).
+  await setStockLocation(tx, args.siteId ?? (await productionLocation(tx)).id);
 
   if (preview.problems.length > 0) {
     throw { _appCode: 409, message: preview.problems[0] };

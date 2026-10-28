@@ -8,6 +8,7 @@ import { hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
  */
 export function canReceiveGreenAlert(user: { permissions: Permissions }): boolean {
   return hasSubPrivilege(user.permissions, "inventory", "receive") || hasSubPrivilege(user.permissions, "inventory", "adjust")
+    || hasSubPrivilege(user.permissions, "inventory", "transfer_send")
     || hasSubPrivilege(user.permissions, "production", "manage_schedule");
 }
 

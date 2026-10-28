@@ -21,6 +21,7 @@
 import { after } from "next/server";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { greenSourceFacts, pickFromFacts } from "./green-source";
+import { roasterSiteId } from "./stock-locations";
 import { roastQueue } from "./roast-queue";
 import { productionProgressMany } from "./production-planning";
 import { addDays, riyadhKey, riyadhMidnight } from "./schedule/planner";
@@ -87,8 +88,12 @@ export async function greenShortages(db: Db, now = new Date()): Promise<GreenSho
   const demand = await greenDemand(db, now);
   const out: GreenShortage[] = [];
   const facts = new Map<string, Awaited<ReturnType<typeof greenSourceFacts>>>();
+  // The roasting site the readiness is about (20261117090000, owner decision 5): the default roaster's location (or its
+  // station's), else the production site.
+  const def = await db.roaster.findFirst({ where: { isDefault: true, status: { not: "RETIRED" } }, select: { id: true } });
+  const siteId = await roasterSiteId(db, def?.id ?? null);
   for (const d of [...demand.values()].sort((a, b) => a.day.localeCompare(b.day) || a.productId.localeCompare(b.productId))) {
-    if (!facts.has(d.productId)) facts.set(d.productId, await greenSourceFacts(db, { productId: d.productId }));
+    if (!facts.has(d.productId)) facts.set(d.productId, await greenSourceFacts(db, { productId: d.productId, siteId }));
     const f = facts.get(d.productId) ?? null;
     const pick = pickFromFacts(f, d.kg);
     if (pick.ok || pick.reason !== "AT_OTHER_SITE") continue;

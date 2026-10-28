@@ -39,11 +39,16 @@ export async function stationsOverview() {
     prisma.stationPolicy.findUnique({ where: { id: "singleton" } }),
     prisma.roaster.findMany({ where: { status: { not: "RETIRED" } }, orderBy: [{ isDefault: "desc" }, { name: "asc" }], select: { id: true, name: true, type: true, status: true } }),
   ]);
+  // «موقع المحطة» (20261117090000): the active sites a station can work at (never «في الطريق»), and the production site
+  // a station without one works at.
+  const locations = await prisma.stockLocation.findMany({ where: { isActive: true, type: { not: "TRANSIT" } }, orderBy: [{ sortOrder: "asc" }, { code: "asc" }], select: { id: true, nameAr: true, nameEn: true, isProduction: true } });
+  const locName = new Map(locations.map((l) => [l.id, l]));
   const roasterName = new Map(roasters.map((r) => [r.id, r.name]));
   const now = Date.now();
   return {
     stations: stations.map((s) => ({
       id: s.id, name: s.name, type: s.type, place: s.place, status: s.status, roasterId: s.roasterId, roasterName: s.roasterId ? roasterName.get(s.roasterId) ?? null : null,
+      locationId: s.locationId, locationNameAr: s.locationId ? locName.get(s.locationId)?.nameAr ?? null : null, locationNameEn: s.locationId ? locName.get(s.locationId)?.nameEn ?? null : null,
       assigned: s._count.assignments, createdAt: s.createdAt.toISOString(), createdByName: s.createdByName,
     })),
     devices: stations.flatMap((s) => s.devices.map((d) => ({
@@ -55,12 +60,13 @@ export async function stationsOverview() {
     }))).sort((a, b) => (a.status === "REVOKED" ? 1 : 0) - (b.status === "REVOKED" ? 1 : 0) || b.registeredAt.localeCompare(a.registeredAt)),
     policy: { ...effectivePolicy(policyRow), stored: { idleMinutes: policyRow?.idleMinutes ?? null, pinMaxAttempts: policyRow?.pinMaxAttempts ?? null, activationMinutes: policyRow?.activationMinutes ?? null } },
     roasters: roasters.filter((r) => r.type === "PRODUCTION"),
+    locations,
   };
 }
 
 // ── Stations ───────────────────────────────────────────────────────────────────────────────────
 async function stationFields(raw: Record<string, unknown>, partial: boolean) {
-  const out: { name?: string; type?: StationType; place?: string | null; roasterId?: string | null } = {};
+  const out: { name?: string; type?: StationType; place?: string | null; roasterId?: string | null; locationId?: string | null } = {};
   if (!partial || raw.name !== undefined) {
     const name = text(raw.name, 80);
     if (!name) throw new UsersError(400, "STATION_NAME_REQUIRED", "اسم المحطة مطلوب.", "The station name is required.");
@@ -79,6 +85,16 @@ async function stationFields(raw: Record<string, unknown>, partial: boolean) {
     }
     out.roasterId = id;
   }
+  // «موقع المحطة» (20261117090000, owner decision 5): where the station draws from and books into; null = the
+  // production site. An active location, never «في الطريق».
+  if (!partial || raw.locationId !== undefined) {
+    const id = typeof raw.locationId === "string" && raw.locationId ? raw.locationId : null;
+    if (id) {
+      const l = await prisma.stockLocation.findUnique({ where: { id }, select: { isActive: true, type: true } });
+      if (!l || !l.isActive || l.type === "TRANSIT") throw new UsersError(400, "STATION_LOCATION_INVALID", "اختر موقعًا نشطًا للمحطة.", "Choose an active location for the station.");
+    }
+    out.locationId = id;
+  }
   return out;
 }
 
@@ -90,8 +106,8 @@ export async function createStation(request: Request, user: SessionUser, raw: Re
   if (dup) throw new UsersError(409, "STATION_NAME_TAKEN", "يوجد محطة بهذا الاسم.", "A station with this name exists.");
   const ctx = auditContext(request, user.id);
   return prisma.$transaction(async (tx) => {
-    const s = await tx.station.create({ data: { name: f.name!, type: f.type!, place: f.place ?? null, roasterId: f.roasterId ?? null, createdById: user.id, createdByName: user.name } });
-    await recordUsersAudit(tx, ctx, "STATION_CREATED", { stationId: s.id, stationName: s.name, type: s.type, place: s.place, roasterId: s.roasterId });
+    const s = await tx.station.create({ data: { name: f.name!, type: f.type!, place: f.place ?? null, roasterId: f.roasterId ?? null, locationId: f.locationId ?? null, createdById: user.id, createdByName: user.name } });
+    await recordUsersAudit(tx, ctx, "STATION_CREATED", { stationId: s.id, stationName: s.name, type: s.type, place: s.place, roasterId: s.roasterId, locationId: s.locationId });
     return s;
   }, TX_OPTS);
 }
@@ -109,7 +125,7 @@ export async function updateStation(request: Request, user: SessionUser, id: str
     // A retired station works nowhere: every session on its devices ends now (the devices are refused).
     let ended = 0;
     if (status === "RETIRED" && s.status !== "RETIRED") ended = (await tx.authSession.updateMany({ where: { stationId: id, revokedAt: null }, data: { revokedAt: new Date(), revokedReason: "STATION_RETIRED" } })).count;
-    await recordUsersAudit(tx, ctx, "STATION_UPDATED", { stationId: id, stationName: updated.name, before: { name: s.name, place: s.place, roasterId: s.roasterId, status: s.status }, after: { name: updated.name, place: updated.place, roasterId: updated.roasterId, status: updated.status }, sessionsEnded: ended, reason: reasonOf(raw.reason) || undefined });
+    await recordUsersAudit(tx, ctx, "STATION_UPDATED", { stationId: id, stationName: updated.name, before: { name: s.name, place: s.place, roasterId: s.roasterId, locationId: s.locationId, status: s.status }, after: { name: updated.name, place: updated.place, roasterId: updated.roasterId, locationId: updated.locationId, status: updated.status }, sessionsEnded: ended, reason: reasonOf(raw.reason) || undefined });
     return updated;
   }, TX_OPTS);
 }

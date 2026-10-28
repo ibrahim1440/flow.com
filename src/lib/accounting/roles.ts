@@ -28,7 +28,7 @@ export const ACCOUNT_ROLES: RoleDef[] = [
   { key: "AR", ar: "الذمم المدينة", en: "Accounts receivable", group: "receivables", phase: "A2", types: ["ASSET"], seedCode: "1140" },
   { key: "CUSTOMER_ADVANCES", ar: "دفعات مقدمة من العملاء", en: "Customer advances", group: "receivables", phase: "A2", types: ["LIABILITY"], seedCode: "2155" },
   { key: "AP", ar: "الذمم الدائنة", en: "Accounts payable", group: "payables", phase: "A3", types: ["LIABILITY"], seedCode: "2110" },
-  { key: "GRNI", ar: "بضاعة مستلمة لم تصل فاتورتها", en: "Goods received not invoiced", group: "payables", phase: "A3", types: ["LIABILITY"], seedCode: "2115" },
+  { key: "GRNI", ar: "بضاعة مستلمة لم تُرحَّل فاتورتها", en: "Received, not yet billed in the books", group: "payables", phase: "A3", types: ["LIABILITY"], seedCode: "2115" },
   { key: "SUPPLIER_ADVANCES", ar: "دفعات مقدمة للموردين", en: "Supplier advances", group: "payables", phase: "A3", types: ["ASSET"], seedCode: "1165" },
   { key: "SALES_REVENUE", ar: "إيرادات المبيعات (الجملة)", en: "Sales revenue (wholesale)", group: "revenue", phase: "A2", types: ["REVENUE"], seedCode: "4200" },
   { key: "SALES_REVENUE_CAFE", ar: "إيرادات المقهى", en: "Sales revenue (café)", group: "revenue", phase: "A2", types: ["REVENUE"], seedCode: "4100" },

@@ -17,6 +17,19 @@ export const LOCATION_TYPE_LABEL: Record<LocationType, [string, string]> = {
 
 export type StockItemKind = "GREEN_BEAN" | "MATERIAL";
 export const STOCK_ITEM_KINDS: readonly StockItemKind[] = ["GREEN_BEAN", "MATERIAL"];
+/** What a transfer line carries: a green lot / material (a balance), or a finished-goods lot (whole units). */
+export type TransferItemKind = StockItemKind | "FG_LOT";
+
+/**
+ * «في الطريق» (20261117090000_locations_enhancements): the ONE system location holding what a two-step transfer has
+ * sent and not yet received. A real "StockLocation" row (type TRANSIT), so every balance invariant holds unchanged
+ * and in-transit stock counts in the company totals and valuation — but never a site anyone picks, receives at,
+ * counts, roasts or packs at, and never default / production (database CHECK + guard).
+ */
+export const TRANSIT_LOCATION_ID = "loc_transit";
+export const TRANSIT_TYPE = "TRANSIT";
+export const TRANSIT_LABEL: [string, string] = ["في الطريق", "In transit"];
+export const isTransitLocation = (l: { id?: string; type?: string } | null | undefined) => !!l && (l.type === TRANSIT_TYPE || l.id === TRANSIT_LOCATION_ID);
 
 /** The seeded sites (ids only: their names, types, order and the default are the owner's to change). */
 export const SEEDED_LOCATIONS = { roastery: "loc_roastery", warehouse: "loc_warehouse", cafe: "loc_cafe" } as const;
@@ -35,6 +48,12 @@ export const isLocationType = (v: unknown): v is LocationType => typeof v === "s
 /** A location's name in the page language (English falls back to Arabic). */
 export function locationName(l: Pick<LocationRow, "nameAr" | "nameEn">, lang: "ar" | "en" | string): string {
   return lang === "en" ? l.nameEn || l.nameAr : l.nameAr;
+}
+
+/** A location's type label («في الطريق» for the transit location). */
+export function locationTypeLabel(type: string, lang: "ar" | "en" | string): string {
+  const pair = type === TRANSIT_TYPE ? TRANSIT_LABEL : isLocationType(type) ? LOCATION_TYPE_LABEL[type] : null;
+  return pair ? (lang === "en" ? pair[1] : pair[0]) : type;
 }
 
 /** Code: trimmed, upper-case, 1–16 of A–Z 0–9 and '-', starting with a letter or digit (the database CHECK). */
@@ -65,9 +84,18 @@ export function pickProductionLocation<T extends LocationRow>(rows: readonly T[]
   return rows.find((r) => r.isProduction && r.isActive) ?? null;
 }
 
-/** Active locations for a picker, in their order (the default first among equals). */
+/**
+ * The site a workstation / roaster works at: its own location when set and active (never transit), else the production
+ * site (owner decision 5, 20261117090000: the production site stays the fallback).
+ */
+export function workSiteOf<T extends LocationRow>(rows: readonly T[], ownLocationId: string | null | undefined): T | null {
+  const own = ownLocationId ? rows.find((r) => r.id === ownLocationId && r.isActive && !isTransitLocation(r)) : undefined;
+  return own ?? pickProductionLocation(rows);
+}
+
+/** Active locations for a picker, in their order (the default first among equals). Never the transit location. */
 export function pickerLocations<T extends LocationRow>(rows: readonly T[]): T[] {
-  return rows.filter((r) => r.isActive).sort((a, b) => a.sortOrder - b.sortOrder || Number(b.isDefault) - Number(a.isDefault) || a.code.localeCompare(b.code));
+  return rows.filter((r) => r.isActive && !isTransitLocation(r)).sort((a, b) => a.sortOrder - b.sortOrder || Number(b.isDefault) - Number(a.isDefault) || a.code.localeCompare(b.code));
 }
 
 // ─── Refusals ───────────────────────────────────────────────────────────────────────────────────
@@ -99,6 +127,14 @@ export function productionRefusal(name: string, locationId?: string): LocationRe
     errorEn: `«${name}» is the production site (roasting and packing) and cannot be deactivated. Choose another production site first.`,
   };
 }
+/** «تحويل في الطريق» — a site named by a transfer on its way is not deactivated (council F2). */
+export function inTransitRefusal(name: string, refs: string, locationId?: string): LocationRefusal {
+  return {
+    status: 409, code: "STOCK_LOCATION_IN_TRANSIT", locationId,
+    error: `لا يُوقف «${name}»: تحويلات في الطريق منه أو إليه (${refs}). استلمها أو ألغِها أولًا.`,
+    errorEn: `«${name}» cannot be deactivated: transfers on their way from or to it (${refs}). Receive or cancel them first.`,
+  };
+}
 export function shortRefusal(name: string, available: number | undefined, requested: number | undefined, extra: Partial<LocationRefusal> = {}): LocationRefusal {
   return {
     status: 409, code: "STOCK_LOCATION_SHORT", available, requested, ...extra,
@@ -116,6 +152,8 @@ export function inactiveRefusal(name: string, locationId?: string): LocationRefu
 
 /** The bilingual refusal of a database stock-location guard (stock_balance_sync / _guard, stock_location_guard), or null. */
 export function locationDbRefusal(message: string): LocationRefusal | null {
+  const t = /STOCK_LOCATION_IN_TRANSIT\|([^|\n]*)\|([^|\n]*)\|([^\n"]*)/.exec(message);
+  if (t) return inTransitRefusal(t[2], t[3].trim(), t[1]);
   const m = /(STOCK_LOCATION_SHORT|STOCK_LOCATION_INACTIVE|STOCK_LOCATION_HOLDS_STOCK|STOCK_LOCATION_DEFAULT|STOCK_LOCATION_PRODUCTION)\|([^|\n]*)\|([^|\n]*)(?:\|([^|\n]*)\|([^|\n]*)\|([^|\n]*)\|([^|\s]*))?/.exec(message);
   if (m) {
     const [, code, id, name] = m;
@@ -158,7 +196,7 @@ export function transferLink(a: { from?: string | null; to?: string | null; kind
 
 export const MAX_TRANSFER_LINES = 100;
 
-export type TransferLineInput = { itemKind: StockItemKind; entityId: string; qty: number; notes: string | null };
+export type TransferLineInput = { itemKind: TransferItemKind; entityId: string; qty: number; notes: string | null };
 
 /** Validate a transfer's lines (shape and quantities); duplicates of one item are merged. */
 export function parseTransferLines(raw: unknown): { ok: true; lines: TransferLineInput[] } | { ok: false; code: string; error: string; errorEn: string } {
@@ -167,12 +205,16 @@ export function parseTransferLines(raw: unknown): { ok: true; lines: TransferLin
   const merged = new Map<string, TransferLineInput>();
   for (const [i, it] of raw.entries()) {
     const r = (it ?? {}) as Record<string, unknown>;
-    const kind = r.itemKind === "GREEN_BEAN" || r.itemKind === "MATERIAL" ? r.itemKind : null;
+    const kind = r.itemKind === "GREEN_BEAN" || r.itemKind === "MATERIAL" || r.itemKind === "FG_LOT" ? r.itemKind : null;
     const id = typeof r.entityId === "string" && r.entityId.trim() ? r.entityId.trim().slice(0, 64) : null;
     const n = typeof r.qty === "number" ? r.qty : typeof r.qty === "string" && /^\d{1,9}(\.\d{1,4})?$/.test(r.qty.trim()) ? Number(r.qty) : NaN;
     if (!kind || !id) return { ok: false, code: "TRANSFER_LINE_INVALID", error: `السطر ${i + 1}: اختر الصنف.`, errorEn: `Line ${i + 1}: choose the item.` };
     if (!Number.isFinite(n) || n <= 0 || n > 1_000_000 || Number(n.toFixed(4)) !== n) {
       return { ok: false, code: "TRANSFER_LINE_INVALID", error: `السطر ${i + 1}: الكمية أكبر من صفر (4 خانات عشرية كحد أقصى).`, errorEn: `Line ${i + 1}: quantity above zero (at most 4 decimals).` };
+    }
+    // A finished lot moves in whole packages (its units).
+    if (kind === "FG_LOT" && !Number.isInteger(n)) {
+      return { ok: false, code: "TRANSFER_LINE_INVALID", error: `السطر ${i + 1}: المنتج الجاهز يُحوَّل بعدد صحيح من العبوات.`, errorEn: `Line ${i + 1}: finished goods move in whole packages.` };
     }
     const k = `${kind}:${id}`;
     const prev = merged.get(k);
@@ -185,3 +227,73 @@ export function parseTransferLines(raw: unknown): { ok: true; lines: TransferLin
 
 /** Whether a quantity `need` is available in `have` (with the float tolerance). */
 export const covers = (have: number, need: number) => have + QTY_EPSILON >= need;
+
+// ─── Two-step transfers (20261117090000_locations_enhancements) ─────────────────────────────────
+
+export const TRANSFER_MODES = ["IMMEDIATE", "TWO_STEP"] as const;
+export type TransferMode = (typeof TRANSFER_MODES)[number];
+export type TransferStatus = "POSTED" | "IN_TRANSIT" | "RECEIVED" | "CANCELLED";
+
+export const TRANSFER_STATUS_LABEL: Record<TransferStatus, [string, string]> = {
+  POSTED: ["مُرحَّل", "Posted"],
+  IN_TRANSIT: ["في الطريق", "In transit"],
+  RECEIVED: ["مُستلَم", "Received"],
+  CANCELLED: ["ملغى", "Cancelled"],
+};
+
+export type ReceiveLineInput = { lineNo: number; qtyReceived: number; varianceReason: string | null };
+
+/**
+ * Validate a receipt against the sent lines. Every line is answered (a missing line = received in full). A green /
+ * material line may arrive short — the shortfall is written off from transit and needs a reason (≥ 3 characters);
+ * a finished-goods line is received in full only (whole packages travel as one lot; a missing package is a count
+ * correction at the destination afterwards). Never more than was sent.
+ */
+export function parseReceiveLines(raw: unknown, sent: readonly { lineNo: number; itemKind: string; qty: number }[]):
+  { ok: true; lines: (ReceiveLineInput & { qtyShort: number })[] } | { ok: false; code: string; error: string; errorEn: string; lineNo?: number } {
+  const given = new Map<number, Record<string, unknown>>();
+  if (raw !== undefined && raw !== null) {
+    if (!Array.isArray(raw)) return { ok: false, code: "TRANSFER_RECEIVE_INVALID", error: "سطور الاستلام غير صالحة.", errorEn: "The receipt lines are not valid." };
+    for (const it of raw) {
+      const r = (it ?? {}) as Record<string, unknown>;
+      const no = typeof r.lineNo === "number" ? r.lineNo : Number(r.lineNo);
+      if (!Number.isInteger(no)) return { ok: false, code: "TRANSFER_RECEIVE_INVALID", error: "سطور الاستلام غير صالحة.", errorEn: "The receipt lines are not valid." };
+      given.set(no, r);
+    }
+  }
+  const out: (ReceiveLineInput & { qtyShort: number })[] = [];
+  for (const l of sent) {
+    const r = given.get(l.lineNo);
+    const v = r?.qtyReceived;
+    const n = v === undefined || v === null || v === "" ? l.qty : typeof v === "number" ? v : Number(v);
+    if (!Number.isFinite(n) || n < 0 || Number(n.toFixed(4)) !== n) {
+      return { ok: false, lineNo: l.lineNo, code: "TRANSFER_RECEIVE_INVALID", error: `السطر ${l.lineNo}: الكمية المستلمة غير صالحة.`, errorEn: `Line ${l.lineNo}: the received quantity is not valid.` };
+    }
+    if (n > l.qty + QTY_EPSILON) {
+      return { ok: false, lineNo: l.lineNo, code: "TRANSFER_RECEIVE_OVER", error: `السطر ${l.lineNo}: المستلم أكثر من المرسَل (${l.qty}).`, errorEn: `Line ${l.lineNo}: more received than was sent (${l.qty}).` };
+    }
+    const short = Number((l.qty - n).toFixed(4));
+    if (l.itemKind === "FG_LOT" && short > QTY_EPSILON) {
+      return { ok: false, lineNo: l.lineNo, code: "TRANSFER_FG_FULL_ONLY", error: `السطر ${l.lineNo}: المنتج الجاهز يُستلم كاملًا. استلمه ثم صحّح العدد بالجرد في موقع الوصول.`, errorEn: `Line ${l.lineNo}: finished goods are received in full. Receive it, then correct the count at the destination.` };
+    }
+    const reason = typeof r?.varianceReason === "string" && r.varianceReason.trim() ? r.varianceReason.trim().slice(0, 300) : null;
+    if (short > QTY_EPSILON && (!reason || reason.length < 3)) {
+      return { ok: false, lineNo: l.lineNo, code: "TRANSFER_VARIANCE_REASON", error: `السطر ${l.lineNo}: وصل ${n} من ${l.qty} — اكتب سبب الفرق (3 أحرف على الأقل).`, errorEn: `Line ${l.lineNo}: ${n} of ${l.qty} arrived — give the reason for the difference (at least 3 characters).` };
+    }
+    out.push({ lineNo: l.lineNo, qtyReceived: short > QTY_EPSILON ? n : l.qty, qtyShort: short > QTY_EPSILON ? short : 0, varianceReason: short > QTY_EPSILON ? reason : null });
+  }
+  return { ok: true, lines: out };
+}
+
+// ─── Reorder points per location ────────────────────────────────────────────────────────────────
+
+/** «تحت حد إعادة الطلب» at one site: a point set (> 0) and the site's balance at or below it. */
+export const belowReorder = (qty: number, point: number | null | undefined) => point !== null && point !== undefined && point > 0 && qty <= point + QTY_EPSILON;
+
+/** Parse a reorder point entered for a site: "" / null clears it; otherwise ≥ 0 with at most 4 decimals. */
+export function parseReorderPoint(v: unknown): { ok: true; value: number | null } | { ok: false } {
+  if (v === null || v === undefined || v === "") return { ok: true, value: null };
+  const n = typeof v === "number" ? v : typeof v === "string" && /^\d{1,9}(\.\d{1,4})?$/.test(v.trim()) ? Number(v) : NaN;
+  if (!Number.isFinite(n) || n < 0 || n >= 1e9 || Number(n.toFixed(4)) !== n) return { ok: false };
+  return { ok: true, value: n };
+}

@@ -18,7 +18,7 @@ import "@/components/ops/stock.css";
 import { useUser } from "../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
-import { LOCATION_TYPES, LOCATION_TYPE_LABEL, locationName, suggestLocationCode, type LocationType } from "@/lib/inventory/locations";
+import { LOCATION_TYPES, LOCATION_TYPE_LABEL, isTransitLocation, locationName, locationTypeLabel, suggestLocationCode, type LocationType } from "@/lib/inventory/locations";
 import { useLocations, type Loc } from "../_parts/locations";
 
 type Refusal = { msg: string; href?: string | null };
@@ -36,10 +36,12 @@ export default function LocationsPage() {
   const [toast, setToast] = useState<{ msg: string; tone: "success" | "danger"; href?: string | null } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const pair = (k: string) => (LOCATION_TYPE_LABEL[k as LocationType] ? LOCATION_TYPE_LABEL[k as LocationType][lang === "ar" ? 0 : 1] : k);
+  const pair = (k: string) => (LOCATION_TYPE_LABEL[k as LocationType] ? LOCATION_TYPE_LABEL[k as LocationType][lang === "ar" ? 0 : 1] : locationTypeLabel(k, lang));
   const all = state?.locations ?? [];
-  const active = all.filter((l) => l.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
-  const rows = showInactive ? [...active, ...all.filter((l) => !l.isActive)] : active;
+  // «في الطريق» (20261117090000) is the system's: listed last, with what it holds, never ordered, edited or picked.
+  const transit = all.filter((l) => isTransitLocation(l));
+  const active = all.filter((l) => l.isActive && !isTransitLocation(l)).sort((a, b) => a.sortOrder - b.sortOrder);
+  const rows = [...active, ...transit, ...(showInactive ? all.filter((l) => !l.isActive) : [])];
   const withValue = all.some((l) => typeof l.valueEstimate === "number");
   const cols = withValue ? 6 : 5;
   const value = (l: Loc) => (typeof l.valueEstimate === "number" ? <span className="hr-num">{L(`${formatMoney(l.valueEstimate.toFixed(2))} ر.س`, `SAR ${formatMoney(l.valueEstimate.toFixed(2))}`)}</span> : null);
@@ -128,6 +130,7 @@ export default function LocationsPage() {
                         <span className="strong">{lang === "ar" ? l.nameAr : l.nameEn || l.nameAr}</span>{" "}
                         <span className="hr-id hr-caption">{l.code}</span>
                         {lang === "ar" && l.nameEn ? <span className="stk-sub" dir="ltr">{l.nameEn}</span> : null}
+                        {isTransitLocation(l) ? <span className="loc-badges"><span className="stk-flag tone-info" data-testid="loc-transit-badge">{L("موقع النظام", "System location")}</span></span> : null}
                         {l.isDefault || l.isProduction || !l.isActive ? <span className="loc-badges">
                           {l.isDefault ? <span className="stk-flag tone-success" data-testid={`loc-default-${l.code}`}>{L("موقع الاستلام الافتراضي", "Default receiving site")}</span> : null}
                           {l.isProduction ? <span className="stk-flag tone-info" data-testid={`loc-production-${l.code}`}>{L("موقع الإنتاج", "Production site")}</span> : null}
@@ -142,7 +145,7 @@ export default function LocationsPage() {
                       {withValue ? <td className="hr-hide-mobile" data-testid={`loc-value-${l.code}`}>{value(l)}</td> : null}
                       <td className="hr-hide-mobile">{l.isActive ? L("نشط", "Active") : L("موقوف", "Inactive")}</td>
                       <td className="stk-acts stk-macts">
-                        {canWrite ? (l.isActive ? (
+                        {isTransitLocation(l) ? <Link className="hr-btn is-sm is-ghost" href="/dashboard/inventory/transfers?status=IN_TRANSIT" data-testid="loc-transit-open">{L("التحويلات في الطريق", "Transfers in transit")}</Link> : canWrite ? (l.isActive ? (
                           <>
                             <Btn size="sm" variant="ghost" aria-label={L("تحريك لأعلى", "Move up")} title={L("تحريك لأعلى", "Move up")} disabled={busy || idx <= 0} onClick={() => move(l, -1)}><ArrowUp size={14} /></Btn>
                             <Btn size="sm" variant="ghost" aria-label={L("تحريك لأسفل", "Move down")} title={L("تحريك لأسفل", "Move down")} disabled={busy || idx === active.length - 1} onClick={() => move(l, 1)}><ArrowDown size={14} /></Btn>

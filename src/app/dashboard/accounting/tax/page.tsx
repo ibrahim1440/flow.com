@@ -75,7 +75,7 @@ function Tax() {
             <div className="acct-metric"><span className="k">{L("ضريبة المبيعات", "Output VAT")}</span><span className="v">{money(d.sales.find((b) => b.box === 6)?.vat)}</span><span className="s">{L(`${d.counts.salesDocuments} مستند`, `${d.counts.salesDocuments} documents`)}</span></div>
             <div className="acct-metric"><span className="k">{L("ضريبة المشتريات", "Input VAT")}</span><span className="v">{money(d.purchases.find((b) => b.box === 12)?.vat)}</span><span className="s">{L(`${d.counts.purchaseInvoices} فاتورة مورد`, `${d.counts.purchaseInvoices} supplier invoices`)}</span></div>
             <div className="acct-metric"><span className="k">{L("صافي الضريبة المستحقة (خانة 16)", "Net VAT due (box 16)")}</span><span className={`v${Number(d.summary.netVatDue) < 0 ? " is-bad" : ""}`} data-testid="vat-net">{money(d.summary.netVatDue)}</span><span className="s">{L(`آخر موعد للتقديم والسداد ${d.dueDate}`, `File and pay by ${d.dueDate}`)}</span></div>
-            <div className="acct-metric"><span className="k">{L("المطابقة مع الأستاذ", "Reconciled to the GL")}</span><span className={`v ${rec.output.matched && rec.input.matched ? "acct-good" : "acct-bad"}`} data-testid="vat-recon">{rec.output.matched && rec.input.matched ? L("مطابق", "Matched") : L("فرق", "Difference")}</span><span className="s hr-num">{d.from} – {d.to}</span></div>
+            <div className="acct-metric"><span className="k">{L("المطابقة مع دفتر الأستاذ", "Reconciled to the general ledger")}</span><span className={`v ${rec.output.matched && rec.input.matched ? "acct-good" : "acct-bad"}`} data-testid="vat-recon">{rec.output.matched && rec.input.matched ? L("مطابق", "Matched") : L("فرق", "Difference")}</span><span className="s hr-num">{d.from} – {d.to}</span></div>
           </div>
           <div className="acct-banner-note" role="note"><p className="acct-hint">{L(d.disclaimer.ar, d.disclaimer.en)}</p></div>
           <Boxes title={L("المبيعات", "Sales")} rows={d.sales} testId="vat-sales" />
@@ -94,7 +94,7 @@ function Tax() {
             <h2>{L("المطابقة: الإقرار ↔ الأستاذ العام ↔ الهيئة", "Reconciliation: return ↔ general ledger ↔ ZATCA")}</h2>
             <div className="hr-tablewrap">
               <table className="hr-table is-dense">
-                <thead><tr><th /><th className="num">{L("المستندات المرحّلة", "Posted documents")}</th><th className="num">{L("الأستاذ من المستندات", "GL from documents")}</th><th className="num">{L("الفرق", "Difference")}</th><th className="num acct-hide-m">{L("غير مرحّلة", "Not posted")}</th><th className="num acct-hide-m">{L("قيود أخرى على الحساب", "Other GL entries")}</th></tr></thead>
+                <thead><tr><th /><th className="num">{L("المستندات المرحّلة", "Posted documents")}</th><th className="num">{L("دفتر الأستاذ من المستندات", "Ledger from documents")}</th><th className="num">{L("الفرق", "Difference")}</th><th className="num acct-hide-m">{L("غير مرحّلة", "Not posted")}</th><th className="num acct-hide-m">{L("قيود أخرى على الحساب", "Other ledger entries")}</th></tr></thead>
                 <tbody>
                   {(["output", "input"] as const).map((k) => (
                     <tr key={k} data-testid={`vat-recon-${k}`}>
@@ -115,7 +115,7 @@ function Tax() {
               <div><dt>{L("ضريبة الإقرار − ضريبة المعتمد لدى الهيئة", "Return VAT − ZATCA-accepted VAT")}</dt><dd className="hr-num">{money(rec.zatca.returnVsAccepted)}</dd></div>
               {rec.input.noSupplierVatNumber && rec.input.noSupplierVatNumber.count ? <div data-testid="vat-no-supplier-vat"><dt className="acct-warn">{L("ضريبة مدخلات من موردين بلا رقم ضريبي (استردادها معرّض للرفض)", "Input VAT from suppliers with no VAT number (claim at risk)")}</dt><dd className="hr-num acct-warn">{rec.input.noSupplierVatNumber.count} · {money(rec.input.noSupplierVatNumber.vat)}</dd></div> : null}
             </dl>
-            <p className="acct-hint">{L("المستندات قبل تاريخ بدء المحاسبة لا تُرحَّل (تدخل في الأرصدة الافتتاحية)، و«قيود أخرى» تشمل قيود التسوية اليدوية وسداد الضريبة.", "Documents before the go-live date post nothing (they belong to the opening balances); «other GL entries» are manual adjustments and VAT settlements.")}</p>
+            <p className="acct-hint">{L("المستندات قبل تاريخ بدء المحاسبة لا تُرحَّل (تدخل في الأرصدة الافتتاحية)، و«قيود أخرى» تشمل قيود التسوية اليدوية وسداد الضريبة.", "Documents before the go-live date post nothing (they belong to the opening balances); «other ledger entries» are manual adjustments and VAT settlements.")}</p>
           </section>
         </>
       )}

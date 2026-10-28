@@ -17,7 +17,7 @@ import { ipHashOf } from "@/lib/accounting/ops/purchase-activity";
 import type { AuditContext } from "@/lib/accounting/audit";
 import {
   LOCATION_TYPES, QTY_EPSILON, covers, defaultLocationRefusal, holdsStockRefusal, inactiveRefusal, isLocationType, locationDbRefusal, normalizeLocationCode,
-  pickProductionLocation, productionRefusal, shortRefusal, transferLink, type LocationRow, type StockItemKind,
+  pickProductionLocation, productionRefusal, shortRefusal, transferLink, inTransitRefusal, isTransitLocation, workSiteOf, type LocationRow, type StockItemKind,
 } from "@/lib/inventory/locations";
 
 type Tx = Prisma.TransactionClient;
@@ -95,10 +95,14 @@ export async function productionLocation(db: Db = prisma): Promise<LocationRow> 
   return p;
 }
 
-/** An active location by id (refused when missing or inactive). */
+/** «في الطريق» is the system's: no one receives, counts, roasts, packs or edits there. */
+const transitFail = () => fail(409, "STOCK_LOCATION_TRANSIT", "«في الطريق» موقع النظام للبضاعة المرسلة ولم تُستلم بعد؛ لا يُختار ولا يُعدَّل.", "«In transit» is the system's location for goods sent and not yet received; it is not picked or edited.");
+
+/** An active location by id (refused when missing, inactive or the transit location). */
 export async function activeLocation(db: Db, id: unknown): Promise<LocationRow> {
   const l = typeof id === "string" && id ? await db.stockLocation.findUnique({ where: { id }, select: { id: true, code: true, nameAr: true, nameEn: true, type: true, isActive: true, isDefault: true, isProduction: true, sortOrder: true } }) : null;
   if (!l) throw fail(404, "STOCK_LOCATION_NOT_FOUND", "الموقع غير موجود.", "Location not found.");
+  if (isTransitLocation(l)) throw transitFail();
   if (!l.isActive) { const r = inactiveRefusal(l.nameAr, l.id); throw fail(r.status, r.code, r.error, r.errorEn, { locationId: l.id }); }
   return l;
 }
@@ -113,6 +117,53 @@ export async function receivingLocationId(db: Db, asked: unknown): Promise<strin
 export async function lastReceivingLocationId(userId: string): Promise<string | null> {
   const r = await prisma.purchaseRecord.findFirst({ where: { userId, location: { isActive: true } }, orderBy: { createdAt: "desc" }, select: { locationId: true } });
   return r?.locationId ?? null;
+}
+
+/**
+ * The site a workstation / roaster works at (owner decision 5, 20261117090000): its own location when set and active,
+ * else the production site. `own` is the Station / Roaster "locationId".
+ */
+export async function workSite(db: Db, own: string | null | undefined): Promise<LocationRow> {
+  const s = workSiteOf(await allLocations(db), own);
+  if (!s) throw fail(409, "STOCK_LOCATION_NO_PRODUCTION", "لا يوجد موقع إنتاج نشط.", "No active production location.");
+  return s;
+}
+
+/**
+ * Where a roaster works (owner decision 5): the roaster's own location, else the location of the active roasting station
+ * paired with it, else null (= the production site). Read by the roast, the station queue and the readiness alerts.
+ */
+export async function roasterSiteId(db: Db, roasterId: string | null | undefined): Promise<string | null> {
+  if (!roasterId) return null;
+  const r = await db.roaster.findUnique({ where: { id: roasterId }, select: { locationId: true, location: { select: { isActive: true } } } });
+  if (r?.locationId && r.location?.isActive) return r.locationId;
+  const s = await db.station.findFirst({ where: { roasterId, status: "ACTIVE", locationId: { not: null } }, orderBy: { createdAt: "asc" }, select: { locationId: true } });
+  return s?.locationId ?? null;
+}
+
+/**
+ * Where a roast is packed (owner decision 5): the packing station's own location when it has one, else where the roast
+ * drew its green (its site), else the production site.
+ */
+export async function packSiteId(db: Db, batchId: string, stationId?: string | null): Promise<string> {
+  if (stationId) {
+    const s = await db.station.findUnique({ where: { id: stationId }, select: { locationId: true, status: true, location: { select: { isActive: true, type: true } } } });
+    if (s?.locationId && s.status === "ACTIVE" && s.location?.isActive && !isTransitLocation(s.location)) return s.locationId;
+  }
+  return drawSiteOf(db, "ROASTING_BATCH", batchId);
+}
+
+/**
+ * The roaster's EFFECTIVE site and where it comes from (council F6): its own location («roaster»), else its active
+ * station's («station»), else the production site («production») — what roaster settings show.
+ */
+export async function roasterEffectiveSite(db: Db, roasterId: string): Promise<{ id: string; nameAr: string; nameEn: string | null; source: "roaster" | "station" | "production" } | null> {
+  const r = await db.roaster.findUnique({ where: { id: roasterId }, select: { location: { select: { id: true, nameAr: true, nameEn: true, isActive: true } } } });
+  if (r?.location?.isActive) return { id: r.location.id, nameAr: r.location.nameAr, nameEn: r.location.nameEn, source: "roaster" };
+  const s = await db.station.findFirst({ where: { roasterId, status: "ACTIVE", locationId: { not: null }, location: { isActive: true } }, orderBy: { createdAt: "asc" }, select: { location: { select: { id: true, nameAr: true, nameEn: true } } } });
+  if (s?.location) return { ...s.location, source: "station" };
+  const p = await productionLocation(db).catch(() => null);
+  return p ? { id: p.id, nameAr: p.nameAr, nameEn: p.nameEn, source: "production" } : null;
 }
 
 /** The (active) site a document drew its stock at — its OUT movement's location — else the production site. */
@@ -162,9 +213,12 @@ export async function assertLocationHas(db: Db, a: { kind: StockItemKind; entity
   });
 }
 
-/** Material balances at the production site (null when the database has no locations — never after the migration). */
-export async function productionSiteBalances(db: Db, ids: string[]): Promise<Map<string, number> | null> {
-  const site = await productionLocation(db).catch(() => null);
+/**
+ * Material balances at a site — `siteId`, else the production site (null when the database has no locations — never
+ * after the migration).
+ */
+export async function productionSiteBalances(db: Db, ids: string[], siteId?: string | null): Promise<Map<string, number> | null> {
+  const site = siteId ? { id: siteId } : await productionLocation(db).catch(() => null);
   if (!site) return null;
   const rows = await db.stockBalance.findMany({ where: { locationId: site.id, itemKind: "MATERIAL", entityId: { in: ids } }, select: { entityId: true, qty: true } });
   return new Map(rows.map((r) => [r.entityId, r.qty]));
@@ -205,7 +259,7 @@ export async function listLocations(opts: { includeInactive?: boolean; withValue
     const green = bal.find((b) => b.locationId === r.id && b.itemKind === "GREEN_BEAN")?._count._all ?? 0;
     const materials = bal.find((b) => b.locationId === r.id && b.itemKind === "MATERIAL")?._count._all ?? 0;
     const finished = fg.find((f) => f.locationId === r.id)?._count._all ?? 0;
-    return { ...r, holdings: { green, materials, finished, any: green + materials + finished > 0 }, hasHistory: used.has(r.id), ...(opts.withValue ? { valueEstimate: value.get(r.id) ?? 0 } : {}) };
+    return { ...r, isTransit: isTransitLocation(r), holdings: { green, materials, finished, any: green + materials + finished > 0 }, hasHistory: used.has(r.id), ...(opts.withValue ? { valueEstimate: value.get(r.id) ?? 0 } : {}) };
   });
 }
 
@@ -283,6 +337,7 @@ export async function updateLocation(id: string, body: Record<string, unknown>, 
     const cur = (await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "StockLocation" WHERE "id" = ${id} FOR UPDATE`)[0];
     if (!cur) throw fail(404, "STOCK_LOCATION_NOT_FOUND", "الموقع غير موجود.", "Location not found.");
     const before = await tx.stockLocation.findUniqueOrThrow({ where: { id }, select: SELECT });
+    if (isTransitLocation(before)) throw transitFail();
     const action = typeof body.action === "string" ? body.action : null;
     if (action === "default") {
       if (!before.isActive) { const r = inactiveRefusal(before.nameAr, id); throw fail(r.status, r.code, r.error, r.errorEn); }
@@ -311,6 +366,12 @@ export async function updateLocation(id: string, body: Record<string, unknown>, 
       if (before.isProduction) { const r = productionRefusal(before.nameAr, id); throw fail(r.status, r.code, r.error, r.errorEn, { locationId: id }); }
       const h = await holdings(tx, id);
       if (h.any) { const r = holdsStockRefusal(before.nameAr, id); throw fail(r.status, r.code, r.error, r.errorEn, { locationId: id, holdings: h, transferHref: transferLink({ from: id }) }); }
+      // Council F2: a transfer on its way from or to this site could neither arrive nor go back.
+      const moving = await tx.stockTransfer.findMany({ where: { status: "IN_TRANSIT", OR: [{ fromLocationId: id }, { toLocationId: id }] }, select: { id: true, number: true }, orderBy: { number: "asc" } });
+      if (moving.length) {
+        const r = inTransitRefusal(before.nameAr, moving.map((t) => `TR-${String(t.number).padStart(5, "0")}`).join(", "), id);
+        throw fail(r.status, r.code, r.error, r.errorEn, { locationId: id, transfers: moving.map((t) => t.id) });
+      }
       const row = await tx.stockLocation.update({ where: { id }, data: { isActive: false, deactivatedAt: new Date(), deactivatedBy: actor.id, deactivationReason: reason, updatedBy: actor.id }, select: SELECT });
       await logLocation(tx, { ...ctx, reason }, "STOCK_LOCATION_DEACTIVATED", row);
       return row;
@@ -354,6 +415,7 @@ export async function deleteLocation(id: string, actor: Actor, ctx: AuditContext
   return guarded(() => prisma.$transaction(async (tx) => {
     const l = await tx.stockLocation.findUnique({ where: { id }, select: SELECT });
     if (!l) throw fail(404, "STOCK_LOCATION_NOT_FOUND", "الموقع غير موجود.", "Location not found.");
+    if (isTransitLocation(l)) throw transitFail();
     if (l.isDefault) { const r = defaultLocationRefusal(l.nameAr, id); throw fail(r.status, r.code, r.error, r.errorEn); }
     if (l.isProduction) { const r = productionRefusal(l.nameAr, id); throw fail(r.status, r.code, r.error, r.errorEn); }
     const refs = await Promise.all([

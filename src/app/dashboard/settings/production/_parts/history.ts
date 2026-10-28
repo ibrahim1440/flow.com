@@ -6,6 +6,7 @@ const F: Record<string, [string, string]> = {
   nominalCapacityKg: ["سعة الحمّاصة", "Roaster capacity"], defaultTargetKg: ["كمية التحميص الافتراضية", "Default roast quantity"], minBatchKg: ["أقل كمية مسموحة للتحميص", "Minimum roast quantity"], maxBatchKg: ["أعلى كمية مسموحة للتحميص", "Maximum roast quantity"],
   cycleMinutes: ["الدورة", "Cycle"], defaultOperatorId: ["المشغّل الافتراضي:", "Default operator:"], status: ["الحالة:", "Status:"],
   statusReason: ["السبب:", "Reason:"], statusUntil: ["حتى", "Until"], isDefault: ["الافتراضية:", "Default:"],
+  locationId: ["موقع الحمّاصة:", "Location:"],
 };
 
 /** One history row: «أُنشئت الحمّاصة · سعة الحمّاصة 6.00 · كمية التحميص الافتراضية 5.00 كغ», «أقل كمية مسموحة للتحميص 3.00 · أعلى كمية مسموحة للتحميص 6.00 · الدورة 30 دقيقة». */
@@ -15,6 +16,7 @@ export function historyText(h: HistoryRow, ar: boolean): string {
     if (v === null || v === undefined || v === "") return "—";
     if (k === "cycleMinutes") return `${v} ${ar ? "دقيقة" : "min"}`;
     if (k === "defaultOperatorId") return h.names[String(v)] ?? "—";
+    if (k === "locationId") return h.names[String(v)] ?? String(v);
     if (k === "status") return ar ? STATUS[v as Roaster["status"]]?.[0] ?? String(v) : STATUS[v as Roaster["status"]]?.[1] ?? String(v);
     if (k === "type") return ar ? TYPE[v as Roaster["type"]]?.[0] ?? String(v) : TYPE[v as Roaster["type"]]?.[1] ?? String(v);
     if (k === "isDefault") return v ? (ar ? "نعم" : "yes") : (ar ? "لا" : "no");
