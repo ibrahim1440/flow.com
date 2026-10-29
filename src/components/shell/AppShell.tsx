@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useWsBadge } from "@/lib/workspace/badge-client";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Circle, LogOut, UserRound } from "lucide-react";
 import {
   NAV, SHELL_GROUP_ORDER, MENU_ORDER, visibleNav, presentTree, resolveActive, resolveHighlight, firstDestination, breadcrumb,
@@ -19,6 +19,9 @@ import { Ico, type D21IconName } from "./icons";
 import { createActions } from "./creates";
 import { CrumbsContext, PhoneContext, SectionPagesContext, TitleContext, type Crumb, type PhoneHeader, type SectionPages } from "./page-context";
 import "./direction-2.1.css";
+import { accountantEligible, accountantModeFor, accountantTree, activeAccountantItem, quickCreates, workspaceKey } from "@/lib/nav/accountant";
+import { AccountantMore, AccountantNav, WorkspaceSwitch } from "./AccountantNav";
+import { ACCOUNTANT_HOME, FULL_HOME, WorkspaceModeContext } from "./workspace-mode";
 
 /**
  * The Direction 2.1 application shell — one shell for every migrated route.
@@ -71,6 +74,21 @@ function NodeIcon({ node, fallback }: { node?: NavNode; fallback?: NavNode }) {
 const OPEN_GROUP_KEY = "hiqbah.nav.openGroup";
 const readOpenGroup = (): string | null => { try { return window.localStorage.getItem(OPEN_GROUP_KEY) || null; } catch { return null; } };
 const writeOpenGroup = (id: string | null) => { try { window.localStorage.setItem(OPEN_GROUP_KEY, id ?? ""); } catch { /* storage unavailable: the choice lasts this page only */ } };
+
+/**
+ * «واجهة المحاسب» / «القائمة الكاملة» — the person's choice, remembered on this device under their own user id (so a
+ * shared computer keeps each person's choice). No choice yet: the default of `accountantDefault`. Presentation only.
+ */
+const readWorkspace = (userId: string): string | null => { try { return window.localStorage.getItem(workspaceKey(userId)); } catch { return null; } };
+const writeWorkspace = (userId: string, v: "full" | "accountant") => { try { window.localStorage.setItem(workspaceKey(userId), v); } catch { /* storage unavailable: the choice lasts this page only */ } };
+
+/** The address's query, for the accountant tree's tab items (`?tab=…`). In its own Suspense boundary, as Next requires. */
+function SearchSync({ onChange }: { onChange: (s: string) => void }) {
+  const params = useSearchParams();
+  const s = params.toString();
+  useEffect(() => { onChange(s); }, [s, onChange]);
+  return null;
+}
 
 /** A group heading's icon: the reference set for the shell's own groups, else the module's icon. */
 const GROUP_ICONS: Record<string, D21IconName> = {
@@ -199,6 +217,15 @@ export function AppShell({
   // The viewer's tree as the approved frames present it (`presentTree`: «الطلبات» in «التشغيل»
   // for every persona, N-02); resolution uses the same presentation of the full registry.
   const tree = useMemo(() => presentTree(visibleNav(viewer)), [viewer]);
+  // «واجهة المحاسب» (Qoyod-parity program): drawn for an accounting holder unless they chose the full menu.
+  // Everybody else: `acctMode` is false and nothing below differs from the system shell.
+  const eligible = accountantEligible(viewer);
+  const [savedMode, setSavedMode] = useState<string | null>(() => (typeof window === "undefined" ? null : readWorkspace(user.id)));
+  const acctMode = accountantModeFor(viewer, savedMode);
+  const wsHome = acctMode ? ACCOUNTANT_HOME : FULL_HOME;
+  const [search, setSearch] = useState("");
+  const acctTree = useMemo(() => (acctMode ? accountantTree(viewer, lang) : []), [acctMode, viewer, lang]);
+  const acctActive = useMemo(() => (acctMode ? activeAccountantItem(acctTree, pathname, search) : null), [acctMode, acctTree, pathname, search]);
   // WHERE you are is resolved against the full registry; WHAT you may follow is the pruned
   // tree. Resolving against the pruned tree mislabels a refused page: without the leave duty,
   // /dashboard/hr/leave would fall through to /dashboard/hr and read «الموظفون».
@@ -241,6 +268,20 @@ export function AppShell({
   // «الإعدادات / الأتمتة والواتساب / القواعد» (GX E-P01). A part repeating the one before it is
   // dropped — «المبيعات / عروض الأسعار», never «… / عروض الأسعار / عروض الأسعار».
   const trail = useMemo(() => {
+    // The accountant workspace names the page as Qoyod does: «المبيعات / فواتير المبيعات», «الصفحة الرئيسية / لوحة المتابعة».
+    if (acctMode && acctActive) {
+      // «القسم / الصفحة» (Qoyod); only the dashboard starts with «الصفحة الرئيسية» (QOYOD-REF §0.2).
+      const parts: { key: string; text: string; href: string | null }[] = acctActive.item ? [] : [{ key: "acct-home", text: ar ? "الصفحة الرئيسية" : "Home", href: ACCOUNTANT_HOME }];
+      if (acctActive.item) {
+        parts.push({ key: acctActive.group.id, text: acctActive.group.label, href: null });
+        parts.push({ key: acctActive.item.id, text: acctActive.item.label, href: title ? acctActive.item.href : null });
+      } else {
+        parts.push({ key: acctActive.group.id, text: acctActive.group.label, href: title ? acctActive.group.href : null });
+      }
+      if (title) (extraCrumbs ?? []).forEach((c, i) => parts.push({ key: `extra-${i}`, text: c.text, href: c.href ?? null }));
+      if (title) parts.push({ key: "title", text: title, href: null });
+      return dedupeTrail(parts);
+    }
     const base = showSeg && leafIsPage && title ? crumbs.slice(0, -1) : crumbs;
     const shown = shellTrail(base, lang, viewer);
     const parts: { key: string; text: string; href: string | null }[] = shown.map((p, i) => ({
@@ -251,8 +292,9 @@ export function AppShell({
     if (title) (extraCrumbs ?? []).forEach((c, i) => parts.push({ key: `extra-${i}`, text: c.text, href: c.href ?? null }));
     if (title) parts.push({ key: "title", text: title, href: null });
     return dedupeTrail(parts);
-  }, [crumbs, showSeg, leafIsPage, title, lang, viewer, ownAccount, extraCrumbs]);
+  }, [crumbs, showSeg, leafIsPage, title, lang, viewer, ownAccount, extraCrumbs, acctMode, acctActive, ar]);
 
+  const workspaceMode = useMemo(() => ({ accountant: acctMode, home: wsHome }), [acctMode, wsHome]);
   const sectionPages: SectionPages = useMemo(() => showSeg ? {
     label: ar ? "صفحات القسم" : "Section pages",
     pages: pages.map((p) => ({ id: p.id, href: p.href!, text: text(p, lang, viewer), current: active.leaf?.id === p.id })),
@@ -279,10 +321,19 @@ export function AppShell({
   // «جديد» offers the create actions of the module you are in (owner decision A-3): several →
   // a menu, exactly one → the control opens it directly, none → no control.
   const router = useRouter();
+  // «لوحة المتابعة» is the accountant workspace's landing page: the dashboard address opens it.
+  useEffect(() => { if (acctMode && pathname === FULL_HOME) router.replace(ACCOUNTANT_HOME); }, [acctMode, pathname, router]);
   // A top-level entry naming `shell.creates` (the operations dashboard and the global history)
   // offers that module's create actions, as the frame's top bar «جديد · C» shows (20:236).
   const moduleId = active.group?.id ?? active.leaf?.shell?.creates;
-  const creates = useMemo(() => (allowed ? createActions(viewer, moduleId) : []), [viewer, moduleId, allowed]);
+  // In the accountant workspace «جديد» is «الإنشاء السريع»: every «+» of the accountant tree (the rail and the phone
+  // have no sidebar menu for it). The same entries, the same permissions — see `quickCreates`.
+  const acctQuick = useMemo(() => {
+    if (!acctMode) return [];
+    const en = quickCreates(viewer, "en");
+    return quickCreates(viewer, "ar").map((c, i) => ({ id: c.id, labelAr: c.label, labelEn: en[i]?.label ?? c.label, href: c.href, permitted: () => true }));
+  }, [acctMode, viewer]);
+  const creates = useMemo(() => (!allowed ? [] : acctMode ? acctQuick : createActions(viewer, moduleId)), [viewer, moduleId, allowed, acctMode, acctQuick]);
   const single = creates.length === 1 ? creates[0] : null;
   const singleHref = single?.href ?? null;
 
@@ -355,7 +406,8 @@ export function AppShell({
   // The accordion (sidebar, rail and «المزيد» share it): the current page's group opens on every
   // navigation; a page outside the groups keeps whatever was open.
   // A gear-menu screen opens «الحساب والإعدادات» in «المزيد» (the sidebar has no such group).
-  const litGroupId = litGroup?.id ?? (menuItems.some((it) => it.current) ? SETTINGS_GROUP : null);
+  const acctLit = acctActive && acctActive.item ? acctActive.group.id : null;
+  const litGroupId = acctMode ? acctLit : litGroup?.id ?? (menuItems.some((it) => it.current) ? SETTINGS_GROUP : null);
   const [openGroup, setOpenGroup] = useState<string | null>(litGroupId);
   const [openFor, setOpenFor] = useState(pathname);
   if (openFor !== pathname) { setOpenFor(pathname); if (litGroupId) setOpenGroup(litGroupId); }
@@ -373,6 +425,13 @@ export function AppShell({
     const next = openGroup === id ? null : id;
     setOpenGroup(next);
     writeOpenGroup(next);
+  };
+  const switchWorkspace = (toAccountant: boolean) => {
+    const v = toAccountant ? "accountant" : "full";
+    writeWorkspace(user.id, v);
+    setSavedMode(v);
+    setOpenGroup(null);
+    router.push(toAccountant ? ACCOUNTANT_HOME : FULL_HOME);
   };
   const moduleHref = !litGroup && active.group ? firstDestination(viewer, active.group) : null;
   const meNode = tree.find((n) => n.id === "me");
@@ -397,6 +456,7 @@ export function AppShell({
     <CrumbsContext value={setCrumbsStable}>
     <PhoneContext value={setPhoneStable}>
     <SectionPagesContext value={sectionPages}>
+    <WorkspaceModeContext value={workspaceMode}>
     <div className="d21" lang={lang} dir={ar ? "rtl" : "ltr"} data-shell="d21">
       {/* IBM Plex, self-hosted (public/fonts): the same faces, files and unicode-range subsets
           Google Fonts served, so nothing is fetched from a third party. */}
@@ -414,28 +474,35 @@ export function AppShell({
             <span className="lbl">{ar ? "بحث أو انتقال" : "Search or jump"}</span>
             <span className="d21-kbd" aria-hidden>Ctrl K</span>
           </button>
-          <nav aria-label={ar ? "التنقل الرئيسي" : "Main"}>
-            <ul className="d21-navlist">{top.map((it) => navItem(it))}</ul>
-            {groups.map((g) => {
-              const gid = `d21-grp-${g.id}`;
-              const pid = `d21-grp-panel-${g.id}`;
-              const mod = NAV.find((n) => n.id === g.id);
-              const isOpen = openGroup === g.id;
-              return (
-                <div key={g.id} className="d21-grpbox" role="group" aria-labelledby={gid}>
-                  {/* The heading opens and closes its entries (a native button: Enter and Space). */}
-                  <button type="button" className="d21-grp" id={gid} data-testid={`navgroup-${g.id}`}
-                    aria-expanded={isOpen} aria-controls={pid} data-current={g.id === litGroupId ? "true" : undefined}
-                    title={g.label ?? undefined} onClick={() => toggleGroup(g.id)}>
-                    <GroupIcon id={g.id} /><span>{g.label ?? g.id}</span><Ico name="chevd" small className="chev" />
-                  </button>
-                  <div className="d21-acc" id={pid} data-open={isOpen ? "true" : undefined}>
-                    <div className="d21-acc-in"><ul className="d21-navlist">{g.items.map((it) => navItem(it, mod))}</ul></div>
+          <Suspense fallback={null}><SearchSync onChange={setSearch} /></Suspense>
+          {acctMode ? (
+            <AccountantNav lang={lang} tree={acctTree} creates={acctQuick.map((c) => ({ id: c.id, label: ar ? c.labelAr : c.labelEn, href: c.href }))}
+              activeGroup={acctActive?.group.id ?? null} activeItem={acctActive?.item?.id ?? null} openGroup={openGroup} onToggleGroup={toggleGroup} />
+          ) : (
+            <nav aria-label={ar ? "التنقل الرئيسي" : "Main"}>
+              <ul className="d21-navlist">{top.map((it) => navItem(it))}</ul>
+              {groups.map((g) => {
+                const gid = `d21-grp-${g.id}`;
+                const pid = `d21-grp-panel-${g.id}`;
+                const mod = NAV.find((n) => n.id === g.id);
+                const isOpen = openGroup === g.id;
+                return (
+                  <div key={g.id} className="d21-grpbox" role="group" aria-labelledby={gid}>
+                    {/* The heading opens and closes its entries (a native button: Enter and Space). */}
+                    <button type="button" className="d21-grp" id={gid} data-testid={`navgroup-${g.id}`}
+                      aria-expanded={isOpen} aria-controls={pid} data-current={g.id === litGroupId ? "true" : undefined}
+                      title={g.label ?? undefined} onClick={() => toggleGroup(g.id)}>
+                      <GroupIcon id={g.id} /><span>{g.label ?? g.id}</span><Ico name="chevd" small className="chev" />
+                    </button>
+                    <div className="d21-acc" id={pid} data-open={isOpen ? "true" : undefined}>
+                      <div className="d21-acc-in"><ul className="d21-navlist">{g.items.map((it) => navItem(it, mod))}</ul></div>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </nav>
+                );
+              })}
+            </nav>
+          )}
+          {eligible ? <WorkspaceSwitch lang={lang} accountant={acctMode} onChange={switchWorkspace} /> : null}
           {/* The user block (reference `.me`): avatar, name and role, the gear. One control: it
               opens the account menu — profile, settings, sign out — on the rail too, where only
               the avatar is drawn. */}
@@ -526,7 +593,7 @@ export function AppShell({
                 <div className="d21-denied" role="alert">
                   <h1>{deniedTitle}</h1>
                   <p>{deniedBody}</p>
-                  <Link href="/dashboard" className="d21-btn p">{homeLabel}</Link>
+                  <Link href={wsHome} className="d21-btn p">{homeLabel}</Link>
                 </div>
               )}
             </main>
@@ -538,8 +605,9 @@ export function AppShell({
             · المزيد. A page with its own sticky action bar takes its place. */}
         {!phoneHeader?.ownBar ? (
           <nav className="d21-tabbar" aria-label={ar ? "التنقل السريع" : "Quick navigation"}>
-            <Link href="/dashboard" aria-current={pathname === "/dashboard" ? "page" : undefined}><Ico name="home" />{ar ? "الرئيسية" : "Home"}</Link>
-            {litGroup && litGroup.label ? <Link href={litGroup.items[0].href} aria-current="true" data-testid="tab-group"><NodeIcon node={litGroup.items[0].node} fallback={NAV.find((n) => n.id === litGroup.id)} />{litGroup.label}</Link>
+            <Link href={wsHome} aria-current={pathname === wsHome ? "page" : undefined}><Ico name="home" />{ar ? "الرئيسية" : "Home"}</Link>
+            {acctMode ? (acctActive && acctActive.item && acctActive.item.href ? <Link href={acctActive.item.href} aria-current="true" data-testid="tab-group"><Ico name={acctActive.group.icon} />{acctActive.group.label}</Link> : null)
+              : litGroup && litGroup.label ? <Link href={litGroup.items[0].href} aria-current="true" data-testid="tab-group"><NodeIcon node={litGroup.items[0].node} fallback={NAV.find((n) => n.id === litGroup.id)} />{litGroup.label}</Link>
               : active.group && moduleHref ? <Link href={moduleHref} aria-current="true" data-testid="tab-group"><NodeIcon node={active.group} />{text(active.group, lang)}</Link>
               // «مساحة عملي» takes the slot when no section holds it (the workspace itself, the dashboard,
               // «خدماتي»): the reference's «الوارد» position, never displacing the current section.
@@ -569,7 +637,8 @@ export function AppShell({
           </div>
           {/* Every section under its heading, exactly as the sidebar groups them (owner, 19 Oct 2026),
               each one opening and closing like the sidebar's; the ungrouped entries stay listed. */}
-          {top.length > 0 ? (
+          {acctMode ? <AccountantMore lang={lang} tree={acctTree} activeItem={acctActive?.item?.id ?? null} activeGroup={acctActive?.group.id ?? null} openGroup={openGroup} onToggleGroup={toggleGroup} /> : null}
+          {!acctMode && top.length > 0 ? (
             <div role="group" data-testid="moregroup-top">
               {top.map((it) => (
                 <Link key={it.node.id} href={it.href} className="d21-more-row" aria-current={it.current ? "page" : undefined} data-testid={`more-${it.node.id}`}>
@@ -578,7 +647,7 @@ export function AppShell({
               ))}
             </div>
           ) : null}
-          {[...groups, ...(menuItems.length > 0 ? [{ id: SETTINGS_GROUP, label: ar ? "الحساب والإعدادات" : "Account & settings", items: menuItems } as Group] : [])].map((g) => {
+          {[...(acctMode ? [] : groups), ...(menuItems.length > 0 ? [{ id: SETTINGS_GROUP, label: ar ? "الحساب والإعدادات" : "Account & settings", items: menuItems } as Group] : [])].map((g) => {
             const parent = g.id === SETTINGS_GROUP ? undefined : NAV.find((n) => n.id === g.id);
             const hid = `d21-more-grp-${g.id}`;
             const pid = `d21-more-panel-${g.id}`;
@@ -602,11 +671,13 @@ export function AppShell({
               </div>
             );
           })}
+          {eligible ? <WorkspaceSwitch lang={lang} accountant={acctMode} onChange={switchWorkspace} variant="row" /> : null}
           <LanguageToggle variant="row" onDone={() => setMore(false)} />
           <button type="button" className="d21-more-row danger" onClick={onLogout}><LogOut aria-hidden /><span>{ar ? "تسجيل الخروج" : "Sign out"}</span></button>
         </MoreSheet>
       ) : null}
     </div>
+    </WorkspaceModeContext>
     </SectionPagesContext>
     </PhoneContext>
     </CrumbsContext>

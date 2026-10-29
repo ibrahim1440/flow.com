@@ -9,7 +9,7 @@ export type RoleDef = {
   key: string;
   ar: string;
   en: string;
-  group: "cash" | "receivables" | "payables" | "revenue" | "tax" | "inventory" | "cost" | "payroll" | "commission" | "equity" | "other";
+  group: "cash" | "receivables" | "payables" | "revenue" | "tax" | "inventory" | "cost" | "payroll" | "commission" | "fixedAssets" | "equity" | "other";
   /** The phase whose events post to it (the readiness check lists unmapped roles per phase). */
   phase: RolePhase;
   /** The account types the role may map to (a mapping to another type is refused). */
@@ -60,10 +60,20 @@ export const ACCOUNT_ROLES: RoleDef[] = [
   { key: "EMPLOYEE_ADVANCES", ar: "سلف الموظفين", en: "Employee advances", group: "payroll", phase: "A3", types: ["ASSET"], seedCode: "1180" },
   { key: "COMMISSION_EXPENSE", ar: "عمولات المبيعات", en: "Sales commission expense", group: "commission", phase: "A3", types: ["EXPENSE"], seedCode: "6150" },
   { key: "COMMISSION_PAYABLE", ar: "عمولات مستحقة الدفع", en: "Commissions payable", group: "commission", phase: "A3", types: ["LIABILITY"], seedCode: "2145" },
+  // «الأصول الثابتة» (20261121090000_fixed_assets): a category's own accounts win; these are the defaults.
+  { key: "FA_COST", ar: "الأصول الثابتة - التكلفة", en: "Fixed assets – cost", group: "fixedAssets", phase: "A3", types: ["ASSET"], seedCode: "1210" },
+  { key: "FA_ACCUMULATED_DEPRECIATION", ar: "مجمع الإهلاك", en: "Accumulated depreciation", group: "fixedAssets", phase: "A3", types: ["ASSET"], seedCode: "1290" },
+  { key: "FA_DEPRECIATION_EXPENSE", ar: "مصروف الإهلاك", en: "Depreciation expense", group: "fixedAssets", phase: "A3", types: ["EXPENSE"], seedCode: "6600" },
+  { key: "FA_DISPOSAL_GAIN_LOSS", ar: "أرباح وخسائر استبعاد الأصول الثابتة", en: "Gain / loss on disposal of fixed assets", group: "fixedAssets", phase: "A3", types: ["EXPENSE", "REVENUE"], seedCode: "7300" },
   { key: "BANK_FEES", ar: "رسوم البنوك ونقاط البيع", en: "Bank & POS fees", group: "other", phase: "A2", types: ["EXPENSE"], seedCode: "6310" },
   { key: "DELIVERY_APP_COMMISSION", ar: "عمولات تطبيقات التوصيل", en: "Delivery-app commissions", group: "other", phase: "A2", types: ["EXPENSE"], seedCode: "6300" },
   { key: "ROUNDING", ar: "فروقات التقريب", en: "Rounding differences", group: "other", phase: "A1", types: ["EXPENSE"], seedCode: "6900", requiredForActivation: true },
   { key: "OPENING_BALANCE_EQUITY", ar: "حقوق ملكية الأرصدة الافتتاحية", en: "Opening balance equity", group: "equity", phase: "A1", types: ["EQUITY"], seedCode: "3900", requiredForActivation: true },
+  // «قوالب التأجيل» (20261122090000_budgets_deferrals): the balance-sheet side of a deferral schedule — a prepaid expense is
+  // recognised Dr P&L / Cr PREPAID_EXPENSES, a deferred revenue Dr DEFERRED_REVENUE / Cr revenue (a template may name
+  // another account of the same type instead).
+  { key: "PREPAID_EXPENSES", ar: "مصروفات مدفوعة مقدماً", en: "Prepaid expenses", group: "other", phase: "A3", types: ["ASSET"], seedCode: "1160" },
+  { key: "DEFERRED_REVENUE", ar: "إيرادات مؤجلة", en: "Deferred revenue", group: "revenue", phase: "A3", types: ["LIABILITY"], seedCode: "2152" },
   { key: "RETAINED_EARNINGS", ar: "الأرباح المبقاة", en: "Retained earnings", group: "equity", phase: "A1", types: ["EQUITY"], seedCode: "3300" },
 ];
 

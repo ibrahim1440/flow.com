@@ -253,6 +253,17 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "zatca_onboard", label: "E-invoicing (ZATCA): onboard / renew EGS units and switch e-invoicing (admin + step-up)" },
     { key: "zatca_resubmit", label: "E-invoicing (ZATCA): send a pending or failed document again" },
     { key: "zatca_xml", label: "E-invoicing (ZATCA): download the signed / cleared XML" },
+    // «الأصول الثابتة» (20261121090000_fixed_assets): the fixed-asset register — categories, assets, depreciation runs,
+    // additions, disposals and the go-live opening (posting actions step up). A new capability nobody held:
+    // permission-backfill writes it adminOnly.
+    { key: "fixed_assets", label: "Fixed assets: register, depreciation runs, additions and disposals" },
+    // Qoyod-parity integration (council, uniform register model): each register's own maintenance duty — create, edit and
+    // archive of its records. Reads stay with the accounting module; every act that writes the GL ALSO needs the journal
+    // duty (journal_post / journal_approve / journal_reverse) through the central gate. New capabilities nobody held:
+    // permission-backfill writes them adminOnly (no migration: permissions are JSON).
+    { key: "budgets", label: "Budgets: prepare, revise and archive budgets (approval needs journal_approve)" },
+    { key: "deferrals", label: "Deferral templates and schedules: create, edit and cancel (runs need journal_post)" },
+    { key: "recurring", label: "Journal templates and recurring transactions: create, edit, pause and cancel" },
   ],
   // Accounting A3: entering supplier invoices (drafts) and submitting them for approval.
   purchases: [

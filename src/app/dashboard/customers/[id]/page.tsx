@@ -15,6 +15,9 @@ import type { Account, Activity, AgingKey, Contact, CustomerFile, TimelineEntry 
 import { CreditBadges, CreditCallout, HoldDialog, LiftDialog, badgesOf, fullDate } from "@/components/credit/credit-ui";
 import { orderProgress, progressText } from "@/lib/order-stage";
 import { ORDER_STATUS_LABEL_KEYS } from "@/components/OrderLifecyclePanel";
+import { useUser } from "../../user-context";
+import { canViewInvoices } from "@/lib/services/invoicing/access";
+import { useAccountantView } from "../../accounting/_ui/qoyod-pages";
 import "../customers.css";
 import "./account.css";
 
@@ -95,6 +98,26 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   const noteRef = useRef<HTMLInputElement>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const reload = () => setReloadToken((t) => t + 1);
+  // Qoyod parity (accountant workspace only): Qoyod's five customer tiles — الرصيد الختامي · إجمالي المستحق · متأخرة ·
+  // عدد جميع الفواتير · مجموع مبالغ كل الفواتير — from the AR statement and the issued sales invoices (read-only), with
+  // one-click links to the invoices and the statement of account. Everyone else keeps this page as it was.
+  const viewer = useUser();
+  const qoyod = useAccountantView() && !!viewer && canViewInvoices(viewer.permissions);
+  const [arTiles, setArTiles] = useState<{ balance: string; open: string; overdue: string; count: number; sum: string; more: boolean } | null>(null);
+  useEffect(() => {
+    if (!qoyod) return;
+    let off = false;
+    Promise.all([
+      fetch(`/api/accounting/ar/customers/${encodeURIComponent(id)}`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`/api/sales/invoices?customerId=${encodeURIComponent(id)}&status=ISSUED&take=200&skip=0`).then((r) => (r.ok ? r.json() : null)),
+    ]).then(([a, inv]: [{ aging: Record<string, string | number> } | null, { items: { kind: string; grandTotal: string }[]; total: number } | null]) => {
+      if (off || !a || !inv) return;
+      const invoices = inv.items.filter((x) => x.kind === "INVOICE");
+      const cents = invoices.reduce((t, x) => t + Math.round(Number(x.grandTotal) * 100), 0);
+      setArTiles({ balance: String(a.aging.balance ?? "0"), open: String(a.aging.totalOpen ?? "0"), overdue: String(a.aging.overdue ?? "0"), count: invoices.length, sum: (cents / 100).toFixed(2), more: inv.total > inv.items.length });
+    }).catch(() => undefined);
+    return () => { off = true; };
+  }, [qoyod, id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -860,6 +883,25 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
         </div>
 
         {creditBand}
+        {qoyod ? (
+          <>
+            <dl className="metrics acc-metrics" data-testid="account-ar-tiles">
+              {[
+                [L("الرصيد الختامي", "Closing balance"), arTiles?.balance],
+                [L("إجمالي المستحق", "Total due"), arTiles?.open],
+                [L("متأخرة", "Overdue"), arTiles?.overdue],
+                [L("عدد جميع الفواتير", "Invoices"), arTiles ? String(arTiles.count) : undefined],
+                [L("مجموع مبالغ كل الفواتير", "All invoices total"), arTiles?.sum],
+              ].map(([k, v], i) => (
+                <div key={i}><dt>{k}</dt><dd className="mid"><bdi className="n">{v === undefined ? "…" : i === 3 ? v : money2(Number(v))}</bdi></dd>{i === 4 && arTiles?.more ? <dd className="d">{L("أول 200 فاتورة", "first 200 invoices")}</dd> : null}</div>
+              ))}
+            </dl>
+            <p className="acc-qlinks" style={{ display: "flex", gap: 12, margin: "0 0 16px" }}>
+              <Link href={`/dashboard/sales/invoices?customerId=${encodeURIComponent(id)}`} data-testid="account-invoices-link">{L("فواتير العميل", "The customer's invoices")}</Link>
+              <Link href={`/dashboard/sales/receivables/${encodeURIComponent(id)}`} data-testid="account-statement-link">{L("كشف الحساب", "Statement of account")}</Link>
+            </p>
+          </>
+        ) : null}
         <dl className="metrics acc-metrics" data-testid="account-metrics">
           {salesFig}{balFig}{lastFig}{qtyFig}{termsFig}
         </dl>

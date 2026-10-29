@@ -10,6 +10,7 @@ import { initials } from "@/components/d21/labels";
 import { shortDate } from "@/components/d21/format";
 import { QuotePane } from "./QuotePane";
 import { QuotePicker } from "./QuotePicker";
+import { useAccountantView } from "../../accounting/_ui/qoyod-pages";
 
 /**
  * Quotations list, built to `crm-quotes` 1440 (`181:1609`, EN `1528:1930`) and 1024
@@ -101,6 +102,8 @@ export default function QuotesPage() {
   const lang = useLang();
   const ar = lang === "ar";
   const phone = usePhone();
+  // Qoyod parity: read-only in the accountant workspace (Sales owns quotations) — no «+ عرض سعر».
+  const readOnly = useAccountantView();
 
   const [data, setData] = useState<Payload | null>(null);
   const [status, setStatus] = useState("");
@@ -336,7 +339,7 @@ export default function QuotesPage() {
       <Ico name="dl" small /> {ar ? "تصدير" : "Export"}
     </a>
   );
-  const newBtn = data.can.write ? (
+  const newBtn = data.can.write && !readOnly ? (
     <button type="button" className="btn p" onClick={() => setPicker(true)} data-testid="new-quote">
       <Ico name="plus" small /> {ar ? "عرض سعر" : "Quotation"}
     </button>

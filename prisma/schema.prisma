@@ -1358,6 +1358,8 @@ model Supplier {
   /// GOODS_SERVICES (default) | CUSTOMS | CLEARING_AGENT — import VAT (P-IMP15) is billed by customs / a clearing agent only.
   kind                String               @default("GOODS_SERVICES")
   supplierInvoices    SupplierInvoice[]
+  /// «الأصول الثابتة» (20261121090000_fixed_assets): assets bought from this supplier.
+  fixedAssets         FixedAsset[]
   supplierPayments    SupplierPayment[]
   /// «نقص من المورد» (20261119090000_supplier_shortfall).
   supplierClaims      SupplierClaim[]
@@ -2686,23 +2688,41 @@ model Account {
   hrAccountMaps     HrAccountMap[]
 
   // ── Accounting core A1 ──
-  tenantId           String               @default("hiqbah")
+  tenantId                  String                @default("hiqbah")
   /// DEBIT | CREDIT. Inserted as 'AUTO' (the default) and resolved from the type by the database
   /// (ledger_account_guard): ASSET / EXPENSE → DEBIT, the others → CREDIT. Contra accounts set it explicitly.
-  normalBalance      String               @default("AUTO")
+  normalBalance             String                @default("AUTO")
   /// Sub-ledger control kind (AR, AP, INVENTORY, VAT_INPUT, VAT_OUTPUT, CASH, BANK, FIXED_ASSET, PAYROLL,
   /// COMMISSION, CLEARING) or null. AR / AP lines must name their party.
-  controlType        String?
+  controlType               String?
   /// Control accounts refuse MANUAL journals (they are fed by their sub-ledgers through the engine).
-  allowManualJournal Boolean              @default(true)
-  description        String?
-  roles              AccountRole[]
-  openingLines       OpeningBalanceLine[]
+  allowManualJournal        Boolean               @default(true)
+  description               String?
+  roles                     AccountRole[]
+  openingLines              OpeningBalanceLine[]
   /// Accounting A3: the expense categories of supplier bills that post here.
-  expenseCategories  ExpenseCategory[]
+  expenseCategories         ExpenseCategory[]
+  /// «القيود السهلة» (20261120090000_recurring_journals): the journal-template lines naming this account.
+  templateLines             JournalTemplateLine[]
   /// Accounting A5: the statement line (CURRENT_ASSET … ZAKAT, CHECK); NULL = inferred from the chart
   /// (src/lib/accounting/statements.ts → reportGroupOf).
-  reportGroup        String?
+  reportGroup               String?
+  /// «الأصول الثابتة» (20261121090000_fixed_assets): the categories / assets / documents that name this account.
+  faCategoryCost            FixedAssetCategory[]  @relation("FaCategoryCost")
+  faCategoryAccum           FixedAssetCategory[]  @relation("FaCategoryAccum")
+  faCategoryExpense         FixedAssetCategory[]  @relation("FaCategoryExpense")
+  faCategoryGainLoss        FixedAssetCategory[]  @relation("FaCategoryGainLoss")
+  faCounter                 FixedAsset[]          @relation("FaCounter")
+  faAdditionCounter         FixedAssetAddition[]  @relation("FaAdditionCounter")
+  faDisposalProceeds        FixedAssetDisposal[]  @relation("FaDisposalProceeds")
+  /// «الموازنات» / «قوالب التأجيل» (20261122090000_budgets_deferrals).
+  glBudgetLines             GlBudgetLine[]
+  deferralTemplateBalances  DeferralTemplate[]    @relation("DeferralTemplateBalance")
+  deferralTemplatePls       DeferralTemplate[]    @relation("DeferralTemplatePl")
+  deferralScheduleBalances  DeferralSchedule[]    @relation("DeferralScheduleBalance")
+  deferralSchedulePls       DeferralSchedule[]    @relation("DeferralSchedulePl")
+  deferralScheduleReclasses DeferralSchedule[]    @relation("DeferralScheduleReclass")
+  deferralScheduleCancels   DeferralSchedule[]    @relation("DeferralScheduleCancel")
 
   @@index([type])
   @@index([parentId])
@@ -4361,6 +4381,9 @@ model FinBranch {
   // Native HR (additive): people and job openings located at this branch.
   hrEmployees   HrEmployee[]   @relation("HrEmployeeBranch")
   hrJobOpenings HrJobOpening[] @relation("HrJobOpeningBranch")
+
+  /// «الأصول الثابتة»: the assets located at this branch.
+  fixedAssets FixedAsset[]
 }
 
 /// Which branches a finance user without `all_branches` may read and write.
@@ -7585,10 +7608,13 @@ model SupplierInvoice {
   createdAt              DateTime       @default(now())
   updatedAt              DateTime       @updatedAt
 
-  lines       SupplierInvoiceLine[]
-  allocations SupplierPaymentAllocation[]
-  claims      SupplierClaim[]
-  creditNotes SupplierCreditNote[]
+  lines               SupplierInvoiceLine[]
+  allocations         SupplierPaymentAllocation[]
+  claims              SupplierClaim[]
+  creditNotes         SupplierCreditNote[]
+  /// «الأصول الثابتة»: assets / additions capitalised from an EXPENSE line of this invoice.
+  fixedAssets         FixedAsset[]
+  fixedAssetAdditions FixedAssetAddition[]
 
   @@index([supplierId, status])
   @@index([status, dueDate])
@@ -7599,9 +7625,9 @@ model SupplierInvoice {
 /// variance. STOCK: a stock line without a costed receipt (stockKind + stockItemId) — capitalised into the holder.
 /// EXPENSE: a non-stock line (expenseCategoryId → its account).
 model SupplierInvoiceLine {
-  id                     String           @id @default(cuid())
+  id                     String               @id @default(cuid())
   invoiceId              String
-  invoice                SupplierInvoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoice                SupplierInvoice      @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   lineNo                 Int
   kind                   String
   /// PurchaseRecord.id (no FK: the receipt register is operational data).
@@ -7609,43 +7635,46 @@ model SupplierInvoiceLine {
   stockKind              String?
   stockItemId            String?
   expenseCategoryId      String?
-  expenseCategory        ExpenseCategory? @relation(fields: [expenseCategoryId], references: [id], onDelete: Restrict)
+  expenseCategory        ExpenseCategory?     @relation(fields: [expenseCategoryId], references: [id], onDelete: Restrict)
   description            String
-  quantity               Decimal?         @db.Decimal(18, 4)
-  net                    Decimal          @db.Decimal(18, 2)
-  vatRate                Decimal          @default(15) @db.Decimal(5, 2)
-  vat                    Decimal          @db.Decimal(18, 2)
-  gross                  Decimal          @db.Decimal(18, 2)
+  quantity               Decimal?             @db.Decimal(18, 4)
+  net                    Decimal              @db.Decimal(18, 2)
+  vatRate                Decimal              @default(15) @db.Decimal(5, 2)
+  vat                    Decimal              @db.Decimal(18, 2)
+  gross                  Decimal              @db.Decimal(18, 2)
   /// Filled when posted: the receipt's value (GRN), the price variance, and the part of it capitalised.
-  matchedValue           Decimal?         @db.Decimal(18, 2)
-  variance               Decimal?         @db.Decimal(18, 2)
-  capitalized            Decimal?         @db.Decimal(18, 2)
+  matchedValue           Decimal?             @db.Decimal(18, 2)
+  variance               Decimal?             @db.Decimal(18, 2)
+  capitalized            Decimal?             @db.Decimal(18, 2)
   // ── Phase 2 (20261113090000_purchase_invoice_phase2): the purchase VAT category of the line ──
   taxCategoryId          String?
-  taxCategory            TaxCategory?     @relation(fields: [taxCategoryId], references: [id], onDelete: Restrict)
+  taxCategory            TaxCategory?         @relation(fields: [taxCategoryId], references: [id], onDelete: Restrict)
   /// Written when the invoice is posted (buildPurchaseTaxSnapshot); never changed afterwards.
   taxSnapshot            Json?
   /// IMPORT_VAT lines: the customs value the import VAT is computed on (net is 0).
-  customsValue           Decimal?         @db.Decimal(18, 2)
+  customsValue           Decimal?             @db.Decimal(18, 2)
   /// P-RC15 lines: the self-assessed VAT (not payable to the supplier; Dr VAT_INPUT / Cr VAT_OUTPUT).
-  selfAssessedVat        Decimal?         @db.Decimal(18, 2)
+  selfAssessedVat        Decimal?             @db.Decimal(18, 2)
   /// LANDED_COST lines: the receipt (of any supplier) the freight / duty / clearance / insurance is capitalised onto.
   targetPurchaseRecordId String?
-  targetPurchaseRecord   PurchaseRecord?  @relation("LandedCostTarget", fields: [targetPurchaseRecordId], references: [id], onDelete: Restrict)
+  targetPurchaseRecord   PurchaseRecord?      @relation("LandedCostTarget", fields: [targetPurchaseRecordId], references: [id], onDelete: Restrict)
   /// LANDED_COST lines: FREIGHT | DUTY | CLEARANCE | INSURANCE.
   landedCostType         String?
   // ── «نقص من المورد» (20261119090000_supplier_shortfall): STOCK / GRN lines billed for more than was received ──
   /// The quantity on the supplier's invoice (NULL = as received, i.e. "quantity"); net = billedQty × unit cost.
-  billedQty              Decimal?         @db.Decimal(18, 4)
+  billedQty              Decimal?             @db.Decimal(18, 4)
   /// billedQty − quantity (the received), and its value at the line's unit cost.
-  shortfallQty           Decimal?         @db.Decimal(18, 4)
-  shortfallNet           Decimal?         @db.Decimal(18, 2)
+  shortfallQty           Decimal?             @db.Decimal(18, 4)
+  shortfallNet           Decimal?             @db.Decimal(18, 2)
   /// CLAIM (Dr SUPPLIER_CLAIMS) | LOSS (Dr PURCHASE_SHORTAGE, reason ≥ 3) | ABSORBED (within tolerance, into the cost).
   shortfallTreatment     String?
   shortfallReason        String?
   /// LOSS lines: the input VAT on the shortfall reversed at posting (the abandonment's VAT setting); NULL otherwise.
-  shortfallVatReversed   Decimal?         @db.Decimal(18, 2)
+  shortfallVatReversed   Decimal?             @db.Decimal(18, 2)
   claim                  SupplierClaim?
+  /// «الأصول الثابتة»: the assets / additions capitalised from this EXPENSE line.
+  fixedAssets            FixedAsset[]
+  fixedAssetAdditions    FixedAssetAddition[]
 
   @@unique([invoiceId, lineNo])
   @@index([purchaseRecordId])
@@ -9032,4 +9061,584 @@ model WorkJobRun {
   error      String?
 
   @@index([startedAt])
+}
+
+// ── «القيود السهلة» / «المعاملات المتكررة» (feat/recurring-journals, 20261120090000_recurring_journals) ──────────────
+// src/lib/accounting/recurring/*. CHECKs, the deferred balance trigger (journal_template_balanced), the run guard and the
+// audit triggers live in the migration.
+
+/// A reusable journal: FIXED amounts, or PERCENT of a total entered at use time (each side 100 %).
+model JournalTemplate {
+  id          String                @id @default(cuid())
+  tenantId    String                @default("hiqbah")
+  name        String
+  description String?
+  /// FIXED | PERCENT
+  amountMode  String
+  isActive    Boolean               @default(true)
+  archivedAt  DateTime?
+  archivedBy  String?
+  createdBy   String
+  updatedBy   String
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @default(now()) @updatedAt
+  lines       JournalTemplateLine[]
+  schedules   RecurringSchedule[]
+
+  @@index([tenantId, isActive])
+}
+
+model JournalTemplateLine {
+  id           String          @id @default(cuid())
+  tenantId     String          @default("hiqbah")
+  templateId   String
+  template     JournalTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  lineNo       Int
+  accountId    String
+  account      Account         @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  /// D | C
+  side         String
+  amount       Decimal?        @db.Decimal(18, 2)
+  percent      Decimal?        @db.Decimal(7, 4)
+  description  String?
+  branchId     String?
+  costCenterId String?
+  partyType    String?
+  partyId      String?
+
+  @@unique([templateId, lineNo])
+  @@index([accountId])
+}
+
+/// «معاملة متكررة»: a journal (from a template or a copied journal) or a sales-invoice draft, on a schedule.
+model RecurringSchedule {
+  id                 String           @id @default(cuid())
+  tenantId           String           @default("hiqbah")
+  /// The reference shown as REC-000001.
+  refNo              Int              @unique @default(autoincrement())
+  name               String
+  description        String?
+  /// JOURNAL | SALES_INVOICE
+  kind               String
+  /// TEMPLATE | JOURNAL | SALES_INVOICE
+  sourceType         String
+  templateId         String?
+  template           JournalTemplate? @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  sourceEntryId      String?
+  sourceInvoiceId    String?
+  totalAmount        Decimal?         @db.Decimal(18, 2)
+  /// The document each run makes, frozen when the schedule is saved (journal lines, or the invoice's customer and lines).
+  payload            Json
+  /// DAILY | WEEKLY | MONTHLY | YEARLY
+  frequency          String
+  interval           Int              @default(1)
+  startDate          DateTime         @db.Date
+  endDate            DateTime?        @db.Date
+  maxOccurrences     Int?
+  nextIndex          Int              @default(0)
+  nextRunDate        DateTime?        @db.Date
+  /// ACTIVE | PAUSED | COMPLETED | CANCELLED
+  status             String           @default("ACTIVE")
+  autoPost           Boolean          @default(false)
+  autoPostApprovedBy String?
+  autoPostApprovedAt DateTime?
+  /// The authoriser was the preparer (the SoD setting allowed it): carried to each auto-posted journal's sodBypass.
+  autoPostSodBypass  Boolean          @default(false)
+  pausedAt           DateTime?
+  pausedBy           String?
+  /// Why it is paused (a person's pause, or the runner's: the preparer lost the right).
+  pauseReason        String?
+  lastRunAt          DateTime?
+  createdBy          String
+  updatedBy          String
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @default(now()) @updatedAt
+  runs               RecurringRun[]
+
+  @@index([status, nextRunDate])
+  @@index([kind, status])
+  @@index([templateId])
+}
+
+/// One run per (schedule, due date) — the run key.
+model RecurringRun {
+  id                String            @id @default(cuid())
+  tenantId          String            @default("hiqbah")
+  scheduleId        String
+  schedule          RecurringSchedule @relation(fields: [scheduleId], references: [id], onDelete: Restrict)
+  occurrenceIndex   Int
+  dueDate           DateTime          @db.Date
+  /// CREATED | POSTED | SKIPPED | FAILED
+  status            String
+  /// The snapshot at the first attempt: what the run makes, and its auto-post authorisation (a retry makes exactly this).
+  payload           Json
+  autoPost          Boolean           @default(false)
+  autoPostBy        String?
+  autoPostSodBypass Boolean           @default(false)
+  journalEntryId    String?
+  salesInvoiceId    String?
+  /// NOT_ACTIVE | BEFORE_GO_LIVE
+  skipReason        String?
+  errorCode         String?
+  errorMessage      String?
+  attempts          Int               @default(1)
+  /// CRON | MANUAL | RETRY
+  trigger           String
+  actorId           String
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @default(now()) @updatedAt
+
+  @@unique([scheduleId, dueDate])
+  @@index([status])
+  @@index([journalEntryId])
+  @@index([salesInvoiceId])
+}
+
+// ── «الأصول الثابتة» (20261121090000_fixed_assets; IAS 16 / IFRS for SMEs s.17 — src/lib/accounting/fixed-assets) ──
+
+/// A fixed-asset category: the default useful life, method and residual % of its assets and their GL accounts
+/// (NULL = the posting role FA_COST / FA_ACCUMULATED_DEPRECIATION / FA_DEPRECIATION_EXPENSE / FA_DISPOSAL_GAIN_LOSS).
+/// Never deleted (deactivated).
+model FixedAssetCategory {
+  id                   String       @id @default(cuid())
+  tenantId             String       @default("hiqbah")
+  code                 String       @unique
+  nameAr               String
+  nameEn               String?
+  usefulLifeMonths     Int
+  /// STRAIGHT_LINE | DECLINING_BALANCE (CHECK; the rate only with DECLINING_BALANCE).
+  method               String       @default("STRAIGHT_LINE")
+  decliningRatePercent Decimal?     @db.Decimal(7, 4)
+  residualPercent      Decimal      @default(0) @db.Decimal(5, 2)
+  costAccountId        String?
+  costAccount          Account?     @relation("FaCategoryCost", fields: [costAccountId], references: [id], onDelete: Restrict)
+  accumAccountId       String?
+  accumAccount         Account?     @relation("FaCategoryAccum", fields: [accumAccountId], references: [id], onDelete: Restrict)
+  expenseAccountId     String?
+  expenseAccount       Account?     @relation("FaCategoryExpense", fields: [expenseAccountId], references: [id], onDelete: Restrict)
+  gainLossAccountId    String?
+  gainLossAccount      Account?     @relation("FaCategoryGainLoss", fields: [gainLossAccountId], references: [id], onDelete: Restrict)
+  /// The net book value of its assets is deducted from the Zakat base (fixed assets used in the business).
+  zakatDeductible      Boolean      @default(true)
+  /// Leasehold improvements: its assets name the lease end; the life is at most 60 months and ends by then.
+  isLeasehold          Boolean      @default(false)
+  isActive             Boolean      @default(true)
+  sortOrder            Int          @default(0)
+  createdBy            String?
+  updatedBy            String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @default(now()) @updatedAt
+  assets               FixedAsset[]
+}
+
+/// The fixed-asset register. DRAFT → ACTIVE (its acquisition recorded) → FULLY_DEPRECIATED / DISPOSED. Once out of DRAFT
+/// its cost and accumulated depreciation equal its sub-ledger (FixedAssetEvent) at every commit (fixed_asset_books_check).
+model FixedAsset {
+  id                      String                       @id @default(cuid())
+  tenantId                String                       @default("hiqbah")
+  code                    String                       @unique
+  nameAr                  String
+  nameEn                  String?
+  categoryId              String
+  category                FixedAssetCategory           @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  branchId                String?
+  branch                  FinBranch?                   @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  location                String?
+  supplierId              String?
+  supplier                Supplier?                    @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  supplierInvoiceId       String?
+  supplierInvoice         SupplierInvoice?             @relation(fields: [supplierInvoiceId], references: [id], onDelete: Restrict)
+  supplierInvoiceLineId   String?
+  supplierInvoiceLine     SupplierInvoiceLine?         @relation(fields: [supplierInvoiceLineId], references: [id], onDelete: Restrict)
+  /// PURCHASE_INVOICE (an EXPENSE line reclassified) | MANUAL (against a counter account) | OPENING (at go-live).
+  acquisitionKind         String
+  counterAccountId        String?
+  counterAccount          Account?                     @relation("FaCounter", fields: [counterAccountId], references: [id], onDelete: Restrict)
+  acquisitionDate         DateTime                     @db.Date
+  inServiceDate           DateTime?                    @db.Date
+  cost                    Decimal                      @db.Decimal(18, 2)
+  residualValue           Decimal                      @default(0) @db.Decimal(18, 2)
+  usefulLifeMonths        Int
+  method                  String                       @default("STRAIGHT_LINE")
+  decliningRatePercent    Decimal?                     @db.Decimal(7, 4)
+  /// OPENING assets: the accumulated depreciation carried in from the old books.
+  openingAccumulated      Decimal?                     @db.Decimal(18, 2)
+  /// DRAFT | ACTIVE | FULLY_DEPRECIATED | DISPOSED (CHECK).
+  status                  String                       @default("DRAFT")
+  serialNumber            String?
+  /// HrEmployee.id (no FK: no foreign key points into Hr* tables — verifier check 14).
+  custodianEmployeeId     String?
+  /// [{ name, url (https) }] — the journals' attachment pattern.
+  attachments             Json?
+  notes                   String?
+  /// «غير مخصوم من وعاء الزكاة» per asset: NULL = the category's zakatDeductible; true / false overrides it.
+  zakatDeductible         Boolean?
+  /// The lease end of a leasehold improvement (frozen once out of DRAFT).
+  leaseEndDate            DateTime?                    @db.Date
+  accumulatedDepreciation Decimal                      @default(0) @db.Decimal(18, 2)
+  /// The last day depreciation is recorded for (NULL: none yet).
+  depreciatedThrough      DateTime?                    @db.Date
+  /// The schedule basis: from this day the remaining depreciable amount is spread over the remaining life
+  /// (the in-service date; an addition starts a new basis — IAS 16 prospective).
+  basisDate               DateTime?                    @db.Date
+  /// The accumulated depreciation the schedule starts from at basisDate (recorded or not yet run).
+  basisAccumulated        Decimal?                     @db.Decimal(18, 2)
+  activatedAt             DateTime?
+  activatedBy             String?
+  createdBy               String
+  updatedBy               String?
+  createdAt               DateTime                     @default(now())
+  updatedAt               DateTime                     @default(now()) @updatedAt
+  events                  FixedAssetEvent[]
+  depreciationLines       FixedAssetDepreciationLine[]
+  additions               FixedAssetAddition[]
+  disposals               FixedAssetDisposal[]
+
+  @@index([categoryId, status])
+  @@index([status])
+  @@index([supplierInvoiceLineId])
+}
+
+/// The fixed-asset sub-ledger (append-only): each row a cost / accumulated-depreciation delta and its GL state.
+model FixedAssetEvent {
+  id              String           @id @default(cuid())
+  tenantId        String           @default("hiqbah")
+  assetId         String
+  asset           FixedAsset       @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  /// ACQUISITION | OPENING | ADDITION | DEPRECIATION | DISPOSAL (a reversal keeps its kind and names reversesEventId).
+  kind            String
+  eventDate       DateTime         @db.Date
+  costDelta       Decimal          @default(0) @db.Decimal(18, 2)
+  accumDelta      Decimal          @default(0) @db.Decimal(18, 2)
+  /// ASSET | RUN | ADDITION | DISPOSAL, with the document's id.
+  sourceType      String
+  sourceId        String
+  reversesEventId String?          @unique
+  reverses        FixedAssetEvent? @relation("FaEventReversal", fields: [reversesEventId], references: [id], onDelete: Restrict)
+  reversedBy      FixedAssetEvent? @relation("FaEventReversal")
+  /// POSTED (journalEntryId) | SKIPPED (accounting off / before go-live) | OPENING (through the opening balances).
+  glState         String
+  journalEntryId  String?
+  createdBy       String
+  createdAt       DateTime         @default(now())
+
+  @@index([assetId, eventDate])
+  @@index([sourceType, sourceId], map: "FixedAssetEvent_source_idx")
+}
+
+/// A monthly depreciation run: one balanced entry; reversed only as a whole.
+model FixedAssetDepreciationRun {
+  id              String                       @id @default(cuid())
+  tenantId        String                       @default("hiqbah")
+  number          String                       @unique
+  year            Int
+  month           Int
+  periodEnd       DateTime                     @db.Date
+  /// POSTED | REVERSED
+  status          String                       @default("POSTED")
+  totalAmount     Decimal                      @db.Decimal(18, 2)
+  assetCount      Int
+  /// POSTED | SKIPPED
+  glState         String
+  journalEntryId  String?
+  reversalEntryId String?
+  reversedAt      DateTime?
+  reversedBy      String?
+  reverseReason   String?
+  createdBy       String
+  createdAt       DateTime                     @default(now())
+  updatedAt       DateTime                     @default(now()) @updatedAt
+  lines           FixedAssetDepreciationLine[]
+
+  @@index([year, month])
+}
+
+/// One asset's depreciation in a run; one live line per (asset, month) (FixedAssetDepreciationLine_asset_period_live_key).
+model FixedAssetDepreciationLine {
+  id               String                    @id @default(cuid())
+  tenantId         String                    @default("hiqbah")
+  runId            String
+  run              FixedAssetDepreciationRun @relation(fields: [runId], references: [id], onDelete: Restrict)
+  assetId          String
+  asset            FixedAsset                @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  /// "YYYY-MM" of the run's month.
+  periodKey        String
+  fromDate         DateTime                  @db.Date
+  toDate           DateTime                  @db.Date
+  amount           Decimal                   @db.Decimal(18, 2)
+  categoryId       String
+  branchId         String?
+  /// The accounts posted (NULL when the run was skipped before a chart / go-live).
+  expenseAccountId String?
+  accumAccountId   String?
+  voidedAt         DateTime?
+  createdAt        DateTime                  @default(now())
+
+  @@index([runId])
+}
+
+/// A capital improvement: the cost rises and the remaining depreciation is recomputed (a new schedule basis).
+model FixedAssetAddition {
+  id                    String               @id @default(cuid())
+  tenantId              String               @default("hiqbah")
+  number                String               @unique
+  assetId               String
+  asset                 FixedAsset           @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  additionDate          DateTime             @db.Date
+  /// Above zero; 0 for a REVISION.
+  amount                Decimal              @db.Decimal(18, 2)
+  /// PURCHASE_INVOICE | MANUAL | REVISION (a change of the useful life / residual value only: no amount, no entry — glState NONE)
+  kind                  String
+  supplierInvoiceId     String?
+  supplierInvoice       SupplierInvoice?     @relation(fields: [supplierInvoiceId], references: [id], onDelete: Restrict)
+  supplierInvoiceLineId String?
+  supplierInvoiceLine   SupplierInvoiceLine? @relation(fields: [supplierInvoiceLineId], references: [id], onDelete: Restrict)
+  counterAccountId      String?
+  counterAccount        Account?             @relation("FaAdditionCounter", fields: [counterAccountId], references: [id], onDelete: Restrict)
+  description           String
+  newUsefulLifeMonths   Int?
+  newResidualValue      Decimal?             @db.Decimal(18, 2)
+  /// The asset's schedule before the addition (restored by a cancel).
+  before                Json
+  status                String               @default("POSTED")
+  glState               String
+  journalEntryId        String?
+  cancelEntryId         String?
+  cancelledAt           DateTime?
+  cancelledBy           String?
+  cancelReason          String?
+  createdBy             String
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @default(now()) @updatedAt
+
+  @@index([assetId])
+  @@index([supplierInvoiceLineId])
+}
+
+/// A disposal (sale or scrap): depreciation to the disposal day, cost and accumulated derecognised, proceeds (and
+/// output VAT on a sale), gain / loss = proceeds net − net book value (CHECK).
+model FixedAssetDisposal {
+  id                  String     @id @default(cuid())
+  tenantId            String     @default("hiqbah")
+  number              String     @unique
+  assetId             String
+  asset               FixedAsset @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  disposalDate        DateTime   @db.Date
+  /// SALE | SCRAP
+  kind                String
+  proceedsNet         Decimal    @default(0) @db.Decimal(18, 2)
+  vatRate             Decimal    @default(0) @db.Decimal(5, 2)
+  vat                 Decimal    @default(0) @db.Decimal(18, 2)
+  proceedsAccountId   String?
+  proceedsAccount     Account?   @relation("FaDisposalProceeds", fields: [proceedsAccountId], references: [id], onDelete: Restrict)
+  buyerName           String?
+  taxInvoiceRef       String?
+  catchUpDepreciation Decimal    @default(0) @db.Decimal(18, 2)
+  costRemoved         Decimal    @db.Decimal(18, 2)
+  accumRemoved        Decimal    @db.Decimal(18, 2)
+  gainLoss            Decimal    @db.Decimal(18, 2)
+  reason              String?
+  before              Json
+  status              String     @default("POSTED")
+  glState             String
+  journalEntryId      String?
+  cancelEntryId       String?
+  cancelledAt         DateTime?
+  cancelledBy         String?
+  cancelReason        String?
+  createdBy           String
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @default(now()) @updatedAt
+
+  @@index([disposalDate])
+}
+
+// ── «الموازنات» and «قوالب التأجيل» (feat/budgets-deferrals, 20261122090000_budgets_deferrals) ──────────────────
+// A GL budget never posts: it is compared with the ledger (src/lib/accounting/budgets.ts). The finance module's cash
+// budget (FinBudget / BudgetRevision / BudgetLine) is a different thing and is untouched.
+
+/// «الموازنة»: amounts per P&L account per month for one Gregorian fiscal year, optionally for one branch. DRAFT is
+/// edited; APPROVED is locked by the database (gl_budget_guard / gl_budget_line_guard) — a change is a new revision
+/// (same rootId, revisionNo + 1) that, once approved, archives the version it replaces. Never posts to the GL.
+model GlBudget {
+  id             String         @id @default(cuid())
+  tenantId       String         @default("hiqbah")
+  name           String
+  fiscalYear     Int
+  /// The branch dimension (FinBranch id, as on JournalEntryLine.branchId: no FK); NULL = the whole company.
+  branchId       String?
+  /// DRAFT | APPROVED | ARCHIVED (CHECK)
+  status         String         @default("DRAFT")
+  /// The first version of this budget (itself for the original); its revisions share it.
+  rootId         String
+  root           GlBudget       @relation("GlBudgetRoot", fields: [rootId], references: [id], onDelete: Restrict)
+  versions       GlBudget[]     @relation("GlBudgetRoot")
+  revisionOfId   String?
+  revisionOf     GlBudget?      @relation("GlBudgetRevision", fields: [revisionOfId], references: [id], onDelete: Restrict)
+  revisions      GlBudget[]     @relation("GlBudgetRevision")
+  revisionNo     Int            @default(1)
+  revisionReason String?
+  notes          String?
+  createdBy      String
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @default(now()) @updatedAt
+  updatedBy      String?
+  approvedBy     String?
+  approvedAt     DateTime?
+  /// The approver prepared it too (allowed by the SoD setting or SIMPLE MODE; listed for the auditor).
+  sodBypass      Boolean        @default(false)
+  archivedBy     String?
+  archivedAt     DateTime?
+  lines          GlBudgetLine[]
+
+  @@unique([rootId, revisionNo])
+  @@index([fiscalYear, status])
+}
+
+/// One amount of a budget: an account in a month (1–12), on the account's natural side (revenue credit-positive,
+/// expenses debit-positive). Zero is not stored.
+model GlBudgetLine {
+  id        String   @id @default(cuid())
+  budgetId  String
+  budget    GlBudget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  month     Int
+  amount    Decimal  @db.Decimal(18, 2)
+
+  @@unique([budgetId, accountId, month])
+  @@index([accountId])
+}
+
+/// «قالب التأجيل»: how a prepaid expense or a deferred revenue is recognised — over `months` months from a start rule,
+/// between the balance-sheet account (NULL = the PREPAID_EXPENSES / DEFERRED_REVENUE role's account) and the P&L account.
+/// Editing a template changes only the schedules made after (a schedule keeps its own copy).
+model DeferralTemplate {
+  id               String             @id @default(cuid())
+  tenantId         String             @default("hiqbah")
+  nameAr           String
+  nameEn           String?
+  /// PREPAID_EXPENSE | DEFERRED_REVENUE (CHECK)
+  kind             String
+  months           Int
+  /// START_MONTH (the start month is a full month) | NEXT_MONTH | DAILY_PRORATA (the start month by its days; the rest in a last month) (CHECK)
+  startRule        String             @default("START_MONTH")
+  balanceAccountId String?
+  balanceAccount   Account?           @relation("DeferralTemplateBalance", fields: [balanceAccountId], references: [id], onDelete: Restrict)
+  plAccountId      String
+  plAccount        Account            @relation("DeferralTemplatePl", fields: [plAccountId], references: [id], onDelete: Restrict)
+  isActive         Boolean            @default(true)
+  createdBy        String
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @default(now()) @updatedAt
+  updatedBy        String?
+  schedules        DeferralSchedule[]
+
+  @@index([kind, isActive])
+}
+
+/// «جدول التأجيل»: one amount recognised month by month (its lines). Made from a template (copied: kind, months, rule,
+/// accounts) and an amount + start date, by hand or from a journal / purchase / sales invoice line. Its amounts,
+/// accounts and lines never change (deferral_schedule_guard); it is only cancelled (the rest is not recognised).
+model DeferralSchedule {
+  id               String                 @id @default(cuid())
+  tenantId         String                 @default("hiqbah")
+  /// DEF-000001 (sequence)
+  number           String                 @unique
+  templateId       String
+  template         DeferralTemplate       @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  kind             String
+  months           Int
+  startRule        String
+  startDate        DateTime               @db.Date
+  totalAmount      Decimal                @db.Decimal(18, 2)
+  balanceAccountId String
+  balanceAccount   Account                @relation("DeferralScheduleBalance", fields: [balanceAccountId], references: [id], onDelete: Restrict)
+  plAccountId      String
+  plAccount        Account                @relation("DeferralSchedulePl", fields: [plAccountId], references: [id], onDelete: Restrict)
+  description      String
+  /// MANUAL | JOURNAL_LINE | SUPPLIER_INVOICE_LINE | SALES_INVOICE_LINE (CHECK); sourceId NULL only when MANUAL.
+  sourceType       String                 @default("MANUAL")
+  sourceId         String?
+  branchId         String?
+  costCenterId     String?
+  /// Council F1. ON_ACCOUNT: the amount already sits on the balance-sheet account (a journal line on it, or by hand) — no
+  /// entry at creation. RECLASS: it was booked to a P&L account (an invoice line, or by hand) and is moved to the balance
+  /// sheet by one reclass entry at the start date (prepaid: Dr balance / Cr reclassAccount; deferred: Dr reclassAccount / Cr balance).
+  initialMode      String                 @default("ON_ACCOUNT")
+  reclassAccountId String?
+  reclassAccount   Account?               @relation("DeferralScheduleReclass", fields: [reclassAccountId], references: [id], onDelete: Restrict)
+  /// POSTED | SKIPPED (before go-live / accounting off) for RECLASS; NULL for ON_ACCOUNT.
+  reclassStatus    String?
+  reclassEntryId   String?
+  /// ACTIVE | COMPLETED | CANCELLED (CHECK)
+  status           String                 @default("ACTIVE")
+  createdBy        String
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @default(now()) @updatedAt
+  cancelledBy      String?
+  cancelledAt      DateTime?
+  cancelReason     String?
+  /// Council F4. RECOGNIZE_NOW: the remaining PENDING lines recognised by one entry (into cancelAccountId, default the
+  /// P&L account) on cancelDate; KEEP: the remainder stays on the balance-sheet account (the reason is the note).
+  cancelMode       String?
+  cancelDate       DateTime?              @db.Date
+  cancelAccountId  String?
+  cancelAccount    Account?               @relation("DeferralScheduleCancel", fields: [cancelAccountId], references: [id], onDelete: Restrict)
+  cancelAmount     Decimal?               @db.Decimal(18, 2)
+  /// POSTED | SKIPPED | NONE (nothing left, or KEEP)
+  cancelStatus     String?
+  cancelEntryId    String?
+  lines            DeferralScheduleLine[]
+
+  @@index([status])
+  @@index([sourceType, sourceId])
+}
+
+/// One month of a schedule: its amount (halalas split straight-line, the remainder in the last month) and the run that
+/// recognised it (one live run per line: the idempotency of a run per schedule and month).
+model DeferralScheduleLine {
+  id          String           @id @default(cuid())
+  scheduleId  String
+  schedule    DeferralSchedule @relation(fields: [scheduleId], references: [id], onDelete: Restrict)
+  seq         Int
+  /// The first day of the month it belongs to.
+  periodStart DateTime         @db.Date
+  amount      Decimal          @db.Decimal(18, 2)
+  /// PENDING | RECOGNIZED (CHECK)
+  status      String           @default("PENDING")
+  runId       String?
+  run         DeferralRun?     @relation(fields: [runId], references: [id], onDelete: Restrict)
+
+  @@unique([scheduleId, seq])
+  @@unique([scheduleId, periodStart])
+  @@index([periodStart, status])
+  @@index([runId])
+}
+
+/// «تشغيل الاعتراف الشهري»: one run recognises the month's PENDING lines with ONE balanced journal entry (module
+/// accounting, type DEFERRAL_RUN). SKIPPED = accounting not active / before go-live (the lines are recorded, no entry —
+/// the existing pattern). REVERSED: its entry reversed and its lines PENDING again.
+model DeferralRun {
+  id              String                 @id @default(cuid())
+  tenantId        String                 @default("hiqbah")
+  periodStart     DateTime               @db.Date
+  entryDate       DateTime               @db.Date
+  /// POSTED | SKIPPED | REVERSED (CHECK)
+  status          String
+  /// NOT_ACTIVE | BEFORE_GO_LIVE when SKIPPED.
+  skipReason      String?
+  journalEntryId  String?
+  total           Decimal                @db.Decimal(18, 2)
+  lineCount       Int
+  createdBy       String
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @default(now()) @updatedAt
+  reversedBy      String?
+  reversedAt      DateTime?
+  reverseReason   String?
+  reversalEntryId String?
+  lines           DeferralScheduleLine[]
+
+  @@index([periodStart])
 }

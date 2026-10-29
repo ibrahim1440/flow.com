@@ -10,6 +10,7 @@ import {
 } from "@/lib/services/sales/collections";
 import { projectedCommissionFor } from "@/lib/services/commissions/accrual";
 import { collectionScope, collectionWhere, seesAllSales } from "@/lib/services/sales/scope";
+import { canViewInvoices } from "@/lib/services/invoicing/access";
 
 /**
  * Sales collections — the list, and recording a new one.
@@ -182,8 +183,26 @@ export async function GET(request: Request) {
       };
     }
 
+    // Qoyod parity («تخصيصات السند» / «المبلغ غير المخصص»): what each listed receipt is applied to, read-only. Only for a
+    // viewer who may read sales invoices (sales › invoices_view or accounting › ar); the rows are the ones already
+    // scoped above, so this widens nothing.
+    let allocations: Record<string, { id: string; invoiceId: string; number: string | null; amount: string; appliedDate: string }[]> | undefined;
+    if (canViewInvoices(user.permissions) && rows.length) {
+      const apps = await prisma.arApplication.findMany({
+        where: { collectionId: { in: rows.map((r) => r.id) }, status: "APPLIED" },
+        orderBy: [{ appliedDate: "asc" }, { createdAt: "asc" }],
+        select: { id: true, collectionId: true, amount: true, appliedDate: true, invoice: { select: { id: true, number: true } } },
+      });
+      allocations = {};
+      for (const a of apps) {
+        if (!a.collectionId) continue;
+        (allocations[a.collectionId] ??= []).push({ id: a.id, invoiceId: a.invoice.id, number: a.invoice.number, amount: new Decimal(a.amount.toString()).toFixed(2), appliedDate: a.appliedDate.toISOString().slice(0, 10) });
+      }
+    }
+
     return NextResponse.json({
       rows,
+      ...(allocations ? { allocations } : {}),
       counts,
       totals,
       decisions,

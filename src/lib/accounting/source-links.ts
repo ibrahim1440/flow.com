@@ -37,6 +37,9 @@ export const SOURCE_DOC: Record<string, Pair> = {
   PAYROLL_RUN: ["مسير الرواتب", "Payroll run"],
   COMMISSION: ["عمولة", "Commission"],
   YEAR_END: ["إقفال السنة", "Year-end close"],
+  // «المعاملات المتكررة» (20261120090000): a journal a recurring transaction made (draft or auto-posted).
+  RECURRING: ["معاملة متكررة", "Recurring transaction"],
+  DEFERRAL_RUN: ["الاعتراف الشهري بالمؤجلات", "Monthly deferral recognition"],
 };
 
 export const SOURCE_EVENT: Record<string, Pair> = {
@@ -51,6 +54,7 @@ export const SOURCE_EVENT: Record<string, Pair> = {
   SPLIT_OUT: ["فصل جزء من اللوط", "Part split off the lot"], SPLIT_IN: ["لوط مفصول", "Split lot"],
   TRANSFER_SHORTFALL: ["عجز تحويل", "Transfer shortfall"],
   ACCRUED: ["استحقاق", "Accrued"], PAID: ["سداد", "Paid"], ISSUED: ["إصدار", "Issued"],
+  RECOGNIZED: ["اعتراف", "Recognised"],
   REPLACED: ["بضاعة بديلة", "Replacement goods"], ABANDONED: ["تنازل", "Abandoned"], REFUNDED: ["استرداد من المورد", "Refund received"],
 };
 
@@ -98,6 +102,8 @@ export function sourceDocHref(sourceType: string | null | undefined, sourceId: s
     case "OPENING_VALUATION": case "OPENING_STOCK": return "/dashboard/accounting/inventory?view=opening";
     case "COMMISSION": return "/dashboard/commissions/review";
     case "YEAR_END": return "/dashboard/accounting/periods";
+    case "RECURRING": return `/dashboard/accounting/recurring/${id}`;
+    case "DEFERRAL_RUN": return `/dashboard/accounting/deferrals?view=runs&run=${id}`;
     default: return sourceModule === "hr" ? "/dashboard/hr/payroll" : null;
   }
 }

@@ -215,33 +215,7 @@ export async function createDraft(input: DraftInput, ctx: AuditContext) {
   if (problems.length) throw refuseWith("LINES_INVALID", { problems });
   return prisma.$transaction(async (tx) => {
     await setAuditContext(tx, ctx);
-    const customer = await tx.customer.findUnique({ where: { id: input.customerId }, select: { id: true, name: true, nameAr: true, vatNumber: true, commercialRegNo: true, city: true, address: true, phone: true, paymentTermsDays: true } });
-    if (!customer) throw refuseInv("CUSTOMER_NOT_FOUND");
-    if (input.orderId) {
-      const o = await tx.order.findUnique({ where: { id: input.orderId }, select: { customerId: true } });
-      if (!o) throw refuseInv("ORDER_NOT_FOUND");
-      if (o.customerId !== customer.id) throw refuseInv("BAD_INPUT", "The order belongs to another customer.", "الطلب لعميل آخر.");
-    } else if (lines.some((l) => l.orderItemId)) {
-      throw refuseInv("BAD_INPUT", "Lines name order lines: give the order.", "البنود مرتبطة بطلب؛ حدّد الطلب.");
-    }
-    await assertNotOverInvoiced(tx, lines, input.orderId ?? null);
-    const settings = await readInvoiceSettings(tx);
-    const { priced, rows } = lineRows(lines);
-    const created = await tx.salesInvoice.create({
-      data: {
-        kind: "INVOICE", family: input.family === "SIMPLIFIED" ? "SIMPLIFIED" : "STANDARD", status: "DRAFT",
-        customerId: customer.id, orderId: input.orderId ?? null, quoteId: input.quoteId ?? null,
-        buyer: parseBuyer(input.buyer, buyerFromCustomer(customer)) as unknown as Prisma.InputJsonValue,
-        supplyDate: dateOf(asDay(input.supplyDate)), supplyEndDate: dateOf(asDay(input.supplyEndDate)),
-        paymentTermsDays: termsOf(input.paymentTermsDays, customer.paymentTermsDays ?? settings.defaultTermsDays),
-        notes: notesOf(input.notes), source: input.source ?? (input.orderId ? "ORDER" : "MANUAL"), requestKey: input.requestKey ?? null,
-        channel: ext?.channel ?? null, externalOrderRef: ext?.externalOrderRef ?? null,
-        createdById: ctx.actorId, ...totalsData(priced),
-        lines: { create: rows },
-      },
-      select: { id: true },
-    });
-    return { id: created.id, replayed: false };
+    return insertDraft(tx, input, lines, ext, ctx);
   }, TX_OPTS).catch(async (e: { code?: string }) => {
     // Two requests for the same external order at once: the unique (channel, ref) lets one through; the other replays it.
     if (ext && e?.code === "P2002") {
@@ -250,6 +224,49 @@ export async function createDraft(input: DraftInput, ctx: AuditContext) {
     }
     throw e;
   });
+}
+
+/**
+ * «المعاملات المتكررة»: a manual invoice DRAFT (no order, no external source) inside the CALLER'S transaction, under its
+ * request key — the same key twice returns the first draft (replayed). The draft is only a draft: nothing is numbered,
+ * signed, reported or posted until a person issues it. The caller sets the audit context.
+ */
+export async function createManualDraftIn(tx: Tx, input: Omit<DraftInput, "orderId" | "quoteId" | "channel" | "externalOrderRef" | "source"> & { requestKey: string }, ctx: AuditContext) {
+  const hit = await tx.salesInvoice.findUnique({ where: { requestKey: input.requestKey }, select: { id: true } });
+  if (hit) return { id: hit.id, replayed: true };
+  const { lines, problems } = parseLines(input.lines);
+  if (problems.length) throw refuseWith("LINES_INVALID", { problems });
+  return insertDraft(tx, { ...input, source: "MANUAL" }, lines, null, ctx);
+}
+
+async function insertDraft(tx: Tx, input: DraftInput, lines: CleanLine[], ext: { channel: string; externalOrderRef: string } | null, ctx: AuditContext) {
+  const customer = await tx.customer.findUnique({ where: { id: input.customerId }, select: { id: true, name: true, nameAr: true, vatNumber: true, commercialRegNo: true, city: true, address: true, phone: true, paymentTermsDays: true } });
+  if (!customer) throw refuseInv("CUSTOMER_NOT_FOUND");
+  if (input.orderId) {
+    const o = await tx.order.findUnique({ where: { id: input.orderId }, select: { customerId: true } });
+    if (!o) throw refuseInv("ORDER_NOT_FOUND");
+    if (o.customerId !== customer.id) throw refuseInv("BAD_INPUT", "The order belongs to another customer.", "الطلب لعميل آخر.");
+  } else if (lines.some((l) => l.orderItemId)) {
+    throw refuseInv("BAD_INPUT", "Lines name order lines: give the order.", "البنود مرتبطة بطلب؛ حدّد الطلب.");
+  }
+  await assertNotOverInvoiced(tx, lines, input.orderId ?? null);
+  const settings = await readInvoiceSettings(tx);
+  const { priced, rows } = lineRows(lines);
+  const created = await tx.salesInvoice.create({
+    data: {
+      kind: "INVOICE", family: input.family === "SIMPLIFIED" ? "SIMPLIFIED" : "STANDARD", status: "DRAFT",
+      customerId: customer.id, orderId: input.orderId ?? null, quoteId: input.quoteId ?? null,
+      buyer: parseBuyer(input.buyer, buyerFromCustomer(customer)) as unknown as Prisma.InputJsonValue,
+      supplyDate: dateOf(asDay(input.supplyDate)), supplyEndDate: dateOf(asDay(input.supplyEndDate)),
+      paymentTermsDays: termsOf(input.paymentTermsDays, customer.paymentTermsDays ?? settings.defaultTermsDays),
+      notes: notesOf(input.notes), source: input.source ?? (input.orderId ? "ORDER" : "MANUAL"), requestKey: input.requestKey ?? null,
+      channel: ext?.channel ?? null, externalOrderRef: ext?.externalOrderRef ?? null,
+      createdById: ctx.actorId, ...totalsData(priced),
+      lines: { create: rows },
+    },
+    select: { id: true },
+  });
+  return { id: created.id, replayed: false };
 }
 
 /** «إنشاء فاتورة من الطلب»: a draft of what is left to invoice (or only what was delivered and not invoiced). */

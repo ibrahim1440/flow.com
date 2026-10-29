@@ -9,6 +9,7 @@
   "crons": [
     { "path": "/api/cron/hr-document-expiry", "schedule": "0 3 * * *" },
     { "path": "/api/cron/zatca-reporting", "schedule": "0 2 * * *" },
-    { "path": "/api/cron/workspace", "schedule": "0 4 * * *" }
+    { "path": "/api/cron/workspace", "schedule": "0 4 * * *" },
+    { "path": "/api/cron/recurring", "schedule": "10 1 * * *" }
   ]
 }

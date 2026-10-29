@@ -12,10 +12,12 @@ import { Select } from "@/components/ui/Select";
 import { LEGACY_AP_TAB } from "@/lib/accounting/source-links";
 import { AcctShell, Msg, money, todayRiyadh, useApi, useLang, useWrite, type Setup } from "../_ui/shell";
 import { InvoiceList, type InvoiceRow } from "../_ui/ap";
+import { DateRange, FilterCard, Section, ListFooter, ListPageSize, useFilters, usePaging, useTerm } from "@/components/chrome";
+import { useAccountantView } from "../_ui/qoyod-pages";
 
 type Aging = { asOf: string; total: string; buckets: Record<string, string>; counts: Record<string, number>; suppliers: { supplierId: string; name: string; buckets: Record<string, string>; total: string; openClaim?: string }[]; openClaims?: string; gl: { balance: string; difference: string } | null };
 type Statement = { supplier: { name: string }; from: string; to: string; opening: string; closing: string; lines: { entryId: string; date: string; ref: string; description: string | null; sourceType: string | null; debit: string; credit: string; balance: string }[] };
-type Payment = { id: string; number: string; supplierName: string; paymentDate: string; amount: string; method: string; reference: string | null; status: string; journalEntryId: string | null; invoices: string[] };
+type Payment = { id: string; number: string; supplierName: string; paymentDate: string; amount: string; method: string; reference: string | null; status: string; journalEntryId: string | null; invoices: string[]; allocated?: string; supplierId: string };
 type Supplier = { id: string; name: string; openingOutstanding?: string };
 type List = { rows: InvoiceRow[]; can: { ap: boolean } };
 const BUCKETS: [string, string, string][] = [["current", "غير مستحقة", "Not due"], ["d1_30", "1–30 يومًا", "1–30 days"], ["d31_60", "31–60 يومًا", "31–60 days"], ["d61_90", "61–90 يومًا", "61–90 days"], ["d90_plus", "أكثر من 90", "Over 90"]];
@@ -44,6 +46,8 @@ function Ap() {
     router.replace(`${path}?${p}`);
   };
   const setup = useApi<Setup>("/api/accounting/setup");
+  const qoyod = useAccountantView();
+  const t = useTerm();
   return (
     <AcctShell setup={setup.data} title={L("الذمم الدائنة", "Accounts payable")}
       actions={<Link className="hr-btn is-primary" href="/dashboard/purchases/invoices/new" data-testid="ap-new-invoice">+ {L("فاتورة مشتريات", "Purchase invoice")}</Link>}>
@@ -51,10 +55,10 @@ function Ap() {
         <div className="acct-seg" role="group" aria-label={L("القسم", "Section")}>
           <button type="button" aria-pressed={view === "invoices"} onClick={() => go({ view: null })} data-testid="ap-view-invoices">{L("فواتير المشتريات", "Purchase invoices")}</button>
           <button type="button" aria-pressed={view === "aging"} onClick={() => go({ view: "aging" })} data-testid="ap-view-aging">{L("أعمار الدائنين وكشف المورد", "AP aging & statement")}</button>
-          <button type="button" aria-pressed={view === "payments"} onClick={() => go({ view: "payments" })} data-testid="ap-view-payments">{L("المدفوعات", "Payments")}</button>
+          <button type="button" aria-pressed={view === "payments"} onClick={() => go({ view: "payments" })} data-testid="ap-view-payments">{qoyod ? t("supplierPayments") : L("المدفوعات", "Payments")}</button>
         </div>
       </div>
-      {view === "invoices" ? <InvoiceList base="/dashboard/purchases/invoices" /> : view === "aging" ? <AgingView asOf={sp.get("asOf") ?? todayRiyadh()} supplierId={sp.get("supplierId") ?? ""} go={go} /> : <PaymentsView />}
+      {view === "invoices" ? <InvoiceList base="/dashboard/purchases/invoices" /> : view === "aging" ? <AgingView asOf={sp.get("asOf") ?? todayRiyadh()} supplierId={sp.get("supplierId") ?? ""} go={go} /> : <PaymentsView prefill={sp.get("pay") ? { supplierId: sp.get("pay")!, invoiceId: sp.get("invoice") } : null} />}
     </AcctShell>
   );
 }
@@ -115,17 +119,34 @@ function AgingView({ asOf, supplierId, go }: { asOf: string; supplierId: string;
   );
 }
 
-function PaymentsView() {
+/** `prefill` (Qoyod parity — the 💳 on a purchase invoice or a voucher row): open «تسجيل سداد لمورد» on that supplier,
+ *  and that invoice's open amount in its allocation. The dialog, its checks and the API are unchanged. */
+function PaymentsView({ prefill }: { prefill: { supplierId: string; invoiceId: string | null } | null }) {
   const { L } = useLang();
-  const pays = useApi<Payment[]>("/api/accounting/ap/payments");
+  // Qoyod parity (accountant workspace only): «سندات الموردين» — the filter card (supplier, period, status; applied to the
+  // list already loaded), the same columns in Qoyod's words (المرجع … الخيارات), the dark title bar and the pager.
+  const qoyod = useAccountantView();
+  const t = useTerm();
+  const pf = useFilters({ supplierId: "", from: "", to: "", status: "" });
+  const pa = pf.applied;
+  const pays = useApi<Payment[]>(`/api/accounting/ap/payments${qoyod && pa.supplierId ? `?supplierId=${encodeURIComponent(pa.supplierId)}` : ""}`);
   const sups = useApi<Supplier[]>("/api/accounting/ap/suppliers");
+  const payRows = (pays.data ?? []).filter((p) => !qoyod || ((!pa.from || p.paymentDate >= pa.from) && (!pa.to || p.paymentDate <= pa.to) && (!pa.status || p.status === pa.status)));
+  const { pageRows, pager } = usePaging(payRows);
   const w = useWrite();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(!!prefill);
   const [voiding, setVoiding] = useState<Payment | null>(null);
   const [reason, setReason] = useState("");
-  const [f, setF] = useState({ supplierId: "", paymentDate: todayRiyadh(), method: "BANK_TRANSFER", reference: "", alloc: {} as Record<string, string> });
+  const [f, setF] = useState({ supplierId: prefill?.supplierId ?? "", paymentDate: todayRiyadh(), method: "BANK_TRANSFER", reference: "", alloc: {} as Record<string, string> });
   const inv = useApi<List>(f.supplierId ? `/api/accounting/ap/invoices?status=POSTED&supplierId=${f.supplierId}` : null);
   const openInv = (inv.data?.rows ?? []).filter((r) => Number(r.outstanding) > 0);
+  const [prefilled, setPrefilled] = useState(false);
+  useEffect(() => {
+    if (prefilled || !prefill?.invoiceId || !inv.data) return;
+    const row = inv.data.rows.find((r) => r.id === prefill.invoiceId && Number(r.outstanding) > 0);
+    setPrefilled(true);
+    if (row) setF((x) => ({ ...x, alloc: { ...x.alloc, [row.id]: row.outstanding } }));
+  }, [prefilled, prefill, inv.data]);
   // «نقص من المورد»: the supplier's open claims — pay what the invoice owes less what the supplier still owes back.
   const claims = useApi<{ rows: { invoice: { id: string }; openGross: string }[]; openGross: string }>(f.supplierId ? `/api/purchases/claims?supplierId=${f.supplierId}` : null);
   const claimOn = (invoiceId: string) => (claims.data?.rows ?? []).filter((c) => c.invoice.id === invoiceId).reduce((a, c) => a + Number(c.openGross), 0);
@@ -133,6 +154,27 @@ function PaymentsView() {
   const [toOpening, setToOpening] = useState("");
   const openingOutstanding = Number((sups.data ?? []).find((s) => s.id === f.supplierId)?.openingOutstanding ?? 0);
   const total = Object.values(f.alloc).reduce((s, v) => s + (Number(v) || 0), 0) + (Number(toOpening) || 0);
+  const newBtn = <Btn variant="primary" onClick={() => setOpen(true)} data-testid="pay-new">+ {qoyod ? t("recordPayment") : L("تسجيل سداد", "Record a payment")}</Btn>;
+  const table = (list: Payment[]) => (
+    <div className="hr-tablewrap">
+      <table className="hr-table is-dense" data-testid="payments" data-layout={qoyod ? "qoyod" : undefined}>
+        <thead><tr><th>{qoyod ? t("colRef") : L("السداد", "Payment")}</th><th>{L("المورد", "Supplier")}</th><th className="acct-hide-m">{L("التاريخ", "Date")}</th><th className="acct-hide-m">{qoyod ? t("colMethod") : L("الطريقة", "Method")}</th><th className="acct-hide-m">{L("الفواتير", "Invoices")}</th><th className="num">{L("المبلغ", "Amount")}</th>{qoyod ? <th className="num acct-hide-m" title={L("الجزء غير المخصص لفواتير — يسدد الرصيد الافتتاحي للمورد", "The part not applied to invoices — it pays the supplier's opening balance")}>{L("المبلغ غير المخصص", "Unallocated")}</th> : null}<th>{L("الحالة", "Status")}</th><th>{qoyod ? t("colOptions") : ""}</th></tr></thead>
+        <tbody>
+          {list.map((p) => (
+            <tr key={p.id} className={p.status === "VOIDED" ? "is-muted" : undefined}>
+              <td>{p.journalEntryId ? <Link className="acct-code" href={`/dashboard/accounting/journals/${p.journalEntryId}`}>{p.number}</Link> : <span className="acct-code">{p.number}</span>}</td>
+              <td>{p.supplierName}</td><td className="acct-hide-m hr-num">{p.paymentDate}</td><td className="acct-hide-m">{L(METHOD[p.method]?.[0] ?? p.method, METHOD[p.method]?.[1] ?? p.method)}{p.reference ? ` · ${p.reference}` : ""}</td>
+              <td className="acct-hide-m acct-code">{p.invoices.join(" ، ")}</td><td className="num hr-num">{money(p.amount)}</td>
+              {qoyod ? <td className="num hr-num acct-hide-m" data-testid={`pay-unallocated-${p.number}`}>{p.allocated !== undefined ? money(Number(p.amount) - Number(p.allocated)) : "—"}{p.allocated !== undefined && Number(p.amount) - Number(p.allocated) > 0 ? <span className="hr-caption" style={{ display: "block" }}>{L("على الرصيد الافتتاحي", "to the opening balance")}</span> : null}</td> : null}
+              <td>{p.status === "VOIDED" ? <span className="hr-dot tone-cancelled"><span>{L("ملغى", "Voided")}</span></span> : qoyod ? <span className="hr-dot tone-success"><span>{L("مستعمل", "Used")}</span></span> : <span className="hr-dot tone-success"><span>{L("مرحّل", "Posted")}</span></span>}</td>
+              <td><span className="acct-actions">{qoyod && p.status === "POSTED" ? <Link className="hr-btn is-sm is-ghost" href={`/dashboard/accounting/ap?view=payments&pay=${encodeURIComponent(p.supplierId)}`} onClick={() => { setF((x) => ({ ...x, supplierId: p.supplierId, alloc: {} })); setOpen(true); }} aria-label={L(`سداد جديد للمورد ${p.supplierName}`, `New payment to ${p.supplierName}`)} title={L("سداد جديد لهذا المورد", "New payment to this supplier")} data-testid={`pay-again-${p.number}`}>💳</Link> : null}{p.status === "POSTED" ? <Btn size="sm" variant="ghost" onClick={() => setVoiding(p)}>{L("إلغاء", "Void")}</Btn> : null}</span></td>
+            </tr>
+          ))}
+          {!list.length ? <tr><td colSpan={qoyod ? 9 : 8} className="acct-hint">{L("لا مدفوعات بعد.", "No payments yet.")}</td></tr> : null}
+        </tbody>
+      </table>
+    </div>
+  );
   async function record() {
     const allocations = Object.entries(f.alloc).filter(([, v]) => Number(v) > 0).map(([invoiceId, amount]) => ({ invoiceId, amount: Number(amount).toFixed(2) }));
     if (await w.run("pay", "/api/accounting/ap/payments", "POST", { supplierId: f.supplierId, paymentDate: f.paymentDate, method: f.method, reference: f.reference || null, amount: total.toFixed(2), allocations }, L("سُجّل السداد ورُحّل.", "Payment recorded and posted."))) {
@@ -142,26 +184,22 @@ function PaymentsView() {
   return (
     <>
       <Msg error={w.error ?? pays.error} done={w.done} onClose={() => { w.setError(null); w.setDone(null); }} />
-      <div className="acct-actions"><Btn variant="primary" onClick={() => setOpen(true)} data-testid="pay-new">+ {L("تسجيل سداد", "Record a payment")}</Btn></div>
-      {!pays.data ? <OpsLoading /> : (
-        <div className="hr-tablewrap">
-          <table className="hr-table is-dense" data-testid="payments">
-            <thead><tr><th>{L("السداد", "Payment")}</th><th>{L("المورد", "Supplier")}</th><th className="acct-hide-m">{L("التاريخ", "Date")}</th><th className="acct-hide-m">{L("الطريقة", "Method")}</th><th className="acct-hide-m">{L("الفواتير", "Invoices")}</th><th className="num">{L("المبلغ", "Amount")}</th><th>{L("الحالة", "Status")}</th><th /></tr></thead>
-            <tbody>
-              {pays.data.map((p) => (
-                <tr key={p.id} className={p.status === "VOIDED" ? "is-muted" : undefined}>
-                  <td>{p.journalEntryId ? <Link className="acct-code" href={`/dashboard/accounting/journals/${p.journalEntryId}`}>{p.number}</Link> : <span className="acct-code">{p.number}</span>}</td>
-                  <td>{p.supplierName}</td><td className="acct-hide-m hr-num">{p.paymentDate}</td><td className="acct-hide-m">{L(METHOD[p.method]?.[0] ?? p.method, METHOD[p.method]?.[1] ?? p.method)}{p.reference ? ` · ${p.reference}` : ""}</td>
-                  <td className="acct-hide-m acct-code">{p.invoices.join(" ، ")}</td><td className="num hr-num">{money(p.amount)}</td>
-                  <td>{p.status === "VOIDED" ? <span className="hr-dot tone-cancelled"><span>{L("ملغى", "Voided")}</span></span> : <span className="hr-dot tone-success"><span>{L("مرحّل", "Posted")}</span></span>}</td>
-                  <td>{p.status === "POSTED" ? <Btn size="sm" variant="ghost" onClick={() => setVoiding(p)}>{L("إلغاء", "Void")}</Btn> : null}</td>
-                </tr>
-              ))}
-              {!pays.data.length ? <tr><td colSpan={8} className="acct-hint">{L("لا مدفوعات بعد.", "No payments yet.")}</td></tr> : null}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {qoyod ? (
+        <FilterCard onApply={pf.apply} onReset={pf.reset} busy={pays.loading} testId="pay-filter">
+          <div className="qc-field"><span className="qc-label">{t("colSupplier")}</span>
+            <Select value={pf.draft.supplierId} onChange={(e) => pf.set("supplierId", e.target.value)} aria-label={t("colSupplier")}><option value="">{L("الكل", "All")}</option>{(sups.data ?? []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select></div>
+          <DateRange from={pf.draft.from} to={pf.draft.to} onChange={(r) => pf.setDraft({ ...pf.draft, ...r })} />
+          <div className="qc-field"><span className="qc-label">{t("colStatus")}</span>
+            <Select value={pf.draft.status} onChange={(e) => pf.set("status", e.target.value)} aria-label={t("colStatus")}><option value="">{L("الكل", "All")}</option><option value="POSTED">{L("مرحّل", "Posted")}</option><option value="VOIDED">{L("ملغى", "Voided")}</option></Select></div>
+        </FilterCard>
+      ) : <div className="acct-actions">{newBtn}</div>}
+      {!pays.data ? <OpsLoading /> : qoyod ? (
+        <Section title={t("supplierPayments")} actions={newBtn} testId="payments-section">
+          <ListPageSize {...pager} />
+          {table(pageRows)}
+          <ListFooter {...pager} noun={L("سند", "vouchers")} emptyText={L("لا توجد أي سندات", "No vouchers")} />
+        </Section>
+      ) : table(pays.data)}
       <Dialog open={open} title={L("تسجيل سداد لمورد", "Record a supplier payment")} onClose={() => setOpen(false)}
         actions={<><Btn onClick={() => setOpen(false)}>{L("إلغاء", "Cancel")}</Btn><Btn variant="primary" busy={w.busy === "pay"} disabled={!f.supplierId || total <= 0} onClick={record} data-testid="pay-confirm">{L(`سداد ${money(total)} ر.س`, `Pay SAR ${money(total)}`)}</Btn></>}>
         <div className="hr-stack">

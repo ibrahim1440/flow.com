@@ -18,6 +18,7 @@ import { useD21Title, usePhone, useD21Phone } from "@/components/shell/page-cont
 import { splitTitle } from "@/components/d21/labels";
 import { shortDate } from "@/components/d21/format";
 import { DISCOUNT_MAX } from "@/lib/services/sales/discount-limits";
+import { useAccountantView } from "../../../accounting/_ui/qoyod-pages";
 
 /**
  * The quotation — editor while it is a draft (GX A-10, Figma 1230:121651 / EN 1230:147423,
@@ -156,7 +157,11 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
 
   const [quote, setQuote] = useState<Quote | null>(null);
   const [state, setState] = useState<State | null>(null);
-  const [can, setCan] = useState<Can | null>(null);
+  const [canRaw, setCan] = useState<Can | null>(null);
+  // Qoyod parity: in the accountant workspace a quotation is read-only (Sales owns it — QOYOD-REF §5.1): no edit, issue,
+  // accept, revise, discount decision or order from here. The server's rules are unchanged.
+  const readOnly = useAccountantView();
+  const can = canRaw && readOnly ? { ...canRaw, write: false, close: false, createOrder: false, approveThisDiscount: false } : canRaw;
   const [threshold, setThreshold] = useState("10");
   const [discount, setDiscount] = useState<DiscountInfo | null>(null);
   const [notes, setNotes] = useState("");

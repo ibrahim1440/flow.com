@@ -7,13 +7,14 @@
 // Every write runs with the audit context; the database records it.
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma, TX_OPTS } from "@/lib/db";
-import { COA_TEMPLATE, COA_TEMPLATE_KEY } from "./coa-template";
+import { CATEGORY_SEED_COST_CODE, COA_TEMPLATE, COA_TEMPLATE_KEY } from "./coa-template";
 import { ACCOUNT_ROLES, ACTIVATION_ROLES, roleDef, type RolePhase } from "./roles";
 import { refuse } from "./refusals";
 import { setAuditContext, type AuditContext } from "./audit";
 import { dayText, parseBusinessDay } from "./dates";
 import { ENGINE_MODULES } from "./posting-engine";
 import { payrollAlignment } from "./ops/payroll-alignment";
+import { assertGoLiveFirstOfMonth } from "./fixed-assets/common";
 
 type Tx = Prisma.TransactionClient;
 const SINGLETON = "singleton";
@@ -120,6 +121,11 @@ export async function seedChart(ctx: AuditContext, opts: { dryRun?: boolean } = 
       const accountId = idOf.get(code);
       if (accountId) await tx.accountRole.create({ data: { role, accountId, updatedBy: ctx.actorId } });
     }
+    // «الأصول الثابتة»: the seeded categories that name no cost account yet take the default chart's (1210 … 1240).
+    for (const [code, acc] of Object.entries(CATEGORY_SEED_COST_CODE)) {
+      const accountId = idOf.get(acc);
+      if (accountId) await tx.fixedAssetCategory.updateMany({ where: { code, costAccountId: null }, data: { costAccountId: accountId, updatedBy: ctx.actorId } });
+    }
     await tx.accountingSettings.upsert({
       where: { id: SINGLETON },
       create: { id: SINGLETON, coaSeededAt: new Date(), coaSeededBy: ctx.actorId, coaTemplate: COA_TEMPLATE_KEY, updatedBy: ctx.actorId },
@@ -158,6 +164,12 @@ export async function setRoles(map: Record<string, unknown>, ctx: AuditContext) 
   }, TX_OPTS);
 }
 
+/** Council F3 (fixed assets): with assets in the register, the go-live date is the 1st of a month (FA_GO_LIVE_DAY). */
+async function faGoLiveGuard(tx: Prisma.TransactionClient, day: Date): Promise<void> {
+  if (day.getUTCDate() === 1) return;
+  if (await tx.fixedAsset.count({ where: { status: { not: "DRAFT" } } })) assertGoLiveFirstOfMonth(day);
+}
+
 /** Activate (with the go-live date) when every readiness check passes. */
 export async function activate(goLive: string, ctx: AuditContext) {
   let day: Date;
@@ -172,6 +184,7 @@ export async function activate(goLive: string, ctx: AuditContext) {
     // on what this activation commits with: a map made MISALIGNED meanwhile rolls the activation back.
     await tx.$queryRaw`SELECT "id" FROM "AccountingSettings" WHERE "id" = ${SINGLETON} FOR UPDATE`;
     await tx.$executeRawUnsafe(`LOCK TABLE "HrAccountMap", "HrPayrollAccount", "AccountRole" IN SHARE MODE`);
+    await faGoLiveGuard(tx, day);
     if ((await payrollAlignment(tx)).rows.some((row) => row.status === "MISALIGNED")) {
       const c = PAYROLL_CHECK;
       throw refuse("ACTIVATION_NOT_READY", `(${c.key})`, `(${c.ar})`);
@@ -202,6 +215,7 @@ export async function setGoLiveDate(goLive: string | null, ctx: AuditContext) {
     await setAuditContext(tx, ctx);
     const s = await getSettings(tx);
     if (s.accountingActive) throw refuse("ALREADY_ACTIVE");
+    if (day) await faGoLiveGuard(tx, day);
     return tx.accountingSettings.upsert({ where: { id: SINGLETON }, create: { id: SINGLETON, goLiveDate: day, updatedBy: ctx.actorId }, update: { goLiveDate: day, updatedBy: ctx.actorId } });
   }, TX_OPTS);
 }

@@ -1,0 +1,83 @@
+/*
+ * Shared page chrome (Qoyod-parity program): breadcrumb, filter card, dark section bar, table pager.
+ * Direction 2.1 tokens only (defined on `.d21` in components/shell/direction-2.1.css); logical properties, so the
+ * English (LTR) frame mirrors. Class prefix `qc-`.
+ */
+.qc-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* «الصفحة الرئيسية / …» */
+.qc-crumb { margin: 0 0 12px; font-size: 13.5px; color: var(--text-muted); }
+.qc-crumb ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.qc-crumb li { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.qc-crumb li + li::before { content: "/"; color: var(--text-disabled); }
+.qc-crumb a { color: var(--text-secondary); text-decoration: none; }
+.qc-crumb a:hover { color: var(--text-link); text-decoration: underline; }
+.qc-crumb [aria-current="page"] { color: var(--text-primary); font-weight: 500; }
+
+/* The filter card */
+.qc-filter { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-end; padding: 16px; margin: 0 0 20px; background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 10px; }
+.qc-filter-fields { display: flex; flex-wrap: wrap; gap: 12px 16px; flex: 1 1 420px; min-width: 0; align-items: flex-end; }
+.qc-filter-actions { display: flex; gap: 8px; flex: none; }
+.qc-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; border: 0; padding: 0; margin: 0; }
+.qc-label { font-size: 12.5px; color: var(--text-muted); padding: 0; }
+.qc-muted { color: var(--text-muted); font-size: 13px; margin: 4px 8px; }
+
+.qc-pick { position: relative; flex: 1 1 260px; max-width: 420px; }
+.qc-pick-box { display: flex; align-items: center; gap: 6px; min-height: 34px; padding: 3px 6px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--surface); }
+.qc-chips { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; }
+.qc-chip { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 6px; background: var(--surface-selected); color: var(--text-primary); font-size: 12.5px; max-width: 100%; }
+.qc-chip.is-all { background: none; color: var(--text-muted); }
+.qc-chip button { display: inline-grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; background: none; color: var(--text-muted); cursor: pointer; border-radius: 4px; }
+.qc-chip button:hover { color: var(--action-danger); }
+.qc-pick-btn { display: inline-grid; place-items: center; width: 28px; height: 28px; border: 0; background: none; color: var(--text-secondary); cursor: pointer; border-radius: 6px; }
+.qc-pick-btn:hover { background: var(--surface-hover); }
+.qc-pick-pop { position: absolute; inset-inline: 0; top: calc(100% + 4px); z-index: 30; max-height: 260px; overflow: auto; padding: 4px; background: var(--surface); border-radius: 10px; box-shadow: var(--shadow-pop); }
+.qc-pick-opt { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 8px; border-radius: 6px; cursor: pointer; font-size: 13.5px; }
+.qc-pick-opt:hover { background: var(--surface-hover); }
+.qc-pick-opt input { accent-color: var(--action-primary); width: 16px; height: 16px; }
+
+.qc-range-in { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 8px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--surface); }
+.qc-range-in input { border: 0; background: none; font: 13.5px var(--f-num); color: var(--text-primary); min-width: 0; width: 128px; height: 30px; }
+.qc-range-sep { color: var(--text-disabled); }
+
+/* The dark section title bar */
+.qc-section { margin: 0 0 20px; background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 10px; overflow: hidden; min-width: 0; }
+.qc-bar { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 10px 18px; background: var(--text-primary); color: var(--text-inverse); border-top: 3px solid var(--action-primary); }
+.qc-bar.is-mid { background: var(--action-primary); border-top-color: var(--brand-signature); }
+.qc-bar h2, .qc-bar h3 { margin: 0; font-size: 16px; line-height: 26px; font-weight: 600; flex: 1; min-width: 0; color: inherit; }
+.qc-bar-actions { display: flex; gap: 6px; flex: none; }
+.qc-bar-actions a, .qc-bar-actions button { color: var(--text-inverse); }
+.qc-section-body { padding: 16px; }
+.qc-section-body.is-flush { padding: 0; }
+
+/* «السابق / التالي» */
+.qc-pager { display: flex; align-items: center; gap: 8px; padding: 10px 0; flex-wrap: wrap; }
+.qc-pager-mid { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 140px; text-align: center; }
+.qc-pager-mid b { font-weight: 600; font-size: 13.5px; }
+.qc-pager-mid small { color: var(--text-muted); font-size: 12px; }
+.qc-pager-size { height: 28px; border: 1px solid var(--border-control); border-radius: 7px; background: var(--surface); padding: 0 6px; font: 13px var(--f-num); color: var(--text-primary); }
+.qc-pager .d21-btn:disabled { opacity: 0.5; cursor: default; }
+
+@media (max-width: 767.98px) {
+  .qc-filter { padding: 12px; }
+  .qc-filter-fields, .qc-pick { flex-basis: 100%; max-width: none; }
+  .qc-filter-actions { width: 100%; }
+  .qc-filter-actions .d21-btn { flex: 1; justify-content: center; height: 40px; }
+  .qc-range-in input { width: auto; flex: 1; }
+  .qc-bar { padding: 10px 14px; min-height: 46px; }
+  .qc-section-body { padding: 12px; }
+}
+
+/* List variant of the filter card (Qoyod lists: «بحث» + «إعادة تعيين» dark); the dashboard's red-outline reset. */
+.qc-reset { color: var(--text-inverse); background: var(--text-primary); box-shadow: none; }
+.qc-reset:hover { background: var(--text-secondary); }
+.qc-reset.is-outline { color: var(--action-danger); background: var(--surface); box-shadow: inset 0 0 0 1px var(--action-danger); }
+.qc-reset.is-outline:hover { background: var(--status-danger-tint); }
+.qc-pick-q { width: calc(100% - 8px); margin: 4px; height: 30px; padding: 0 8px; border: 1px solid var(--border-control); border-radius: 6px; font: inherit; font-size: 13px; background: var(--surface); color: var(--text-primary); }
+
+/* «في الصفحة [15]» above a list, «يتم عرض N» below it */
+.qc-size { display: inline-flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 13px; color: var(--text-secondary); }
+.qc-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 2px; }
+.qc-foot-line { flex: 1; min-width: 0; font-style: italic; font-size: 13px; color: var(--text-muted); }
+.qc-foot-nav { display: inline-flex; gap: 6px; }
+.qc-foot .d21-btn:disabled { opacity: 0.5; cursor: default; }

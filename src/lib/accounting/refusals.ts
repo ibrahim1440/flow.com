@@ -65,6 +65,29 @@ export const REFUSALS = {
   YEAR_CLOSED_POSTING: { status: 409, en: "The fiscal year is closed: posting into it is refused.", ar: "السنة المالية مقفلة؛ الترحيل إليها مرفوض." },
   REVERSAL_OF_REVERSAL: { status: 409, en: "A reversal entry is not reversed again: post the original event again (or a new entry) instead.", ar: "القيد العكسي لا يُعكس مرة أخرى؛ رحّل الحدث الأصلي من جديد أو قيدًا جديدًا." },
   LEDGER_DB: { status: 409, en: "The ledger refused the change.", ar: "رفض دفتر الأستاذ التغيير." },
+  // «القيود السهلة» / «المعاملات المتكررة» (20261120090000_recurring_journals).
+  TEMPLATE_INVALID: { status: 400, en: "The journal template is not valid.", ar: "قالب القيد غير صالح." },
+  TEMPLATE_IN_USE: { status: 409, en: "A recurring transaction uses this template: archive it instead.", ar: "معاملة متكررة تستخدم هذا القالب؛ أرشفه بدل حذفه." },
+  TEMPLATE_ARCHIVED: { status: 409, en: "This template is archived.", ar: "هذا القالب مؤرشف." },
+  RECURRING_INVALID: { status: 400, en: "The recurring transaction is not valid.", ar: "المعاملة المتكررة غير صالحة." },
+  RECURRING_STATE: { status: 409, en: "The recurring transaction is not in a state that allows this.", ar: "حالة المعاملة المتكررة لا تسمح بهذا الإجراء." },
+  RECURRING_STALE: { status: 409, en: "Someone changed this recurring transaction meanwhile: reload it and try again.", ar: "عدّل شخص آخر هذه المعاملة المتكررة؛ أعد تحميلها ثم حاول مجددًا." },
+  AUTO_POST_JOURNALS_ONLY: { status: 400, en: "Only a recurring journal may post automatically; invoices are always created as drafts.", ar: "الترحيل التلقائي للقيود فقط؛ الفواتير تُنشأ مسودات دائمًا." },
+  RECURRING_PREPARER_RIGHTS: { status: 409, en: "The recurring transaction's preparer no longer holds the duty to create it (or the account is deactivated): it was paused.", ar: "مُعدّ المعاملة المتكررة لم يعد يملك صلاحية إنشائها (أو أوقف حسابه)؛ أوقفت مؤقتًا." },
+  RUN_NOT_FAILED: { status: 409, en: "Only a failed run is retried.", ar: "يُعاد تشغيل الدفعة الفاشلة فقط." },
+  // «الموازنات» / «قوالب التأجيل» (20261122090000_budgets_deferrals).
+  BUDGET_LOCKED: { status: 409, en: "An approved budget is locked: change it through a revision.", ar: "الموازنة المعتمدة مقفلة؛ عدّلها بإنشاء نسخة جديدة منها." },
+  BUDGET_STATE: { status: 409, en: "The budget is not in a state that allows this.", ar: "حالة الموازنة لا تسمح بهذا الإجراء." },
+  BUDGET_EMPTY: { status: 409, en: "Enter at least one amount before approving the budget.", ar: "أدخل مبلغًا واحدًا على الأقل قبل اعتماد الموازنة." },
+  BUDGET_REVISION_OPEN: { status: 409, en: "A revision of this budget is already open as a draft.", ar: "توجد نسخة معدّلة من هذه الموازنة قيد الإعداد (مسودة)." },
+  SOD_SELF_APPROVAL_BUDGET: { status: 409, en: "The preparer of a budget does not approve it (segregation of duties).", ar: "مُعدّ الموازنة لا يعتمدها (فصل المهام)." },
+  DEFERRAL_ACCOUNT_TYPE: { status: 400, en: "The account's type does not suit this deferral (prepaid: an asset and an expense; deferred revenue: a liability and a revenue).", ar: "نوع الحساب لا يناسب التأجيل (المدفوع مقدماً: أصل ومصروف؛ الإيراد المؤجل: التزام وإيراد)." },
+  DEFERRAL_AMOUNT: { status: 400, en: "The amount cannot be spread over these months.", ar: "لا يمكن توزيع المبلغ على هذه الأشهر." },
+  DEFERRAL_TEMPLATE_INACTIVE: { status: 409, en: "The deferral template is inactive.", ar: "قالب التأجيل غير نشط." },
+  DEFERRAL_SOURCE: { status: 409, en: "The source line cannot carry this schedule.", ar: "سطر المصدر لا يحتمل هذا الجدول." },
+  DEFERRAL_STATE: { status: 409, en: "The deferral schedule or run is not in a state that allows this.", ar: "حالة جدول التأجيل أو التشغيل لا تسمح بهذا الإجراء." },
+  DEFERRAL_FUTURE_MONTH: { status: 409, en: "A month is recognised in it or after it, never in advance.", ar: "يُعترف بالشهر خلاله أو بعده، لا مقدمًا." },
+  DEFERRAL_FROZEN: { status: 409, en: "A deferral schedule's amounts and lines never change, and a month is recognised once.", ar: "مبالغ جدول التأجيل وأشهره لا تتغير، ويُعترف بكل شهر مرة واحدة." },
 } satisfies Record<string, R>;
 
 export type RefusalCode = keyof typeof REFUSALS;
@@ -88,6 +111,8 @@ const DB: [RegExp, RefusalCode, string][] = [
   [/LEDGER: once the posting engine has posted/, "ENGINE_HAS_POSTED", ""],
   [/LEDGER: the opening balances are posted; the opening grid is final/, "OPENING_POSTED", ""],
   [/LEDGER: a closed fiscal period is reopened only with a reason/, "REASON_REQUIRED", ""],
+  [/LEDGER: an approved budget is locked|LEDGER: an archived budget is final/, "BUDGET_LOCKED", ""],
+  [/LEDGER: a deferral (schedule|month|run)|LEDGER: deferral templates/, "DEFERRAL_FROZEN", ""],
   [/LEDGER: /, "LEDGER_DB", ""],
 ];
 

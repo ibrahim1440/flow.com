@@ -13,6 +13,8 @@ import { useI18n } from "@/lib/i18n/context";
 import { routeAllowed } from "@/lib/nav/registry";
 import { hasModuleAccess } from "@/lib/auth-shared";
 import { useUser } from "../../user-context";
+import { useWorkspaceMode } from "@/components/shell/workspace-mode";
+import { term, type TermKey } from "@/lib/nav/glossary";
 import "./accounting.css";
 
 export type Setup = {
@@ -29,7 +31,7 @@ export type Setup = {
   /** A5: the SoD setting (effective: the setting, or SIMPLE MODE). */
   sod?: { allowSelfApproval: boolean; approverMayPost: boolean; stored: { allowSelfApproval: boolean; approverMayPost: boolean }; simpleMode: boolean };
   viewer: { id: string };
-  can: Record<"settings" | "coa" | "periodLock" | "periodClose" | "periodReopen" | "journalCreate" | "journalSubmit" | "journalApprove" | "journalPost" | "journalReverse" | "opening", boolean>;
+  can: Record<"settings" | "coa" | "periodLock" | "periodClose" | "periodReopen" | "journalCreate" | "journalSubmit" | "journalApprove" | "journalPost" | "journalReverse" | "opening" | "recurring" | "budgets" | "deferrals" | "fixedAssets", boolean>;
 };
 
 export function useLang() {
@@ -106,26 +108,36 @@ export function money(v: string | number | null | undefined, blankZero = false):
   return nf.format(n);
 }
 
-export const TABS = [
+// `term`: inside the accountant workspace the tab reads Qoyod's word (src/lib/nav/glossary.ts); elsewhere `ar` / `en`.
+export const TABS: { href: string; ar: string; en: string; exact?: boolean; term?: TermKey }[] = [
   { href: "/dashboard/accounting", ar: "نظرة عامة", en: "Overview", exact: true },
-  { href: "/dashboard/accounting/journals", ar: "القيود", en: "Journals" },
-  { href: "/dashboard/accounting/chart", ar: "دليل الحسابات", en: "Chart of accounts" },
+  { href: "/dashboard/accounting/journals", ar: "القيود", en: "Journals", term: "journals" as TermKey },
+  // Qoyod parity phase 4 (20261120090000_recurring_journals): journal templates and recurring transactions.
+  { href: "/dashboard/accounting/journal-templates", ar: "القيود السهلة", en: "Journal templates", term: "easyJournals" as TermKey },
+  { href: "/dashboard/accounting/recurring", ar: "المعاملات المتكررة", en: "Recurring", term: "recurring" as TermKey },
+  { href: "/dashboard/accounting/chart", ar: "دليل الحسابات", en: "Chart of accounts", term: "chart" as TermKey },
   { href: "/dashboard/accounting/reports", ar: "التقارير", en: "Reports" },
+  // Qoyod parity phase 4 (feat/budgets-deferrals): «الموازنات» (never posts; budget vs actual) and «قوالب التأجيل».
+  { href: "/dashboard/accounting/budgets", ar: "الموازنات", en: "Budgets" },
+  { href: "/dashboard/accounting/deferrals", ar: "قوالب التأجيل", en: "Deferral templates" },
   // Accounting A5: the quarterly VAT return, reconciled to the GL and ZATCA (Figma «الضريبة»).
-  { href: "/dashboard/accounting/tax", ar: "الضريبة", en: "VAT" },
+  { href: "/dashboard/accounting/tax", ar: "الضريبة", en: "VAT", term: "taxes" as TermKey },
   // Accounting A3: the AP ledger (Figma ACC-50 / 53) and the inventory cost ledger (ACC-100) — «تقييم المخزون» since
   // unified inventory phase 4 (money only; the quantities are the operations inventory's).
   { href: "/dashboard/accounting/ap", ar: "الذمم الدائنة", en: "Payables" },
   { href: "/dashboard/accounting/inventory", ar: "تقييم المخزون", en: "Inventory valuation" },
-  { href: "/dashboard/accounting/periods", ar: "الفترات", en: "Periods" },
+  // «الأصول الثابتة» (20261121090000_fixed_assets): the register, depreciation runs, disposals and additions.
+  { href: "/dashboard/accounting/fixed-assets", ar: "الأصول الثابتة", en: "Fixed assets", term: "fixedAssets" as TermKey },
+  { href: "/dashboard/accounting/periods", ar: "الفترات", en: "Periods", term: "fiscalPeriods" as TermKey },
   { href: "/dashboard/accounting/opening", ar: "الأرصدة الافتتاحية", en: "Opening balances" },
   { href: "/dashboard/accounting/settings", ar: "الإعدادات", en: "Settings" },
   // ZATCA Phase 2 A4 (ZT-20 family): the e-invoicing setup, onboarding, queue and log.
-  { href: "/dashboard/accounting/zatca", ar: "الفوترة الإلكترونية", en: "E-invoicing" },
+  { href: "/dashboard/accounting/zatca", ar: "الفوترة الإلكترونية", en: "E-invoicing", term: "einvoicing" as TermKey },
 ];
 
 export function AcctShell({ title, meta, actions, children, setup, pendingCount }: { title?: string; meta?: ReactNode; actions?: ReactNode; children: ReactNode; setup?: Setup | null; pendingCount?: number }) {
-  const { L } = useLang();
+  const { L, lang } = useLang();
+  const { accountant } = useWorkspaceMode();
   const path = usePathname() ?? "";
   const active = setup?.settings.accountingActive;
   const canOpen = useCanOpen();
@@ -159,7 +171,7 @@ export function AcctShell({ title, meta, actions, children, setup, pendingCount 
           const on = t.exact ? path === t.href : path.startsWith(t.href) || (t.href === "/dashboard/accounting/inventory" && path.startsWith("/dashboard/inventory/valuation"));
           return (
             <Link key={t.href} href={t.href} className="hr-tab" aria-selected={on} aria-current={on ? "page" : undefined}>
-              {L(t.ar, t.en)}
+              {t.term && accountant ? term(t.term, lang, true) : L(t.ar, t.en)}
               {t.href.endsWith("/journals") && pendingCount ? <span className="hr-count">{pendingCount}</span> : null}
             </Link>
           );

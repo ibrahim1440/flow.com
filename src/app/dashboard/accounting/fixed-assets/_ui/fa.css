@@ -1,0 +1,27 @@
+/* «الأصول الثابتة» — section pieces on the accounting kit (Direction 2.1 tokens only; no new colour). */
+.acct .fa-sections { flex-wrap: wrap; align-self: flex-start; max-width: 100%; }
+.acct .fa-block { border: 1px solid var(--hr-border-subtle); border-radius: var(--hr-r-md); background: var(--hr-surface); min-width: 0; }
+.acct .fa-block > .fa-body { padding: 12px 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.acct .fa-block > .hr-tablewrap { border: 0; border-radius: 0; }
+.acct .fa-filter { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.acct .fa-filter > .hr-field { min-width: 160px; flex: 0 1 200px; }
+.acct .fa-money { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.acct .fa-money.is-strong { font-weight: 600; }
+.acct .fa-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 16px; }
+.acct .fa-form .is-wide { grid-column: 1 / -1; }
+.acct .fa-proj { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px; }
+.acct .fa-proj > div { border: 1px solid var(--hr-border-subtle); border-radius: var(--hr-r-sm); padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
+.acct .fa-sched td.is-proj { color: var(--hr-muted); font-style: italic; }
+@media (max-width: 767px) {
+  .acct .fa-filter > .hr-field { flex: 1 1 100%; min-width: 0; }
+}
+.acct .fa-empty { padding: 24px 16px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.acct .fa-empty h3 { margin: 0; font-size: 16px; font-weight: 600; }
+.acct .fa-body { padding: 12px 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.acct .fa-nowrap { white-space: nowrap; }
+.acct .hr-table td:first-child { min-width: 120px; }
+
+/* Council F4: the Zakat figure is an indication, labelled «تحقق مع مستشار الزكاة / zatca.gov.sa». */
+.acct .fa-zakat { display: grid; gap: 4px; margin-top: 12px; padding: 12px 14px; border: 1px solid var(--hr-border-subtle); border-radius: var(--hr-r-md); background: var(--hr-surface); font-size: 13px; }
+.acct .fa-zakat strong { font-weight: 700; }
+.acct .fa-note { margin: 8px 0; padding: 8px 12px; border-radius: var(--hr-r-sm); border: 1px solid var(--hr-border-subtle); background: var(--hr-surface); font-size: 13px; }

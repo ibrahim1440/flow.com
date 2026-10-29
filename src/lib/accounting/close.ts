@@ -8,6 +8,9 @@
 //   grni          received, not yet billed in the books: open receipts vs the GRNI account                   WARN (review)
 //   inventory     inventory sub-ledger = GL (A3 reconciliation: no UNEXPLAINED difference)         FAIL
 //   supplierClaims open supplier claims (net) = SUPPLIER_CLAIMS («نقص من المورد»)                 FAIL (WARN: opening pending)
+//   fixedAssets   the fixed-asset register = its GL accounts; the month's depreciation is run     FAIL / WARN (NA: none)
+//   fixedAssetsReview  December only, with assets: review the useful lives and residual values      WARN (IAS 16.51)
+//   deferrals     unrecognised deferrals = their balance-sheet accounts («قوالب التأجيل»)          FAIL (WARN: opening pending)
 //   ar / ap       AR sub-ledger = GL (AR − customer advances); AP open items = GL                  WARN / FAIL
 //   vat           the month's VAT documents = the VAT accounts' movement from documents             FAIL
 //   zatca         the e-invoicing queue holds nothing pending / failed for the month (A4)          FAIL (NA while off)
@@ -28,6 +31,8 @@ import { postEntry, resolveRoles } from "./posting-engine";
 import { trialBalance } from "./reports";
 import { loadAccountInfo } from "./statements";
 import { reconciliation } from "./ops/valuation";
+import { rollForward as faRollForward } from "./fixed-assets/reports";
+import { deferralReconciliation } from "./deferrals";
 import { agingReport } from "@/lib/services/invoicing/ar";
 
 type Tx = Prisma.TransactionClient;
@@ -79,6 +84,38 @@ export async function closeChecklist(periodId: string) {
     sc.status === "MATCHED" ? `مطالبات الموردين المفتوحة = الحساب (${sc.openClaims})` : `مطالبات الموردين المفتوحة ${sc.openClaims} ≠ الحساب ${sc.gl} (الفرق ${sc.difference}${Number(sc.openingPending) ? `، منها ${sc.openingPending} بانتظار الأرصدة الافتتاحية` : ""})`,
     sc.status === "MATCHED" ? `Open supplier claims = the account (${sc.openClaims})` : `Open supplier claims ${sc.openClaims} ≠ the account ${sc.gl} (difference ${sc.difference}${Number(sc.openingPending) ? `, of which ${sc.openingPending} awaits the opening balances` : ""})`,
     "/dashboard/purchases?tab=claims", sc.count, sc.difference));
+  // «الأصول الثابتة» (20261121090000_fixed_assets): the register = its GL accounts at the month end (FAIL when a
+  // difference is not explained by what is not in the books yet), and the month's depreciation is run (WARN).
+  const faCount = await prisma.fixedAsset.count({ where: { status: { not: "DRAFT" } } });
+  if (!faCount) out.push(check("fixedAssets", "NA", "لا أصول ثابتة في السجل", "No fixed assets in the register", "/dashboard/accounting/fixed-assets"));
+  else {
+    const rf = await faRollForward(new Date(Date.UTC(toDay.getUTCFullYear(), 0, 1)), toDay);
+    const bad = rf.tieOut.filter((t) => t.status === "UNEXPLAINED");
+    const diff = rf.tieOut.reduce((t, x) => t.plus(new Decimal(x.difference).abs()), ZERO);
+    const notRun = await prisma.fixedAsset.count({ where: { status: "ACTIVE", inServiceDate: { lte: toDay }, OR: [{ depreciatedThrough: null }, { depreciatedThrough: { lt: toDay } }] } });
+    out.push(check("fixedAssets", bad.length ? "FAIL" : notRun || !rf.matched ? "WARN" : "PASS",
+      bad.length ? `سجل الأصول الثابتة لا يطابق دفتر الأستاذ في ${bad.length} حساب` : notRun ? `لم يُرحَّل إهلاك الشهر لـ ${notRun} أصل` : rf.matched ? "سجل الأصول الثابتة = دفتر الأستاذ، وإهلاك الشهر مرحّل" : "سجل الأصول الثابتة = دفتر الأستاذ بعد البنود غير المرحّلة (الأرصدة الافتتاحية)",
+      bad.length ? `The fixed-asset register differs from the ledger on ${bad.length} account(s)` : notRun ? `The month's depreciation is not run for ${notRun} asset(s)` : rf.matched ? "Fixed-asset register = ledger, the month's depreciation run" : "Fixed-asset register = ledger after the items not in the books yet (the opening)",
+      notRun && !bad.length ? "/dashboard/accounting/fixed-assets/depreciation" : "/dashboard/accounting/fixed-assets?view=reports", bad.length || notRun || null, diff));
+    // Council F5 (IAS 16.51 / SME 17.19): at least at each year end the useful lives and residual values are reviewed; a
+    // change is recorded as «تعديل تقدير» (a revision, prospective). A WARN: the close records the reviewer's note.
+    if (p.periodNo === 12) {
+      const live = await prisma.fixedAsset.count({ where: { status: { in: ["ACTIVE", "FULLY_DEPRECIATED"] } } });
+      out.push(check("fixedAssetsReview", "WARN",
+        `نهاية السنة: راجع الأعمار الإنتاجية والقيم المتبقية لـ ${live} أصل ثابت، وسجّل أي تغيير «تعديل تقدير» (مستقبليًا)`,
+        `Year end: review the useful lives and residual values of ${live} fixed asset(s); record any change as a «change of estimate» (prospective)`,
+        "/dashboard/accounting/fixed-assets?status=ACTIVE", live));
+    }
+  }
+  // «قوالب التأجيل» (council F2): the unrecognised amount of the schedules = their balance-sheet accounts, difference 0;
+  // WARN when the difference is only the go-live opening still to post.
+  const dr = await deferralReconciliation(toDay);
+  const drDiff = dr.reduce((t, r) => t.plus(r.difference), ZERO), drOpen = dr.reduce((t, r) => t.plus(r.openingPending), ZERO);
+  const drStatus: CheckStatus = !dr.length ? "NA" : dr.every((r) => r.status === "MATCHED") ? "PASS" : dr.every((r) => r.status !== "UNEXPLAINED") ? "WARN" : "FAIL";
+  out.push(check("deferrals", drStatus,
+    drStatus === "PASS" || drStatus === "NA" ? "المؤجلات غير المعترف بها = حسابات الميزانية" : `المؤجلات غير المعترف بها ≠ حسابات الميزانية (الفرق ${fix2(drDiff)}${drOpen.isZero() ? "" : `، منها ${fix2(drOpen)} بانتظار الأرصدة الافتتاحية`})`,
+    drStatus === "PASS" || drStatus === "NA" ? "Unrecognised deferrals = their balance-sheet accounts" : `Unrecognised deferrals ≠ their balance-sheet accounts (difference ${fix2(drDiff)}${drOpen.isZero() ? "" : `, of which ${fix2(drOpen)} awaits the opening balances`})`,
+    "/dashboard/accounting/deferrals", dr.filter((r) => r.status !== "MATCHED").length, drDiff));
   const unexplained = recon.inventory.filter((r) => r.status === "UNEXPLAINED");
   out.push(check("inventory", unexplained.length ? "FAIL" : recon.inventory.some((r) => r.status === "EXPLAINED") ? "WARN" : "PASS",
     unexplained.length ? `فرق غير مفسَّر بين سجل تكلفة المخزون ودفتر الأستاذ في ${unexplained.length} حساب` : "سجل تكلفة المخزون = دفتر الأستاذ",

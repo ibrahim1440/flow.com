@@ -27,6 +27,8 @@ export async function GET() {
         settings: can("settings_manage"), coa: can("coa_manage"), periodLock: can("period_lock"), periodClose: can("period_close"),
         periodReopen: can("period_reopen"), journalCreate: can("journal_create"), journalSubmit: can("journal_submit"),
         journalApprove: can("journal_approve"), journalPost: can("journal_post"), journalReverse: can("journal_reverse"), opening: can("opening_balance"),
+        // The registers' maintenance duties (src/lib/accounting/register-access.ts).
+        recurring: can("recurring"), budgets: can("budgets"), deferrals: can("deferrals"), fixedAssets: can("fixed_assets"),
       },
     });
   } catch (err) {

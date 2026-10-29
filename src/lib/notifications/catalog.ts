@@ -595,6 +595,25 @@ export const EVENTS: NotificationEventDef[] = [
       };
     },
   },
+  {
+    // «المعاملات المتكررة» (20261120090000_recurring_journals): the runner found that a recurring transaction's preparer or
+    // its auto-post authoriser no longer holds the right — the transaction was paused, or switched to drafts only.
+    key: "finance.recurring_attention", category: "finance", severity: "warning",
+    label: { ar: "معاملة متكررة تحتاج انتباهك", en: "A recurring transaction needs your attention" },
+    recipients: [{ perm: [{ module: "accounting", sub: "settings_manage" }] }, { person: "preparer" }, { person: "authoriser" }], requires: [MOD("accounting")],
+    trigger: "runNext / retryRun (lib/accounting/recurring/runner.ts): the preparer lost recurring / journal_create or was deactivated (paused) or the auto-post authoriser lost journal_post / the admin role / was deactivated (drafts only)",
+    render: (f) => {
+      const paused = s(f.state) === "PAUSED";
+      return {
+        severity: paused ? "danger" : "warning",
+        titleAr: paused ? `أوقفت المعاملة المتكررة ${s(f.ref)} مؤقتًا` : `أُلغي الترحيل التلقائي للمعاملة المتكررة ${s(f.ref)}`,
+        titleEn: paused ? `Recurring transaction ${s(f.ref)} was paused` : `Auto-post of recurring transaction ${s(f.ref)} was withdrawn`,
+        bodyAr: paused ? `مُعدّها لم يعد يملك صلاحية المعاملات المتكررة أو إنشاء القيود (أو أوقف حسابه). ${s(f.name)}` : `من فعّل الترحيل التلقائي لم يعد يملك صلاحية الترحيل؛ تُنشأ مسودات من الآن. ${s(f.name)}`,
+        bodyEn: paused ? `Its preparer no longer holds the recurring-transactions or journal-create duty (or the account was deactivated). ${s(f.name)}` : `The person who authorised auto-post no longer may post; drafts are made from now on. ${s(f.name)}`,
+        link: f.scheduleId ? `/dashboard/accounting/recurring/${enc(s(f.scheduleId))}` : "/dashboard/accounting/recurring",
+      };
+    },
+  },
   // ── System ──
   {
     // ZATCA Phase 2 A4: a document ZATCA rejected, could not take (CSID / clearance switched off / conflict), or

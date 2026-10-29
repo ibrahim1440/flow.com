@@ -23,6 +23,7 @@ import { GL_STATE, LEGACY_INVENTORY_TAB, MOVE_KIND, SOURCE_DOC, SOURCE_EVENT, pl
 import { useUser } from "../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { AcctShell, Msg, Term, money, todayRiyadh, useApi, useCanOpen, useHasAccounting, useLang, useWrite, type Setup } from "./shell";
+import { useAccountantView } from "./qoyod-pages";
 
 type RoleKey = "INVENTORY_GREEN" | "INVENTORY_PACKAGING" | "INVENTORY_CAFE" | "INVENTORY_ROASTED" | "INVENTORY_PACKED";
 const ROLE_AR: Record<string, [string, string]> = {
@@ -71,6 +72,7 @@ type Batches = { from: string; to: string; rows: { id: string; batchNumber: stri
 type Receipt = { purchaseRecordId: string; supplierName: string; type: string; date: string; quantity: string; value: string; glState: string; notes: string | null; invoice: { id: string; number: string | null; status: string | null } | null };
 type Opening = { goLiveDate: string | null; openingPosted: boolean; appliedAt: string | null; total: string; missing: number; byRole: { role: string; value: string; count: number }[]; grni: { count: number; value: string };
   supplierClaims?: { count: number; value: string; suppliers: { supplierId: string; name: string; value: string }[] };
+  deferrals?: { accountId: string; code: string; name: string; kind: string; amount: string; schedules: number; manualInGrid: string; doubleRisk: boolean }[];
   apOpening?: { supplierId: string; name: string; expected: string; grid: string; difference: string }[]; rows: { kind: string; entityId: string; label: string; sub: string | null; role: string; unit: string; qty: string; unitCost: string | null; source: string; value: string }[] };
 type Policy = { abnormalRoastLossPct: string | null; abnormalUseProductLimit: boolean; updatedAt: string | null };
 type Align = { aligned: boolean; hrAccountingEnabled: boolean; rows: { key: string; role: string | null; why: string; whyEn?: string; hrAccount: { code: string; name: string } | null; roleAccount: { code: string; name: string } | null; status: string }[] };
@@ -86,6 +88,8 @@ type Go = (patch: Record<string, string | null>) => void;
 export function InventoryValuationScreen() {
   const { L } = useLang();
   const acct = useHasAccounting();
+  // Qoyod parity: «المنتجات والتكاليف» in the accountant workspace (the same read-only valuation).
+  const qoyod = useAccountantView();
   const user = useUser();
   const valuer = !!user && hasSubPrivilege(user.permissions, "inventory", "valuation");
   const router = useRouter();
@@ -114,7 +118,7 @@ export function InventoryValuationScreen() {
   const role = (r: string) => L(ROLE_AR[r]?.[0] ?? r, ROLE_AR[r]?.[1] ?? r);
   const csvQuery = new URLSearchParams({ format: "csv", ...(sp.get("cat") ? { category: sp.get("cat")! } : {}), ...(sp.get("loc") ? { location: sp.get("loc")! } : {}) });
   return (
-    <AcctShell setup={setup.data} title={L("تقييم المخزون", "Inventory valuation")}
+    <AcctShell setup={setup.data} title={qoyod ? L("المنتجات والتكاليف", "Products & costs") : L("تقييم المخزون", "Inventory valuation")}
       actions={item ? undefined : view === "value" ? <a className="hr-btn" href={`/api/accounting/inventory/valuation/groups?${csvQuery}`} data-testid="valuation-csv">{L("تصدير CSV", "Export CSV")}</a> : view === "batches" ? <a className="hr-btn" href={`/api/accounting/inventory/batches?format=csv&from=${sp.get("from") ?? ""}&to=${sp.get("to") ?? ""}`}>{L("تصدير CSV", "Export CSV")}</a> : undefined}>
       <p className="acct-scope" data-testid="valuation-scope">
         <span>{acct ? L("هذه الشاشة للقيمة بالريال فقط: تكلفة المخزون ومطابقتها مع دفتر الأستاذ. الكميات وحركتها اليومية في شاشة المخزون.", "This screen is money only: the inventory's cost and its match with the general ledger. Quantities and their daily movement are in the Inventory screen.")
@@ -145,6 +149,7 @@ const pct = (part: string, whole: string) => (Number(whole) ? `${((Number(part) 
 
 function ValueView({ role, sp, go, acct, base }: { role: (r: string) => string; sp: { get(k: string): string | null }; go: Go; acct: boolean; base: string }) {
   const { L, lang } = useLang();
+  const qoyod = useAccountantView();
   const by = sp.get("by") === "location" ? "location" : "category";
   const cat = sp.get("cat") ?? "";
   const loc = sp.get("loc") ?? "";
@@ -182,6 +187,14 @@ function ValueView({ role, sp, go, acct, base }: { role: (r: string) => string; 
         </div>
       )}
 
+      {qoyod ? (
+        // Qoyod parity «المنتجات والتكاليف» (accountant workspace, read-only): the main categories as type tabs — the same
+        // category filter, one click each. Quantities stay in Inventory; nothing is created here.
+        <nav className="hr-tabs is-underline" aria-label={L("نوع الصنف", "Item type")} data-testid="val-type-tabs">
+          <button type="button" className="hr-tab" aria-pressed={!cat} onClick={() => go({ cat: null })}>{L("الكل", "All")}</button>
+          {roots.map((root) => <button key={root.id} type="button" className="hr-tab" aria-pressed={cat === root.id || v.categoryOptions.some((c) => c.id === cat && c.parentId === root.id)} onClick={() => go({ cat: root.id })} data-testid={`val-type-${root.id}`}>{name(root)}</button>)}
+        </nav>
+      ) : null}
       <div className="acct-filters" data-testid="val-filters">
         <div className="acct-seg" role="group" aria-label={L("التجميع", "Group by")}>
           <button type="button" aria-pressed={by === "category"} onClick={() => go({ by: null })} data-testid="val-by-category-btn">{L("حسب التصنيف", "By category")}</button>
@@ -519,6 +532,8 @@ function OpeningView({ role, canEdit }: { role: (r: string) => string; canEdit: 
         {L("الكمية الموجودة الآن × تكلفة يدخلها المالك، وإلا آخر تكلفة معروفة (المتوسط، آخر استلام، آخر شراء). التطبيق يضبط سجل التكلفة ويضيف سطر مخزون لكل حساب في جدول الأرصدة الافتتاحية (وسطر «بضاعة مستلمة لم تُرحَّل فاتورتها» لكل مورد) — دون ترحيل أي حركة سابقة. يُعاد التطبيق حتى تُرحَّل الأرصدة الافتتاحية.", "On hand now × the owner's cost, else the last known cost (moving average, last receipt, last purchase). Applying sets the cost ledger and adds one inventory line per account to the opening grid (and a received-not-yet-billed line per supplier) — no past movement is posted. Repeatable until the opening is posted.")}
         {" "}{L("تاريخ البدء", "Go-live")}: <span className="hr-num">{o.goLiveDate ?? "—"}</span>{o.appliedAt ? <> · {L("آخر تطبيق", "Last applied")} <span className="hr-num">{o.appliedAt.slice(0, 16).replace("T", " ")}</span></> : null}
         {o.grni.count ? <> · {L("بضاعة مستلمة لم تُرحَّل فاتورتها قبل التفعيل", "Received, not yet billed in the books, before go-live")} {o.grni.count} ({money(o.grni.value)})</> : null}
+        {o.deferrals?.length ? <span data-testid="opening-deferrals"> · {L("المؤجلات غير المعترف بها عند البدء", "Deferrals not yet recognised at go-live")} {o.deferrals.map((d) => `${d.code} ${money(d.amount)}`).join("، ")}</span> : null}
+        {o.deferrals?.some((d) => d.doubleRisk) ? <span className="acct-bad" role="alert" data-testid="opening-deferrals-double"> · {L("تنبيه: في جدول الأرصدة الافتتاحية مبلغ يدوي على حساب المؤجلات نفسه", "Warning: the opening grid already has a manual amount on the same deferral account")} ({o.deferrals.filter((d) => d.doubleRisk).map((d) => `${d.code}: ${money(d.manualInGrid)}`).join("، ")}) — {L("سيُحتسب مرتين؛ احذف أحدهما قبل الترحيل.", "it would count twice; remove one before posting.")}</span> : null}
         {o.supplierClaims?.count ? <span data-testid="opening-claims"> · {L("مطالبات موردين مفتوحة قبل التفعيل (مدين مطالبات الموردين لكل مورد)", "Open supplier claims before go-live (Dr supplier claims per supplier)")} {money(o.supplierClaims.value)}</span> : null}
       </p>
       {o.apOpening?.length ? (

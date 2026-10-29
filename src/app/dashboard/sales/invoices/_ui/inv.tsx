@@ -10,6 +10,7 @@ import type { ReactNode } from "react";
 import { OpsRoot, PageHeader } from "@/components/ops/ui";
 import { useLang } from "@/app/dashboard/accounting/_ui/shell";
 import "@/app/dashboard/accounting/_ui/accounting.css";
+import { useTerm, useWorkspaceMode } from "@/components/chrome";
 import "./inv.css";
 
 export { acctFetch, money, Msg, useApi, useLang, useWrite, todayRiyadh } from "@/app/dashboard/accounting/_ui/shell";
@@ -24,6 +25,10 @@ export const INV_TABS = [
 export function InvShell({ title, meta, actions, children, testId, tab = null }: { title?: string; meta?: ReactNode; actions?: ReactNode; children: ReactNode; testId?: string; tab?: string | null }) {
   const { L } = useLang();
   const path = usePathname() ?? "";
+  // The hub tabs read the glossary (Qoyod's words in the accountant workspace, ours elsewhere).
+  const term = useTerm();
+  const { accountant } = useWorkspaceMode();
+  const word = (href: string, ar: string, en: string) => (!accountant ? L(ar, en) : href === "/dashboard/sales/collections" ? term("collections") : href.endsWith("?tab=notes") ? term("creditNotes") : href === "/dashboard/sales/invoices" ? term("salesInvoices") : L(ar, en));
   return (
     <OpsRoot className="acct inv">
       <div className="hr-page" data-testid={testId}>
@@ -33,7 +38,7 @@ export function InvShell({ title, meta, actions, children, testId, tab = null }:
         <nav className="hr-tabs is-underline acct-tabs" aria-label={L("أقسام الفواتير", "Invoicing sections")}>
           {INV_TABS.map((t) => {
             const on = t.match(path, tab);
-            return <Link key={t.href} href={t.href} className="hr-tab" aria-selected={on} aria-current={on ? "page" : undefined}>{L(t.ar, t.en)}</Link>;
+            return <Link key={t.href} href={t.href} className="hr-tab" aria-selected={on} aria-current={on ? "page" : undefined}>{word(t.href, t.ar, t.en)}</Link>;
           })}
         </nav>
         <div className="acct-body">{children}</div>

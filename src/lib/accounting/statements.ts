@@ -33,7 +33,9 @@ const HEADER_GROUP: Record<string, ReportGroup> = {
   "3000": "EQUITY", "4000": "REVENUE", "5000": "COST_OF_SALES", "6000": "OPERATING_EXPENSE", "7000": "OTHER_INCOME_EXPENSE", "8000": "ZAKAT",
 };
 const ROLE_GROUP: Record<string, ReportGroup> = Object.fromEntries(ACCOUNT_ROLES.map((r) => {
-  const g: ReportGroup = r.group === "cost" ? "COST_OF_SALES"
+  // «الأصول الثابتة»: cost / accumulated depreciation are non-current; the gain / loss on disposal is other income / expense.
+  const g: ReportGroup = r.group === "fixedAssets" ? (r.types[0] === "ASSET" ? "NON_CURRENT_ASSET" : r.key === "FA_DISPOSAL_GAIN_LOSS" ? "OTHER_INCOME_EXPENSE" : "OPERATING_EXPENSE")
+    : r.group === "cost" ? "COST_OF_SALES"
     : r.key === "EOSB_PROVISION" ? "NON_CURRENT_LIABILITY"
     : r.types[0] === "ASSET" ? "CURRENT_ASSET"
     : r.types[0] === "LIABILITY" ? "CURRENT_LIABILITY"
@@ -134,8 +136,12 @@ export function rangeFromQuery(q: { kind?: string | null; year?: string | null; 
 const POSTED = Prisma.sql`j."status" IN ('POSTED', 'REVERSED')`;
 const endOf = (d: Date) => new Date(d.getTime() + 86_399_999);
 
-/** Σ (debit − credit) per account over [from, to] (from = null: since the beginning), posted only. */
-async function netByAccount(ranges: { from: Date | null; to: Date; excludeTypes?: string[] }[]): Promise<Map<string, Decimal[]>> {
+/**
+ * Σ (debit − credit) per account over [from, to] (from = null: since the beginning), posted only. `branchId`: the
+ * lines of that branch only (the journal line's branch dimension). Exported for the budget-vs-actual report
+ * («الموازنات», ./budgets.ts) and the deferral reconciliation (./deferrals.ts): one aggregate, never a second sum.
+ */
+export async function netByAccount(ranges: { from: Date | null; to: Date; excludeTypes?: string[] }[], opts: { branchId?: string | null } = {}): Promise<Map<string, Decimal[]>> {
   const maxTo = ranges.reduce((m, r) => (r.to > m ? r.to : m), ranges[0].to);
   const cols = ranges.map((r, i) => {
     const conds = [Prisma.sql`j."entryDate" <= ${endOf(r.to)}`];
@@ -146,7 +152,7 @@ async function netByAccount(ranges: { from: Date | null; to: Date; excludeTypes?
   const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
     SELECT l."accountId", ${Prisma.join(cols, ", ")}
       FROM "JournalEntryLine" l JOIN "JournalEntry" j ON j."id" = l."journalEntryId"
-     WHERE ${POSTED} AND j."entryDate" <= ${endOf(maxTo)}
+     WHERE ${POSTED} AND j."entryDate" <= ${endOf(maxTo)}${opts.branchId ? Prisma.sql` AND l."branchId" = ${opts.branchId}` : Prisma.empty}
      GROUP BY l."accountId"`;
   return new Map(rows.map((r) => [r.accountId as string, ranges.map((_, i) => new Decimal(String(r[`c${i}`] ?? 0)))]));
 }

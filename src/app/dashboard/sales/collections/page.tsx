@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import Link from "next/link";
 import { Paperclip } from "lucide-react";
 import {
@@ -11,6 +11,8 @@ import { usePhone, useD21Phone } from "@/components/shell/page-context";
 import { splitTitle } from "@/components/d21/labels";
 import { useUser } from "../../user-context";
 import { canViewInvoices } from "@/lib/services/invoicing/access";
+import { FilterCard, DateRange, Section, ListFooter, ListPageSize, useFilters, usePaging, useTerm } from "@/components/chrome";
+import { useAccountantView } from "../../accounting/_ui/qoyod-pages";
 
 /**
  * Collections — one screen, two jobs, built to GX A-01 (Figma 1459:15522, EN 1459:16043; the
@@ -110,6 +112,8 @@ type Payload = {
   /** Exact per-status counts over the caller's whole scope (ALL = every status), whatever the
       active segment and the 200-row page. Absent from an older payload. */
   counts?: Record<string, number>;
+  /** Qoyod parity: what each listed receipt is applied to (only for an invoices viewer). */
+  allocations?: Record<string, { id: string; invoiceId: string; number: string | null; amount: string; appliedDate: string }[]>;
   /** Per-status sums (gross / net), over the same scope. */
   totals?: Record<string, { gross: string; net: string }>;
 };
@@ -151,6 +155,8 @@ export default function CollectionsPage() {
   // Sales invoicing A2: «الفواتير والتحصيل» is one hub (Figma ZT-10); an invoices viewer gets its tabs here too.
   const viewer = useUser();
   const invoicesTabs = !!viewer && canViewInvoices(viewer.permissions);
+  // Qoyod parity: in the accountant workspace this page is «سندات العملاء» (wording and column order only).
+  const qoyod = useAccountantView();
   const lang = useLang();
   const ar = lang === "ar";
   const phone = usePhone();
@@ -166,7 +172,17 @@ export default function CollectionsPage() {
   const [detail, setDetail] = useState<Collection | null>(null);
   const [reason, setReason] = useState("");
 
-  useD21Phone({ title: ar ? "التحصيلات" : "Collections", sub: ar ? "الفواتير والتحصيل" : "Invoicing & collections" });
+  const t = useTerm();
+  useD21Phone({ title: qoyod ? t("collections") : (ar ? "التحصيلات" : "Collections"), sub: ar ? "الفواتير والتحصيل" : "Invoicing & collections" });
+  // Qoyod parity (accountant workspace only): a filter card (period, customer) over the rows already loaded, the dark
+  // title bar and the pager. The status segments, the server's scope and every decision stay as they are.
+  const cf = useFilters({ from: "", to: "", customer: "" });
+  const riyadhDay = (iso: string) => new Date(Date.parse(iso) + 3 * 3600_000).toISOString().slice(0, 10);
+  const custKey = (r: Collection) => r.customer?.id ?? "";
+  const qRows = (data?.rows ?? []).filter((r) => !qoyod || ((!cf.applied.from || riyadhDay(r.collectedAt) >= cf.applied.from)
+    && (!cf.applied.to || riyadhDay(r.collectedAt) <= cf.applied.to) && (!cf.applied.customer || custKey(r) === cf.applied.customer)));
+  const { pageRows, pager } = usePaging(qRows);
+  const customerOptions = Array.from(new Map((data?.rows ?? []).filter((r) => r.customer).map((r) => [r.customer!.id, ar ? (r.customer!.nameAr ?? r.customer!.name) : r.customer!.name])).entries());
 
   /**
    * Reload counter. The fetch lives in the effect rather than a `useCallback` it calls, so
@@ -438,54 +454,95 @@ export default function CollectionsPage() {
     );
   };
 
+  // Qoyod parity (accountant workspace only): «سندات العملاء» reads العميل · التاريخ · المبلغ · طريقة الدفع · الحالة first,
+  // then our own net basis and commission, then «الخيارات». Same cells, same rows; everyone else keeps the frame's order.
+  // A collection has no voucher number of its own, so there is no «المرجع» column (the bank reference sits under the amount).
+  // QOYOD-REF §1.8: الجهة · رقم المرجع · (الحساب → طريقة الدفع) · الوصف · التاريخ · المبلغ · المبلغ غير المخصص · الحالة ·
+  // الخيارات; our commission stays before the options (Finance decides with it).
+  const COLS = qoyod
+    ? (["deal", "ref", "method", "note", "date", "amount", "unallocated", "status", "commission", "actions"] as const)
+    : (["deal", "amount", "net", "date", "method", "status", "commission", "actions"] as const);
+  type Col = "deal" | "ref" | "note" | "unallocated" | "amount" | "net" | "date" | "method" | "status" | "commission" | "actions";
+  const allocs = data.allocations;
+  const allocatedCents = (r: Collection) => (allocs?.[r.id] ?? []).reduce((a, x) => a + Math.round(Number(x.amount) * 100), 0);
+  const unallocated = (r: Collection) => (Math.round(Number(r.amountGross) * 100) - allocatedCents(r)) / 100;
+  const allocPill = (r: Collection) => {
+    if (!allocs || r.status !== "APPROVED") return null;
+    const a = allocatedCents(r), g = Math.round(Number(r.amountGross) * 100);
+    const [txt, tone] = a <= 0 ? [ar ? "غير مستعمل" : "Unused", "wa"] : a >= g ? [ar ? "مستعمل" : "Used", "ok"] : [ar ? "مستعمل جزئياً" : "Partly used", "wa"];
+    return <span className={`st ${tone}`} style={{ marginInlineStart: 6 }} data-testid={`collection-use-${r.id}`}>{txt}</span>;
+  };
+  const head: Record<Col, ReactNode> = {
+    deal: qoyod ? (ar ? "الجهة" : "Party") : (ar ? "الصفقة" : "Deal"),
+    ref: ar ? "رقم المرجع" : "Reference",
+    note: ar ? "الوصف" : "Description",
+    unallocated: t("colUnallocated"),
+    amount: ar ? "المبلغ" : "Amount",
+    net: ar ? "الأساس الصافي" : "Net basis",
+    date: ar ? "التاريخ" : "Date",
+    method: qoyod ? t("colMethod") : (ar ? "الطريقة" : "Method"),
+    status: ar ? "الحالة" : "Status",
+    commission: ar ? "العمولة" : "Commission",
+    actions: qoyod ? t("colOptions") : <span className="sr-only">{ar ? "الإجراءات" : "Actions"}</span>,
+  };
+  const cell = (r: Collection, k: Col) => {
+    switch (k) {
+      case "ref": return <td key={k}>{r.referenceNumber ? <bdi className="id" style={{ fontSize: 12 }}>{r.referenceNumber}</bdi> : r.quote ? <bdi className="id" style={{ fontSize: 12 }}>{r.quote.quoteNumber}</bdi> : <span className="sm">—</span>}</td>;
+      case "note": return <td key={k} style={{ whiteSpace: "normal", maxWidth: 220 }}>{r.note ? <span className="sm" style={{ display: "inline" }}>{r.note}</span> : <span className="sm">—</span>}</td>;
+      case "unallocated": return <td key={k}>{allocs ? <bdi className="n">{formatMoney(unallocated(r).toFixed(2))}</bdi> : <span className="sm">—</span>}</td>;
+      case "deal": return (
+        <td key={k} style={{ whiteSpace: "normal", minWidth: 200 }}>
+          {r.opportunity ? (
+            <Link href={`/dashboard/sales/deals/${r.opportunity.id}`} style={{ display: "block" }}>
+              <b className="who"><bdi>{dealText(r)}</bdi></b>
+            </Link>
+          ) : <b className="who">{dealText(r)}</b>}
+          <span className="sm">
+            {r.quote && <bdi className="id" style={{ fontSize: 12 }}>{r.quote.quoteNumber}</bdi>}
+            {r.quote && r.submittedBy && " · "}
+            {r.submittedBy?.name}
+          </span>
+        </td>
+      );
+      case "amount": return (
+        <td key={k}>
+          <span className="l1"><bdi className="n">{formatMoney(r.amountGross)}</bdi></span>
+          {r.referenceNumber && <span className="sm"><bdi className="id" style={{ fontSize: 12 }}>{r.referenceNumber}</bdi></span>}
+        </td>
+      );
+      case "net": return (
+        <td key={k}>
+          <span className="l1"><bdi className="n">{formatMoney(r.amountNet)}</bdi></span>
+          <span className="sm">{ar ? "ضريبة " : "tax "}<bdi className="n">{formatMoney(Number(r.amountTax).toFixed(2))}</bdi></span>
+        </td>
+      );
+      case "date": return <td key={k}><bdi className="n">{formatDay(r.collectedAt)}</bdi></td>;
+      case "method": return <td key={k}>{methodText(r.paymentMethod)}</td>;
+      case "status": return (
+        <td key={k} style={{ whiteSpace: "normal" }}>
+          <StatusDot status={r.status} ar={ar} />
+          {qoyod ? allocPill(r) : null}
+          {(r.decisionReason || r.reversalReason) && (
+            <span className="sm">{r.reversalReason ?? r.decisionReason}</span>
+          )}
+        </td>
+      );
+      case "commission": return <td key={k}>{commissionCell(r)}</td>;
+      case "actions": return <td key={k} style={{ textAlign: "end" }}>{rowActions(r)}</td>;
+    }
+  };
   const table = (
     <div style={{ overflowX: "auto" }}>
-      <table className="t coll" data-testid="collections-table" style={{ minWidth: 1000 }}>
+      <table className="t coll" data-testid="collections-table" data-layout={qoyod ? "qoyod" : undefined} style={{ minWidth: 1000 }}>
         <thead>
           <tr>
-            <th scope="col">{ar ? "الصفقة" : "Deal"}</th>
-            <th scope="col">{ar ? "المبلغ" : "Amount"}</th>
-            <th scope="col">{ar ? "الأساس الصافي" : "Net basis"}</th>
-            <th scope="col">{ar ? "التاريخ" : "Date"}</th>
-            <th scope="col">{ar ? "الطريقة" : "Method"}</th>
-            <th scope="col">{ar ? "الحالة" : "Status"}</th>
-            <th scope="col">{ar ? "العمولة" : "Commission"}</th>
-            <th scope="col"><span className="sr-only">{ar ? "الإجراءات" : "Actions"}</span></th>
+            {COLS.map((k) => <th key={k} scope="col">{head[k]}</th>)}
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {(qoyod ? pageRows : rows).map((r) => (
             <tr key={r.id} data-testid={`collection-${r.id}`} className={detail?.id === r.id ? "sel" : undefined}>
-              <td style={{ whiteSpace: "normal", minWidth: 200 }}>
-                {r.opportunity ? (
-                  <Link href={`/dashboard/sales/deals/${r.opportunity.id}`} style={{ display: "block" }}>
-                    <b className="who"><bdi>{dealText(r)}</bdi></b>
-                  </Link>
-                ) : <b className="who">{dealText(r)}</b>}
-                <span className="sm">
-                  {r.quote && <bdi className="id" style={{ fontSize: 12 }}>{r.quote.quoteNumber}</bdi>}
-                  {r.quote && r.submittedBy && " · "}
-                  {r.submittedBy?.name}
-                </span>
-              </td>
-              <td>
-                <span className="l1"><bdi className="n">{formatMoney(r.amountGross)}</bdi></span>
-                {r.referenceNumber && <span className="sm"><bdi className="id" style={{ fontSize: 12 }}>{r.referenceNumber}</bdi></span>}
-              </td>
-              <td>
-                <span className="l1"><bdi className="n">{formatMoney(r.amountNet)}</bdi></span>
-                <span className="sm">{ar ? "ضريبة " : "tax "}<bdi className="n">{formatMoney(Number(r.amountTax).toFixed(2))}</bdi></span>
-              </td>
-              <td><bdi className="n">{formatDay(r.collectedAt)}</bdi></td>
-              <td>{methodText(r.paymentMethod)}</td>
-              <td style={{ whiteSpace: "normal" }}>
-                <StatusDot status={r.status} ar={ar} />
-                {(r.decisionReason || r.reversalReason) && (
-                  <span className="sm">{r.reversalReason ?? r.decisionReason}</span>
-                )}
-              </td>
-              <td>{commissionCell(r)}</td>
-              <td style={{ textAlign: "end" }}>{rowActions(r)}</td>
+              {COLS.map((k) => cell(r, k))}
             </tr>
           ))}
         </tbody>
@@ -633,6 +690,27 @@ export default function CollectionsPage() {
               <p className="c-reason">{detail.reversalReason ?? detail.decisionReason}</p>
             )}
 
+            {qoyod && allocs ? (
+              <section data-testid="detail-allocations" style={{ margin: "12px 0" }}>
+                <p className="c-ev-h">{ar ? "تخصيصات السند" : "Receipt allocations"}</p>
+                {(allocs[detail.id] ?? []).length === 0 ? (
+                  <p className="lbl" style={{ fontWeight: 400, margin: 0 }}>{ar ? "لم يُخصَّص هذا التحصيل لأي فاتورة بعد." : "Not applied to any invoice yet."}</p>
+                ) : (
+                  <table className="t" style={{ width: "100%" }}>
+                    <thead><tr><th scope="col">#</th><th scope="col">{ar ? "التاريخ" : "Date"}</th><th scope="col">{ar ? "المخصص له" : "Applied to"}</th><th scope="col">{ar ? "رقم المرجع" : "Reference"}</th><th scope="col">{ar ? "المبلغ" : "Amount"}</th></tr></thead>
+                    <tbody>
+                      {(allocs[detail.id] ?? []).map((a, i) => (
+                        <tr key={a.id}><td><bdi className="n">{i + 1}</bdi></td><td><bdi className="n">{a.appliedDate}</bdi></td><td>{ar ? "فاتورة مبيعات" : "Sales invoice"}</td>
+                          <td><Link href={`/dashboard/sales/invoices/${a.invoiceId}`}><bdi className="id">{a.number ?? "—"}</bdi></Link></td><td><bdi className="n">{formatMoney(a.amount)}</bdi></td></tr>
+                      ))}
+                      <tr><td colSpan={4}><b>{ar ? "المجموع" : "Total"}</b></td><td><b><bdi className="n">{formatMoney((allocatedCents(detail) / 100).toFixed(2))}</bdi></b></td></tr>
+                    </tbody>
+                  </table>
+                )}
+                <p className="lbl" style={{ fontWeight: 400, margin: "6px 0 0" }}>{ar ? "المبلغ غير المخصص" : "Unallocated"}: <bdi className="n">{formatMoney(unallocated(detail).toFixed(2))}</bdi> {unit}</p>
+              </section>
+            ) : null}
+
             <p className="c-ev-h">{ar ? "الإثبات" : "Evidence"}</p>
             {(detail.evidence ?? []).length === 0 ? (
               <p className="lbl" style={{ fontWeight: 400, margin: 0 }} data-testid="detail-no-evidence">
@@ -730,7 +808,7 @@ export default function CollectionsPage() {
       {notices}
       <div className="ph">
         <div>
-          <h1>{ar ? "التحصيلات" : "Collections"}</h1>
+          <h1>{qoyod ? t("collections") : (ar ? "التحصيلات" : "Collections")}</h1>
           <div className="meta">
             <span>
               {isFinance
@@ -747,7 +825,7 @@ export default function CollectionsPage() {
         <nav className="hr-tabs is-underline" aria-label={ar ? "الفواتير والتحصيل" : "Invoices & collections"} data-testid="hub-tabs" style={{ marginBottom: 12 }}>
           <Link className="hr-tab" href="/dashboard/sales/invoices">{ar ? "فواتير المبيعات" : "Sales invoices"}</Link>
           <Link className="hr-tab" href="/dashboard/sales/invoices?tab=notes">{ar ? "الإشعارات الدائنة والمدينة" : "Credit & debit notes"}</Link>
-          <span className="hr-tab" aria-selected="true" aria-current="page">{ar ? "التحصيلات" : "Collections"}</span>
+          <span className="hr-tab" aria-selected="true" aria-current="page">{qoyod ? t("collections") : (ar ? "التحصيلات" : "Collections")}</span>
           <Link className="hr-tab" href="/dashboard/sales/receivables">{ar ? "أعمار الذمم وكشوف العملاء" : "AR aging & statements"}</Link>
         </nav>
       ) : null}
@@ -779,7 +857,23 @@ export default function CollectionsPage() {
         <span className="sort-note">{ar ? "الأحدث أولًا · حتى 200 تحصيل" : "Newest first · up to 200"}</span>
       </div>
 
-      {rows.length === 0 ? empty : table}
+      {qoyod ? (
+        <FilterCard onApply={cf.apply} onReset={cf.reset} testId="collections-filter">
+          <DateRange from={cf.draft.from} to={cf.draft.to} onChange={(r) => cf.setDraft({ ...cf.draft, ...r })} />
+          <div className="qc-field"><span className="qc-label">{t("colCustomer")}</span>
+            <select className="c-qselect" value={cf.draft.customer} onChange={(e) => cf.set("customer", e.target.value)} aria-label={t("colCustomer")} data-testid="qf-customer">
+              <option value="">{ar ? "الكل" : "All"}</option>
+              {customerOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </select></div>
+        </FilterCard>
+      ) : null}
+      {rows.length === 0 ? empty : qoyod ? (
+        <Section title={t("collections")} testId="collections-section">
+          <ListPageSize {...pager} />
+          {table}
+          <ListFooter {...pager} noun={ar ? "سند" : "receipts"} emptyText={ar ? "لا توجد أي سندات" : "No receipts"} />
+        </Section>
+      ) : table}
       {rules}
       {decisionDialog}
       {drawer}

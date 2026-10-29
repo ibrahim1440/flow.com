@@ -71,6 +71,9 @@ export type PostEntryInput = {
   whenPeriodNotOpen?: "reject" | "nextOpenPeriod";
   /** Sets the transaction's audit context first (actor, IP, device, reason). */
   audit?: AuditContext;
+  /** A5 segregation of duties: the poster also prepared the document and the setting allowed it — recorded on the
+   *  entry (JournalEntry.sodBypass) for «استثناءات فصل المهام». Not part of the payload hash. */
+  sodBypass?: boolean;
 };
 
 export type PostEntryResult =
@@ -342,6 +345,7 @@ export async function postEntry(tx: Tx, input: PostEntryInput): Promise<PostEntr
       approvedBy: input.createdBy,
       postedAt: now,
       postedBy: input.createdBy,
+      sodBypass: input.sodBypass === true,
       lines: {
         create: resolved.map((l, i) => ({
           lineNo: i + 1,

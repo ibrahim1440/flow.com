@@ -11,6 +11,8 @@ import { Dialog } from "@/components/hr/ui";
 import { Select } from "@/components/ui/Select";
 import { roleDef } from "@/lib/accounting/roles";
 import { AcctShell, ACCOUNT_TYPE_AR, CONTROL_AR, Msg, money, useApi, useLang, useWrite, type Setup } from "../_ui/shell";
+import { Section, useTerm } from "@/components/chrome";
+import { useAccountantView } from "../_ui/qoyod-pages";
 
 type Acc = { id: string; code: string; nameAr: string | null; nameEn: string; type: string; normalBalance: string; parentId: string | null; allowPosting: boolean; isActive: boolean; controlType: string | null; allowManualJournal: boolean; description: string | null; reportGroup?: string | null; lines: number; balance: string; roles: string[]; children: number };
 type Form = { id?: string; code: string; nameAr: string; nameEn: string; type: string; parentId: string; allowPosting: boolean; isActive: boolean; normalBalance: string; controlType: string; allowManualJournal: boolean; description: string; reportGroup: string };
@@ -21,6 +23,9 @@ export default function ChartPage() {
   const setup = useApi<Setup>("/api/accounting/setup");
   const chart = useApi<Acc[]>("/api/accounting/coa");
   const w = useWrite();
+  // Qoyod parity (accountant workspace): «شجرة الحسابات», «الخيارات»; the same tree, columns and actions.
+  const qoyod = useAccountantView();
+  const t = useTerm();
   const [filter, setFilter] = useState<"all" | "postable" | "control" | "inactive">("all");
   const [type, setType] = useState("");
   const [q, setQ] = useState("");
@@ -71,8 +76,32 @@ export default function ChartPage() {
   const editing = form?.id ? byId.get(form.id) : undefined;
   const locked = !!editing && editing.lines > 0;
 
+  const coaTable = (
+          <div className="hr-tablewrap">
+            <table className="hr-table is-dense" data-testid="coa-table">
+              <thead><tr><th>{L("الرمز", "Code")}</th><th>{L("الحساب", "Account")}</th><th className="acct-hide-m">{L("النوع", "Type")}</th><th className="acct-hide-m">{L("المراقبة", "Control")}</th><th className="acct-hide-m">{L("القيد اليدوي", "Manual journal")}</th><th className="acct-hide-m">{L("يُرحَّل عليه تلقائيًا", "Posted to automatically for")}</th><th className="num">{L("الرصيد", "Balance")}</th>{can?.coa ? <th>{qoyod ? t("colOptions") : <span className="hr-sr">{L("تعديل", "Edit")}</span>}</th> : null}</tr></thead>
+              <tbody>
+                {shown.map((a) => {
+                  const header = !a.allowPosting || a.children > 0;
+                  return (
+                    <tr key={a.id} className={`${header ? "is-header" : ""}${a.isActive ? "" : " is-muted"}`} data-code={a.code}>
+                      <td className="acct-code">{a.code}</td>
+                      <td><span className="acct-indent" style={{ paddingInlineStart: depth(a) * 16 }}>{L(a.nameAr ?? a.nameEn, a.nameEn)}</span></td>
+                      <td className="acct-hide-m">{L(ACCOUNT_TYPE_AR[a.type]?.[0] ?? a.type, ACCOUNT_TYPE_AR[a.type]?.[1] ?? a.type)}{header ? <span className="acct-hint"> · {L("رئيسي · لا يُرحَّل عليه", "Header · not postable")}</span> : null}</td>
+                      <td className="acct-hide-m">{a.controlType ? L(CONTROL_AR[a.controlType]?.[0] ?? a.controlType, CONTROL_AR[a.controlType]?.[1] ?? a.controlType) : "—"}</td>
+                      <td className="acct-hide-m">{header ? "" : a.allowManualJournal ? L("مسموح", "Allowed") : <span className="hr-flag tone-warning"><span>{L("لا قيد يدوي", "No manual journal")}</span></span>}</td>
+                      <td className="acct-hide-m acct-hint" title={a.roles.join(" · ") || undefined}>{a.roles.map((k) => { const d = roleDef(k); return d ? L(d.ar, d.en) : k; }).join(" · ")}</td>
+                      <td className="num hr-num">{a.lines ? money(a.balance) : <span className="acct-hint">{header ? "" : L("لا حركات", "No movement")}</span>}</td>
+                      {can?.coa ? <td><button type="button" className="hr-btn is-ghost is-sm" onClick={() => edit(a)} aria-label={L(`تعديل ${a.code}`, `Edit ${a.code}`)}>{L("تعديل", "Edit")}</button></td> : null}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+  );
   return (
-    <AcctShell setup={setup.data}
+    <AcctShell setup={setup.data} title={qoyod ? t("chart") : undefined}
       meta={<span className="acct-meta"><span className="hr-num">{counts.all}</span> {L("حسابًا", "accounts")} · <span className="hr-num">{counts.postable}</span> {L("قابلًا للترحيل", "postable")}{setup.data?.settings.coaSeededAt ? <> · {L("من القالب الافتراضي", "from the default template")}</> : null}</span>}
       actions={can?.coa && all.length > 0 ? <Btn variant="primary" onClick={() => edit()} data-testid="coa-new">+ {L("حساب جديد", "New account")}</Btn> : undefined}>
       <Msg error={w.error ?? chart.error} done={w.done} onClose={() => { w.setError(null); w.setDone(null); }} />
@@ -99,28 +128,7 @@ export default function ChartPage() {
                 {Object.entries(ACCOUNT_TYPE_AR).map(([k, v]) => <option key={k} value={k}>{L(v[0], v[1])}</option>)}
               </Select></label>
           </div>
-          <div className="hr-tablewrap">
-            <table className="hr-table is-dense" data-testid="coa-table">
-              <thead><tr><th>{L("الرمز", "Code")}</th><th>{L("الحساب", "Account")}</th><th className="acct-hide-m">{L("النوع", "Type")}</th><th className="acct-hide-m">{L("المراقبة", "Control")}</th><th className="acct-hide-m">{L("القيد اليدوي", "Manual journal")}</th><th className="acct-hide-m">{L("يُرحَّل عليه تلقائيًا", "Posted to automatically for")}</th><th className="num">{L("الرصيد", "Balance")}</th>{can?.coa ? <th><span className="hr-sr">{L("تعديل", "Edit")}</span></th> : null}</tr></thead>
-              <tbody>
-                {shown.map((a) => {
-                  const header = !a.allowPosting || a.children > 0;
-                  return (
-                    <tr key={a.id} className={`${header ? "is-header" : ""}${a.isActive ? "" : " is-muted"}`} data-code={a.code}>
-                      <td className="acct-code">{a.code}</td>
-                      <td><span className="acct-indent" style={{ paddingInlineStart: depth(a) * 16 }}>{L(a.nameAr ?? a.nameEn, a.nameEn)}</span></td>
-                      <td className="acct-hide-m">{L(ACCOUNT_TYPE_AR[a.type]?.[0] ?? a.type, ACCOUNT_TYPE_AR[a.type]?.[1] ?? a.type)}{header ? <span className="acct-hint"> · {L("رئيسي · لا يُرحَّل عليه", "Header · not postable")}</span> : null}</td>
-                      <td className="acct-hide-m">{a.controlType ? L(CONTROL_AR[a.controlType]?.[0] ?? a.controlType, CONTROL_AR[a.controlType]?.[1] ?? a.controlType) : "—"}</td>
-                      <td className="acct-hide-m">{header ? "" : a.allowManualJournal ? L("مسموح", "Allowed") : <span className="hr-flag tone-warning"><span>{L("لا قيد يدوي", "No manual journal")}</span></span>}</td>
-                      <td className="acct-hide-m acct-hint" title={a.roles.join(" · ") || undefined}>{a.roles.map((k) => { const d = roleDef(k); return d ? L(d.ar, d.en) : k; }).join(" · ")}</td>
-                      <td className="num hr-num">{a.lines ? money(a.balance) : <span className="acct-hint">{header ? "" : L("لا حركات", "No movement")}</span>}</td>
-                      {can?.coa ? <td><button type="button" className="hr-btn is-ghost is-sm" onClick={() => edit(a)} aria-label={L(`تعديل ${a.code}`, `Edit ${a.code}`)}>{L("تعديل", "Edit")}</button></td> : null}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          {qoyod ? <Section title={t("chart")} testId="coa-section">{coaTable}</Section> : coaTable}
           <p className="acct-hint">{L("لا يُحذف حساب عليه حركات، ولا يتغير رمزه أو نوعه أو طبيعة رصيده بعد أول حركة. الحساب الرئيسي لا يُرحَّل عليه.", "An account with movements is never deleted, and its code, type and normal balance are fixed after its first movement. A header account is not posted to.")}</p>
         </>
       )}

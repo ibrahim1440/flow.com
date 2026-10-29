@@ -166,25 +166,61 @@ export async function createManualJournalEntry(input: CreateManualJournalEntryIn
   return prisma.$transaction(async (tx) => {
     await setAuditContext(tx, ctx);
     await assertManualJournalsEnabled(tx);
-    const { period, taxCategoryById } = await validateLines(tx, entryDate, lines);
-    const total = lines.reduce((sum, l) => sum.add(l.debit), new Prisma.Decimal(0));
-    return tx.journalEntry.create({
-      data: {
-        entryDate,
-        fiscalPeriodId: period.id,
-        type: "MANUAL",
-        status: "DRAFT",
-        sourceModule: "manual",
-        description: input.description,
-        totalDebit: total,
-        totalCredit: total,
-        createdBy: ctx.actorId,
-        attachments,
-        lines: { create: lineData(lines, taxCategoryById) },
-      },
-      include: { lines: true },
-    });
+    return insertManualDraft(tx, entryDate, input.description, lines, attachments, ctx.actorId);
   }, TX_OPTS);
+}
+
+async function insertManualDraft(tx: Prisma.TransactionClient, entryDate: Date, description: string | undefined, lines: CleanLine[], attachments: Prisma.InputJsonValue | undefined, createdBy: string, source?: { type: string; id: string; event: string }) {
+  await assertManualJournalsEnabled(tx);
+  const { period, taxCategoryById } = await validateLines(tx, entryDate, lines);
+  const total = lines.reduce((sum, l) => sum.add(l.debit), new Prisma.Decimal(0));
+  return tx.journalEntry.create({
+    data: {
+      entryDate,
+      fiscalPeriodId: period.id,
+      type: "MANUAL",
+      status: "DRAFT",
+      sourceModule: "manual",
+      ...(source ? { sourceType: source.type, sourceId: source.id, sourceEvent: source.event, sourceDocumentId: source.id } : {}),
+      description,
+      totalDebit: total,
+      totalCredit: total,
+      createdBy,
+      attachments,
+      lines: { create: lineData(lines, taxCategoryById) },
+    },
+    include: { lines: true },
+  });
+}
+
+/**
+ * «المعاملات المتكررة»: the same manual-journal DRAFT, inside the CALLER'S transaction (the recurring run commits its run
+ * row and its draft together). Every rule of createManualJournalEntry applies: manual journals enabled, setup complete,
+ * ≥ 2 lines, balanced, open period, after go-live, no payroll account, no control account, dimensions exist. The draft
+ * names its source (sourceType / sourceId / sourceEvent) and its preparer (`createdBy`); the caller sets the audit context.
+ */
+export async function createManualJournalDraftIn(tx: Prisma.TransactionClient, input: CreateManualJournalEntryInput, createdBy: string, source: { type: string; id: string; event: string }) {
+  await assertManualJournalsEnabled(tx);
+  const s = await tx.accountingSettings.findUnique({ where: { id: "singleton" }, select: { setupComplete: true } });
+  if (!s?.setupComplete) throw new AccountingError("Accounting setup is not complete. Complete accounting settings before posting.", 409);
+  return insertManualDraft(tx, toBusinessDay(input.entryDate), input.description, cleanLines(input.lines), undefined, createdBy, source);
+}
+
+/**
+ * «المعاملات المتكررة» with auto-post: the same manual journal (createManualJournalDraftIn — every check of the manual
+ * path: manual journals enabled, setup complete, balanced, open period, after go-live, no payroll / control account, tax
+ * categories, dimensions), then submitted by its preparer and approved and POSTED by the person who authorised the
+ * standing journal, in the caller's transaction. It stays type MANUAL, so the manual-journal review, the SoD exceptions
+ * and the auditor's filters see it; `sodBypass` records that the authorisation was the preparer's own (SoD setting).
+ * The database numbers it gaplessly and checks its balance at commit, as for any posting.
+ */
+export async function postRecurringJournalIn(tx: Prisma.TransactionClient, input: CreateManualJournalEntryInput, who: { preparer: string; poster: string; sodBypass: boolean }, source: { type: string; id: string; event: string }) {
+  const draft = await createManualJournalDraftIn(tx, input, who.preparer, source);
+  const now = new Date();
+  return tx.journalEntry.update({
+    where: { id: draft.id },
+    data: { status: "POSTED", submittedAt: now, submittedBy: who.preparer, approvedAt: now, approvedBy: who.poster, postedAt: now, postedBy: who.poster, sodBypass: who.sodBypass },
+  });
 }
 
 /** Row-lock the entry for the rest of the transaction: a concurrent approve / reject / post / edit of the

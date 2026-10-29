@@ -13,6 +13,9 @@ import { Select } from "@/components/ui/Select";
 import { CATEGORY, DOC_STATUS, DocNo, FAMILY, InvShell, KIND, Msg, PAY_STATUS, REASONS, Tag, money, useApi, useLang, useWrite } from "../_ui/inv";
 import { BuyerFields, LinesEditor, Totals, type Buyer, type EditLine } from "../_ui/editor";
 import { ZatcaPanel } from "@/app/dashboard/accounting/zatca/_ui/zatca";
+import { QRCodeSVG } from "qrcode.react";
+import { Section } from "@/components/chrome";
+import { useAccountantView } from "../../../accounting/_ui/qoyod-pages";
 
 type Line = { id: string; description: string; skuCode: string | null; quantity: string; unit: "UNIT" | "KG"; unitPrice: string; discountPercent: string; discountAmount: string; taxCategory: "S" | "Z" | "E" | "O"; taxRatePercent: string; exemptionReasonCode: string | null; exemptionReason: string | null; lineNet: string; lineTax: string; lineTotal: string; orderItemId: string | null; productSkuId: string | null; originalLineId: string | null; deliveryId: string | null };
 type Doc = {
@@ -29,6 +32,7 @@ type Doc = {
   entries: { id: string; ref: string | null; event: string | null; status: string }[];
   customer: { id: string; name: string; nameAr: string | null } | null; order: { id: string; orderNumber: number } | null; people: { id: string; name: string }[];
   can: { create: boolean; issue: boolean; cancel: boolean; creditNote: boolean; ar: boolean; self: boolean };
+  zatca?: { qr: string | null; ref: string | null; status: string | null } | null;
 };
 
 const toEdit = (l: Line): EditLine => ({ description: l.description, quantity: l.quantity, unit: l.unit, unitPrice: l.unitPrice, discountPercent: l.discountPercent, taxCategory: l.taxCategory, taxRatePercent: l.taxRatePercent, exemptionReasonCode: l.exemptionReasonCode, orderItemId: l.orderItemId, productSkuId: l.productSkuId, skuCode: l.skuCode, originalLineId: l.originalLineId, deliveryId: l.deliveryId });
@@ -36,6 +40,7 @@ const toEdit = (l: Line): EditLine => ({ description: l.description, quantity: l
 export default function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { L, lang } = useLang();
+  const qoyodView = useAccountantView();
   const router = useRouter();
   const doc = useApi<Doc>(`/api/sales/invoices/${id}`);
   const w = useWrite();
@@ -59,6 +64,10 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
 
   const kindLabel = L(KIND[d.kind]?.[d.family]?.[0] ?? d.kind, KIND[d.kind]?.[d.family]?.[1] ?? d.kind);
   const isNote = d.kind !== "INVOICE";
+  // Qoyod parity (accountant workspace only — QOYOD-REF §1.6): the settlement rows and «المبلغ المستحق» in the totals,
+  // the «ملخص الضريبة» card (S / Z / E), the stored ZATCA QR on screen (only when it exists) and the bottom buttons in
+  // Qoyod's order. Display only: the same document, the same links, no new action.
+  const qoyod = qoyodView;
   const canEditDraft = d.status === "DRAFT" && (isNote ? d.can.creditNote : d.can.create);
   const canIssue = d.status === "DRAFT" && (isNote ? d.can.creditNote : d.can.issue);
   const person = (pid: string | null) => d.people.find((p) => p.id === pid)?.name ?? "—";
@@ -171,6 +180,12 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                 <div><dt>{L("الإجمالي قبل الضريبة", "Total before VAT")}</dt><dd>{money(d.totals.taxable)}</dd></div>
                 {(d.taxBreakdown ?? []).map((b) => <div key={`${b.category}${b.rate}`}><dt>{b.category === "S" ? L(`ضريبة القيمة المضافة ${Number(b.rate)}%`, `VAT ${Number(b.rate)}%`) : L(CATEGORY[b.category]?.[0] ?? b.category, CATEGORY[b.category]?.[1] ?? b.category)}</dt><dd>{money(b.tax)}</dd></div>)}
                 <div className="g"><dt>{L("الإجمالي شامل الضريبة · ر.س", "Total incl. VAT · SAR")}</dt><dd data-testid="doc-grand">{money(d.totals.grand)}</dd></div>
+                {qoyod && d.status === "ISSUED" ? <>
+                  {d.applications.filter((a) => a.status === "APPLIED").map((a) => (
+                    <div key={a.id} data-testid="doc-settlement"><dt>{a.collectionId ? L("دفعت بواسطة سند قبض", "Paid by a receipt") : L("دفعت بواسطة إشعار دائن", "Paid by a credit note")} · <span className="hr-num">{a.appliedDate}</span></dt><dd>{money(a.amount)}</dd></div>
+                  ))}
+                  <div className="g" data-testid="doc-due"><dt>{isNote ? L("الرصيد", "Balance") : L("المبلغ المستحق", "Amount due")}</dt><dd>{money(isNote ? d.creditLeft ?? "0" : d.open ?? "0")}</dd></div>
+                </> : null}
               </dl>
             </div>
           </div>
@@ -185,6 +200,29 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               ))}</tbody>
             </table>
           </div>
+          {qoyod ? (() => {
+            const by = (c: string) => (d.taxBreakdown ?? []).filter((b) => b.category === c);
+            const sum = (c: string, k: "taxable" | "tax") => by(c).reduce((t, b) => t + Math.round(Number(b[k]) * 100), 0);
+            const cats = ["S", "Z", "E"];
+            const col = (c: string) => ({ taxable: sum(c, "taxable"), tax: sum(c, "tax") });
+            const all = (d.taxBreakdown ?? []).reduce((t, b) => ({ taxable: t.taxable + Math.round(Number(b.taxable) * 100), tax: t.tax + Math.round(Number(b.tax) * 100) }), { taxable: 0, tax: 0 });
+            const head: Record<string, string> = { S: L("«S» المعدل الأساسي", "«S» standard rate"), Z: L("«Z» الضريبة الصفرية", "«Z» zero-rated"), E: L("«E» معفى من الضريبة", "«E» exempt") };
+            return (
+              <Section title={L("ملخص الضريبة", "Tax summary")} testId="tax-summary">
+                <div className="hr-tablewrap">
+                  <table className="hr-table is-dense">
+                    <thead><tr><th /> {cats.map((c) => <th key={c} className="num">{head[c]}</th>)}<th className="num">{L("الإجمالي", "Total")}</th></tr></thead>
+                    <tbody>
+                      {([["taxable", L("الإجمالي قبل الضريبة", "Before VAT")], ["tax", L("الضريبة", "VAT")], ["gross", L("الإجمالي بعد الضريبة", "After VAT")]] as const).map(([k, label]) => (
+                        <tr key={k}><td>{label}</td>{cats.map((c) => { const v = col(c); return <td key={c} className="num hr-num">{money((k === "gross" ? v.taxable + v.tax : v[k]) / 100)}</td>; })}<td className="num hr-num">{money((k === "gross" ? all.taxable + all.tax : all[k]) / 100)}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {d.zatca?.qr ? <div data-testid="doc-qr" style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 12 }}><QRCodeSVG value={d.zatca.qr} size={112} level="M" /><span className="acct-hint">{L("رمز QR المخزّن لهذه الفاتورة لدى الربط مع الهيئة.", "The QR stored for this invoice by the ZATCA integration.")}</span></div> : null}
+              </Section>
+            );
+          })() : null}
           {d.notes ? <div className="acct-card"><h3>{L("ملاحظات", "Notes")}</h3><p style={{ margin: 0 }}><bdi>{d.notes}</bdi></p></div> : null}
         </>
       )}
@@ -221,6 +259,21 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           <label className="hr-field"><span className="hr-label">{L("السبب", "Reason")}</span><input className="hr-input" value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} data-testid="cancel-reason" /></label>
         </D21Dialog>
       ) : null}
+      {qoyod && d.status === "ISSUED" ? (() => {
+        const deliveries = Array.from(new Set(d.lines.map((l) => l.deliveryId).filter((x): x is string => !!x)));
+        return (
+          <div className="acct-actions" data-testid="doc-bottom-actions" style={{ marginBlock: 16 }}>
+            <Link className="hr-btn" href={`/dashboard/sales/invoices/${id}/print`}>{L("طباعة", "Print")}</Link>
+            {deliveries.length ? <Link className="hr-btn" href={`/dashboard/orders/print/delivery-note?ids=${deliveries.map(encodeURIComponent).join(",")}`}>{L("طباعة سند التسليم", "Print delivery note")}</Link> : null}
+            <Link className="hr-btn" href={`/dashboard/sales/invoices/${id}/print`}>{L("تحميل PDF", "Download PDF")}</Link>
+            {d.zatca?.ref ? <a className="hr-btn" href={`/api/sales/invoices/${id}/zatca/xml`} download>{L("تحميل XML", "Download XML")}</a> : null}
+            {d.kind === "INVOICE" && d.can.creditNote ? <>
+              <Link className="hr-btn" href={`/dashboard/sales/invoices/${id}/credit-note`}>+ {L("إرجاع الفاتورة (إشعار دائن)", "Return the invoice (credit note)")}</Link>
+              <Link className="hr-btn" href={`/dashboard/sales/invoices/${id}/credit-note?kind=DEBIT_NOTE`}>+ {L("إنشاء إشعار مدين للمبيعات", "Create a sales debit note")}</Link>
+            </> : null}
+          </div>
+        );
+      })() : null}
       <p className="acct-hint"><button type="button" className="hr-btn is-ghost is-sm" onClick={() => router.push("/dashboard/sales/invoices")}>{L("كل الفواتير", "All invoices")}</button></p>
     </InvShell>
   );

@@ -10,6 +10,8 @@ import { OpsLoading } from "@/components/ops/ui";
 import { Select } from "@/components/ui/Select";
 import { InvShell, Msg, money, useApi, useLang, useWrite, todayRiyadh } from "../_ui/inv";
 import { BuyerFields, LinesEditor, Totals, emptyLine, type Buyer, type EditLine } from "../_ui/editor";
+import { useTerm } from "@/components/chrome";
+import { useAccountantView } from "../../../accounting/_ui/qoyod-pages";
 
 type Customer = { id: string; name: string; nameAr: string | null; vatNumber: string | null; commercialRegNo: string | null; city: string | null; address: string | null; paymentTermsDays: number | null };
 type OrderFacts = {
@@ -114,6 +116,21 @@ function Manual() {
     if (!c.vatNumber) setFamily("SIMPLIFIED");
   };
   const options = useMemo(() => custs.data?.items ?? [], [custs.data]);
+  const qoyod = useAccountantView();
+  const t = useTerm();
+  const familyField = (
+    <label className="hr-field"><span className="hr-label">{L("نوع الفاتورة", "Invoice type")}</span>
+      <Select value={family} onChange={(e) => setFamily(e.target.value === "SIMPLIFIED" ? "SIMPLIFIED" : "STANDARD")}>
+        <option value="STANDARD">{L("فاتورة ضريبية (منشأة)", "Tax invoice (business)")}</option>
+        <option value="SIMPLIFIED">{L("فاتورة ضريبية مبسطة (مستهلك)", "Simplified (consumer)")}</option>
+      </Select></label>
+  );
+  const buyerBlock = (
+    <>
+      <h3>{L("بيانات المشتري", "Buyer particulars")}</h3>
+      <BuyerFields buyer={buyer} family={family} onChange={setBuyer} />
+    </>
+  );
   const save = async () => {
     if (!customer) return;
     const r = await w.run<{ id: string }>("save", "/api/sales/invoices", "POST", { customerId: customer.id, family, buyer, supplyDate, paymentTermsDays: terms || undefined, notes, lines, requestKey: key });
@@ -138,18 +155,16 @@ function Manual() {
       </div>
       {customer ? (
         <>
-          <div className="acct-card">
+          {/* Qoyod parity (accountant workspace): the header reads party → date → terms → type, the lines and totals
+              follow, and the buyer's particulars come after the lines. Same fields and payload for everyone. */}
+          <div className="acct-card" data-testid="invoice-header">
             <div className="acct-row">
-              <label className="hr-field"><span className="hr-label">{L("نوع الفاتورة", "Invoice type")}</span>
-                <Select value={family} onChange={(e) => setFamily(e.target.value === "SIMPLIFIED" ? "SIMPLIFIED" : "STANDARD")}>
-                  <option value="STANDARD">{L("فاتورة ضريبية (منشأة)", "Tax invoice (business)")}</option>
-                  <option value="SIMPLIFIED">{L("فاتورة ضريبية مبسطة (مستهلك)", "Simplified (consumer)")}</option>
-                </Select></label>
+              {qoyod ? null : familyField}
               <label className="hr-field"><span className="hr-label">{L("تاريخ التوريد", "Supply date")}</span><input type="date" className="hr-input" value={supplyDate} onChange={(e) => setSupplyDate(e.target.value)} data-testid="supply-date" /></label>
               <label className="hr-field"><span className="hr-label">{L("مدة السداد (يوم)", "Payment terms (days)")}</span><input className="hr-input acct-amount" inputMode="numeric" value={terms} onChange={(e) => setTerms(e.target.value)} placeholder="30" /></label>
+              {qoyod ? familyField : null}
             </div>
-            <h3>{L("بيانات المشتري", "Buyer particulars")}</h3>
-            <BuyerFields buyer={buyer} family={family} onChange={setBuyer} />
+            {qoyod ? null : buyerBlock}
           </div>
           <div className="acct-card">
             <h2>{L("البنود", "Lines")}</h2>
@@ -159,11 +174,12 @@ function Manual() {
               <Totals lines={lines} />
             </div>
           </div>
+          {qoyod ? <div className="acct-card" data-testid="buyer-card">{buyerBlock}</div> : null}
           <div className="acct-foot">
             <span className="acct-hint">{L("تُحفظ مسودة بلا رقم؛ الرقم يُعطى عند الإصدار.", "Saved as a draft without a number; the number is given at issue.")}</span>
             <span className="acct-actions">
               <Link className="hr-btn" href="/dashboard/sales/invoices">{L("إلغاء", "Cancel")}</Link>
-              <button type="button" className="hr-btn is-primary" disabled={!!w.busy} onClick={save} data-testid="save-draft">{L("حفظ المسودة", "Save draft")}</button>
+              <button type="button" className="hr-btn is-primary" disabled={!!w.busy} onClick={save} data-testid="save-draft">{qoyod ? t("saveDraft") : L("حفظ المسودة", "Save draft")}</button>
             </span>
           </div>
         </>

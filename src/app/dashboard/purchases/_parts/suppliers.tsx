@@ -11,6 +11,7 @@ import { acctFetch, money, useApi, useLang } from "../../accounting/_ui/shell";
 import type { PurchaseCan } from "./invoices";
 import Link from "next/link";
 import { ReliabilityBlock } from "./claims";
+import { useAccountantView } from "../../accounting/_ui/qoyod-pages";
 
 export type SupplierRow = { id: string; name: string; contact: string | null; vatNumber: string | null; isNonResident?: boolean; kind?: string; paymentTermsDays: number | null; receipts: number; openBalance: string | null; awaitingApproval: string | null; openClaims?: string | null };
 
@@ -73,6 +74,11 @@ export function SupplierDialog({ initial, can, onClose, onSaved }: { initial: Su
 export function SuppliersTab() {
   const { L } = useLang();
   const list = useApi<{ can: PurchaseCan; rows: SupplierRow[] }>("/api/purchases/suppliers");
+  // Qoyod parity (accountant workspace only): each name opens «تفاصيل المورد», and «متأخرة» (the AP aging past due) sits
+  // beside the open balance. Everyone else keeps this tab as it was.
+  const qoyod = useAccountantView();
+  const aging = useApi<{ suppliers: { supplierId: string; buckets: Record<string, string>; total: string }[] }>(qoyod && list.data?.can.read ? "/api/accounting/ap/aging" : null);
+  const overdueOf = (id: string) => { const a = aging.data?.suppliers.find((x) => x.supplierId === id); return a ? Number(a.total) - Number(a.buckets.current ?? 0) : 0; };
   const [edit, setEdit] = useState<SupplierRow | "new" | null>(null);
   const [q, setQ] = useState("");
   const [done, setDone] = useState("");
@@ -93,25 +99,25 @@ export function SuppliersTab() {
           <thead><tr>
             <th>{L("المورد", "Supplier")}</th><th>{L("الرقم الضريبي", "VAT number")}</th><th className="hr-hide-compact">{L("شروط الدفع", "Terms")}</th>
             <th className="hr-hide-compact">{L("التواصل", "Contact")}</th><th className="num hr-hide-compact">{L("الاستلامات", "Receipts")}</th>
-            {can.read ? <><th className="num hr-hide-compact">{L("بانتظار الاعتماد", "Awaiting approval")}</th><th className="num">{L("الرصيد المفتوح", "Open balance")}</th><th className="num">{L("مطالبات مفتوحة", "Open claims")}</th></> : null}
+            {can.read ? <><th className="num hr-hide-compact">{L("بانتظار الاعتماد", "Awaiting approval")}</th><th className="num">{qoyod ? L("الرصيد", "Balance") : L("الرصيد المفتوح", "Open balance")}</th>{qoyod ? <th className="num">{L("متأخرة", "Overdue")}</th> : null}<th className="num">{L("مطالبات مفتوحة", "Open claims")}</th></> : null}
             <th />
           </tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.id}>
-                <td className="m-title"><span className="strong">{r.name}</span><span className="hr-msub">{r.vatNumber ? <bdi className="acct-code">{r.vatNumber}</bdi> : L("بلا رقم ضريبي", "No VAT number")} · {L(`${r.paymentTermsDays ?? 30} يومًا`, `${r.paymentTermsDays ?? 30} days`)}</span></td>
+                <td className="m-title">{qoyod ? <Link className="strong" href={`/dashboard/purchases/suppliers/${r.id}`} data-testid={`supplier-open-${r.id}`}>{r.name}</Link> : <span className="strong">{r.name}</span>}<span className="hr-msub">{r.vatNumber ? <bdi className="acct-code">{r.vatNumber}</bdi> : L("بلا رقم ضريبي", "No VAT number")} · {L(`${r.paymentTermsDays ?? 30} يومًا`, `${r.paymentTermsDays ?? 30} days`)}</span></td>
                 <td>{r.vatNumber ? <bdi className="acct-code">{r.vatNumber}</bdi> : <span className="hr-caption">—</span>}{r.isNonResident ? <span className="pur-tag">{L("غير مقيم", "Non-resident")}</span> : null}{r.kind === "CUSTOMS" ? <span className="pur-tag">{L("جمارك", "Customs")}</span> : r.kind === "CLEARING_AGENT" ? <span className="pur-tag">{L("مخلّص", "Clearing agent")}</span> : null}</td>
                 <td className="hr-hide-compact">{L(`${r.paymentTermsDays ?? 30} يومًا`, `${r.paymentTermsDays ?? 30} days`)}{r.paymentTermsDays === null ? <span className="hr-caption"> {L("(افتراضي)", "(default)")}</span> : null}</td>
                 <td className="hr-hide-compact">{r.contact ? <bdi dir="ltr">{r.contact}</bdi> : "—"}</td>
                 <td className="num hr-hide-compact hr-num">{r.receipts}</td>
-                {can.read ? <><td className="num hr-hide-compact hr-num">{money(r.awaitingApproval ?? 0)}</td><td className="num hr-num m-end" style={{ fontWeight: 600 }}>{money(r.openBalance ?? 0)}</td>
+                {can.read ? <><td className="num hr-hide-compact hr-num">{money(r.awaitingApproval ?? 0)}</td><td className="num hr-num m-end" style={{ fontWeight: 600 }}>{money(r.openBalance ?? 0)}</td>{qoyod ? <td className="num hr-num" data-testid={`supplier-overdue-${r.id}`}>{aging.data ? (overdueOf(r.id) ? <span className="acct-bad">{money(overdueOf(r.id))}</span> : <span className="hr-caption">—</span>) : "…"}</td> : null}
                   <td className="num hr-num" data-testid={`supplier-claims-${r.id}`}>{Number(r.openClaims ?? 0) ? <Link className="pur-inv-link" href={`/dashboard/purchases?tab=claims&supplier=${r.id}`}>{money(r.openClaims ?? 0)}</Link> : <span className="hr-caption">—</span>}</td></> : null}
                 <td>{can.suppliers || can.ap ? <Btn size="sm" variant="ghost" onClick={() => setEdit(r)} data-testid={`supplier-edit-${r.id}`}>{L("تعديل", "Edit")}</Btn> : null}</td>
               </tr>
             ))}
             {!rows.length ? <tr><td colSpan={9} className="acct-hint">{q ? L("لا نتائج.", "No results.") : L("لا موردين بعد.", "No suppliers yet.")}</td></tr> : null}
           </tbody>
-          {can.read ? <tfoot><tr><td colSpan={6}>{L(`${rows.length} مورد`, `${rows.length} suppliers`)}</td><td className="num stk-tot hr-num">{money(open)}</td><td className="num hr-num">{money(rows.reduce((a, r) => a + Number(r.openClaims ?? 0), 0))}</td><td /></tr></tfoot> : null}
+          {can.read ? <tfoot><tr><td colSpan={6}>{L(`${rows.length} مورد`, `${rows.length} suppliers`)}</td><td className="num stk-tot hr-num">{money(open)}</td>{qoyod ? <td /> : null}<td className="num hr-num">{money(rows.reduce((a, r) => a + Number(r.openClaims ?? 0), 0))}</td><td /></tr></tfoot> : null}
         </table>
       </div>
       <p className="acct-hint">{L("الرصيد المفتوح: الفواتير المعتمدة غير المسددة (بعد الإشعارات الدائنة). مطالبات مفتوحة: ما فوترَه المورد ولم يصل بعد. الرصيد الافتتاحي للمورد وكشف حسابه من «المحاسبة › الذمم الدائنة».", "Open balance: approved invoices not yet paid (after credit notes). Open claims: what the supplier billed and has not delivered. The supplier's opening balance and statement are under «Accounting › Payables».")}</p>

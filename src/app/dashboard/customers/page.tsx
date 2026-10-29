@@ -7,12 +7,14 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Pencil, Trash2 } from "lucide-react";
 import { useUser } from "../user-context";
-import { hasSubPrivilege } from "@/lib/auth-shared";
+import { canEdit, hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
 import { Ico } from "@/components/shell/icons";
-import { SectionPages, usePhone, useD21Phone } from "@/components/shell/page-context";
+import { SectionPages, useCreateRequest, usePhone, useD21Phone } from "@/components/shell/page-context";
 import { Dialog, Field, HrRoot } from "@/components/hr/ui";
 import { CreditBadges } from "@/components/credit/credit-ui";
+import { useAccountantView } from "../accounting/_ui/qoyod-pages";
+import { canViewInvoices } from "@/lib/services/invoicing/access";
 import "./customers.css";
 
 /**
@@ -77,6 +79,20 @@ export default function CustomersPage() {
   const [beans, setBeans] = useState<GreenBeanFull[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  // Qoyod parity (accountant workspace only): «الرصيد» and «متأخرة» per customer from the AR aging (read-only; the
+  // same figures as «أعمار الذمم»). Everyone else keeps the roast-profile and WhatsApp columns.
+  const qoyod = useAccountantView() && !!user && canViewInvoices(user.permissions);
+  const [arByCustomer, setArByCustomer] = useState<Record<string, { balance: string; overdue: string }> | null>(null);
+  useEffect(() => {
+    if (!qoyod) return;
+    let off = false;
+    fetch("/api/accounting/ar/aging").then((r) => (r.ok ? r.json() : null)).then((j: { rows: { customerId: string; balance: string; overdue: string }[] } | null) => {
+      if (off || !j) return;
+      setArByCustomer(Object.fromEntries(j.rows.map((x) => [x.customerId, { balance: x.balance, overdue: x.overdue }])));
+    }).catch(() => undefined);
+    return () => { off = true; };
+  }, [qoyod]);
+  const fmt2 = (v: string | undefined) => (v === undefined ? "0.00" : new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v)));
 
   // Selected customer (detail panel)
   const [selected, setSelected] = useState<Customer | null>(null);
@@ -146,6 +162,9 @@ export default function CustomersPage() {
     setCustomerForm({ name: "", nameAr: "", phone: "", email: "", address: "", whatsappOptOut: false });
     setShowCustomerForm(true);
   }
+
+  // «+» beside «العملاء» in the accountant workspace (?new=customer): the same form as «عميل جديد», for the API's audience (customers › edit).
+  useCreateRequest("customer", openAddCustomer, !!user && canEdit(user.permissions, "customers"));
 
   function openEditCustomer(c: Customer) {
     setEditingCustomer(c);
@@ -530,8 +549,13 @@ export default function CustomersPage() {
                         <th scope="col">{t("customerPhone")}</th>
                         <th scope="col" className="xl">{t("customerEmail")}</th>
                         <th scope="col" className="num">{L("الطلبات", "Orders")}</th>
+                        {qoyod ? <>
+                          <th scope="col" className="num">{L("الرصيد", "Balance")}</th>
+                          <th scope="col" className="num">{L("متأخرة", "Overdue")}</th>
+                        </> : <>
                         <th scope="col">{t("roastProfiles")}</th>
                         <th scope="col" className="xl">{L("واتساب", "WhatsApp")}</th>
+                        </>}
                         <th scope="col"><span className="sr-only">{L("الإجراء", "Action")}</span></th>
                       </tr>
                     </thead>
@@ -548,8 +572,13 @@ export default function CustomersPage() {
                           <td>{c.phone ? <bdi dir="ltr" className="n">{c.phone}</bdi> : <span className="sm">—</span>}</td>
                           <td className="xl">{c.email ? <bdi dir="ltr" style={{ color: "var(--text-secondary)" }}>{c.email}</bdi> : <span className="sm">—</span>}</td>
                           <td className="num">{c._count.orders}</td>
+                          {qoyod ? <>
+                            <td className="num" data-testid={`customer-balance-${c.id}`}><Link href={`/dashboard/sales/receivables/${c.id}`}><bdi className="n">{arByCustomer ? fmt2(arByCustomer[c.id]?.balance) : "…"}</bdi></Link></td>
+                            <td className="num">{arByCustomer && Number(arByCustomer[c.id]?.overdue ?? 0) > 0 ? <bdi className="n" style={{ color: "var(--action-danger)" }}>{fmt2(arByCustomer[c.id]?.overdue)}</bdi> : <span className="sm">{arByCustomer ? "0.00" : "…"}</span>}</td>
+                          </> : <>
                           <td>{c._count.roastPreferences > 0 ? <span>{num(c._count.roastPreferences)} {t("customerProfilesLabel")}</span> : <span className="sm">—</span>}</td>
                           <td className="xl">{c.whatsappOptOut ? <span className="st wa">{L("لا يرغب", "Opted out")}</span> : <span className="sm">{L("يستلم", "On")}</span>}</td>
+                          </>}
                           <td style={{ textAlign: "end" }}>
                             <button type="button" className="btn sm" onClick={() => open(c)} aria-label={`${L("معاينة", "Preview")} · ${nameOf(c)}`} data-testid={`open-customer-${c.id}`}>{L("معاينة", "Preview")}</button>
                           </td>

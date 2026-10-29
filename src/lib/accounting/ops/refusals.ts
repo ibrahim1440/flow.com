@@ -75,6 +75,40 @@ export const OPS_REFUSALS = {
   CREDIT_NOTE_STATE: { status: 409, en: "The supplier credit note is not in a state that allows this.", ar: "حالة الإشعار الدائن لا تسمح بهذا الإجراء." },
   GRN_CLAIM_REPLACEMENT: { status: 409, en: "This receipt is replacement goods for a supplier claim (already billed on the claim's invoice); it is not matched to another bill.", ar: "هذا الاستلام بضاعة بديلة عن مطالبة مورد (مفوترة في فاتورة المطالبة)، فلا يُطابَق بفاتورة أخرى." },
   CREDIT_NOTE_REF_REQUIRED: { status: 400, en: "Enter the supplier's credit note number.", ar: "أدخل رقم الإشعار الدائن لدى المورد." },
+  // «الأصول الثابتة» (20261121090000_fixed_assets).
+  FA_NOT_FOUND: { status: 404, en: "The fixed asset was not found.", ar: "الأصل الثابت غير موجود." },
+  FA_CATEGORY_INVALID: { status: 400, en: "A category needs a code (capital letters, digits, _), an Arabic name, a useful life of 1–1200 months, a residual value below 100 % and, for declining balance, an annual rate above 0 and at most 100 %.", ar: "الفئة تحتاج رمزًا (أحرف لاتينية كبيرة وأرقام و _) واسمًا عربيًا وعمرًا إنتاجيًا من 1 إلى 1200 شهر وقيمة متبقية أقل من 100٪، ولطريقة القسط المتناقص نسبة سنوية أكبر من صفر وحتى 100٪." },
+  FA_CATEGORY_CODE_EXISTS: { status: 409, en: "A fixed-asset category with this code exists already.", ar: "توجد فئة أصول بهذا الرمز." },
+  FA_ACCOUNT_INVALID: { status: 400, en: "The account must be an active, postable leaf of the right type: cost and accumulated depreciation are asset accounts, depreciation an expense account, gain / loss an expense or revenue account.", ar: "الحساب يجب أن يكون حسابًا فرعيًا نشطًا قابلًا للترحيل من النوع المناسب: التكلفة ومجمع الإهلاك حسابا أصول، والإهلاك حساب مصروف، والأرباح والخسائر حساب مصروف أو إيراد." },
+  FA_INVALID: { status: 400, en: "The asset is not valid:", ar: "بيانات الأصل غير صالحة:" },
+  FA_STATE: { status: 409, en: "The fixed asset is not in a state that allows this.", ar: "حالة الأصل الثابت لا تسمح بهذا الإجراء." },
+  FA_COUNTER_ACCOUNT: { status: 400, en: "Choose the account the asset is paid from (bank, cash or another postable account — not receivables, payables, inventory, VAT or a fixed-asset account).", ar: "اختر الحساب الذي دُفعت منه قيمة الأصل (بنك أو صندوق أو حساب قابل للترحيل — لا الذمم ولا المخزون ولا الضريبة ولا حسابات الأصول الثابتة)." },
+  FA_INVOICE_LINE: { status: 400, en: "Choose an EXPENSE line of a posted purchase invoice, with an amount still not capitalised.", ar: "اختر سطر مصروف من فاتورة مشتريات مرحّلة لم تُرسمَل قيمته كاملة بعد." },
+  FA_INVOICE_AMOUNT: { status: 400, en: "The amount capitalised from the invoice line is above zero and at most what the line still has (its net plus any VAT that is not recoverable, less what was capitalised already):", ar: "المبلغ المرسمل من سطر الفاتورة أكبر من صفر ولا يتجاوز المتبقي منه (صافيه مع الضريبة غير القابلة للاسترداد ناقص ما رُسمل سابقًا):" },
+  FA_INVOICE_NOT_IN_BOOKS: { status: 409, en: "This purchase invoice was posted before accounting went live (its entry was skipped) and the opening balances are posted: the old books expensed it. Record the asset as «manual» against the account your accountant chooses.", ar: "رُحّلت فاتورة المشتريات هذه قبل بدء المحاسبة (لم يُنشأ قيدها) والأرصدة الافتتاحية مرحّلة، فقد صُرفت في الدفاتر القديمة. سجّل الأصل «يدويًا» مقابل الحساب الذي يختاره محاسبك." },
+  FA_INVOICE_ACCOUNT_CHANGED: { status: 409, en: "The expense category of this invoice line now posts to another account than the one the invoice debited; capitalise it as «manual» against the account the invoice used.", ar: "فئة المصروف لهذا السطر تُرحَّل الآن إلى حساب غير الذي قُيّدت عليه الفاتورة؛ سجّل الرسملة «يدويًا» مقابل الحساب الذي استخدمته الفاتورة." },
+  FA_GO_LIVE_REQUIRED: { status: 409, en: "An existing asset at go-live (opening) needs the accounting go-live date first (Accounting › Settings).", ar: "الأصل القائم عند بدء المحاسبة (افتتاحي) يحتاج تحديد تاريخ بدء المحاسبة أولًا (المحاسبة › الإعدادات)." },
+  FA_OPENING_FINAL: { status: 409, en: "The opening balances are posted: an opening asset, or anything dated before go-live, can no longer be recorded or reversed (the books hold the opening as posted).", ar: "رُحّلت الأرصدة الافتتاحية: لا يُسجَّل بعدها أصل افتتاحي ولا أي حركة مؤرخة قبل بدء المحاسبة ولا يُعكس شيء منها." },
+  FA_OPENING_PENDING: { status: 409, en: "This asset's history before go-live reaches the books only through the opening balances: apply the fixed-assets opening (Accounting › Fixed assets › Opening) and post the opening first.", ar: "تاريخ هذا الأصل قبل بدء المحاسبة يدخل الدفاتر عبر الأرصدة الافتتاحية فقط: طبّق افتتاحي الأصول الثابتة ثم رحّل الأرصدة الافتتاحية أولًا." },
+  FA_DATE_ORDER: { status: 409, en: "The date is within depreciation already recorded for this asset (or before its in-service date): reverse that month's depreciation run first, or choose a later date.", ar: "التاريخ داخل إهلاك مسجّل لهذا الأصل (أو قبل تاريخ بدء استخدامه): اعكس قيد إهلاك ذلك الشهر أولًا، أو اختر تاريخًا لاحقًا." },
+  FA_FUTURE_DATE: { status: 400, en: "The date is not in the future.", ar: "التاريخ لا يكون في المستقبل." },
+  FA_LIFE_ENDED: { status: 409, en: "The asset's useful life has ended: an addition after it needs a new (longer) useful life.", ar: "انتهى العمر الإنتاجي للأصل: الإضافة بعده تحتاج عمرًا إنتاجيًا جديدًا أطول." },
+  FA_RESIDUAL: { status: 400, en: "The residual value is at least zero and leaves the depreciation already recorded within the depreciable amount.", ar: "القيمة المتبقية لا تقل عن صفر ولا تجعل الإهلاك المسجّل أكبر من القابل للإهلاك." },
+  FA_RUN_MONTH: { status: 400, en: "Choose a month that has started (year and month 1–12).", ar: "اختر شهرًا بدأ (السنة والشهر من 1 إلى 12)." },
+  FA_RUN_NOTHING: { status: 409, en: "Nothing to depreciate for this month: every active asset is already depreciated through it.", ar: "لا إهلاك لهذا الشهر: كل الأصول النشطة مُهلكة حتى نهايته." },
+  FA_RUN_STATE: { status: 409, en: "The depreciation run is not in a state that allows this.", ar: "حالة قيد الإهلاك لا تسمح بهذا الإجراء." },
+  FA_RUN_NOT_LATEST: { status: 409, en: "An asset of this run has later depreciation, an addition or a disposal: reverse those first (newest first).", ar: "لأصل في هذا القيد إهلاك لاحق أو إضافة أو استبعاد: اعكسها أولًا (الأحدث أولًا)." },
+  FA_PERIOD_CLOSED: { status: 409, en: "The fiscal period of this date is soft-closed or closed: nothing is recorded or reversed in it.", ar: "الفترة المالية لهذا التاريخ مقفلة؛ لا يُسجَّل فيها شيء ولا يُعكس." },
+  FA_DISPOSAL_INVALID: { status: 400, en: "A disposal is a sale or a scrap; the proceeds are at least zero (2 decimals) and go to an account (bank, cash or another postable asset account); VAT is 15 % on a sale or none.", ar: "الاستبعاد بيع أو إتلاف؛ المتحصلات لا تقل عن صفر (خانتان عشريتان) وتُقيَّد في حساب (بنك أو صندوق أو حساب أصول قابل للترحيل)؛ والضريبة 15٪ على البيع أو بلا ضريبة." },
+  FA_NOT_LATEST: { status: 409, en: "Something was recorded on this asset after this document (depreciation, an addition or a disposal): reverse that first (newest first).", ar: "سُجّل على هذا الأصل شيء بعد هذا المستند (إهلاك أو إضافة أو استبعاد): اعكسه أولًا (الأحدث أولًا)." },
+  FA_KEPT: { status: 409, en: "Fixed-asset records are part of the books: they are reversed or cancelled, never deleted (a draft asset is deleted).", ar: "سجلات الأصول الثابتة جزء من الدفاتر: تُعكس أو تُلغى ولا تُحذف (المسودة فقط تُحذف)." },
+  FA_FROZEN: { status: 409, en: "A recorded fixed-asset amount never changes; reverse or cancel it and record it again.", ar: "مبالغ الأصول الثابتة المسجّلة لا تتغير؛ اعكسها أو ألغها وسجّلها من جديد." },
+  FA_SALE_NEEDS_INVOICE: { status: 409, en: "Selling an asset needs an e-invoiced sales invoice — coming soon. Proceeds of any disposal (a sale or scrap sold for value) go through it; here only a disposal without proceeds (scrap / write-off) is recorded.", ar: "بيع الأصل يحتاج فاتورة مبيعات إلكترونية — قريباً. متحصلات أي استبعاد (بيع أو خردة مُباعة) تمر بها؛ هنا يُسجَّل الاستبعاد بلا متحصلات فقط (إتلاف / شطب)." },
+  FA_SOD_SELF_POST: { status: 403, en: "Segregation of duties: you prepared this fixed-asset document, so another person with the journal-posting duty posts it (Accounting › Settings › segregation of duties).", ar: "فصل المهام: أعددت مستند الأصل الثابت هذا، فيرحّله شخص آخر لديه صلاحية ترحيل القيود (المحاسبة › الإعدادات › فصل المهام)." },
+  FA_GO_LIVE_DAY: { status: 409, en: "The fixed-asset register needs the accounting go-live date on the 1st of a month (the opening carries whole months; the monthly run posts whole months). Set the go-live date to the 1st before activating accounting:", ar: "سجل الأصول الثابتة يحتاج أن يكون تاريخ بدء المحاسبة أول يوم في الشهر (الافتتاحي يحمل أشهرًا كاملة وقيد الإهلاك الشهري يرحّل أشهرًا كاملة). اجعل تاريخ البدء أول الشهر قبل تفعيل المحاسبة:" },
+  FA_LEASE_TERM: { status: 400, en: "A leasehold improvement names its lease end date; its useful life is the shorter of 5 years (60 months) and the lease term — it ends on or before the lease end.", ar: "تحسينات المباني المستأجرة تحتاج تاريخ نهاية عقد الإيجار؛ وعمرها الإنتاجي الأقل من 5 سنوات (60 شهرًا) ومدة العقد — ينتهي في تاريخ نهاية العقد أو قبله." },
+  FA_REVISION_EMPTY: { status: 400, en: "A change of estimate gives a new useful life and / or a new residual value that differs from the current one.", ar: "تعديل التقدير يحدد عمرًا إنتاجيًا جديدًا و / أو قيمة متبقية جديدة تختلف عن الحالية." },
+  FA_CAPITALISED: { status: 409, en: "A line of this supplier invoice was capitalised as a fixed asset: dispose of or cancel that first.", ar: "رُسمل سطر من فاتورة المورد هذه كأصل ثابت: ألغِ ذلك أولًا." },
 } satisfies Record<string, R>;
 
 export type OpsRefusalCode = keyof typeof OPS_REFUSALS;
@@ -94,5 +128,12 @@ export function opsDbRefusal(message: string): AccountingError | null {
   if (/AP_INVOICE_DELETE/.test(message)) return opsRefuse("INVOICE_NUMBER_ISSUED");
   if (/TAX_CATEGORY_FROZEN/.test(message)) return opsRefuse("TAX_CATEGORY_FROZEN");
   if (/SupplierInvoice_supplier_ref_live_key/.test(message)) return opsRefuse("SUPPLIER_REF_DUPLICATE");
+  // «الأصول الثابتة» (20261121090000_fixed_assets): the sub-ledger's guards.
+  if (/FA_CAPITALISED/.test(message)) return opsRefuse("FA_CAPITALISED");
+  if (/FA_KEPT/.test(message)) return opsRefuse("FA_KEPT");
+  if (/FA_FROZEN|FA_OUT_OF_BOOKS/.test(message)) return opsRefuse("FA_FROZEN");
+  if (/FixedAssetDepreciationLine_asset_period_live_key/.test(message)) return opsRefuse("FA_RUN_NOTHING");
+  if (/FixedAssetDisposal_asset_live_key/.test(message)) return opsRefuse("FA_STATE");
+  if (/FixedAsset_code_key/.test(message)) return opsRefuse("FA_INVALID", "The code is used by another asset.", "الرمز مستخدم لأصل آخر.");
   return null;
 }

@@ -87,7 +87,9 @@ const UNIT: Record<string, [string, string]> = { KG: ["كغ", "kg"], GRAM: ["غ"
 const addDays = (d: string, n: number) => new Date(Date.parse(d) + n * 86_400_000).toISOString().slice(0, 10);
 const STOCK_TEMPLATES = ["GREEN_COFFEE", "PACKAGING", "GENERAL"];
 
-export function PurchaseInvoiceForm({ id }: { id: string | null }) {
+/** `expense` (Qoyod parity «فواتير بسيطة», `?mode=expense`): a new invoice that starts as ONE expense line — supplier,
+ *  date, expense category, VAT and amount — with the stock / landed-cost / import line kinds hidden. Same API, same checks. */
+export function PurchaseInvoiceForm({ id, expense = false }: { id: string | null; expense?: boolean }) {
   const { L, lang } = useLang();
   const router = useRouter();
   const sp = useSearchParams();
@@ -150,7 +152,7 @@ export function PurchaseInvoiceForm({ id }: { id: string | null }) {
   const f = form && (form.base === (data ?? null) || (form.base === "receipt" && !data)) ? form
     : data ? fromInvoice(data)
     : receiptSeed ? { base: "receipt" as const, supplierId: receiptSeed.supplierId, supplierRef: "", invoiceDate: todayRiyadh(), dueDate: "", dueTouched: false, notes: "", customsNo: "", customsDate: "", receivedDate: todayRiyadh(), lines: [{ ...blankLine("GRN"), purchaseRecordId: receiptSeed.purchaseRecordId, net: receiptSeed.value }] }
-    : { base: null, supplierId: "", supplierRef: "", invoiceDate: todayRiyadh(), dueDate: "", dueTouched: false, notes: "", customsNo: "", customsDate: "", receivedDate: todayRiyadh(), lines: [blankLine()] };
+    : { base: null, supplierId: "", supplierRef: "", invoiceDate: todayRiyadh(), dueDate: "", dueTouched: false, notes: "", customsNo: "", customsDate: "", receivedDate: todayRiyadh(), lines: [blankLine(expense ? "EXPENSE" : "")] };
   const set = (patch: Partial<typeof f>) => setForm({ ...f, ...patch });
   const setLine = (key: string, patch: Partial<Line>) => set({ lines: f.lines.map((l) => (l.key === key ? { ...l, ...patch } : l)) });
   const supplier = sups.data?.find((s) => s.id === f.supplierId);
@@ -555,7 +557,9 @@ export function PurchaseInvoiceForm({ id }: { id: string | null }) {
           </div>
           {f.lines.map((l, i) => lineEditor(l, i))}
         </div>
-        {editable ? <div className="acct-actions">
+        {editable && expense && !id ? <div className="acct-actions">
+          <Btn size="sm" variant="ghost" onClick={() => set({ lines: [...f.lines, blankLine("EXPENSE")] })} data-testid="inv-add-expense">+ {L("مصروف", "Expense")}</Btn>
+        </div> : editable ? <div className="acct-actions">
           <Btn size="sm" onClick={() => set({ lines: [...f.lines, blankLine()] })} data-testid="inv-add-line">+ {L("سطر", "Line")}</Btn>
           {greenCat ? <Btn size="sm" variant="ghost" onClick={() => set({ lines: [...f.lines, blankLine(`cat:${greenCat.id}`)] })}>+ {L("بن أخضر", "Green coffee")}</Btn> : null}
           <Btn size="sm" variant="ghost" onClick={() => set({ lines: [...f.lines, blankLine("EXPENSE")] })} data-testid="inv-add-expense">+ {L("مصروف", "Expense")}</Btn>

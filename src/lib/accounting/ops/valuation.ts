@@ -11,6 +11,7 @@ import { Decimal, ZERO, roundMoney } from "../money";
 import { dayText, parseBusinessDay, riyadhDay } from "../dates";
 import { setAuditContext, type AuditContext } from "../audit";
 import { checkDimensions, checkLineAccount, loadAccounts, type NormalLine } from "../posting-engine";
+import { openingDeferrals } from "../deferrals";
 import { qty4, unitCost } from "./costing";
 import { costSet, lockHolder, type CostKind, type InventoryRole } from "./cost-ledger";
 import { opsRefuse } from "./refusals";
@@ -265,8 +266,24 @@ export async function openingPreview() {
     rows, byRole, total: f2(rows.reduce((s, r) => s.plus(r.value), ZERO)), missing: rows.filter((r) => r.source === "NONE").length,
     grni: { count: grni.length, value: f2(grni.reduce((s, r) => s.plus(r.value), ZERO)) },
     supplierClaims: { count: claimsMap.size, value: f2([...claimsMap.values()].reduce((t, v) => t.plus(v), ZERO)), suppliers: [...claimsMap].map(([id, v]) => ({ supplierId: id, name: names.get(id) ?? id, value: f2(v) })) },
+    // «قوالب التأجيل» (council F2): the deferrals the books do not hold at go-live, per balance-sheet account — with the
+    // amount the owner already typed on that account in the opening grid (any line not the tool's own): both would count.
+    deferrals: await deferralsWithGrid(),
     apOpening: [...apMap].map(([id, v]) => ({ supplierId: id, name: names.get(id) ?? id, expected: f2(v), grid: f2(gridOf.get(id) ?? ZERO), difference: f2(v.minus(gridOf.get(id) ?? ZERO)) })),
   };
+}
+
+/** Council follow-up: each opening deferral line beside the manual opening-grid amount on the same account (natural side). */
+async function deferralsWithGrid(db: Prisma.TransactionClient | typeof prisma = prisma) {
+  const defs = await openingDeferrals(db);
+  if (!defs.length) return [];
+  const grid = await db.openingBalanceLine.groupBy({ by: ["accountId"], where: { accountId: { in: defs.map((d) => d.accountId) }, NOT: { description: DEFERRALS_MARK } }, _sum: { debit: true, credit: true } });
+  const net = new Map(grid.map((g) => [g.accountId, new Decimal(g._sum.debit ?? 0).minus(g._sum.credit ?? 0)]));
+  return defs.map((d) => {
+    const n = net.get(d.accountId) ?? ZERO;
+    const manual = d.kind === "PREPAID_EXPENSE" ? n : n.negated();
+    return { ...d, manualInGrid: f2(manual), doubleRisk: !manual.isZero() };
+  });
 }
 
 /** Save the owner's unit costs (null = forget, use the last known). Before the opening is posted only. */
@@ -294,6 +311,7 @@ export async function saveOpeningCosts(list: unknown, ctx: AuditContext) {
 const TOOL_MARK = "مخزون افتتاحي";
 const GRNI_MARK = "بضاعة مستلمة لم تصل فاتورتها (افتتاحي)";
 const CLAIMS_MARK = "مطالبات الموردين المفتوحة (افتتاحي)";
+const DEFERRALS_MARK = "المؤجلات غير المعترف بها (افتتاحي)";
 
 /**
  * Apply the valuation: every holder is set to its on-hand × unit cost (OPENING movements; holders no longer on hand
@@ -329,7 +347,7 @@ export async function applyOpening(ctx: AuditContext) {
     const missing = [...INVENTORY_ROLES, "GRNI", "SUPPLIER_CLAIMS"].filter((r) => !acc.has(r) && (r === "GRNI" ? Number(preview.grni.value) > 0 : r === "SUPPLIER_CLAIMS" ? Number(preview.supplierClaims.value) > 0 : Number(preview.byRole.find((b) => b.role === r)?.value ?? 0) > 0));
     if (missing.length) throw opsRefuse("OPS_BAD_INPUT", `Map these roles first: ${missing.join(", ")}.`, `اربط هذه الأدوار أولًا: ${missing.join("، ")}.`);
     const grid = await tx.openingBalanceLine.findMany({ orderBy: { lineNo: "asc" } });
-    const kept = grid.filter((l) => !(l.description ?? "").startsWith(TOOL_MARK) && l.description !== GRNI_MARK && l.description !== CLAIMS_MARK);
+    const kept = grid.filter((l) => !(l.description ?? "").startsWith(TOOL_MARK) && l.description !== GRNI_MARK && l.description !== CLAIMS_MARK && l.description !== DEFERRALS_MARK);
     const add: { accountId: string; debit: Decimal; credit: Decimal; partyType: string | null; partyId: string | null; description: string }[] = [];
     // The grid carries what the GL does not hold yet: the valuation, less what the engine already posted (a tool
     // applied after go-live day would otherwise count those movements twice).
@@ -346,6 +364,11 @@ export async function applyOpening(ctx: AuditContext) {
     for (const [sid, v] of bySupplier) if (v.gt(0)) add.push({ accountId: acc.get("GRNI") as string, debit: ZERO, credit: v, partyType: "SUPPLIER", partyId: sid, description: GRNI_MARK });
     // «نقص من المورد» (council F1): the open claims the books do not hold yet — Dr SUPPLIER_CLAIMS per supplier at the net.
     for (const [sid, v] of await claimsNotInBooks(tx)) if (v.gt(0)) add.push({ accountId: acc.get("SUPPLIER_CLAIMS") as string, debit: v, credit: ZERO, partyType: "SUPPLIER", partyId: sid, description: CLAIMS_MARK });
+    // «المؤجلات غير المعترف بها» (council F2): per balance-sheet account — a prepaid expense a debit, a deferred revenue a credit.
+    for (const d of await openingDeferrals(tx)) {
+      const v = new Decimal(d.amount);
+      if (v.gt(0)) add.push({ accountId: d.accountId, debit: d.kind === "PREPAID_EXPENSE" ? v : ZERO, credit: d.kind === "PREPAID_EXPENSE" ? ZERO : v, partyType: null, partyId: null, description: DEFERRALS_MARK });
+    }
     const all = [...kept.map((l) => ({ accountId: l.accountId, debit: new Decimal(l.debit), credit: new Decimal(l.credit), partyType: l.partyType, partyId: l.partyId, branchId: l.branchId, costCenterId: l.costCenterId, description: l.description })), ...add.map((a) => ({ ...a, branchId: null, costCenterId: null }))];
     const accounts = await loadAccounts(tx, all.map((l) => l.accountId));
     const dims = (l: (typeof all)[number]): NormalLine["dims"] => ({ branchId: l.branchId, costCenterId: l.costCenterId, partyType: (l.partyType as NormalLine["dims"]["partyType"]) ?? null, partyId: l.partyId, itemType: null, itemId: null });
@@ -354,6 +377,7 @@ export async function applyOpening(ctx: AuditContext) {
     await tx.openingBalanceLine.deleteMany({});
     if (all.length) await tx.openingBalanceLine.createMany({ data: all.map((l, i) => ({ lineNo: i + 1, accountId: l.accountId, debit: l.debit, credit: l.credit, partyType: l.partyType, partyId: l.partyId, branchId: l.branchId, costCenterId: l.costCenterId, description: l.description, updatedBy: ctx.actorId })) });
     await tx.costingSettings.upsert({ where: { id: "singleton" }, create: { id: "singleton", openingAppliedAt: new Date(), openingAppliedBy: ctx.actorId, updatedBy: ctx.actorId }, update: { openingAppliedAt: new Date(), openingAppliedBy: ctx.actorId, updatedBy: ctx.actorId } });
-    return { applied: preview.rows.length, cleared: stale.length - [...seen].filter((k) => stale.some((s) => `${s.kind}:${s.entityId}` === k)).length, gridLines: add.length, total: preview.total, grni: preview.grni };
+    const doubleRisk = (await deferralsWithGrid(tx)).filter((d) => d.doubleRisk).map((d) => ({ code: d.code, tool: d.amount, manual: d.manualInGrid }));
+    return { doubleRisk, applied: preview.rows.length, cleared: stale.length - [...seen].filter((k) => stale.some((s) => `${s.kind}:${s.entityId}` === k)).length, gridLines: add.length, total: preview.total, grni: preview.grni };
   }, { ...TX_OPTS, timeout: 120_000 });
 }

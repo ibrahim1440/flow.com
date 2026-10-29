@@ -492,6 +492,25 @@ export const NAV: NavNode[] = [
         highlightAs: ["finance.accounting"],
         shell: { icon: "invoice", place: "none" },
       },
+      {
+        // «الموازنات» and «قوالب التأجيل» (feat/budgets-deferrals; Qoyod's «المحاسبة» section): tabs of «المحاسبة» — no
+        // sidebar item here (place "none"; they light «المحاسبة»), reached from the tab, the quick jump and the accountant
+        // workspace. The same audience as «المحاسبة» (the accounting module); every API re-checks its duty.
+        id: "finance.accountingBudgets",
+        ar: "الموازنات", en: "Budgets",
+        href: "/dashboard/accounting/budgets",
+        anyOf: [ACCOUNTING],
+        highlightAs: ["finance.accounting"],
+        shell: { icon: "invoice", place: "none" },
+      },
+      {
+        id: "finance.accountingDeferrals",
+        ar: "قوالب التأجيل", en: "Deferral templates",
+        href: "/dashboard/accounting/deferrals",
+        anyOf: [ACCOUNTING],
+        highlightAs: ["finance.accounting"],
+        shell: { icon: "invoice", place: "none" },
+      },
     ],
   },
 

@@ -485,6 +485,8 @@ export async function cancelInvoice(id: string, reason: string, ctx: AuditContex
     const inv = await lockInvoice(tx, id);
     if (inv.status !== "POSTED") throw opsRefuse("INVOICE_STATE");
     if (new Decimal(inv.paidTotal).gt(0)) throw opsRefuse("INVOICE_PAID");
+    // «الأصول الثابتة»: a line capitalised as a fixed asset (or an addition) keeps the invoice (fixed_asset_invoice_guard too).
+    if ((await tx.fixedAsset.count({ where: { supplierInvoiceId: id, status: { not: "DRAFT" } } })) + (await tx.fixedAssetAddition.count({ where: { supplierInvoiceId: id, status: "POSTED" } }))) throw opsRefuse("FA_CAPITALISED");
     // «نقص من المورد»: a claim already settled in any part (a credit note, replacement goods, an abandonment) keeps
     // the invoice — undo the settlement first. Open claims are voided with the posting they came from.
     const claimRows = await tx.$queryRaw<{ id: string; status: string; settledNet: Prisma.Decimal }[]>`SELECT "id", "status", "settledNet" FROM "SupplierClaim" WHERE "invoiceId" = ${id} ORDER BY "id" FOR UPDATE`;
@@ -657,7 +659,9 @@ export async function listInvoices(q: { status?: string | null; supplierId?: str
 
 export async function listPayments(q: { supplierId?: string | null }) {
   const rows = await prisma.supplierPayment.findMany({ where: q.supplierId ? { supplierId: q.supplierId } : {}, orderBy: [{ paymentDate: "desc" }, { number: "desc" }], take: 500, include: { supplier: { select: { name: true } }, allocations: { select: { amount: true, invoice: { select: { number: true } } } } } });
-  return rows.map((p) => ({ id: p.id, number: p.number, supplierId: p.supplierId, supplierName: p.supplier.name, paymentDate: dayText(p.paymentDate), amount: f2(p.amount), method: p.method, reference: p.reference, status: p.status, journalEntryId: p.journalEntryId, invoices: p.allocations.map((a) => a.invoice.number) }));
+  return rows.map((p) => ({ id: p.id, number: p.number, supplierId: p.supplierId, supplierName: p.supplier.name, paymentDate: dayText(p.paymentDate), amount: f2(p.amount), method: p.method, reference: p.reference, status: p.status, journalEntryId: p.journalEntryId, invoices: p.allocations.map((a) => a.invoice.number),
+    // Read-only (Qoyod parity «المبلغ غير المخصص»): what went to invoices; the rest of `amount` paid the opening balance.
+    allocated: f2(p.allocations.reduce((s, a) => s.plus(a.amount.toString()), ZERO)) }));
 }
 
 /** The AP control account's GL balance (credit-positive), optionally for one supplier, as of a day. */

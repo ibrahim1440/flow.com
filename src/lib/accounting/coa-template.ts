@@ -6,7 +6,10 @@
 //   ★ 1165 supplier advances, 2155 customer advances (the AP / AR prepayment sides);
 //   ★ 2145 commissions payable and 6150 sales commission expense (the commission engine's accrual / payout);
 //   ★ 3900 opening balance equity (the opening-balance wizard's counter-entry, cleared to 3300 by the accountant);
+//   ★ 7300 gain / loss on disposal of fixed assets (IAS 16.68: a gain is not revenue — other income / expense);
+//   ★ the fixed-asset accounts (1210 … 1290) refuse manual journals: the fixed-asset register posts them;
 //   ★ 5410 abnormal roast loss (normal loss is absorbed into roasted cost; only loss above standard is expensed);
+//   ★ 2152 deferred revenue – subscriptions & prepaid orders (the DEFERRED_REVENUE role of «قوالب التأجيل»);
 //   ★ branch cash accounts are generic (1111 main branch, 1112 roastery) — the owner renames / adds branches.
 // Control accounts (AR, AP, inventory, VAT, GRNI, payroll and commission liabilities) refuse MANUAL journals:
 // they are fed by their sub-ledgers through the posting engine. Everything here is editable after seeding.
@@ -55,12 +58,12 @@ const ROWS: T[] = [
   ["1170", "ضريبة القيمة المضافة - المدخلات", "VAT input recoverable", A, D, "1100", true, "VAT_INPUT", false],
   ["1180", "سلف الموظفين", "Employee advances", A, D, "1100", true],
   ["1200", "الأصول غير المتداولة", "Non-current assets", A, D, "1000", false],
-  ["1210", "الآلات والمعدات (المحمصة والمكائن)", "Machinery & equipment (roaster, espresso)", A, D, "1200", true, "FIXED_ASSET"],
-  ["1220", "تجهيزات وديكورات الفروع", "Leasehold improvements", A, D, "1200", true, "FIXED_ASSET"],
-  ["1230", "الأثاث والأجهزة", "Furniture & IT equipment", A, D, "1200", true, "FIXED_ASSET"],
-  ["1240", "السيارات", "Vehicles", A, D, "1200", true, "FIXED_ASSET"],
+  ["1210", "الآلات والمعدات (المحمصة والمكائن)", "Machinery & equipment (roaster, espresso)", A, D, "1200", true, "FIXED_ASSET", false],
+  ["1220", "تجهيزات وديكورات الفروع", "Leasehold improvements", A, D, "1200", true, "FIXED_ASSET", false],
+  ["1230", "الأثاث والأجهزة", "Furniture & IT equipment", A, D, "1200", true, "FIXED_ASSET", false],
+  ["1240", "السيارات", "Vehicles", A, D, "1200", true, "FIXED_ASSET", false],
   ["1250", "حق استخدام الأصول المستأجرة", "Right-of-use assets", A, D, "1200", true],
-  ["1290", "مجمع الإهلاك", "Accumulated depreciation", A, C, "1200", true, "FIXED_ASSET"],
+  ["1290", "مجمع الإهلاك", "Accumulated depreciation", A, C, "1200", true, "FIXED_ASSET", false],
   ["2000", "الالتزامات", "Liabilities", L, C, null, false],
   ["2100", "الالتزامات المتداولة", "Current liabilities", L, C, "2000", false],
   ["2110", "الذمم الدائنة - الموردين", "Accounts payable – suppliers", L, C, "2100", true, "AP", false],
@@ -72,6 +75,7 @@ const ROWS: T[] = [
   ["2140", "مصروفات مستحقة", "Accrued expenses", L, C, "2100", true],
   ["2145", "عمولات مستحقة الدفع", "Commissions payable", L, C, "2100", true, "COMMISSION", false],
   ["2150", "إيرادات مؤجلة - بطاقات الهدايا والولاء", "Deferred revenue – gift cards & loyalty", L, C, "2100", true],
+  ["2152", "إيرادات مؤجلة - اشتراكات وطلبات مدفوعة مقدماً", "Deferred revenue – subscriptions & prepaid orders", L, C, "2100", true],
   ["2155", "دفعات مقدمة من العملاء", "Customer advances", L, C, "2100", true],
   ["2160", "إكراميات مستحقة للموظفين", "Tips payable to staff", L, C, "2100", true],
   ["2170", "الزكاة المستحقة", "Zakat payable", L, C, "2100", true],
@@ -122,6 +126,7 @@ const ROWS: T[] = [
   ["7000", "المصروفات الأخرى والتمويلية", "Other & finance costs", X, D, null, false],
   ["7100", "تكاليف التمويل", "Finance costs", X, D, "7000", true],
   ["7200", "فوائد عقود الإيجار", "Lease interest", X, D, "7000", true],
+  ["7300", "أرباح وخسائر استبعاد الأصول الثابتة", "Gain / loss on disposal of fixed assets", X, D, "7000", true],
   ["8000", "الزكاة", "Zakat", X, D, null, false],
   ["8100", "مصروف الزكاة", "Zakat expense", X, D, "8000", true],
 ];
@@ -131,3 +136,9 @@ export const COA_TEMPLATE_KEY = "hiqbah-roastery-cafe-ksa-v1";
 export const COA_TEMPLATE: CoaRow[] = ROWS.map(([code, ar, en, type, normal, parent, postable, control, manual]) => ({
   code, ar, en, type, normal, parent, postable, control: control ?? null, manual: manual ?? true,
 }));
+
+/** «الأصول الثابتة» (20261121090000_fixed_assets): the seeded fixed-asset categories' cost account in this chart —
+ *  linked when the chart is seeded (setup.ts seedChart) and by the migration when a template chart exists. */
+export const CATEGORY_SEED_COST_CODE: Record<string, string> = {
+  ROASTERS: "1210", GRINDERS: "1210", CAFE_EQUIPMENT: "1210", VEHICLES: "1240", FURNITURE: "1230", IT_EQUIPMENT: "1230", LEASEHOLD: "1220",
+};

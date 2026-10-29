@@ -1,0 +1,33 @@
+/* «واجهة المحاسب» sidebar (AccountantNav.tsx): the quick-create button, the «+» beside an item, «قريباً», the switch.
+   Direction 2.1 tokens only; the rest is the system sidebar's own classes (d21-nav, d21-grp, d21-acc). */
+.d21-acct-quick { position: relative; margin: 0 0 10px; flex: none; }
+.d21-acct-quick-btn { appearance: none; border: 0; font: 600 13.5px/1 var(--f-ui); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 36px; border-radius: 9px; background: var(--action-primary); color: var(--text-inverse); }
+.d21-acct-quick-btn:hover { background: var(--action-primary-hover); }
+.d21-acct-quick-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.d21-acct-quick-menu { inset-inline: 0; min-width: 0; max-height: 60vh; overflow-y: auto; }
+.d21-acct-row { position: relative; display: flex; align-items: center; }
+.d21-acct-row > .d21-nav { flex: 1; min-width: 0; padding-inline-end: 34px; }
+.d21-acct-row > .d21-nav[aria-current]::after { inset-inline-end: 34px; }
+.d21-acct-plus { position: absolute; inset-inline-end: 4px; top: 50%; margin-top: -13px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 7px; color: var(--text-muted); text-decoration: none; }
+.d21-acct-plus:hover { background: var(--action-primary-tint); color: var(--action-primary); }
+.d21-acct-plus:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.d21-nav.is-soon { color: var(--text-muted); cursor: default; }
+.d21-nav.is-soon:hover { background: none; }
+.d21-acct-soon { margin-inline-start: auto; font-style: normal; font-size: 11px; line-height: 18px; padding: 0 6px; border-radius: 6px; background: var(--status-warning-tint); color: var(--status-warning); flex: none; }
+.d21-acct-switch { flex: none; appearance: none; border: 0; background: none; font: 500 13px/1 var(--f-ui); cursor: pointer; display: flex; align-items: center; gap: 8px; width: 100%; height: 34px; margin: 10px 0 8px; padding: 0 10px; border-radius: 9px; color: var(--text-secondary); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.d21-acct-switch:hover { background: var(--surface-hover); color: var(--text-primary); }
+.d21-acct-switch:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+@media (max-width: 1279px) {
+  /* The rail has no room for the menu: «جديد» in the top bar carries the same quick creates there. */
+  .d21-acct-quick { display: none; }
+  .d21-acct-switch > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .d21-acct-row > .d21-nav { padding-inline-end: 0; }
+  .d21-side .d21-acct-plus, .d21-side .d21-acct-soon { display: none; }
+  .d21-side .d21-nav.is-soon { opacity: 0.55; }
+  .d21-acct-switch { width: 44px; height: 40px; justify-content: center; padding: 0; }
+}
+/* The phone «المزيد» sheet */
+.d21-more-row.is-soon { color: var(--text-muted); }
+.d21-acct-morerow { position: relative; display: block; }
+.d21-acct-morerow > .d21-more-row { padding-inline-end: 0; }
+.d21-acct-plus.is-more { display: grid; width: 36px; height: 36px; margin-top: -18px; inset-inline-end: 32px; }

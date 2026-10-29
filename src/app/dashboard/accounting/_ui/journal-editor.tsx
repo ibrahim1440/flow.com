@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { Select } from "@/components/ui/Select";
 import { Btn, Field } from "@/components/ops/ui";
 import { Msg, acctFetch, money, todayRiyadh, useApi, useLang } from "./shell";
+import { useAccountantView } from "./qoyod-pages";
 
 type Dims = {
   accounts: { id: string; code: string; nameAr: string | null; nameEn: string; type: string; controlType: string | null; allowManualJournal: boolean }[];
@@ -64,13 +65,17 @@ export function JournalEditor({ initial, entryId }: { initial?: EditorValue; ent
   }
 
   const name = (x: { nameAr: string | null; nameEn: string }) => L(x.nameAr ?? x.nameEn, x.nameEn);
+  const qoyod = useAccountantView();
+  const typeField = <Field label={L("النوع", "Type")} help={L("يُقفل بعد إنشاء المسودة", "Fixed once the draft exists")}><input className="hr-input" value={L("يدوي", "Manual")} readOnly aria-readonly="true" /></Field>;
   return (
     <section className="acct-card" data-testid="journal-editor">
       <Msg error={error} onClose={() => setError(null)} />
+      {/* Qoyod parity (accountant workspace): the header reads date → description, the fixed type last. */}
       <div className="acct-row">
         <Field label={L("تاريخ القيد", "Entry date")}><input type="date" className="hr-input" value={v.entryDate} onChange={(e) => setV({ ...v, entryDate: e.target.value })} data-testid="je-date" /></Field>
-        <Field label={L("النوع", "Type")} help={L("يُقفل بعد إنشاء المسودة", "Fixed once the draft exists")}><input className="hr-input" value={L("يدوي", "Manual")} readOnly aria-readonly="true" /></Field>
+        {qoyod ? null : typeField}
         <div className="acct-grow"><Field label={L("الوصف", "Description")} help={L("حتى 500 حرف", "Up to 500 characters")}><input className="hr-input" maxLength={500} value={v.description} onChange={(e) => setV({ ...v, description: e.target.value })} data-testid="je-description" /></Field></div>
+        {qoyod ? typeField : null}
       </div>
       <div className="acct-foot" style={{ borderTop: 0, paddingTop: 0 }}>
         <h3>{L("السطور", "Lines")} <span className="acct-hint" style={{ fontWeight: 400 }}>{L("سطران على الأقل · مدين أو دائن في كل سطر · ريال سعودي", "At least two lines · a debit or a credit on each · SAR")}</span></h3>

@@ -12,6 +12,8 @@ import { SOURCE_DOC, plain, sourceDocHref } from "@/lib/accounting/source-links"
 import { AcctShell, money, todayRiyadh, useApi, useLang, type Setup } from "../_ui/shell";
 import { BalanceSheet, CashFlow, IncomeStatement } from "../_ui/statements";
 import { SodExceptions } from "../_ui/close";
+import { DateRange, FilterCard, useFilters, useTerm } from "@/components/chrome";
+import { useAccountantView } from "../_ui/qoyod-pages";
 
 type View = "tb" | "ledger" | "income" | "balance" | "cashflow" | "sod";
 const VIEWS: View[] = ["tb", "ledger", "income", "balance", "cashflow", "sod"];
@@ -57,9 +59,14 @@ function Reports() {
     : `${api[view]}?${stQuery}&format=csv`), [view, from, to, accountId, stQuery]); // eslint-disable-line react-hooks/exhaustive-deps
   const print = view === "income" || view === "balance" || view === "cashflow" ? `/dashboard/accounting/reports/print?report=${view}&${stQuery}` : null;
   const name = (a: { nameAr: string | null; nameEn: string }) => L(a.nameAr ?? a.nameEn, a.nameEn);
+  // Qoyod parity (accountant workspace): the page reads «كل التقارير»; the reports, ranges and figures are unchanged.
+  // The range row becomes Qoyod's filter card («تصفية» applies it to the address, «إعادة تعيين» back to this year).
+  const qoyod = useAccountantView();
+  const t = useTerm();
+  const rf = useFilters({ from, to });
 
   return (
-    <AcctShell setup={setup.data} actions={<span className="acct-actions">
+    <AcctShell setup={setup.data} title={qoyod ? t("allReports") : undefined} actions={<span className="acct-actions">
       {print ? <Link className="hr-btn" href={print} data-testid="report-print">{L("طباعة / PDF", "Print / PDF")}</Link> : null}
       {csv ? <a className="hr-btn" href={csv} data-testid="report-csv">{L("تصدير CSV", "Export CSV")}</a> : null}
     </span>}>
@@ -97,8 +104,14 @@ function Reports() {
       ) : null}
       {view === "tb" || view === "ledger" || view === "sod" || ((view === "income" || view === "cashflow") && kind === "custom") ? (
       <div className="acct-row">
+        {qoyod ? (
+          <FilterCard onApply={() => rf.draft.from && rf.draft.to && go({ from: rf.draft.from, to: rf.draft.to })} onReset={() => { rf.setDraft({ from: yearStart, to: todayRiyadh() }); go({ from: null, to: null }); }} testId="report-filter">
+            <DateRange from={rf.draft.from} to={rf.draft.to} onChange={(r) => rf.setDraft(r)} testId="report-range" />
+          </FilterCard>
+        ) : <>
         <label className="hr-field"><span className="hr-label">{L("من", "From")}</span><input type="date" className="hr-input" value={from} onChange={(e) => e.target.value && go({ from: e.target.value })} data-testid="report-from" /></label>
         <label className="hr-field"><span className="hr-label">{L("إلى", "To")}</span><input type="date" className="hr-input" value={to} onChange={(e) => e.target.value && go({ to: e.target.value })} data-testid="report-to" /></label>
+        </>}
         {view === "ledger" ? (
           <label className="hr-field acct-grow"><span className="hr-label">{L("الحساب", "Account")}</span>
             <Select value={accountId} onChange={(e) => go({ accountId: e.target.value })} placeholder={L("اختر الحساب", "Choose the account")} data-testid="ledger-account">

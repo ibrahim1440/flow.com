@@ -84,3 +84,6 @@
 }
 .d21 .t.coll .acts { flex-wrap: nowrap }
 .d21 .t.coll td:last-child { white-space: nowrap }
+
+/* Qoyod parity (accountant workspace): the customer select in the filter card, drawn like the card's date range. */
+.d21 .c-qselect { height: 34px; min-width: 180px; padding: 0 8px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--surface); font: inherit; font-size: 13.5px; color: var(--text-primary); }

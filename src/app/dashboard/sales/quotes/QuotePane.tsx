@@ -5,6 +5,7 @@ import Link from "next/link";
 import { pick, QUOTE_STATUS_SPECS, formatMoney, num, api } from "../_components/ui";
 import { Ico } from "@/components/shell/icons";
 import { shortDate } from "@/components/d21/format";
+import { useAccountantView } from "../../accounting/_ui/qoyod-pages";
 
 /**
  * The quotation preview of `crm-quotes` (1440 `181:1609`, docked beside the list; over it from
@@ -94,6 +95,8 @@ export function QuotePane({
     onChanged(decision === "APPROVE" ? (ar ? "اعتُمد الخصم." : "Discount approved.") : (ar ? "رُفض الخصم." : "Discount refused."));
   }
 
+  // Qoyod parity: read-only in the accountant workspace (no edit, no discount decision from the preview).
+  const readOnly = useAccountantView();
   const q = data?.quote;
   const customer = q?.customer ? (ar ? (q.customer.nameAr ?? q.customer.name) : q.customer.name) : null;
   const pct = (v: string | number) => <bdi>{`${num(Number(v), lang)}%`}</bdi>;
@@ -101,7 +104,7 @@ export function QuotePane({
   const effText = `${(Math.round(effective * 100) / 100).toString()}%`;
   const rates = q ? Array.from(new Set(q.lines.map((l) => Number(l.taxRatePercent)))) : [];
   const st = data?.discount.state;
-  const canDecide = !!data && st !== undefined && (st === "PENDING" || st === "REJECTED") && data.can.approveThisDiscount && q?.status === "DRAFT";
+  const canDecide = !!data && st !== undefined && (st === "PENDING" || st === "REJECTED") && data.can.approveThisDiscount && q?.status === "DRAFT" && !readOnly;
   const unit = (u: string) => (UNIT[u] ? (ar ? UNIT[u].ar : UNIT[u].en) : u);
 
   return (
@@ -240,10 +243,10 @@ export function QuotePane({
             <button type="button" className="btn p" disabled={busy} aria-busy={busy || undefined} onClick={() => decide("APPROVE", true)} data-testid="pane-approve-issue">
               {ar ? "اعتماد الخصم وإصدار العرض" : "Approve discount and issue"}
             </button>
-          ) : q.status === "DRAFT" && data.can.write && st !== "PENDING" && st !== "REJECTED" ? (
+          ) : q.status === "DRAFT" && data.can.write && !readOnly && st !== "PENDING" && st !== "REJECTED" ? (
             <Link href={`/dashboard/sales/quotes/${id}`} className="btn p">{ar ? "متابعة وإصدار" : "Continue and issue"}</Link>
           ) : null}
-          {q.status === "DRAFT" && data.can.write ? (
+          {q.status === "DRAFT" && data.can.write && !readOnly ? (
             <Link href={`/dashboard/sales/quotes/${id}`} className="btn" data-testid="pane-edit-lines">{ar ? "تعديل البنود" : "Edit lines"}</Link>
           ) : (
             <Link href={`/dashboard/sales/quotes/${id}`} className="btn">{ar ? "فتح العرض" : "Open quotation"}</Link>
