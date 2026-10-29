@@ -13,6 +13,7 @@ import { useUser } from "../../user-context";
 import { canViewInvoices } from "@/lib/services/invoicing/access";
 import { FilterCard, DateRange, Section, ListFooter, ListPageSize, useFilters, usePaging, useTerm } from "@/components/chrome";
 import { useAccountantView } from "../../accounting/_ui/qoyod-pages";
+import { LocationFilter, UNASSIGNED_LOCATION } from "../../accounting/_ui/locations";
 
 /**
  * Collections — one screen, two jobs, built to GX A-01 (Figma 1459:15522, EN 1459:16043; the
@@ -37,6 +38,8 @@ type Accrual = { amount: string; status: string; employee: { id: string; name: s
 
 type Collection = {
   id: string;
+  /** «الموقع» (WP-B). */
+  branchId?: string | null;
   status: "PENDING_VERIFICATION" | "APPROVED" | "REJECTED" | "REVERSED";
   amountGross: string;
   amountTax: string;
@@ -60,6 +63,10 @@ type Collection = {
   _count: { evidence: number };
   evidence?: Evidence[];
   collectionEvent: { accruals: Accrual[] } | null;
+  // «سند قبض» (BATCH22 WP-D): the voucher number, a return for correction and the correction made of it.
+  receiptNumber?: string | null;
+  decisionReasonCode?: string | null;
+  correctedBy?: { id: string; status: string } | null;
 };
 
 type EligibleDeal = {
@@ -176,11 +183,12 @@ export default function CollectionsPage() {
   useD21Phone({ title: qoyod ? t("collections") : (ar ? "التحصيلات" : "Collections"), sub: ar ? "الفواتير والتحصيل" : "Invoicing & collections" });
   // Qoyod parity (accountant workspace only): a filter card (period, customer) over the rows already loaded, the dark
   // title bar and the pager. The status segments, the server's scope and every decision stay as they are.
-  const cf = useFilters({ from: "", to: "", customer: "" });
+  const cf = useFilters({ from: "", to: "", customer: "", locations: [] as string[] });
   const riyadhDay = (iso: string) => new Date(Date.parse(iso) + 3 * 3600_000).toISOString().slice(0, 10);
   const custKey = (r: Collection) => r.customer?.id ?? "";
   const qRows = (data?.rows ?? []).filter((r) => !qoyod || ((!cf.applied.from || riyadhDay(r.collectedAt) >= cf.applied.from)
-    && (!cf.applied.to || riyadhDay(r.collectedAt) <= cf.applied.to) && (!cf.applied.customer || custKey(r) === cf.applied.customer)));
+    && (!cf.applied.to || riyadhDay(r.collectedAt) <= cf.applied.to) && (!cf.applied.customer || custKey(r) === cf.applied.customer)
+    && (!cf.applied.locations.length || cf.applied.locations.includes(r.branchId ?? UNASSIGNED_LOCATION))));
   const { pageRows, pager } = usePaging(qRows);
   const customerOptions = Array.from(new Map((data?.rows ?? []).filter((r) => r.customer).map((r) => [r.customer!.id, ar ? (r.customer!.nameAr ?? r.customer!.name) : r.customer!.name])).entries());
 
@@ -689,6 +697,12 @@ export default function CollectionsPage() {
             {(detail.decisionReason || detail.reversalReason) && (
               <p className="c-reason">{detail.reversalReason ?? detail.decisionReason}</p>
             )}
+            {detail.receiptNumber ? (
+              <p className="lbl" style={{ fontWeight: 400, margin: "0 0 8px" }} data-testid="detail-receipt-number">{ar ? "سند قبض" : "Receipt"} <bdi className="id">{detail.receiptNumber}</bdi>{detail.status === "REVERSED" ? (ar ? " · معكوس" : " · reversed") : ""}</p>
+            ) : null}
+            {detail.status === "REJECTED" && detail.decisionReasonCode === "RETURN_FOR_CORRECTION" && detail.submittedBy?.id === viewer?.id ? (
+              <CorrectCollection row={detail} ar={ar} onDone={(msg) => { setDetail(null); setSuccess(msg); reload(); }} onError={setError} />
+            ) : null}
 
             {qoyod && allocs ? (
               <section data-testid="detail-allocations" style={{ margin: "12px 0" }}>
@@ -865,6 +879,7 @@ export default function CollectionsPage() {
               <option value="">{ar ? "الكل" : "All"}</option>
               {customerOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
             </select></div>
+          <LocationFilter value={cf.draft.locations} onChange={(v) => cf.set("locations", v)} testId="collections-locations" />
         </FilterCard>
       ) : null}
       {rows.length === 0 ? empty : qoyod ? (
@@ -878,5 +893,37 @@ export default function CollectionsPage() {
       {decisionDialog}
       {drawer}
     </div>
+  );
+}
+
+
+/**
+ * «نسخ وتصحيح» (BATCH22 WP-D): the accountant returned this collection for correction. A NEW pending collection is made
+ * from it — the amount, date and reference corrected here, its evidence copied — and the returned one stays as it is.
+ */
+function CorrectCollection({ row, ar, onDone, onError }: { row: Collection; ar: boolean; onDone: (msg: string) => void; onError: (msg: string) => void }) {
+  const [amount, setAmount] = useState(row.amountGross);
+  const [date, setDate] = useState(new Date(Date.parse(row.collectedAt) + 3 * 3600_000).toISOString().slice(0, 10));
+  const [ref, setRef] = useState(row.referenceNumber ?? "");
+  const [busy, setBusy] = useState(false);
+  const [key] = useState(() => `fix-${row.id}-${Math.random().toString(36).slice(2, 10)}`);
+  if (row.correctedBy) {
+    return <p className="lbl" style={{ fontWeight: 400 }} data-testid="detail-corrected">{ar ? "صُحّح هذا التحصيل بتحصيل جديد." : "This collection was corrected by a new one."}</p>;
+  }
+  async function go() {
+    setBusy(true);
+    const res = await api<{ collectionId: string }>(`/api/sales/collections/${row.id}/correct`, { method: "POST", body: { idempotencyKey: key, amountGross: amount, collectedAt: `${date}T12:00:00+03:00`, referenceNumber: ref || null } });
+    setBusy(false);
+    if (!res.ok) { onError(res.data.error ?? ""); return; }
+    onDone(ar ? "أُنشئ تحصيل مصحّح وأُرسل للتأكيد." : "A corrected collection was created and sent for confirmation.");
+  }
+  return (
+    <section data-testid="detail-correct" style={{ margin: "12px 0", display: "grid", gap: 8 }}>
+      <p className="c-ev-h">{ar ? "أُعيد إليك للتصحيح" : "Returned to you for correction"}</p>
+      <label className="lbl" style={{ fontWeight: 400 }}>{ar ? "المبلغ (ر.س)" : "Amount (SAR)"}<input className="q-input" dir="ltr" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} data-testid="correct-amount" /></label>
+      <label className="lbl" style={{ fontWeight: 400 }}>{ar ? "تاريخ التحصيل" : "Collected on"}<input className="q-input" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
+      <label className="lbl" style={{ fontWeight: 400 }}>{ar ? "المرجع" : "Reference"}<input className="q-input" dir="ltr" value={ref} onChange={(e) => setRef(e.target.value)} /></label>
+      <button type="button" className="btn p" disabled={busy} onClick={go} data-testid="correct-submit">{ar ? "نسخ وتصحيح" : "Copy and correct"}</button>
+    </section>
   );
 }

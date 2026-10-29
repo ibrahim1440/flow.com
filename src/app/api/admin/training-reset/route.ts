@@ -157,7 +157,8 @@ export async function POST(request: Request) {
       // invoice's lines are frozen too). So only the suppliers that hold none of them (and no receipt kept above)
       // are cleared; a supplier with invoices, payments or a kept receipt stays with its documents.
       // «الأصول الثابتة» (20261121090000_fixed_assets): the register is part of the books too — a supplier an asset names stays.
-      prisma.supplier.deleteMany({ where: { supplierInvoices: { none: {} }, supplierPayments: { none: {} }, purchases: { none: {} }, fixedAssets: { none: {} } } }),
+      // «فواتير بسيطة» (20261130090000_simple_purchase): «مورد نقدي متنوع» (sup_misc_cash) is the system's AP party of one-off vendors — kept.
+      prisma.supplier.deleteMany({ where: { id: { not: "sup_misc_cash" }, supplierInvoices: { none: {} }, supplierPayments: { none: {} }, purchases: { none: {} }, fixedAssets: { none: {} } } }),
     ]);
     await deleteCustomerFileBlobs(prisma, blobs.map((b) => b.blobPathname));
 

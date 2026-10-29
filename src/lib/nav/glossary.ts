@@ -24,6 +24,8 @@ export const GLOSSARY = {
   customers: { ours: { ar: "العملاء", en: "Customers" }, qoyod: { ar: "العملاء", en: "Customers" } },
   quotes: { ours: { ar: "عروض الأسعار", en: "Quotations" }, qoyod: { ar: "عروض الأسعار", en: "Quotes" } },
   salesInvoices: { ours: { ar: "الفواتير الضريبية", en: "Tax invoices" }, qoyod: { ar: "فواتير المبيعات", en: "Sales invoices" }, where: "«الفواتير والتحصيل» › invoices tab" },
+  // BATCH 22 WP-C: the accountant's queue of tax invoice requests (Sales requests, the accountant issues).
+  invoiceRequests: { ours: { ar: "طلبات الفواتير", en: "Invoice requests" }, qoyod: { ar: "طلبات الفواتير", en: "Invoice requests" }, where: "/dashboard/sales/invoices?view=requests" },
   creditNotes: { ours: { ar: "إشعارات دائنة / مدينة", en: "Credit / debit notes" }, qoyod: { ar: "الإشعارات الدائنة", en: "Credit notes" }, where: "«الفواتير والتحصيل» › notes tab" },
   collections: { ours: { ar: "التحصيل", en: "Collections" }, qoyod: { ar: "سندات العملاء", en: "Customer receipts" }, where: "/dashboard/sales/collections" },
   // Qoyod's slot «مركز إدارة الذمم المدينة» is a paid add-on portal we do not have; our receivables aging takes the slot,
@@ -34,7 +36,7 @@ export const GLOSSARY = {
   purchaseOrders: { ours: { ar: "أوامر الشراء", en: "Purchase orders" }, qoyod: { ar: "أوامر الشراء", en: "Purchase orders" }, where: "deferred (owner decision)" },
   purchaseInvoices: { ours: { ar: "فواتير الموردين", en: "Supplier invoices" }, qoyod: { ar: "فواتير المشتريات", en: "Purchase invoices" }, where: "/dashboard/purchases/invoices" },
   supplierClaims: { ours: { ar: "مطالبات / إشعارات المورد", en: "Supplier claims / notes" }, qoyod: { ar: "الإشعارات المدينة", en: "Debit notes" }, where: "«المشتريات» › claims tab" },
-  simpleBills: { ours: { ar: "فاتورة مشتريات (مصروف)", en: "Purchase invoice (expense)" }, qoyod: { ar: "فواتير بسيطة", en: "Simple bills" }, where: "/dashboard/purchases/invoices/new?mode=expense" },
+  simpleBills: { ours: { ar: "فاتورة مشتريات (مصروف)", en: "Purchase invoice (expense)" }, qoyod: { ar: "فواتير بسيطة", en: "Simple bills" }, where: "/dashboard/purchases?tab=invoices&kind=SIMPLE (+ /dashboard/purchases/invoices/new?mode=expense)" },
   supplierPayments: { ours: { ar: "مدفوعات الموردين", en: "Supplier payments" }, qoyod: { ar: "سندات الموردين", en: "Supplier vouchers" }, where: "/dashboard/accounting/ap (payments)" },
   productsCosts: { ours: { ar: "تقييم المخزون", en: "Inventory valuation" }, qoyod: { ar: "المنتجات والتكاليف", en: "Products & costs" }, where: "/dashboard/accounting/inventory (read-only for the accountant)" },
   locations: { ours: { ar: "مواقع المخزون", en: "Stock locations" }, qoyod: { ar: "المواقع", en: "Locations" }, where: "/dashboard/inventory/locations" },

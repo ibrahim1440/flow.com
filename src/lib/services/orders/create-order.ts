@@ -2,6 +2,7 @@ import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 import { kgForUnits } from "@/lib/services/finished-products";
 import { CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
 import { assertSalesAllowed } from "@/lib/services/customers/credit-db";
+import { defaultBranchForActor } from "@/lib/accounting/locations";
 
 type Client = PrismaNS.TransactionClient;
 
@@ -102,6 +103,8 @@ export type NewOrderHeader = {
    * Every caller passes one; absent means an unowned order, which only legacy data has.
    */
   ownerId?: string | null;
+  /** «الموقع» (WP-B): the selling location (an active FinBranch id, validated by the caller); absent = the owner's default. */
+  branchId?: string | null;
 };
 
 /**
@@ -194,6 +197,7 @@ export async function createOrderWithNumber(
           // would ever claim this order; the person who created it is who holds, resumes or
           // cancels it (the manager and the administrator may as well).
           ownerId: header.ownerId ?? null,
+          branchId: header.branchId !== undefined ? header.branchId : await defaultBranchForActor(db, header.ownerId ?? null),
           items: { create: lines },
         },
         include: {

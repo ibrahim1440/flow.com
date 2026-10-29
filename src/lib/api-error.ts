@@ -54,6 +54,11 @@ export function handlePrismaError(err: unknown): NextResponse {
   // closed site, a site still holding stock) is a coded, bilingual 409 — never a crash.
   const loc = locationDbRefusal(msg);
   if (loc) return NextResponse.json({ error: loc.error, errorEn: loc.errorEn, code: loc.code, ...(loc.locationId ? { locationId: loc.locationId } : {}), ...(loc.available !== undefined ? { available: loc.available, requested: loc.requested, itemKind: loc.itemKind, entityId: loc.entityId } : {}) }, { status: loc.status });
+  // «سند قبض» / «سندات الموردين» (20261127090000_customer_receipts): the voucher guards — a coded 409, never a crash.
+  const rct = /(RCT|SPAY): ([^\n]*)/.exec(msg);
+  if (rct && /RCT: a |SPAY: a |SPAY: the |RCT: the /.test(msg)) {
+    return NextResponse.json({ error: rct[1] === "RCT" ? "رفضت قاعدة البيانات تعديل سند القبض." : "رفضت قاعدة البيانات حساب سند المورد.", errorEn: rct[2], code: rct[1] === "RCT" ? "RECEIPT_GUARD" : "PAYMENT_ACCOUNT_GUARD" }, { status: 409 });
+  }
   const ops = opsDbRefusal(msg);
   if (ops) return NextResponse.json(accountingErrorJson(ops), { status: ops.status });
   if (/a journal posted by HR is (reversed|changed)|journal posted by HR/i.test(msg)) {

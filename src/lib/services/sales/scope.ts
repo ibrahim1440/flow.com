@@ -87,7 +87,9 @@ export function collectionScope(
   const finance =
     hasSubPrivilege(p, "commissions", "collection_verify") ||
     hasSubPrivilege(p, "commissions", "collection_reject") ||
-    hasSubPrivilege(p, "commissions", "collection_reverse");
+    hasSubPrivilege(p, "commissions", "collection_reverse") ||
+    // BATCH22 WP-D: the accountant who confirms «سندات القبض» sees every collection, like Finance.
+    hasSubPrivilege(p, "accounting", "receipts_confirm");
   const team = hasSubPrivilege(p, "sales", "collection_view_team") || seesAllSales(p);
   return finance || team ? { all: true } : { all: false, submittedById: userId };
 }

@@ -308,7 +308,7 @@ export async function onPackaging(tx: Tx, a: {
  */
 export async function onDelivery(tx: Tx, a: { deliveryId: string; lines: { lotId: string; kg: number; emptied: boolean; units?: number; unitsBefore?: number }[]; actor: string }) {
   if (!a.lines.length) return { status: "none" as const };
-  const d = await tx.delivery.findUnique({ where: { id: a.deliveryId }, select: { orderItem: { select: { order: { select: { customerId: true, orderNumber: true } } } } } });
+  const d = await tx.delivery.findUnique({ where: { id: a.deliveryId }, select: { orderItem: { select: { order: { select: { customerId: true, orderNumber: true, branchId: true } } } } } });
   const lots = await tx.finishedGoodsLot.findMany({ where: { id: { in: a.lines.map((l) => l.lotId) } }, select: { id: true, productSkuId: true, productId: true } });
   const lotOf = new Map(lots.map((l) => [l.id, l]));
   const src: Src = { module: "inventory", type: "DELIVERY", id: a.deliveryId, event: "COGS" };
@@ -328,7 +328,9 @@ export async function onDelivery(tx: Tx, a: { deliveryId: string; lines: { lotId
     lines.push(side("COGS", out.value, { ...(item ?? {}), ...(customerId ? { party: { type: "CUSTOMER" as const, id: customerId } } : {}) }));
     lines.push(side(h.role, out.value.negated(), item));
   }
-  return postAndResolve(tx, ids, { source: src, memo: `تكلفة بضاعة مسلّمة · طلب ${d?.orderItem.order.orderNumber ?? ""}`, createdBy: a.actor, lines });
+  // «الموقع» (Q-F4): the COGS takes the SELLING location — the order's — so revenue and its cost sit in the same column;
+  // the stock itself left the delivery's site (its movement), which is not a P&L event.
+  return postAndResolve(tx, ids, { source: src, memo: `تكلفة بضاعة مسلّمة · طلب ${d?.orderItem.order.orderNumber ?? ""}`, createdBy: a.actor, lines, defaultBranchId: d?.orderItem.order.branchId ?? null });
 }
 
 /**

@@ -20,6 +20,23 @@
 .inv .inv-chip.is-warn { background: var(--hr-warning-tint); color: var(--hr-warning); }
 .inv .inv-chip.is-ok { background: var(--hr-success-tint); color: var(--hr-success); }
 .inv .inv-aging td.num, .inv .inv-aging th.num { white-space: nowrap; }
+/* «طلب فاتورة ضريبية» (BATCH 22 WP-C): the Q-F2 split button, the banners, the queue's age colours, the confirm facts. */
+.inv .inv-split { position: relative; display: inline-flex; }
+.inv .inv-split .inv-split-main { border-start-end-radius: 0; border-end-end-radius: 0; }
+.inv .inv-split .inv-split-caret { border-start-start-radius: 0; border-end-start-radius: 0; border-inline-start: 1px solid var(--hr-surface); padding-inline: 10px; min-width: 36px; }
+.inv .inv-split-menu { position: absolute; bottom: calc(100% + 4px); inset-inline-end: 0; z-index: 40; min-width: 220px; display: flex; flex-direction: column; padding: 4px;
+  background: var(--hr-surface); border: 1px solid var(--hr-border-strong); border-radius: var(--hr-r-md); }
+.inv .inv-split-menu button { appearance: none; border: 0; background: none; font: inherit; font-size: 13.5px; text-align: start; padding: 8px 10px; border-radius: var(--hr-r-sm); color: var(--hr-text); cursor: pointer; min-height: 36px; }
+.inv .inv-split-menu button:hover, .inv .inv-split-menu button:focus-visible { background: var(--hr-subtle); }
+.inv .inv-banner { border-radius: var(--hr-r-md); padding: 10px 14px; font-size: 14px; display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--hr-border-strong); }
+.inv .inv-banner.is-warning { background: var(--hr-warning-tint); color: var(--hr-text); border-color: var(--hr-warning); }
+.inv .inv-banner.is-info { background: var(--hr-subtle); color: var(--hr-text); }
+.inv .inv-age { display: inline-flex; align-items: center; gap: 6px; }
+.inv .inv-age.is-amber { color: var(--hr-warning); font-weight: 600; }
+.inv .inv-age.is-red { color: var(--hr-danger); font-weight: 600; }
+.inv .inv-check-row { display: inline-flex; gap: 8px; align-items: center; min-height: 36px; font-weight: 500; }
+.inv .inv-check-row input { width: 18px; height: 18px; }
+.inv-confirm .inv-confirm-wide { grid-column: 1 / -1; }
 @media (max-width: 1023px) { .inv .inv-grid2 { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 767px) {
   .inv .inv-hide-m { display: none; }

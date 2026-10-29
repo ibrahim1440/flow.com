@@ -264,6 +264,15 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "budgets", label: "Budgets: prepare, revise and archive budgets (approval needs journal_approve)" },
     { key: "deferrals", label: "Deferral templates and schedules: create, edit and cancel (runs need journal_post)" },
     { key: "recurring", label: "Journal templates and recurring transactions: create, edit, pause and cancel" },
+    // BATCH22 WP-D (20261127090000_customer_receipts): «تأكيد سندات القبض» — confirm (numbered «سند قبض», posted to the
+    // chosen deposit account), return for correction or reject a collection Sales recorded; record a receipt for an
+    // invoice with no deal (a second person confirms). Step-up; the submitter never confirms a Sales collection.
+    // permission-backfill writes it true for holders of commissions › collection_verify with the accounting module,
+    // otherwise adminOnly.
+    { key: "receipts_confirm", label: "Confirm customer receipts (from Sales collections) and record receipts for invoices with no deal" },
+    // BATCH22 WP-E: «إصدار عروض الأسعار من قسم المحاسبة» — create, edit and issue a quotation on an existing open deal from
+    // the accounting section (not privileged: a quote is not a ledger or tax document). adminOnly in the backfill.
+    { key: "quotes_issue", label: "Issue quotations from the accounting section (on an existing open deal)" },
   ],
   // Accounting A3: entering supplier invoices (drafts) and submitting them for approval.
   purchases: [

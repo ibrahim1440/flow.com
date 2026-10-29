@@ -419,10 +419,12 @@ async function runJson(db: Db, id: string): Promise<RunSummary> {
  *   input.actorId    who runs it (a person, or the scheduler's system actor)
  *   input.scheduleIds  optional: only these schedules (default: every ACTIVE schedule with the month PENDING)
  * Returns RECORDED (the run: POSTED with its entry, or SKIPPED before go-live) or NOTHING_DUE (with the month's runs).
+ *   input.standing   the scheduler's run under a StandingAuthorisation (20261124090000): its id is recorded on the run and
+ *                    its sodBypass on the entry; actorId is then the authoriser (the entry's postedBy)
  * Throws the engine's refusals (PERIOD_CLOSED / PERIOD_SOFT_CLOSED, ROLE_NOT_MAPPED, ACCOUNT_NOT_POSTABLE …): nothing is
  * then recorded. Safe to call again: a recognised (schedule, month) is never recognised twice.
  */
-export async function runDeferralRecognition(input: { month: string; actorId: string; scheduleIds?: string[]; audit?: Omit<AuditContext, "actorId"> }): Promise<RunResult> {
+export async function runDeferralRecognition(input: { month: string; actorId: string; scheduleIds?: string[]; audit?: Omit<AuditContext, "actorId">; standing?: { id: string; sodBypass: boolean } }): Promise<RunResult> {
   const periodStart = parseMonth(input.month);
   if (typeof input.actorId !== "string" || !input.actorId) throw refuse("BAD_INPUT", "actorId.");
   const month = monthKey(periodStart);
@@ -448,11 +450,13 @@ export async function runDeferralRecognition(input: { month: string; actorId: st
     const posted = await postEntry(tx, {
       source: { module: "accounting", type: "DEFERRAL_RUN", id: runId, event: "RECOGNIZED" }, date: dayText(entryDate),
       memo: `الاعتراف الشهري بالمؤجلات ${month} (${lines.length} ${lines.length === 1 ? "جدول" : "جداول"})`, createdBy: input.actorId, lines: entryLines,
+      ...(input.standing ? { sodBypass: input.standing.sodBypass } : {}),
     });
     await tx.deferralRun.create({
       data: {
         id: runId, periodStart, entryDate, status: posted.status === "posted" ? "POSTED" : "SKIPPED", skipReason: posted.status === "skipped" ? posted.reason : null,
         journalEntryId: posted.status === "posted" ? posted.entryId : null, total, lineCount: lines.length, createdBy: input.actorId,
+        standingAuthorisationId: input.standing?.id ?? null,
       },
     });
     await tx.deferralScheduleLine.updateMany({ where: { id: { in: lines.map((l) => l.id) }, status: "PENDING" }, data: { status: "RECOGNIZED", runId } });
@@ -476,12 +480,12 @@ export async function dueMonths(asOf: Date = riyadhDay()): Promise<{ month: stri
  * Every due month up to `asOf`, oldest first — what a scheduler calls (APIS.md). Stops at the first refusal (a closed
  * period, an unmapped account …) and reports it; the months before it stay recorded.
  */
-export async function runDueDeferralRecognition(input: { actorId: string; asOf?: string; audit?: Omit<AuditContext, "actorId"> }) {
+export async function runDueDeferralRecognition(input: { actorId: string; asOf?: string; audit?: Omit<AuditContext, "actorId">; standing?: { id: string; sodBypass: boolean } }) {
   const asOf = input.asOf ? (() => { try { return parseBusinessDay(input.asOf!); } catch { throw refuse("BAD_INPUT", "asOf is YYYY-MM-DD."); } })() : riyadhDay();
   const results: RunResult[] = [];
   for (const m of await dueMonths(asOf)) {
     try {
-      results.push(await runDeferralRecognition({ month: m.month, actorId: input.actorId, audit: input.audit }));
+      results.push(await runDeferralRecognition({ month: m.month, actorId: input.actorId, audit: input.audit, standing: input.standing }));
     } catch (e) {
       const err = e as { code?: string; message?: string };
       return { results, stoppedAt: { month: m.month, code: err.code ?? "ERROR", message: err.message ?? String(e) } };

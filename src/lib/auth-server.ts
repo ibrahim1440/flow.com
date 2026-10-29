@@ -185,6 +185,8 @@ export const STEP_UP_KEYS: ReadonlySet<string> = new Set([
   // Accounting core A1: reopening a closed period steps up (activation, role mapping, the chart seed and the
   // opening post step up inline, requirePrivilegedAction).
   "accounting.period_reopen",
+  // BATCH22 WP-D: confirming a customer receipt numbers it and posts it to the ledger (step-up, like journal_post).
+  "accounting.receipts_confirm",
   // Sales invoicing A2: issuing a tax invoice and a credit / debit note step up.
   "sales.invoices_issue", "sales.invoices_credit_note",
   // Accounting A3: posting a supplier invoice, recording / voiding a supplier payment, cancelling an invoice.

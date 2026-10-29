@@ -12,6 +12,8 @@ import { locationName, pickerLocations, type LocationRow } from "@/lib/inventory
 export type Loc = LocationRow & {
   address?: string | null; notes?: string | null; deactivatedAt?: string | null; deactivationReason?: string | null;
   hasHistory?: boolean; valueEstimate?: number; holdings?: { green: number; materials: number; finished: number; any: boolean };
+  /** «الموقع» (20261125090000_location_dimension): the accounting branch the site belongs to. */
+  finBranchId?: string | null;
 };
 export type LocationsState = { locations: Loc[]; defaultId: string | null; productionId: string | null; lastReceivingId: string | null };
 export type Balances = { green: Record<string, { locationId: string; qty: number }[]>; material: Record<string, { locationId: string; qty: number }[]>; finished: Record<string, string> };

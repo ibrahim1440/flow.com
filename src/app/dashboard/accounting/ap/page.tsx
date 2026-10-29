@@ -14,11 +14,15 @@ import { AcctShell, Msg, money, todayRiyadh, useApi, useLang, useWrite, type Set
 import { InvoiceList, type InvoiceRow } from "../_ui/ap";
 import { DateRange, FilterCard, Section, ListFooter, ListPageSize, useFilters, usePaging, useTerm } from "@/components/chrome";
 import { useAccountantView } from "../_ui/qoyod-pages";
+import { LocationFilter, UNASSIGNED_LOCATION, useLocations } from "../_ui/locations";
+import { FormField, PartyCard } from "@/components/forms/QoyodForm";
+import { allocateOldestFirst } from "@/lib/purchases/allocation";
+
 
 type Aging = { asOf: string; total: string; buckets: Record<string, string>; counts: Record<string, number>; suppliers: { supplierId: string; name: string; buckets: Record<string, string>; total: string; openClaim?: string }[]; openClaims?: string; gl: { balance: string; difference: string } | null };
 type Statement = { supplier: { name: string }; from: string; to: string; opening: string; closing: string; lines: { entryId: string; date: string; ref: string; description: string | null; sourceType: string | null; debit: string; credit: string; balance: string }[] };
-type Payment = { id: string; number: string; supplierName: string; paymentDate: string; amount: string; method: string; reference: string | null; status: string; journalEntryId: string | null; invoices: string[]; allocated?: string; supplierId: string };
-type Supplier = { id: string; name: string; openingOutstanding?: string };
+type Payment = { id: string; number: string; supplierName: string; paymentDate: string; amount: string; method: string; reference: string | null; status: string; journalEntryId: string | null; invoices: string[]; allocated?: string; supplierId: string; branchId?: string | null };
+type Supplier = { id: string; name: string; vatNumber?: string | null; openingOutstanding?: string };
 type List = { rows: InvoiceRow[]; can: { ap: boolean } };
 const BUCKETS: [string, string, string][] = [["current", "غير مستحقة", "Not due"], ["d1_30", "1–30 يومًا", "1–30 days"], ["d31_60", "31–60 يومًا", "31–60 days"], ["d61_90", "61–90 يومًا", "61–90 days"], ["d90_plus", "أكثر من 90", "Over 90"]];
 const METHOD: Record<string, [string, string]> = { BANK_TRANSFER: ["تحويل بنكي", "Bank transfer"], CASH: ["نقدًا", "Cash"], CHEQUE: ["شيك", "Cheque"] };
@@ -127,17 +131,22 @@ function PaymentsView({ prefill }: { prefill: { supplierId: string; invoiceId: s
   // list already loaded), the same columns in Qoyod's words (المرجع … الخيارات), the dark title bar and the pager.
   const qoyod = useAccountantView();
   const t = useTerm();
-  const pf = useFilters({ supplierId: "", from: "", to: "", status: "" });
+  const pf = useFilters({ supplierId: "", from: "", to: "", status: "", locations: [] as string[] });
   const pa = pf.applied;
   const pays = useApi<Payment[]>(`/api/accounting/ap/payments${qoyod && pa.supplierId ? `?supplierId=${encodeURIComponent(pa.supplierId)}` : ""}`);
   const sups = useApi<Supplier[]>("/api/accounting/ap/suppliers");
-  const payRows = (pays.data ?? []).filter((p) => !qoyod || ((!pa.from || p.paymentDate >= pa.from) && (!pa.to || p.paymentDate <= pa.to) && (!pa.status || p.status === pa.status)));
+  const payRows = (pays.data ?? []).filter((p) => !qoyod || ((!pa.from || p.paymentDate >= pa.from) && (!pa.to || p.paymentDate <= pa.to) && (!pa.status || p.status === pa.status) && (!pa.locations.length || pa.locations.includes(p.branchId ?? UNASSIGNED_LOCATION))));
   const { pageRows, pager } = usePaging(payRows);
   const w = useWrite();
   const [open, setOpen] = useState(!!prefill);
   const [voiding, setVoiding] = useState<Payment | null>(null);
   const [reason, setReason] = useState("");
-  const [f, setF] = useState({ supplierId: prefill?.supplierId ?? "", paymentDate: todayRiyadh(), method: "BANK_TRANSFER", reference: "", alloc: {} as Record<string, string> });
+  const [f, setF] = useState({ supplierId: prefill?.supplierId ?? "", paymentDate: todayRiyadh(), method: "BANK_TRANSFER", reference: "", paidFromAccountId: "", branchId: "", alloc: {} as Record<string, string> });
+  // «الموقع» (WP-B): "" = the default (the branch every allocated invoice shares, else none — the server warns), "none" = «غير محدد».
+  const branches = useLocations();
+  // «الحساب» (BATCH22 WP-D): the cash / bank account paid from; empty = the method's default account.
+  const cash = useApi<{ accounts: { id: string; code: string; nameAr: string | null; nameEn: string; controlType: string | null }[] }>(open ? "/api/accounting/cash-accounts" : null);
+  const fromAccounts = (cash.data?.accounts ?? []).filter((a) => a.controlType === "CASH" || a.controlType === "BANK");
   const inv = useApi<List>(f.supplierId ? `/api/accounting/ap/invoices?status=POSTED&supplierId=${f.supplierId}` : null);
   const openInv = (inv.data?.rows ?? []).filter((r) => Number(r.outstanding) > 0);
   const [prefilled, setPrefilled] = useState(false);
@@ -154,6 +163,18 @@ function PaymentsView({ prefill }: { prefill: { supplierId: string; invoiceId: s
   const [toOpening, setToOpening] = useState("");
   const openingOutstanding = Number((sups.data ?? []).find((s) => s.id === f.supplierId)?.openingOutstanding ?? 0);
   const total = Object.values(f.alloc).reduce((s, v) => s + (Number(v) || 0), 0) + (Number(toOpening) || 0);
+  // Qoyod's voucher (accountant workspace): an amount spread by «تخصيص تلقائي» — on by default; the inputs stay editable.
+  const [auto, setAuto] = useState(true);
+  const [amount, setAmount] = useState("");
+  const spread = (v: string) => {
+    setAmount(v);
+    if (!auto) return;
+    const r = allocateOldestFirst(Number(v) || 0, openInv, openingOutstanding);
+    setF((x) => ({ ...x, alloc: r.alloc }));
+    setToOpening(r.toOpening);
+  };
+  const supplierRow = (sups.data ?? []).find((s) => s.id === f.supplierId);
+  const owed = openInv.reduce((a, r) => a + Number(r.outstanding), 0) + openingOutstanding;
   const newBtn = <Btn variant="primary" onClick={() => setOpen(true)} data-testid="pay-new">+ {qoyod ? t("recordPayment") : L("تسجيل سداد", "Record a payment")}</Btn>;
   const table = (list: Payment[]) => (
     <div className="hr-tablewrap">
@@ -177,8 +198,11 @@ function PaymentsView({ prefill }: { prefill: { supplierId: string; invoiceId: s
   );
   async function record() {
     const allocations = Object.entries(f.alloc).filter(([, v]) => Number(v) > 0).map(([invoiceId, amount]) => ({ invoiceId, amount: Number(amount).toFixed(2) }));
-    if (await w.run("pay", "/api/accounting/ap/payments", "POST", { supplierId: f.supplierId, paymentDate: f.paymentDate, method: f.method, reference: f.reference || null, amount: total.toFixed(2), allocations }, L("سُجّل السداد ورُحّل.", "Payment recorded and posted."))) {
-      setOpen(false); setF({ ...f, alloc: {}, reference: "" }); setToOpening(""); pays.reload(); sups.reload();
+    const r = await w.run<{ branchWarning?: boolean }>("pay", "/api/accounting/ap/payments", "POST", { supplierId: f.supplierId, paymentDate: f.paymentDate, method: f.method, reference: f.reference || null, ...(f.paidFromAccountId ? { paidFromAccountId: f.paidFromAccountId } : {}), ...(f.branchId ? { branchId: f.branchId === UNASSIGNED_LOCATION ? null : f.branchId } : {}), amount: total.toFixed(2), allocations }, L("سُجّل السداد ورُحّل.", "Payment recorded and posted."));
+    if (r) {
+      // «الموقع»: the invoices paid sit at different locations (or none) — the voucher has none («غير محدد»).
+      if (r.branchWarning) w.setDone(L("سُجّل السداد ورُحّل. تنبيه: الفواتير المسددة في مواقع مختلفة أو بلا موقع، فالسند بلا موقع («غير محدد»).", "Payment recorded and posted. Note: the invoices paid sit at different locations (or none), so the voucher has no location («Unassigned»)."));
+      setOpen(false); setF({ ...f, alloc: {}, reference: "" }); setToOpening(""); setAmount(""); pays.reload(); sups.reload();
     }
   }
   return (
@@ -191,6 +215,7 @@ function PaymentsView({ prefill }: { prefill: { supplierId: string; invoiceId: s
           <DateRange from={pf.draft.from} to={pf.draft.to} onChange={(r) => pf.setDraft({ ...pf.draft, ...r })} />
           <div className="qc-field"><span className="qc-label">{t("colStatus")}</span>
             <Select value={pf.draft.status} onChange={(e) => pf.set("status", e.target.value)} aria-label={t("colStatus")}><option value="">{L("الكل", "All")}</option><option value="POSTED">{L("مرحّل", "Posted")}</option><option value="VOIDED">{L("ملغى", "Voided")}</option></Select></div>
+          <LocationFilter value={pf.draft.locations} onChange={(v) => pf.set("locations", v)} testId="pay-locations" />
         </FilterCard>
       ) : <div className="acct-actions">{newBtn}</div>}
       {!pays.data ? <OpsLoading /> : qoyod ? (
@@ -200,15 +225,73 @@ function PaymentsView({ prefill }: { prefill: { supplierId: string; invoiceId: s
           <ListFooter {...pager} noun={L("سند", "vouchers")} emptyText={L("لا توجد أي سندات", "No vouchers")} />
         </Section>
       ) : table(pays.data)}
-      <Dialog open={open} title={L("تسجيل سداد لمورد", "Record a supplier payment")} onClose={() => setOpen(false)}
-        actions={<><Btn onClick={() => setOpen(false)}>{L("إلغاء", "Cancel")}</Btn><Btn variant="primary" busy={w.busy === "pay"} disabled={!f.supplierId || total <= 0} onClick={record} data-testid="pay-confirm">{L(`سداد ${money(total)} ر.س`, `Pay SAR ${money(total)}`)}</Btn></>}>
-        <div className="hr-stack">
+      <Dialog open={open} title={qoyod ? L("إنشاء سند مورد", "Create a supplier voucher") : L("تسجيل سداد لمورد", "Record a supplier payment")} onClose={() => setOpen(false)} className={qoyod ? "is-wide" : undefined}
+        actions={qoyod
+          ? <><Btn onClick={() => setOpen(false)}>{L("إلغاء", "Cancel")}</Btn><Btn variant="primary" busy={w.busy === "pay"} disabled={!f.supplierId || total <= 0} onClick={record} data-testid="pay-confirm">{L("حفظ", "Save")} <bdi className="hr-num">· {money(total)} {L("ر.س", "SAR")}</bdi></Btn></>
+          : <><Btn onClick={() => setOpen(false)}>{L("إلغاء", "Cancel")}</Btn><Btn variant="primary" busy={w.busy === "pay"} disabled={!f.supplierId || total <= 0} onClick={record} data-testid="pay-confirm">{L(`سداد ${money(total)} ر.س`, `Pay SAR ${money(total)}`)}</Btn></>}>
+        {qoyod ? (
+          <div className="hr-stack" data-testid="pay-voucher">
+            <FormField label={L("الجهة", "Party")} required>
+              <Select value={f.supplierId} onChange={(e) => { setF({ ...f, supplierId: e.target.value, alloc: {} }); setAmount(""); setToOpening(""); }} aria-label={L("الجهة", "Party")} data-testid="pay-supplier"><option value="">{L("اختر المورد", "Choose the supplier")}</option>{(sups.data ?? []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select>
+            </FormField>
+            {/* «الحساب» (WP-D, SupplierPayment.paidFromAccountId): the cash / bank account paid from; none chosen (or no chart
+                of accounts yet) = the method's role account. */}
+            {fromAccounts.length ? (
+              <FormField label={L("الحساب", "Account")} help={L("فارغ = حساب طريقة الدفع (البنك أو الصندوق)", "Empty = the method's account (bank or cash)")}>
+                <Select value={f.paidFromAccountId} onChange={(e) => setF({ ...f, paidFromAccountId: e.target.value })} aria-label={L("الحساب", "Account")} data-testid="pay-from-account">
+                  <option value="">{L("حسب الطريقة (الافتراضي)", "By method (default)")}</option>
+                  {fromAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {L(a.nameAr || a.nameEn, a.nameEn)}</option>)}
+                </Select>
+              </FormField>
+            ) : (
+              <FormField label={L("الحساب", "Account")} help={L("حسب طريقة الدفع (البنك أو الصندوق)", "Per the method (bank or cash)")}>
+                <span className="qf-readonly" data-testid="pay-account-method">{L(METHOD[f.method]?.[0] ?? f.method, METHOD[f.method]?.[1] ?? f.method)}</span>
+              </FormField>
+            )}
+            <FormField label={L("التاريخ", "Date")} required><input type="date" className="hr-input" value={f.paymentDate} onChange={(e) => setF({ ...f, paymentDate: e.target.value })} aria-label={L("التاريخ", "Date")} data-testid="pay-date" /></FormField>
+            <FormField label={L("المبلغ (﷼)", "Amount (SAR)")} required help={auto ? L("يُوزَّع على الفواتير الأقدم أولًا", "Spread over the oldest invoices first") : L("وزّعه على الفواتير أدناه", "Spread it over the invoices below")}>
+              <input className="hr-input acct-amount" inputMode="decimal" dir="ltr" value={amount} onChange={(e) => spread(e.target.value.replace(/[^\d.]/g, ""))} aria-label={L("المبلغ", "Amount")} disabled={!f.supplierId} data-testid="pay-amount" />
+            </FormField>
+            <FormField label={L("الطريقة", "Method")}><Select value={f.method} onChange={(e) => setF({ ...f, method: e.target.value })} aria-label={L("الطريقة", "Method")}>{Object.entries(METHOD).map(([k, [ar, en]]) => <option key={k} value={k}>{L(ar, en)}</option>)}</Select></FormField>
+            <FormField label={L("المرجع", "Reference")}><input className="hr-input" value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} aria-label={L("المرجع", "Reference")} /></FormField>
+            <FormField label={L("الموقع", "Location")} help={L("الافتراضي: موقع الفواتير المسددة إن اتفقت", "Default: the location the paid invoices share")}>
+              <Select value={f.branchId} onChange={(e) => setF({ ...f, branchId: e.target.value })} aria-label={L("الموقع", "Location")} data-testid="pay-location">
+                <option value="">{L("الافتراضي", "Default")}</option>
+                {branches.map((b) => <option key={b.id} value={b.id}>{L(b.nameAr, b.nameEn)}</option>)}
+                <option value={UNASSIGNED_LOCATION}>{L("غير محدد", "Unassigned")}</option>
+              </Select>
+            </FormField>
+            <label className="pur-check" style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={auto} onChange={(e) => { setAuto(e.target.checked); if (e.target.checked) { const r = allocateOldestFirst(Number(amount) || 0, openInv, openingOutstanding); setF((x) => ({ ...x, alloc: r.alloc })); setToOpening(r.toOpening); } }} data-testid="pay-auto" /> {L("تخصيص السند تلقائيًا حسب أقدمية الفواتير", "Allocate the voucher by invoice age automatically")}</label>
+            {f.supplierId ? <PartyCard title={L("تفاصيل الجهة", "Party details")} empty="—" testId="pay-party" rows={[
+              { k: L("الاسم", "Name"), v: supplierRow?.name ?? "—" },
+              { k: L("الرقم الضريبي", "VAT number"), v: supplierRow?.vatNumber ? <bdi className="acct-code">{supplierRow.vatNumber}</bdi> : "—" },
+              { k: L("الرصيد المستحق", "Amount owed"), v: <bdi className="hr-num">{money(owed)} {L("ر.س", "SAR")}</bdi>, tone: owed > 0 ? "bad" : "good", testId: "pay-party-owed" },
+            ]} /> : null}
+            {amount && auto && Number(amount) > owed + 0.004 ? <Notice tone="warning">{L(`المبلغ أكبر من المستحق (${money(owed)}): الزيادة لا تُخصص — خفّضه.`, `The amount is above what is owed (${money(owed)}): the excess has nowhere to go — lower it.`)}</Notice> : null}
+          </div>
+        ) : null}
+        {!qoyod ? <div className="hr-stack">
           <label className="hr-field"><span className="hr-label">{L("المورد", "Supplier")}</span><Select value={f.supplierId} onChange={(e) => setF({ ...f, supplierId: e.target.value, alloc: {} })} data-testid="pay-supplier"><option value="">{L("اختر المورد", "Choose the supplier")}</option>{(sups.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</Select></label>
           <div className="acct-row">
             <label className="hr-field"><span className="hr-label">{L("التاريخ", "Date")}</span><input type="date" className="hr-input" value={f.paymentDate} onChange={(e) => setF({ ...f, paymentDate: e.target.value })} /></label>
             <label className="hr-field"><span className="hr-label">{L("الطريقة", "Method")}</span><Select value={f.method} onChange={(e) => setF({ ...f, method: e.target.value })}>{Object.entries(METHOD).map(([k, [ar, en]]) => <option key={k} value={k}>{L(ar, en)}</option>)}</Select></label>
             <label className="hr-field"><span className="hr-label">{L("المرجع", "Reference")}</span><input className="hr-input" value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} /></label>
           </div>
+          {fromAccounts.length ? (
+            <label className="hr-field"><span className="hr-label">{L("الحساب (مدفوعة من)", "Account (paid from)")}</span>
+              <Select value={f.paidFromAccountId} onChange={(e) => setF({ ...f, paidFromAccountId: e.target.value })} data-testid="pay-from-account">
+                <option value="">{L("حسب الطريقة (الافتراضي)", "By method (default)")}</option>
+                {fromAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {L(a.nameAr || a.nameEn, a.nameEn)}</option>)}
+              </Select></label>
+          ) : null}
+          {branches.length ? (
+            <label className="hr-field"><span className="hr-label">{L("الموقع", "Location")}</span>
+              <Select value={f.branchId} onChange={(e) => setF({ ...f, branchId: e.target.value })} data-testid="pay-location">
+                <option value="">{L("الافتراضي (موقع الفواتير المسددة)", "Default (the paid invoices' location)")}</option>
+                {branches.map((b) => <option key={b.id} value={b.id}>{L(b.nameAr, b.nameEn)}</option>)}
+                <option value={UNASSIGNED_LOCATION}>{L("غير محدد", "Unassigned")}</option>
+              </Select></label>
+          ) : null}
           {f.supplierId && Number(claims.data?.openGross ?? 0) > 0 ? <Notice tone="warning"><span data-testid="pay-claim-warning">{L(`لدى هذا المورد مطالبات مفتوحة بقيمة ${money(claims.data?.openGross)} ر.س (نقص فوترَه ولم يصل). انتظر إشعاره الدائن أو اخصمها قبل سداد كامل الفاتورة.`, `This supplier has open claims of SAR ${money(claims.data?.openGross)} (billed, not delivered). Wait for its credit note or hold it back before paying the invoice in full.`)}</span></Notice> : null}
           {f.supplierId ? (openInv.length ? (
             <table className="hr-table is-dense"><thead><tr><th>{L("الفاتورة", "Invoice")}</th><th className="num">{L("المتبقي", "Open")}</th><th className="num">{L("المسدَّد", "Apply")}</th></tr></thead>
@@ -219,7 +302,21 @@ function PaymentsView({ prefill }: { prefill: { supplierId: string; invoiceId: s
               <input className="hr-input acct-amount" inputMode="decimal" value={toOpening} onChange={(e) => setToOpening(e.target.value)} data-testid="pay-opening" /></label>
           ) : null}
           <p className="acct-hint">{L("يُطبَّق المبلغ على الفواتير (والباقي على الرصيد الافتتاحي)، ويُرحَّل: مدين الذمم الدائنة / دائن البنك (أو الصندوق).", "The amount is applied to invoices (the rest to the opening balance) and posted: Dr accounts payable / Cr bank (or cash).")}</p>
-        </div>
+        </div> : null}
+        {qoyod && f.supplierId ? (
+          <div className="hr-stack" style={{ marginTop: 12 }}>
+            {Number(claims.data?.openGross ?? 0) > 0 ? <Notice tone="warning"><span data-testid="pay-claim-warning">{L(`لدى هذا المورد مطالبات مفتوحة بقيمة ${money(claims.data?.openGross)} ر.س (نقص فوترَه ولم يصل). انتظر إشعاره الدائن أو اخصمها قبل سداد كامل الفاتورة.`, `This supplier has open claims of SAR ${money(claims.data?.openGross)} (billed, not delivered). Wait for its credit note or hold it back before paying the invoice in full.`)}</span></Notice> : null}
+            {openInv.length ? (
+              <table className="hr-table is-dense" data-testid="pay-alloc"><thead><tr><th>{L("الفاتورة", "Invoice")}</th><th className="hr-num">{L("التاريخ", "Date")}</th><th className="num">{L("المتبقي", "Open")}</th><th className="num">{L("المخصص", "Allocated")}</th></tr></thead>
+                <tbody>{[...openInv].sort((a, b) => a.invoiceDate.localeCompare(b.invoiceDate)).map((r) => <tr key={r.id}><td className="acct-code">{r.number} · {r.supplierRef}{claimOn(r.id) ? <span className="hr-caption"> · {L(`مطالبة ${money(claimOn(r.id))}`, `claim ${money(claimOn(r.id))}`)}</span> : null}</td><td className="hr-num">{r.invoiceDate}</td><td className="num hr-num">{money(r.outstanding)}</td><td className="num"><input className="hr-input acct-amount" style={{ width: 110 }} inputMode="decimal" value={f.alloc[r.id] ?? ""} placeholder="0.00" onChange={(e) => { setAuto(false); setF({ ...f, alloc: { ...f.alloc, [r.id]: e.target.value } }); }} aria-label={L(`المخصص للفاتورة ${r.number}`, `Allocated to ${r.number}`)} data-testid={`pay-alloc-${r.number}`} /></td></tr>)}</tbody></table>
+            ) : <p className="acct-hint">{L("لا فواتير مرحّلة مفتوحة لهذا المورد.", "No open posted invoices for this supplier.")}</p>}
+            {openingOutstanding > 0 ? (
+              <label className="hr-field"><span className="hr-label">{L(`من الرصيد الافتتاحي (المتبقي ${money(openingOutstanding)})`, `Against the opening balance (open ${money(openingOutstanding)})`)}</span>
+                <input className="hr-input acct-amount" inputMode="decimal" value={toOpening} onChange={(e) => { setAuto(false); setToOpening(e.target.value); }} data-testid="pay-opening" /></label>
+            ) : null}
+            <p className="acct-hint">{L("يُرحَّل السند: مدين الذمم الدائنة / دائن البنك (أو الصندوق). الخادم يتحقق من كل تخصيص.", "The voucher posts Dr accounts payable / Cr bank (or cash). The server checks every allocation.")}</p>
+          </div>
+        ) : null}
       </Dialog>
       <Dialog open={!!voiding} title={L("إلغاء السداد", "Void the payment")} onClose={() => setVoiding(null)}
         actions={<><Btn onClick={() => setVoiding(null)}>{L("رجوع", "Back")}</Btn><Btn variant="danger" busy={w.busy === "void"} disabled={reason.trim().length < 3} onClick={async () => { if (voiding && await w.run("void", `/api/accounting/ap/payments/${voiding.id}/void`, "POST", { reason }, L("أُلغي السداد وعُكس قيده.", "Voided; its entry is reversed."))) { setVoiding(null); setReason(""); pays.reload(); } }}>{L("تأكيد", "Confirm")}</Btn></>}>

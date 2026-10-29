@@ -23,11 +23,14 @@ import { hasModuleAccess, hasSubPrivilege, canEdit } from "@/lib/auth-shared";
 import { NAV, nodesForPath, presentTree, routeAllowed, visibleNav, type Ability, type NavNode, type Viewer } from "./registry";
 import { qoyodTerm, type TermKey } from "./glossary";
 import { LIVE_RESERVED } from "./accountant-live";
-import { SIMPLE_BILL_HREF } from "./accountant-contract";
+import { SIMPLE_BILL_HREF, SIMPLE_BILL_LIST_HREF } from "./accountant-contract";
+import { canWriteQuotes } from "@/lib/services/sales/quote-access";
 import type { D21IconName } from "@/components/shell/icons";
 
 /** `anyOf`: the duty the page's own create button checks; `editOf`: or edit access to that module (the API's `requireEdit`). */
-export type AcctCreate = { href: string; anyOf?: Ability[]; editOf?: string };
+export type AcctCreate = { href: string; anyOf?: Ability[]; editOf?: string;
+  /** Or a page helper's own rule (the same function its API's door calls — BATCH22 WP-E `canWriteQuotes`). */
+  can?: (p: Viewer["permissions"]) => boolean };
 
 export type AcctItem = {
   id: string;
@@ -55,11 +58,16 @@ export const ACCOUNTANT_NAV: AcctGroup[] = [
     id: "acct.sales", term: "sales", icon: "deal",
     children: [
       { id: "acct.sales.customers", term: "customers", href: "/dashboard/customers", create: { href: "/dashboard/customers?new=customer", editOf: "customers" } },
-      // A read-only view for the accountant (Sales owns quotes; QOYOD-REF §5.1): no «+».
-      { id: "acct.sales.quotes", term: "quotes", href: "/dashboard/sales/quotes" },
+      // Read-only for the accountant by default (Sales owns quotes; QOYOD-REF §5.1; owner answer 3). «+ عرض سعر» only with
+      // `canWriteQuotes` (sales › quote_write, or accounting › quotes_issue — BATCH22 WP-E): on an existing open deal.
+      { id: "acct.sales.quotes", term: "quotes", href: "/dashboard/accounting/quotes", alsoMatches: ["/dashboard/sales/quotes"], create: { href: "/dashboard/accounting/quotes/new", can: canWriteQuotes } },
       { id: "acct.sales.invoices", term: "salesInvoices", href: "/dashboard/sales/invoices", anyOf: [A("sales", "invoices_view"), A("accounting", "ar")], create: { href: "/dashboard/sales/invoices/new", anyOf: [A("sales", "invoices_create")] } },
+      // «طلبات الفواتير» (BATCH 22 WP-C): the queue of requested drafts, for the issuers (a badge counts them).
+      { id: "acct.sales.requests", term: "invoiceRequests", href: "/dashboard/sales/invoices?view=requests", anyOf: [A("sales", "invoices_issue")] },
       { id: "acct.sales.notes", term: "creditNotes", href: "/dashboard/sales/invoices?tab=notes", anyOf: [A("sales", "invoices_view"), A("accounting", "ar")] },
-      { id: "acct.sales.receipts", term: "collections", href: "/dashboard/sales/collections" },
+      // «سندات العملاء» (BATCH22 WP-D): the receipts the accountant confirms («سند قبض»), and «+» records a receipt for an
+      // invoice with no deal (accounting › receipts_confirm or ar).
+      { id: "acct.sales.receipts", term: "collections", href: "/dashboard/accounting/receipts", alsoMatches: ["/dashboard/sales/collections"], create: { href: "/dashboard/accounting/receipts?new=1", anyOf: [A("accounting", "receipts_confirm"), A("accounting", "ar")] } },
       { id: "acct.sales.ar", term: "arCenter", href: "/dashboard/sales/receivables", anyOf: [A("sales", "invoices_view"), A("accounting", "ar")] },
     ],
   },
@@ -70,8 +78,9 @@ export const ACCOUNTANT_NAV: AcctGroup[] = [
       { id: "acct.purchases.orders", term: "purchaseOrders" }, // deferred (owner decision): «قريباً», no route
       { id: "acct.purchases.invoices", term: "purchaseInvoices", href: "/dashboard/purchases?tab=invoices", alsoMatches: ["/dashboard/purchases/invoices", "/dashboard/purchases"], anyOf: [A("accounting"), A("purchases", "invoices")], create: { href: "/dashboard/purchases/invoices/new", anyOf: [A("purchases", "invoices"), A("accounting", "ap")] } },
       { id: "acct.purchases.debitNotes", term: "supplierClaims", href: "/dashboard/purchases?tab=claims", anyOf: [A("accounting"), A("purchases", "invoices")] },
-      // The purchase-invoice form in expense mode (QOYOD-REF §5.2; the `?mode=expense` contract: ./accountant-contract).
-      { id: "acct.purchases.simple", term: "simpleBills", href: SIMPLE_BILL_HREF, anyOf: [A("purchases", "invoices"), A("accounting", "ap")] },
+      // «فواتير بسيطة» (BATCH22 WP-H): the purchase invoices filtered kind=SIMPLE; its «+» opens the simple-invoice form
+      // (`?mode=expense`, ./accountant-contract), which the item also lights.
+      { id: "acct.purchases.simple", term: "simpleBills", href: SIMPLE_BILL_LIST_HREF, alsoMatches: [SIMPLE_BILL_HREF], anyOf: [A("purchases", "invoices"), A("accounting", "ap")], create: { href: SIMPLE_BILL_HREF, anyOf: [A("purchases", "invoices"), A("accounting", "ap")] } },
       { id: "acct.purchases.vouchers", term: "supplierPayments", href: "/dashboard/accounting/ap?view=payments" },
     ],
   },
@@ -204,7 +213,7 @@ function itemFor(v: Viewer, i: AcctItem, lang: string, pruned: NavNode[]): Shown
   if (i.anyOf && i.anyOf.length > 0 && !i.anyOf.some((a) => holds(v, a))) return null;
   const c = i.create;
   const canCreate = !!c && offeredByRegistry(v, c.href, pruned)
-    && ((c.anyOf ?? []).some((a) => holds(v, a)) || (!!c.editOf && canEdit(v.permissions, c.editOf)));
+    && ((c.anyOf ?? []).some((a) => holds(v, a)) || (!!c.editOf && canEdit(v.permissions, c.editOf)) || (!!c.can && c.can(v.permissions)));
   return { id: i.id, label, href: i.href!, state: "link", create: canCreate ? c!.href : null, matches: [i.href!, ...(i.alsoMatches ?? [])] };
 }
 

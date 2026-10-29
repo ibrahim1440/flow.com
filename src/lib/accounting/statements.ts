@@ -18,6 +18,7 @@ import { addDaysUtc, dayText, parseBusinessDay, riyadhDay } from "./dates";
 import { refuse } from "./refusals";
 import { ACCOUNT_ROLES } from "./roles";
 import { acctCsvCell } from "./csv";
+import type { BranchFilter } from "./locations";
 
 import { REPORT_GROUPS, GROUP_LABEL, isReportGroup, type ReportGroup } from "./report-groups";
 export { REPORT_GROUPS, GROUP_LABEL, isReportGroup, type ReportGroup };
@@ -34,7 +35,7 @@ const HEADER_GROUP: Record<string, ReportGroup> = {
 };
 const ROLE_GROUP: Record<string, ReportGroup> = Object.fromEntries(ACCOUNT_ROLES.map((r) => {
   // «الأصول الثابتة»: cost / accumulated depreciation are non-current; the gain / loss on disposal is other income / expense.
-  const g: ReportGroup = r.group === "fixedAssets" ? (r.types[0] === "ASSET" ? "NON_CURRENT_ASSET" : r.key === "FA_DISPOSAL_GAIN_LOSS" ? "OTHER_INCOME_EXPENSE" : "OPERATING_EXPENSE")
+  const g: ReportGroup = r.group === "fixedAssets" ? (r.types[0] === "ASSET" ? "NON_CURRENT_ASSET" : r.types[0] === "LIABILITY" ? "CURRENT_LIABILITY" : r.key === "FA_DISPOSAL_GAIN_LOSS" ? "OTHER_INCOME_EXPENSE" : "OPERATING_EXPENSE")
     : r.group === "cost" ? "COST_OF_SALES"
     : r.key === "EOSB_PROVISION" ? "NON_CURRENT_LIABILITY"
     : r.types[0] === "ASSET" ? "CURRENT_ASSET"
@@ -141,7 +142,7 @@ const endOf = (d: Date) => new Date(d.getTime() + 86_399_999);
  * lines of that branch only (the journal line's branch dimension). Exported for the budget-vs-actual report
  * («الموازنات», ./budgets.ts) and the deferral reconciliation (./deferrals.ts): one aggregate, never a second sum.
  */
-export async function netByAccount(ranges: { from: Date | null; to: Date; excludeTypes?: string[] }[], opts: { branchId?: string | null } = {}): Promise<Map<string, Decimal[]>> {
+export async function netByAccount(ranges: { from: Date | null; to: Date; excludeTypes?: string[] }[], opts: { branchId?: string | null; branches?: BranchFilter } = {}): Promise<Map<string, Decimal[]>> {
   const maxTo = ranges.reduce((m, r) => (r.to > m ? r.to : m), ranges[0].to);
   const cols = ranges.map((r, i) => {
     const conds = [Prisma.sql`j."entryDate" <= ${endOf(r.to)}`];
@@ -152,9 +153,37 @@ export async function netByAccount(ranges: { from: Date | null; to: Date; exclud
   const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
     SELECT l."accountId", ${Prisma.join(cols, ", ")}
       FROM "JournalEntryLine" l JOIN "JournalEntry" j ON j."id" = l."journalEntryId"
-     WHERE ${POSTED} AND j."entryDate" <= ${endOf(maxTo)}${opts.branchId ? Prisma.sql` AND l."branchId" = ${opts.branchId}` : Prisma.empty}
+     WHERE ${POSTED} AND j."entryDate" <= ${endOf(maxTo)}${opts.branchId ? Prisma.sql` AND l."branchId" = ${opts.branchId}` : Prisma.empty}${branchSql(opts.branches ?? null)}
      GROUP BY l."accountId"`;
   return new Map(rows.map((r) => [r.accountId as string, ranges.map((_, i) => new Decimal(String(r[`c${i}`] ?? 0)))]));
+}
+
+/** «الموقع»: the SQL condition of a location filter on the journal line's branch ("" = all). */
+export function branchSql(f: BranchFilter): Prisma.Sql {
+  if (!f) return Prisma.empty;
+  const ids = f.ids.length ? Prisma.sql`l."branchId" IN (${Prisma.join(f.ids)})` : null;
+  if (ids && f.unassigned) return Prisma.sql` AND (${ids} OR l."branchId" IS NULL)`;
+  if (ids) return Prisma.sql` AND ${ids}`;
+  return f.unassigned ? Prisma.sql` AND l."branchId" IS NULL` : Prisma.empty;
+}
+
+/**
+ * «قائمة الدخل حسب الموقع»: Σ (debit − credit) per account and per journal-line branch over [from, to] (posted, the
+ * year-end CLOSING entry excluded). One aggregate; the key "" is «غير محدد» (no branch).
+ */
+async function netByAccountAndBranch(from: Date, to: Date): Promise<Map<string, Map<string, Decimal>>> {
+  const rows = await prisma.$queryRaw<{ accountId: string; branchId: string | null; v: Prisma.Decimal }[]>`
+    SELECT l."accountId", l."branchId", coalesce(sum(l."debit" - l."credit"), 0) AS v
+      FROM "JournalEntryLine" l JOIN "JournalEntry" j ON j."id" = l."journalEntryId"
+     WHERE ${POSTED} AND j."entryDate" >= ${from} AND j."entryDate" <= ${endOf(to)} AND j."type"::text <> 'CLOSING'
+     GROUP BY l."accountId", l."branchId"`;
+  const out = new Map<string, Map<string, Decimal>>();
+  for (const r of rows) {
+    const m = out.get(r.accountId) ?? new Map<string, Decimal>();
+    m.set(r.branchId ?? "", new Decimal(String(r.v)));
+    out.set(r.accountId, m);
+  }
+  return out;
 }
 
 export type StatementLine = { accountId: string; code: string; name: string; nameEn: string; amounts: string[]; group: ReportGroup };
@@ -181,10 +210,46 @@ function section(key: ReportGroup, accounts: Map<string, AccountInfo & { group: 
 
 // ── income statement ───────────────────────────────────────────────────────────────────────────────────────────
 
-export async function incomeStatement(current: Range, compare: Range | null) {
+export async function incomeStatement(current: Range, compare: Range | null, opts: { branches?: BranchFilter } = {}) {
   const ranges = [current, ...(compare ? [compare] : [])].map((r) => ({ from: r.from, to: r.to, excludeTypes: ["CLOSING"] }));
-  const [accounts, net] = await Promise.all([loadAccountInfo(), netByAccount(ranges)]);
-  const n = ranges.length;
+  const [accounts, net] = await Promise.all([loadAccountInfo(), netByAccount(ranges, { branches: opts.branches ?? null })]);
+  return plFrom(accounts, net, ranges.length, [current, ...(compare ? [compare] : [])].map((r) => ({ from: dayText(r.from), to: dayText(r.to), label: r.label })), !!compare);
+}
+
+/**
+ * «قائمة الدخل حسب الموقع» (BATCH22 WP-B): one column per location (active branches, and any branch that carries lines
+ * in the range), then «غير محدد» (lines with no location), then «الإجمالي». Every journal line falls in exactly one
+ * location column, so the columns add up to the total, and the total IS the company income statement for the range
+ * (the same aggregate, unfiltered). The balance sheet is not split (AR, VAT and equity are company-level).
+ */
+export async function incomeStatementByLocation(range: Range) {
+  const [accounts, byBranch, branches] = await Promise.all([
+    loadAccountInfo(), netByAccountAndBranch(range.from, range.to),
+    prisma.finBranch.findMany({ orderBy: { code: "asc" }, select: { id: true, code: true, nameAr: true, nameEn: true, active: true } }),
+  ]);
+  const used = new Set<string>();
+  for (const m of byBranch.values()) for (const k of m.keys()) used.add(k);
+  // A branch id with lines but no branch row (the ledger line has no foreign key) still gets its own column, so the
+  // location columns always add up to the total.
+  const known = new Set(branches.map((b) => b.id));
+  const cols = [...branches.filter((b) => b.active || used.has(b.id)),
+    ...[...used].filter((k) => k && !known.has(k)).map((id) => ({ id, code: id, nameAr: id, nameEn: id, active: false }))];
+  const keys = [...cols.map((b) => b.id), ""];
+  const net = new Map<string, Decimal[]>();
+  for (const [acc, m] of byBranch) {
+    const v = keys.map((k) => m.get(k) ?? ZERO);
+    net.set(acc, [...v, v.reduce((s, x) => s.plus(x), ZERO)]);
+  }
+  const from = dayText(range.from), to = dayText(range.to);
+  const columns = [
+    ...cols.map((b) => ({ from, to, label: b.nameAr ?? b.nameEn, labelEn: b.nameEn, branchId: b.id as string | null, kind: "branch" as const })),
+    { from, to, label: "غير محدد", labelEn: "Unassigned", branchId: null, kind: "unassigned" as const },
+    { from, to, label: "الإجمالي", labelEn: "Total", branchId: null, kind: "total" as const },
+  ];
+  return { ...plFrom(accounts, net, columns.length, columns), layout: "byLocation" as const };
+}
+
+function plFrom<C>(accounts: Map<string, AccountInfo & { group: ReportGroup }>, net: Map<string, Decimal[]>, n: number, columns: C[], compare = false) {
   const revenue = section("REVENUE", accounts, net, n, -1);
   const cos = section("COST_OF_SALES", accounts, net, n, 1);
   const opex = section("OPERATING_EXPENSE", accounts, net, n, 1);
@@ -197,7 +262,7 @@ export async function incomeStatement(current: Range, compare: Range | null) {
   const netProfit = col((i) => beforeZakat[i].minus(zakat.raw[i]));
   const strip = ({ raw: _raw, ...s }: StatementSection & { raw: Decimal[] }) => s; // eslint-disable-line @typescript-eslint/no-unused-vars
   return {
-    columns: [current, ...(compare ? [compare] : [])].map((r) => ({ from: dayText(r.from), to: dayText(r.to), label: r.label })),
+    columns,
     sections: [revenue, cos, opex, other, zakat].map(strip),
     totals: {
       revenue: revenue.raw.map(fix2), costOfSales: cos.raw.map(fix2), grossProfit: gross.map(fix2), grossMarginPct: gross.map((g, i) => pct(g, revenue.raw[i])),

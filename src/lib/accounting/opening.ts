@@ -11,6 +11,8 @@ import { refuse } from "./refusals";
 import { setAuditContext, type AuditContext } from "./audit";
 import { checkDimensions, checkLineAccount, loadAccounts, postEntry, resolveRoles, PARTY_TYPES, type PartyType, type NormalLine, type PostingLineInput } from "./posting-engine";
 import { getSettings } from "./setup";
+import { faOpeningPreview } from "./fixed-assets/opening";
+import { opsRefuse } from "./ops/refusals";
 
 export type OpeningLineInput = { accountId: string; debit?: string | null; credit?: string | null; partyType?: string | null; partyId?: string | null; branchId?: string | null; costCenterId?: string | null; description?: string | null };
 
@@ -166,6 +168,13 @@ export async function postOpening(ctx: AuditContext) {
     if (!st.accountingActive || !st.goLiveDate) throw refuse("NOT_ACTIVE");
     const grid = await tx.openingBalanceLine.findMany({ orderBy: { lineNo: "asc" } });
     if (!grid.length) throw refuse("OPENING_EMPTY");
+    // Batch 22 WP-G: with a live Qoyod import, the grid must carry the register's opening as it stands — an import or an
+    // undo after «تطبيق على الأرصدة الافتتاحية» would otherwise post an opening that differs from the register (the
+    // pre-flight's check 47 fails after posting). The opening tool writes it again in one click.
+    if (await tx.fixedAssetImport.count({ where: { revertedAt: null } })) {
+      const fa = await faOpeningPreview(tx);
+      if (!fa.inGrid) throw opsRefuse("FA_OPENING_NOT_APPLIED");
+    }
     await resolveRoles(tx, ["OPENING_BALANCE_EQUITY"]);
     const d = grid.reduce((x, l) => x.plus(l.debit), ZERO);
     const c = grid.reduce((x, l) => x.plus(l.credit), ZERO);

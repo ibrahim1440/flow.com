@@ -9,18 +9,19 @@ import { prisma } from "@/lib/db";
 import { shortfallSettings } from "@/lib/accounting/ops/supplier-claims";
 import { isSimpleMode } from "@/lib/simple-mode";
 import { purchaseCan, purchaseSaveGate, shortfallLossGate } from "@/lib/purchases/gates";
+import { branchFilterOf } from "@/lib/accounting/locations";
 
 /**
  * Phase 2 — «الفواتير», the purchases screen's default tab: the purchase invoices (status, supplier, period, search),
  * the counts per status, and what the viewer may do (the AP read gate).
- *   GET  ?status=&supplierId=&from=&to=&q=     the list (+ `can`, the SoD setting, `viewer`)
+ *   GET  ?status=&supplierId=&from=&to=&q=&kind=SIMPLE&branches=     the list (+ `can`, the SoD setting, `viewer`)
  *   POST { …invoice, action: draft | receive | post }   «حفظ كمسودة» / «حفظ واستلام» / «حفظ واستلام واعتماد»
  */
 export async function GET(request: Request) {
   const { user, error } = await requireApRead();
   if (error) return error;
   try {
-    const r = await listInvoices({ status: qp(request, "status"), supplierId: qp(request, "supplierId"), from: qp(request, "from"), to: qp(request, "to"), q: qp(request, "q") });
+    const r = await listInvoices({ status: qp(request, "status"), supplierId: qp(request, "supplierId"), from: qp(request, "from"), to: qp(request, "to"), q: qp(request, "q"), branches: branchFilterOf(request), kind: qp(request, "kind") });
     const sod = await sodPolicy();
     // «نقص من المورد»: the weight tolerance and the abandonment's VAT rule (the form states both).
     const shortfall = await shortfallSettings(prisma);

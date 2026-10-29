@@ -527,10 +527,15 @@ model Order {
   collectionEvents CollectionEvent[]
   salesCollections SalesCollection[]
 
+  /// «الموقع» (20261125090000_location_dimension): the location (FinBranch) — NULL «غير محدد».
+  branchId String?
+  branch   FinBranch? @relation("OrderBranch", fields: [branchId], references: [id], onDelete: Restrict)
+
   @@index([createdAt])
   @@index([customerId, createdAt])
   @@index([status])
   @@index([ownerId])
+  @@index([branchId])
 }
 
 model OrderItem {
@@ -1915,7 +1920,12 @@ model StockLocation {
   roasters         Roaster[]
   stations         Station[]
 
+  /// «الموقع» (20261125090000_location_dimension): the branch (profit centre) this site belongs to; NULL for TRANSIT (CHECK).
+  finBranchId String?
+  finBranch   FinBranch? @relation("StockLocationBranch", fields: [finBranchId], references: [id], onDelete: Restrict)
+
   @@index([isActive, sortOrder])
+  @@index([finBranchId])
 }
 
 /// The quantity of one green lot (GREEN_BEAN) or one material (MATERIAL) at one location. Σ over the locations = the
@@ -2723,6 +2733,9 @@ model Account {
   deferralSchedulePls       DeferralSchedule[]    @relation("DeferralSchedulePl")
   deferralScheduleReclasses DeferralSchedule[]    @relation("DeferralScheduleReclass")
   deferralScheduleCancels   DeferralSchedule[]    @relation("DeferralScheduleCancel")
+  /// «سند قبض» / «سندات الموردين» (20261127090000_customer_receipts): the deposit / paid-from account of a voucher.
+  collectionDeposits        SalesCollection[]     @relation("CollectionDepositAccount")
+  supplierPaymentsFrom      SupplierPayment[]     @relation("SupplierPaymentPaidFrom")
 
   @@index([type])
   @@index([parentId])
@@ -4031,8 +4044,10 @@ model SalesCollection {
 
   /// What the money is against. The opportunity is required — commission is owed on a
   /// deal — and the accepted quotation is what the amounts are checked against.
-  opportunityId String
-  opportunity   Opportunity @relation(fields: [opportunityId], references: [id])
+  /// NULL only for a receipt the accountant recorded against an invoice with no deal (source ACCOUNTANT,
+  /// 20261127090000_customer_receipts; SalesCollection_source_check).
+  opportunityId String?
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
   quoteId       String?
   quote         Quote?      @relation(fields: [quoteId], references: [id])
   orderId       String?
@@ -4088,13 +4103,42 @@ model SalesCollection {
   /// Sales invoicing A2 (additive, relation field only): how this receipt was applied to invoices.
   arApplications ArApplication[]
 
+  /// «سند قبض» (20261127090000_customer_receipts, BATCH22 WP-D). SALES = recorded by Sales against a deal (commission);
+  /// ACCOUNTANT = recorded by the accountant against an issued invoice whose customer has no open deal (no commission,
+  /// a second person confirms unless the SoD setting allows self-approval — then sodBypass).
+  source               String          @default("SALES")
+  invoiceId            String?
+  invoice              SalesInvoice?   @relation("CollectionInvoice", fields: [invoiceId], references: [id], onDelete: Restrict)
+  /// RCT-YYYY-NNNNNN — given by the database at confirmation (sales_collection_receipt_guard), gapless, never changed.
+  receiptNumber        String?         @unique
+  /// The cash / bank / card-clearing account the money went to (chosen at confirmation; frozen once decided).
+  depositAccountId     String?
+  depositAccount       Account?        @relation("CollectionDepositAccount", fields: [depositAccountId], references: [id], onDelete: Restrict)
+  receiptMemo          String?
+  /// RETURN_FOR_CORRECTION on a REJECTED row = «إعادة للمندوب للتصحيح».
+  decisionReasonCode   String?
+  /// «نسخ وتصحيح»: the returned collection this one corrects (one correction per row).
+  replacesCollectionId String?         @unique
+  replacesCollection   SalesCollection? @relation("CollectionCorrection", fields: [replacesCollectionId], references: [id], onDelete: NoAction)
+  correctedBy          SalesCollection? @relation("CollectionCorrection")
+  sodBypass            Boolean         @default(false)
+  // WP-B hook (qf-loc, 20261125090000_location_dimension): branchId «الموقع» is added there, not here.
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  /// «الموقع» (20261125090000_location_dimension): the location (FinBranch) — NULL «غير محدد».
+  branchId String?
+  branch   FinBranch? @relation("SalesCollectionBranch", fields: [branchId], references: [id], onDelete: Restrict)
 
   @@unique([submittedById, idempotencyKey])
   @@index([opportunityId, status])
   @@index([status, submittedAt])
   @@index([submittedById, submittedAt])
+  @@index([branchId])
+  @@index([invoiceId])
+  @@index([depositAccountId])
+  @@index([source, status])
 }
 
 /// Proof that the money arrived: a transfer screenshot, a deposit slip, a receipt.
@@ -4384,6 +4428,14 @@ model FinBranch {
 
   /// «الأصول الثابتة»: the assets located at this branch.
   fixedAssets FixedAsset[]
+
+  /// «الموقع» (20261125090000_location_dimension): the sites mapped to this branch and the documents located at it.
+  stockLocations   StockLocation[]   @relation("StockLocationBranch")
+  salesInvoices    SalesInvoice[]    @relation("SalesInvoiceBranch")
+  orders           Order[]           @relation("OrderBranch")
+  salesCollections SalesCollection[] @relation("SalesCollectionBranch")
+  supplierInvoices SupplierInvoice[] @relation("SupplierInvoiceBranch")
+  supplierPayments SupplierPayment[] @relation("SupplierPaymentBranch")
 }
 
 /// Which branches a finance user without `all_branches` may read and write.
@@ -7345,12 +7397,25 @@ model SalesInvoice {
   /// one document per (channel, external order) — a second request for the same order returns the first.
   channel            String?
   externalOrderRef   String?
+  // ── «طلب فاتورة ضريبية» (20261126090000_invoice_requests): Sales requests, the accountant issues. A DRAFT is in the
+  // accountant's queue while requestedAt is set (CHECK: only on a DRAFT, with its requester). Cleared at issue / cancel /
+  // withdraw / return; requestedById stays (the issue notifies the requester).
+  requestedAt        DateTime?
+  requestedById      String?
+  requestNote        String?
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
 
   lines              SalesInvoiceLine[]
   applications       ArApplication[]    @relation("ArTarget")
   creditApplications ArApplication[]    @relation("ArCreditSource")
+  requestEvents      SalesInvoiceRequestEvent[]
+
+  /// «الموقع» (20261125090000_location_dimension): the location (FinBranch) — NULL «غير محدد».
+  branchId String?
+  branch   FinBranch? @relation("SalesInvoiceBranch", fields: [branchId], references: [id], onDelete: Restrict)
+  /// «سند قبض» of an invoice with no deal (20261127090000_customer_receipts, source ACCOUNTANT).
+  accountantReceipts SalesCollection[]  @relation("CollectionInvoice")
 
   @@unique([tenantId, number])
   @@unique([tenantId, channel, externalOrderRef])
@@ -7359,6 +7424,26 @@ model SalesInvoice {
   @@index([originalInvoiceId])
   @@index([kind, status, createdAt])
   @@index([status, issueDate])
+  @@index([branchId])
+  @@index([status, requestedAt])
+}
+
+/// «طلب فاتورة ضريبية» — the request history of a draft (append-only: sinv_request_event_guard; audited).
+/// REQUESTED | WITHDRAWN | RETURNED (reasonCode PRICE | QTY | CUSTOMER_DATA | DUPLICATE | OTHER + reason ≥ 10) |
+/// EDITED_BY_ACCOUNTANT (diff: the compliance fields changed) | ISSUED | CANCELLED.
+model SalesInvoiceRequestEvent {
+  id         String       @id @default(cuid())
+  tenantId   String       @default("hiqbah")
+  invoiceId  String
+  invoice    SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  kind       String
+  actorId    String
+  reasonCode String?
+  reason     String?
+  diff       Json?
+  at         DateTime     @default(now())
+
+  @@index([invoiceId, at])
 }
 
 model SalesInvoiceLine {
@@ -7393,12 +7478,24 @@ model SalesInvoiceLine {
   lineNet             Decimal            @db.Decimal(18, 2)
   lineTax             Decimal            @db.Decimal(18, 2)
   lineTotal           Decimal            @db.Decimal(18, 2)
+  /// «شامل؟» (20261202090000_inclusive_entry): typed VAT-inclusive; unitPrice is the net the server derived from
+  /// enteredGrossUnitPrice (round half-up, 2 dp — SalesInvoiceLine_inclusive_check). Kept for audit.
+  priceIncludesVat    Boolean            @default(false)
+  enteredGrossUnitPrice Decimal?         @db.Decimal(18, 2)
+  /// «بيع أصل ثابت» (20261128090000_fa_sale_invoice): ITEM | FIXED_ASSET_SALE (CHECK). A sale line names the asset it sells
+  /// and the disposal it will make (SALE | SCRAP); its net posts to FA_DISPOSAL_CLEARING, which the disposal clears.
+  kind                String             @default("ITEM")
+  fixedAssetId        String?
+  fixedAsset          FixedAsset?        @relation(fields: [fixedAssetId], references: [id], onDelete: Restrict)
+  disposalKind        String?
+  disposals           FixedAssetDisposal[]
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
 
   @@index([invoiceId, position])
   @@index([orderItemId])
   @@index([originalLineId])
+  @@index([fixedAssetId])
 }
 
 /// One gapless counter per (tenant, series), advanced by the database inside the issue transaction.
@@ -7608,6 +7705,14 @@ model SupplierInvoice {
   createdAt              DateTime       @default(now())
   updatedAt              DateTime       @updatedAt
 
+  /// «فواتير بسيطة» (20261130090000_simple_purchase): STANDARD | SIMPLE (CHECK) — a simple expense invoice is this same
+  /// document (same numbering, posting and AP) with expense lines only (the service's rules).
+  kind            String  @default("STANDARD")
+  /// The one-off vendor of «مورد نقدي متنوع» (supplier sup_misc_cash): its name (required there — trigger
+  /// supplier_invoice_vendor_check) and VAT number (15 digits, 3…3 — CHECK); NULL on any other supplier's invoice.
+  vendorName      String?
+  vendorVatNumber String?
+
   lines               SupplierInvoiceLine[]
   allocations         SupplierPaymentAllocation[]
   claims              SupplierClaim[]
@@ -7616,9 +7721,15 @@ model SupplierInvoice {
   fixedAssets         FixedAsset[]
   fixedAssetAdditions FixedAssetAddition[]
 
+  /// «الموقع» (20261125090000_location_dimension): the location (FinBranch) — NULL «غير محدد».
+  branchId String?
+  branch   FinBranch? @relation("SupplierInvoiceBranch", fields: [branchId], references: [id], onDelete: Restrict)
+
   @@index([supplierId, status])
   @@index([status, dueDate])
+  @@index([kind, status])
   @@index([receivingLocationId])
+  @@index([branchId])
 }
 
 /// GRN: matched to one receipt (PurchaseRecord) — Dr GRNI at the receipt's value, the difference is a price
@@ -7671,6 +7782,10 @@ model SupplierInvoiceLine {
   shortfallReason        String?
   /// LOSS lines: the input VAT on the shortfall reversed at posting (the abandonment's VAT setting); NULL otherwise.
   shortfallVatReversed   Decimal?             @db.Decimal(18, 2)
+  /// «شامل؟» (20261202090000_inclusive_entry): the supplier's gross typed from the paper; net = round(G ÷ (1 + r)), VAT =
+  /// G − net (±0.01 to match the paper). gross = grossEntered (SupplierInvoiceLine_inclusive_check).
+  priceIncludesVat       Boolean              @default(false)
+  grossEntered           Decimal?             @db.Decimal(18, 2)
   claim                  SupplierClaim?
   /// «الأصول الثابتة»: the assets / additions capitalised from this EXPENSE line.
   fixedAssets            FixedAsset[]
@@ -7805,6 +7920,11 @@ model SupplierPayment {
   /// POSTED | VOIDED
   status         String    @default("POSTED")
   journalEntryId String?
+  /// «الحساب» (paid from; 20261127090000_customer_receipts): a postable cash / bank account; posting credits it
+  /// instead of the method's role account. Set at record time, never changed (supplier_payment_account_guard).
+  paidFromAccountId String?
+  paidFromAccount   Account? @relation("SupplierPaymentPaidFrom", fields: [paidFromAccountId], references: [id], onDelete: Restrict)
+  // WP-B hook (qf-loc): branchId «الموقع» is added by 20261125090000_location_dimension.
   createdBy      String
   voidedBy       String?
   voidedAt       DateTime?
@@ -7814,7 +7934,13 @@ model SupplierPayment {
 
   allocations SupplierPaymentAllocation[]
 
+  /// «الموقع» (20261125090000_location_dimension): the location (FinBranch) — NULL «غير محدد».
+  branchId String?
+  branch   FinBranch? @relation("SupplierPaymentBranch", fields: [branchId], references: [id], onDelete: Restrict)
+
   @@index([supplierId, paymentDate])
+  @@index([branchId])
+  @@index([paidFromAccountId])
 }
 
 model SupplierPaymentAllocation {
@@ -9139,6 +9265,10 @@ model RecurringSchedule {
   nextRunDate        DateTime?        @db.Date
   /// ACTIVE | PAUSED | COMPLETED | CANCELLED
   status             String           @default("ACTIVE")
+  /// READ-ONLY MIRROR (autoPost and the three autoPost* columns) of the live StandingAuthorisation (RECURRING_AUTOPOST,
+  /// scopeId = this schedule), kept for one release (20261124090000_standing_authorisation): written by the database only
+  /// (standing_auth_mirror); any other write is refused (recurring_autopost_mirror_guard). Grant / revoke through
+  /// lib/accounting/standing-auth.ts.
   autoPost           Boolean          @default(false)
   autoPostApprovedBy String?
   autoPostApprovedAt DateTime?
@@ -9175,6 +9305,9 @@ model RecurringRun {
   autoPost          Boolean           @default(false)
   autoPostBy        String?
   autoPostSodBypass Boolean           @default(false)
+  /// The StandingAuthorisation the snapshot's auto-post is made under (frozen with the snapshot; NULL = no auto-post).
+  standingAuthorisationId String?
+  standingAuthorisation StandingAuthorisation? @relation(fields: [standingAuthorisationId], references: [id], onDelete: Restrict)
   journalEntryId    String?
   salesInvoiceId    String?
   /// NOT_ACTIVE | BEFORE_GO_LIVE
@@ -9192,6 +9325,34 @@ model RecurringRun {
   @@index([status])
   @@index([journalEntryId])
   @@index([salesInvoiceId])
+  @@index([standingAuthorisationId])
+}
+
+/// «التفويض الدائم» (20261124090000_standing_authorisation; council ruling 2): who authorised the scheduler to post a
+/// register's entries. RECURRING_AUTOPOST (scopeId = the recurring journal) | DEFERRAL_RECOGNITION | DEPRECIATION
+/// (register-wide, scopeId NULL). One live row per (register, scope) — partial unique index on revokedAt IS NULL
+/// (StandingAuthorisation_live_key, in the migration). Never deleted; revoked once (standing_auth_guard); audited.
+model StandingAuthorisation {
+  id               String                      @id @default(cuid())
+  tenantId         String                      @default("hiqbah")
+  register         String
+  scopeId          String?
+  authorisedBy     String
+  authorisedAt     DateTime                    @default(now())
+  /// A self-authorisation the SoD setting allowed: carried to every entry posted under it; listed in «استثناءات فصل المهام».
+  sodBypass        Boolean                     @default(false)
+  revokedAt        DateTime?
+  revokedBy        String?
+  /// Why: a person's withdrawal, an edit / cancel of the schedule, or the runner's 'RIGHTS_LAPSED: …'.
+  revokeReason     String?
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @default(now()) @updatedAt
+  recurringRuns    RecurringRun[]
+  deferralRuns     DeferralRun[]
+  depreciationRuns FixedAssetDepreciationRun[]
+
+  @@index([register, scopeId])
+  @@index([authorisedBy])
 }
 
 // ── «الأصول الثابتة» (20261121090000_fixed_assets; IAS 16 / IFRS for SMEs s.17 — src/lib/accounting/fixed-assets) ──
@@ -9273,6 +9434,9 @@ model FixedAsset {
   notes                   String?
   /// «غير مخصوم من وعاء الزكاة» per asset: NULL = the category's zakatDeductible; true / false overrides it.
   zakatDeductible         Boolean?
+  /// «استيراد من قيود» (20261129090000_fa_import): the import batch an OPENING asset came from.
+  importId                String?
+  import                  FixedAssetImport?            @relation(fields: [importId], references: [id], onDelete: Restrict)
   /// The lease end of a leasehold improvement (frozen once out of DRAFT).
   leaseEndDate            DateTime?                    @db.Date
   accumulatedDepreciation Decimal                      @default(0) @db.Decimal(18, 2)
@@ -9293,10 +9457,34 @@ model FixedAsset {
   depreciationLines       FixedAssetDepreciationLine[]
   additions               FixedAssetAddition[]
   disposals               FixedAssetDisposal[]
+  saleLines               SalesInvoiceLine[]
 
   @@index([categoryId, status])
   @@index([status])
   @@index([supplierInvoiceLineId])
+  @@index([importId])
+}
+
+/// «استيراد الأصول الثابتة من قيود» (20261129090000_fa_import): one CSV file imported as OPENING assets. One live
+/// import per checksum (a partial unique index WHERE revertedAt IS NULL): the same file again replays the first import.
+/// Never deleted; only the undo (revertedAt / revertedBy) is written, once — before the opening is posted.
+model FixedAssetImport {
+  id               String       @id
+  tenantId         String       @default("hiqbah")
+  fileName         String
+  checksum         String
+  rows             Int
+  totalCost        Decimal      @db.Decimal(18, 2)
+  totalAccumulated Decimal      @db.Decimal(18, 2)
+  /// [{ accountId, cost, accumulated }] typed from Qoyod's trial balance (the tie-out), or null.
+  controlTotals    Json?
+  createdBy        String
+  createdAt        DateTime     @default(now())
+  revertedAt       DateTime?
+  revertedBy       String?
+  assets           FixedAsset[]
+
+  @@index([createdAt])
 }
 
 /// The fixed-asset sub-ledger (append-only): each row a cost / accumulated-depreciation delta and its GL state.
@@ -9349,8 +9537,12 @@ model FixedAssetDepreciationRun {
   createdAt       DateTime                     @default(now())
   updatedAt       DateTime                     @default(now()) @updatedAt
   lines           FixedAssetDepreciationLine[]
+  /// The StandingAuthorisation (DEPRECIATION) the scheduler made it under; NULL = a person ran it.
+  standingAuthorisationId String?
+  standingAuthorisation StandingAuthorisation? @relation(fields: [standingAuthorisationId], references: [id], onDelete: Restrict)
 
   @@index([year, month])
+  @@index([standingAuthorisationId])
 }
 
 /// One asset's depreciation in a run; one live line per (asset, month) (FixedAssetDepreciationLine_asset_period_live_key).
@@ -9446,6 +9638,9 @@ model FixedAssetDisposal {
   cancelledAt         DateTime?
   cancelledBy         String?
   cancelReason        String?
+  /// WP-F: the issued sales-invoice line «بيع أصل ثابت» the proceeds come from (one live disposal per line).
+  salesInvoiceLineId  String?
+  salesInvoiceLine    SalesInvoiceLine? @relation(fields: [salesInvoiceLineId], references: [id], onDelete: Restrict)
   createdBy           String
   createdAt           DateTime   @default(now())
   updatedAt           DateTime   @default(now()) @updatedAt
@@ -9639,6 +9834,10 @@ model DeferralRun {
   reverseReason   String?
   reversalEntryId String?
   lines           DeferralScheduleLine[]
+  /// The StandingAuthorisation (DEFERRAL_RECOGNITION) the scheduler made it under; NULL = a person ran it.
+  standingAuthorisationId String?
+  standingAuthorisation StandingAuthorisation? @relation(fields: [standingAuthorisationId], references: [id], onDelete: Restrict)
 
   @@index([periodStart])
+  @@index([standingAuthorisationId])
 }

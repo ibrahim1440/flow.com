@@ -9,9 +9,10 @@
 //   3. the RIGHTS are re-checked as of now (council F2): a preparer who was deactivated or no longer holds
 //      accounting › recurring or journal_create (and sales › invoices_create for an invoice) → the schedule is PAUSED with the reason,
 //      the accounting admins are notified, nothing is made; an auto-post authoriser who was deactivated, is no longer an
-//      admin or no longer holds accounting › journal_post → auto-post is WITHDRAWN (drafts only from now), logged with
-//      the reason and notified — this run makes a draft;
-//   4. the run SNAPSHOTS what it makes (the schedule's payload) and its auto-post authorisation; the document is made
+//      admin or no longer holds accounting › recurring / journal_post → the schedule's StandingAuthorisation is REVOKED
+//      ('RIGHTS_LAPSED: …', batch 22 WP-A — drafts only from now), logged with the reason and notified — this run makes a draft;
+//   4. the run SNAPSHOTS what it makes (the schedule's payload) and its auto-post authorisation — the live
+//      StandingAuthorisation (RECURRING_AUTOPOST) it runs under, recorded on the run (standingAuthorisationId); the document is made
 //      from that snapshot in the SAME transaction as the run row and the move to the next occurrence:
 //        · a JOURNAL — before go-live (accounting not activated, or the date before the go-live date) the run is
 //          RECORDED as SKIPPED and nothing is made (the posting engine's skipped-entry pattern); otherwise a manual
@@ -27,6 +28,7 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
+import { liveAuthorisation, revokeLiveIn, rightsProblem, RIGHTS_LAPSED, type StandingRow } from "../standing-auth";
 import { effectivePermissions } from "@/lib/notifications/recipients";
 import { notify } from "@/lib/notifications/notify";
 import { setAuditContext, type AuditContext } from "../audit";
@@ -47,7 +49,7 @@ export type Outcome =
   | { status: "CREATED" | "POSTED"; journalEntryId?: string; salesInvoiceId?: string }
   | { status: "SKIPPED"; skipReason: "NOT_ACTIVE" | "BEFORE_GO_LIVE" };
 /** What a run makes, frozen at its first attempt. */
-export type Snapshot = { payload: Payload; autoPost: boolean; autoPostBy: string | null; autoPostSodBypass: boolean };
+export type Snapshot = { payload: Payload; autoPost: boolean; autoPostBy: string | null; autoPostSodBypass: boolean; standingAuthorisationId: string | null };
 
 export const SYSTEM_ACTOR = "system:recurring";
 
@@ -88,36 +90,56 @@ export async function preparerProblem(tx: Tx, s: Pick<Schedule, "createdBy" | "k
   return null;
 }
 
-/** The auto-post authoriser may still post: active, the admin role (the posting gate) and accounting › journal_post. */
+/** The auto-post authoriser may still post: active, the admin role (the posting gate), accounting › recurring and
+ *  journal_post (the StandingAuthorisation rule, lib/accounting/standing-auth.ts). */
 export async function authoriserProblem(tx: Tx, id: string | null): Promise<string | null> {
-  const p = await loadPerson(tx, id);
-  if (!p) return "the authoriser's account no longer exists";
-  if (!p.active) return "the authoriser's account is deactivated";
-  if (p.role !== "admin") return "the authoriser no longer has the admin role (the posting gate)";
-  if (!holds(p, "accounting", "journal_post")) return "the authoriser no longer holds accounting › journal_post";
-  return null;
+  return rightsProblem(tx, "RECURRING_AUTOPOST", id);
 }
 
-const attention = (tx: Tx, s: Schedule, state: "PAUSED" | "AUTOPOST_WITHDRAWN", due: string) =>
+const attention = (tx: Tx, s: Schedule, state: "PAUSED" | "AUTOPOST_WITHDRAWN", due: string, authoriser: string | null = s.autoPostApprovedBy) =>
   notify(tx, {
     event: "finance.recurring_attention", dedupeKey: `${s.id}:${state}:${due}`, actorId: SYSTEM_ACTOR,
-    facts: { state, ref: refText(s.refNo), name: s.name, scheduleId: s.id }, people: { preparer: s.createdBy, authoriser: s.autoPostApprovedBy },
+    facts: { state, ref: refText(s.refNo), name: s.name, scheduleId: s.id }, people: { preparer: s.createdBy, authoriser },
     entity: { type: "RecurringSchedule", id: s.id },
   });
 
-/** Withdraw auto-post (the authoriser lost the right), logged with the reason and notified. Returns the schedule as it now is. */
-async function withdrawAutoPost(tx: Tx, s: Schedule, why: string, due: string, ctx: AuditContext): Promise<Schedule> {
+/** Withdraw auto-post (the authoriser lost the right): the StandingAuthorisation is REVOKED ('RIGHTS_LAPSED: …'), logged
+ *  with the reason and notified. Returns the schedule as it now is (the database cleared its mirror). */
+async function withdrawAutoPost(tx: Tx, s: Schedule, live: StandingRow, why: string, due: string, ctx: AuditContext): Promise<Schedule> {
   await setAuditContext(tx, { ...ctx, reason: `auto-post withdrawn by the runner: ${why}`.slice(0, 500) });
-  const next = await tx.recurringSchedule.update({ where: { id: s.id }, data: { autoPost: false, autoPostApprovedBy: null, autoPostApprovedAt: null, autoPostSodBypass: false } });
-  await attention(tx, s, "AUTOPOST_WITHDRAWN", due);
+  await revokeLiveIn(tx, "RECURRING_AUTOPOST", s.id, SYSTEM_ACTOR, `${RIGHTS_LAPSED}: ${why}`);
+  const next = await tx.recurringSchedule.findUniqueOrThrow({ where: { id: s.id } });
+  await attention(tx, s, "AUTOPOST_WITHDRAWN", due, live.authorisedBy);
   await setAuditContext(tx, { ...ctx, reason: ctx.reason ?? "recurring run" });
   return next;
+}
+
+/** The schedule's live auto-post authorisation as of now: revoked here (and null) when its authoriser lost the right. */
+async function liveAutoPost(tx: Tx, s: Schedule, due: string, ctx: AuditContext): Promise<{ s: Schedule; live: StandingRow | null }> {
+  const live = await liveAuthorisation(tx, "RECURRING_AUTOPOST", s.id);
+  if (!live) return { s, live: null };
+  const noAuth = await authoriserProblem(tx, live.authorisedBy);
+  if (!noAuth) return { s, live };
+  return { s: await withdrawAutoPost(tx, s, live, noAuth, due, ctx), live: null };
+}
+
+/** A snapshot's auto-post still stands (a retry, council F3): its authoriser may post, and its authorisation was not
+ *  revoked because the rights lapsed. An authorisation revoked by an edit or a person does not stop the snapshot. */
+async function snapshotAuthorised(tx: Tx, snap: Snapshot): Promise<boolean> {
+  if (!snap.autoPost) return false;
+  if (await authoriserProblem(tx, snap.autoPostBy)) return false;
+  if (!snap.standingAuthorisationId) return false;
+  const a = await tx.standingAuthorisation.findUnique({ where: { id: snap.standingAuthorisationId }, select: { revokeReason: true } });
+  return !!a && !a.revokeReason?.startsWith(RIGHTS_LAPSED);
 }
 
 // ── Making the document ──────────────────────────────────────────────────────────────────────────
 
 const memo = (s: Schedule, p: JournalPayload, due: string) => `${p.description || s.name} — ${refText(s.refNo)} (${due})`.slice(0, 500);
-export const snapshotOf = (s: Schedule): Snapshot => ({ payload: s.payload as unknown as Payload, autoPost: s.autoPost && !!s.autoPostApprovedBy, autoPostBy: s.autoPost ? s.autoPostApprovedBy : null, autoPostSodBypass: s.autoPost && s.autoPostSodBypass });
+/** What a first attempt makes: the schedule's payload, under its live StandingAuthorisation (none = a draft). */
+export const snapshotOf = (s: Schedule, live: StandingRow | null): Snapshot => ({
+  payload: s.payload as unknown as Payload, autoPost: !!live, autoPostBy: live?.authorisedBy ?? null, autoPostSodBypass: !!live?.sodBypass, standingAuthorisationId: live?.id ?? null,
+});
 
 /** Make the occurrence's document from its SNAPSHOT inside `tx` (the caller holds the schedule's lock). */
 export async function makeDocument(tx: Tx, s: Schedule, snap: Snapshot, due: string, ctx: AuditContext): Promise<Outcome> {
@@ -160,8 +182,8 @@ const runData = (o: Outcome) => ({
   status: o.status, journalEntryId: "journalEntryId" in o ? o.journalEntryId ?? null : null, salesInvoiceId: "salesInvoiceId" in o ? o.salesInvoiceId ?? null : null,
   skipReason: o.status === "SKIPPED" ? o.skipReason : null, errorCode: null, errorMessage: null,
 });
-const snapData = (snap: Snapshot) => ({ payload: snap.payload as unknown as Prisma.InputJsonValue, autoPost: snap.autoPost, autoPostBy: snap.autoPostBy, autoPostSodBypass: snap.autoPostSodBypass });
-const snapOfRun = (r: { payload: unknown; autoPost: boolean; autoPostBy: string | null; autoPostSodBypass: boolean }): Snapshot => ({ payload: r.payload as Payload, autoPost: r.autoPost, autoPostBy: r.autoPostBy, autoPostSodBypass: r.autoPostSodBypass });
+const snapData = (snap: Snapshot) => ({ payload: snap.payload as unknown as Prisma.InputJsonValue, autoPost: snap.autoPost, autoPostBy: snap.autoPostBy, autoPostSodBypass: snap.autoPostSodBypass, standingAuthorisationId: snap.standingAuthorisationId });
+const snapOfRun = (r: { payload: unknown; autoPost: boolean; autoPostBy: string | null; autoPostSodBypass: boolean; standingAuthorisationId: string | null }): Snapshot => ({ payload: r.payload as Payload, autoPost: r.autoPost, autoPostBy: r.autoPostBy, autoPostSodBypass: r.autoPostSodBypass, standingAuthorisationId: r.standingAuthorisationId });
 
 export type StepResult = { state: "busy" | "not-due" | "already" | "paused" | "CREATED" | "POSTED" | "SKIPPED" | "FAILED"; scheduleId: string; dueDate?: string; runId?: string; error?: { code: string; ar: string; en: string } };
 
@@ -189,12 +211,10 @@ export async function runNext(scheduleId: string, today: string, trigger: RunTri
         await attention(tx, s, "PAUSED", due);
         return { state: "paused" as const, scheduleId, dueDate: due };
       }
-      if (s.autoPost) {
-        const noAuth = await authoriserProblem(tx, s.autoPostApprovedBy);
-        if (noAuth) s = await withdrawAutoPost(tx, s, noAuth, due, ctx);
-      }
-      snap = prior ? snapOfRun(prior) : snapshotOf(s);
-      if (prior && snap.autoPost && (await authoriserProblem(tx, snap.autoPostBy))) snap = { ...snap, autoPost: false, autoPostSodBypass: false };
+      const auth = await liveAutoPost(tx, s, due, ctx);
+      s = auth.s;
+      snap = prior ? snapOfRun(prior) : snapshotOf(s, auth.live);
+      if (prior && snap.autoPost && !(await snapshotAuthorised(tx, snap))) snap = { ...snap, autoPost: false, autoPostSodBypass: false };
       const o = await makeDocument(tx, s, snap, due, ctx);
       const run = prior
         ? await tx.recurringRun.update({ where: { id: prior.id }, data: { ...runData(o), autoPost: snap.autoPost, autoPostSodBypass: snap.autoPostSodBypass, attempts: prior.attempts + 1, trigger, actorId: ctx.actorId } })
@@ -214,13 +234,12 @@ export async function runNext(scheduleId: string, today: string, trigger: RunTri
       const prior = await tx.recurringRun.findUnique({ where: { scheduleId_dueDate: { scheduleId, dueDate: parseBusinessDay(dueDay) } } });
       if (prior && prior.status !== "FAILED") return { state: "already" as const, scheduleId, dueDate: dueDay, runId: prior.id };
       // The withdrawal of the first attempt rolled back with it: withdraw again (logged, notified) when still due.
-      if (s.autoPost) {
-        const noAuth = await authoriserProblem(tx, s.autoPostApprovedBy);
-        if (noAuth) s = await withdrawAutoPost(tx, s, noAuth, dueDay, { ...ctx, reason: `recurring run failed: ${err.code}` });
-      }
+      const auth = await liveAutoPost(tx, s, dueDay, { ...ctx, reason: `recurring run failed: ${err.code}` });
+      s = auth.s;
       const fail = { status: "FAILED", journalEntryId: null, salesInvoiceId: null, skipReason: null, errorCode: err.code, errorMessage: errorText(err), trigger, actorId: ctx.actorId };
       // The snapshot of the first attempt: what this run would have made (the schedule as it was when it was due).
-      const snapshot = firstSnap ?? snapshotOf(s);
+      // (Its authorisation was revoked just now — the rights lapsed meanwhile: the snapshot is withdrawn, a retry makes a draft.)
+      const snapshot = firstSnap ? (firstSnap.autoPost && !auth.live ? { ...firstSnap, autoPost: false, autoPostSodBypass: false } : firstSnap) : snapshotOf(s, auth.live);
       const run = prior
         ? await tx.recurringRun.update({ where: { id: prior.id }, data: { ...fail, attempts: prior.attempts + 1 } })
         : await tx.recurringRun.create({ data: { scheduleId, occurrenceIndex: k, dueDate: parseBusinessDay(dueDay), ...snapData(snapshot), ...fail } });
@@ -286,7 +305,7 @@ export async function retryRun(runId: string, ctx: AuditContext): Promise<StepRe
       const noPreparer = await preparerProblem(tx, s);
       if (noPreparer) throw refuse("RECURRING_PREPARER_RIGHTS", `(${noPreparer})`);
       let snap = snapOfRun(run);
-      if (snap.autoPost && (await authoriserProblem(tx, snap.autoPostBy))) snap = { ...snap, autoPost: false, autoPostSodBypass: false };
+      if (snap.autoPost && !(await snapshotAuthorised(tx, snap))) snap = { ...snap, autoPost: false, autoPostSodBypass: false };
       const o = await makeDocument(tx, s, snap, due, ctx);
       await tx.recurringRun.update({ where: { id: runId }, data: { ...runData(o), autoPost: snap.autoPost, autoPostSodBypass: snap.autoPostSodBypass, attempts: run.attempts + 1, trigger: "RETRY", actorId: ctx.actorId } });
       return { state: o.status, scheduleId: s.id, dueDate: due, runId };

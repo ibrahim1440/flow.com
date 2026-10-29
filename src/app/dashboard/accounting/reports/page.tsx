@@ -10,7 +10,8 @@ import { OpsLoading } from "@/components/ops/ui";
 import { Select } from "@/components/ui/Select";
 import { SOURCE_DOC, plain, sourceDocHref } from "@/lib/accounting/source-links";
 import { AcctShell, money, todayRiyadh, useApi, useLang, type Setup } from "../_ui/shell";
-import { BalanceSheet, CashFlow, IncomeStatement } from "../_ui/statements";
+import { BalanceSheet, CashFlow, IncomeByLocation, IncomeStatement } from "../_ui/statements";
+import { LocationFilter, branchesQuery } from "../_ui/locations";
 import { SodExceptions } from "../_ui/close";
 import { DateRange, FilterCard, useFilters, useTerm } from "@/components/chrome";
 import { useAccountantView } from "../_ui/qoyod-pages";
@@ -34,13 +35,18 @@ function Reports() {
   const to = sp.get("to") ?? todayRiyadh();
   const accountId = sp.get("accountId") ?? "";
   const zero = sp.get("zero") === "1";
+  // «الموقع» (BATCH22 WP-B): the location filter of the trial balance and the income statement (branches=a,b,none), and
+  // the income statement by location (one column per location + «غير محدد» + «الإجمالي»).
+  const branches = (sp.get("branches") ?? "").split(",").filter(Boolean);
+  const bq = branchesQuery(branches);
+  const byLocation = sp.get("by") === "location";
   const go = (patch: Record<string, string | null>) => {
     const p = new URLSearchParams(sp.toString());
     for (const [k, v] of Object.entries(patch)) { if (v === null || v === "") p.delete(k); else p.set(k, v); }
     router.replace(`${path}?${p}`);
   };
   const setup = useApi<Setup>("/api/accounting/setup");
-  const tb = useApi<Tb>(view === "tb" ? `/api/accounting/trial-balance?from=${from}&to=${to}${zero ? "&includeZero=1" : ""}` : null);
+  const tb = useApi<Tb>(view === "tb" ? `/api/accounting/trial-balance?from=${from}&to=${to}${zero ? "&includeZero=1" : ""}${bq ? `&${bq}` : ""}` : null);
   const gl = useApi<Gl>(view === "ledger" && accountId ? `/api/accounting/ledger?accountId=${encodeURIComponent(accountId)}&from=${from}&to=${to}` : null);
   const coa = useApi<Acc[]>(view === "ledger" ? "/api/accounting/coa" : null);
   // A5 statements: a month / quarter / year (or a custom range) with a comparative; the balance sheet as of a day.
@@ -51,13 +57,13 @@ function Reports() {
   const asOf = sp.get("asOf") ?? todayRiyadh();
   const compareAsOf = sp.get("compareAsOf") ?? `${Number(asOf.slice(0, 4)) - 1}-12-31`;
   const periodQuery = kind === "custom" ? `from=${from}&to=${to}` : `kind=${kind}&year=${year}&n=${n}`;
-  const stQuery = view === "income" ? `${periodQuery}&compare=${compare}` : view === "balance" ? `asOf=${asOf}&compareAsOf=${compareAsOf}` : periodQuery;
+  const stQuery = view === "income" ? `${periodQuery}&compare=${compare}${bq && !byLocation ? `&${bq}` : ""}` : view === "balance" ? `asOf=${asOf}&compareAsOf=${compareAsOf}` : periodQuery;
   const api: Partial<Record<View, string>> = { income: "/api/accounting/statements/income", balance: "/api/accounting/statements/balance-sheet", cashflow: "/api/accounting/statements/cash-flow" };
-  const csv = useMemo(() => (view === "tb" ? `/api/accounting/trial-balance?from=${from}&to=${to}&format=csv`
+  const csv = useMemo(() => (view === "tb" ? `/api/accounting/trial-balance?from=${from}&to=${to}&format=csv${bq ? `&${bq}` : ""}`
     : view === "ledger" ? (accountId ? `/api/accounting/ledger?accountId=${encodeURIComponent(accountId)}&from=${from}&to=${to}&format=csv` : null)
     : view === "sod" ? `/api/accounting/sod/exceptions?from=${from}&to=${to}&format=csv`
-    : `${api[view]}?${stQuery}&format=csv`), [view, from, to, accountId, stQuery]); // eslint-disable-line react-hooks/exhaustive-deps
-  const print = view === "income" || view === "balance" || view === "cashflow" ? `/dashboard/accounting/reports/print?report=${view}&${stQuery}` : null;
+    : `${api[view]}?${stQuery}${view === "income" && byLocation ? "&by=location" : ""}&format=csv`), [view, from, to, accountId, stQuery, bq, byLocation]); // eslint-disable-line react-hooks/exhaustive-deps
+  const print = (view === "income" && !byLocation) || view === "balance" || view === "cashflow" ? `/dashboard/accounting/reports/print?report=${view}&${stQuery}` : null;
   const name = (a: { nameAr: string | null; nameEn: string }) => L(a.nameAr ?? a.nameEn, a.nameEn);
   // Qoyod parity (accountant workspace): the page reads «كل التقارير»; the reports, ranges and figures are unchanged.
   // The range row becomes Qoyod's filter card («تصفية» applies it to the address, «إعادة تعيين» back to this year).
@@ -91,7 +97,7 @@ function Reports() {
             <Select value={n} onChange={(e) => go({ n: e.target.value })} data-testid="st-n">
               {Array.from({ length: kind === "month" ? 12 : 4 }, (_, i) => <option key={i} value={String(i + 1)}>{kind === "month" ? String(i + 1).padStart(2, "0") : `Q${i + 1}`}</option>)}
             </Select></label> : null}
-          {view === "income" ? <label className="hr-field"><span className="hr-label">{L("المقارنة", "Compare with")}</span>
+          {view === "income" && !byLocation ? <label className="hr-field"><span className="hr-label">{L("المقارنة", "Compare with")}</span>
             <Select value={compare} onChange={(e) => go({ compare: e.target.value })} data-testid="st-compare">
               <option value="prior">{L("الفترة السابقة", "The previous period")}</option><option value="lastYear">{L("الفترة نفسها من العام الماضي", "The same period last year")}</option><option value="none">{L("بلا مقارنة", "None")}</option>
             </Select></label> : null}
@@ -122,7 +128,14 @@ function Reports() {
           view === "tb" ? <label className="hr-field"><span className="hr-label"><input type="checkbox" checked={zero} onChange={(e) => go({ zero: e.target.checked ? "1" : null })} /> {L("إظهار الحسابات الصفرية", "Show zero accounts")}</span></label> : null
         )}
       </div>) : null}
-      {view === "income" ? <IncomeStatement query={stQuery} /> : view === "balance" ? <BalanceSheet query={stQuery} /> : view === "cashflow" ? <CashFlow query={stQuery} /> : null}
+      {view === "tb" || view === "income" ? (
+        <div className="acct-row" data-testid="location-row">
+          <LocationFilter value={branches} onChange={(v) => go({ branches: v.join(",") || null })} testId="report-locations" />
+          {view === "income" ? <label className="hr-field"><span className="hr-label"><input type="checkbox" checked={byLocation} onChange={(e) => go({ by: e.target.checked ? "location" : null })} data-testid="pl-by-location" /> {L("حسب الموقع (عمود لكل موقع)", "By location (a column per location)")}</span></label> : null}
+          {view === "tb" && branches.length ? <span className="acct-hint">{L("ميزان موقع بعينه قد لا يتوازن: الذمم والضريبة على مستوى المنشأة.", "A single location's trial balance need not balance: AR and VAT are company-level.")}</span> : null}
+        </div>
+      ) : null}
+      {view === "income" ? (byLocation ? <IncomeByLocation query={stQuery} /> : <IncomeStatement query={stQuery} />) : view === "balance" ? <BalanceSheet query={stQuery} /> : view === "cashflow" ? <CashFlow query={stQuery} /> : null}
       {view === "sod" ? <SodExceptions from={from} to={to} /> : view !== "tb" && view !== "ledger" ? null : view === "tb" ? (
         tb.error ? <p role="alert" className="hr-err">{tb.error}</p> : !tb.data ? <OpsLoading /> : (
           <>

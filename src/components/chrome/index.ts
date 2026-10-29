@@ -6,4 +6,4 @@ export {
 } from "./PageChrome";
 export { useWorkspaceMode, ACCOUNTANT_HOME, FULL_HOME, type WorkspaceMode } from "@/components/shell/workspace-mode";
 export { useTerm } from "./terms";
-export { SIMPLE_BILL_HREF, SIMPLE_BILL_PARAM } from "@/lib/nav/accountant-contract";
+export { SIMPLE_BILL_HREF, SIMPLE_BILL_LIST_HREF, SIMPLE_BILL_PARAM } from "@/lib/nav/accountant-contract";

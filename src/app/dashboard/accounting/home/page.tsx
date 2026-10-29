@@ -31,7 +31,7 @@ type Home = {
   } | null;
   activity: { at: string; kind: string; ref: string; amount: string | null; href: string | null; party: string | null }[];
   /** «قوالب التأجيل»'s backlog (council F6): an alert when months before the current one wait for recognition. */
-  deferrals: { overdueCount: number; overdueAmount: string; stoppedAt: { month: string; reason: "PERIOD_CLOSED" | "PERIOD_SOFT_CLOSED" | "NOT_RUN" } | null; scheduler?: "NOT_AUTHORISED" } | null;
+  deferrals: { overdueCount: number; overdueAmount: string; stoppedAt: { month: string; reason: "PERIOD_CLOSED" | "PERIOD_SOFT_CLOSED" | "NOT_RUN" } | null; scheduler?: "NOT_AUTHORISED" | "AUTHORISED" } | null;
 };
 
 // GET /api/accounting/recurring/widget (src/lib/accounting/recurring/widget.ts; APIS.md, qc-recurring).
@@ -99,8 +99,8 @@ export default function AccountantHome() {
         <DateRange from={f.draft.from} to={f.draft.to} onChange={({ from, to }) => f.setDraft({ ...f.draft, from, to })} testId="home-range" />
       </FilterCard>
       <p className="qa-scope" data-testid="home-scope">
-        {L("الأرصدة المفتوحة كما في نهاية الفترة · الرسوم الشهرية لأشهر الفترة (آخر 12 شهرًا) · فلتر الموقع يطبَّق على حالة المخزون (الفواتير والقيود لا تحمل موقعًا).",
-          "Open balances as at the end of the period · monthly charts for the period's months (last 12) · the location filter applies to the stock status (invoices and journals carry no location).")}
+        {L("الأرصدة المفتوحة كما في نهاية الفترة · الرسوم الشهرية لأشهر الفترة (آخر 12 شهرًا) · فلتر الموقع يطبَّق على حالة المخزون وعلى الإيرادات والمصروفات (حسب فرع الموقع)؛ أرصدة العملاء والموردين على مستوى المنشأة.",
+          "Open balances as at the end of the period · monthly charts for the period's months (last 12) · the location filter applies to the stock status and to revenue and expenses (by the site's branch); customer and supplier balances are company-wide.")}
       </p>
       {r.error ? <p role="alert" className="hr-err">{r.error}</p> : null}
       {!d ? <OpsLoading rows={6} /> : (
@@ -165,7 +165,8 @@ function DeferralAlert({ b }: { b: NonNullable<Home["deferrals"]> }) {
     <p role="alert" className="hr-err" data-testid="w-deferral-backlog">
       {L(`قوالب التأجيل: ${b.overdueCount} ${b.overdueCount === 1 ? "شهر مستحق" : "أشهر مستحقة"} (${money(b.overdueAmount)} ر.س)`, `Deferral templates: ${b.overdueCount} month(s) due (SAR ${money(b.overdueAmount)})`)}
       {b.stoppedAt ? L(`، متوقف عند ${b.stoppedAt.month} (${why})`, `, stopped at ${b.stoppedAt.month} (${why})`) : null}
-      {b.scheduler === "NOT_AUTHORISED" ? <span data-testid="w-deferral-scheduler">{L(" · لا تعترف الجدولة التلقائية بالمؤجلات (NOT_AUTHORISED): شغّلها من «تشغيل المستحق الآن»", " · The scheduler does not recognise deferrals (NOT_AUTHORISED): run them with «Run due now»")}</span> : null}
+      {b.scheduler === "NOT_AUTHORISED" ? <span data-testid="w-deferral-scheduler">{L(" · لا تعترف الجدولة التلقائية بالمؤجلات (NOT_AUTHORISED): شغّلها من «تشغيل المستحق الآن»", " · The scheduler does not recognise deferrals (NOT_AUTHORISED): run them with «Run due now»")}</span>
+        : b.scheduler === "AUTHORISED" ? <span data-testid="w-deferral-scheduler">{L(" · الجدولة التلقائية مفوّضة بالاعتراف (تفويض دائم)", " · The scheduler is authorised to recognise them (standing authorisation)")}</span> : null}
       {" "}<Link href="/dashboard/accounting/deferrals">{L("قوالب التأجيل ←", "Deferral templates →")}</Link>
     </p>
   );

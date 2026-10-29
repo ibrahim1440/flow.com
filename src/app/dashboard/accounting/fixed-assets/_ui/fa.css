@@ -25,3 +25,18 @@
 .acct .fa-zakat { display: grid; gap: 4px; margin-top: 12px; padding: 12px 14px; border: 1px solid var(--hr-border-subtle); border-radius: var(--hr-r-md); background: var(--hr-surface); font-size: 13px; }
 .acct .fa-zakat strong { font-weight: 700; }
 .acct .fa-note { margin: 8px 0; padding: 8px 12px; border-radius: var(--hr-r-sm); border: 1px solid var(--hr-border-subtle); background: var(--hr-surface); font-size: 13px; }
+/* «بيع أصل ثابت» (BATCH 22 WP-F): the sale-line choice of the disposal dialog. */
+.fa-radio { display: flex; gap: 8px; align-items: center; min-height: 36px; font-size: 14px; flex-wrap: wrap; }
+.fa-radio input { width: 18px; height: 18px; }
+fieldset.fa-form { border: 1px solid var(--hr-border-strong); border-radius: var(--hr-r-md); padding: 8px 12px; margin: 0 0 12px; display: flex; flex-direction: column; gap: 4px; }
+
+/* «استيراد الأصول من قيود» (batch 22 WP-G). */
+.acct .faimp-steps { margin: 0; padding-inline-start: 20px; display: grid; gap: 6px; font-size: 14px; }
+.acct .faimp-steps .hr-btn { margin-inline-start: 8px; }
+.acct .faimp-warn { margin: 0; padding-inline-start: 18px; display: grid; gap: 4px; font-size: 13px; }
+.acct .faimp-h { margin: 4px 0 0; font-size: 16px; font-weight: 700; }
+.acct .faimp-risk { border: 1px solid var(--hr-danger); background: var(--hr-danger-tint); color: var(--hr-danger); border-radius: var(--hr-r-md); padding: 12px 14px; display: grid; gap: 6px; }
+.acct .faimp-risk p { margin: 0; color: var(--hr-text); }
+.acct .faimp-check { display: flex; gap: 8px; align-items: center; color: var(--hr-text); font-weight: 600; }
+.acct .hr-table tr.is-bad td { background: var(--hr-danger-tint); }
+.acct .hr-table td input.acct-amount { min-width: 110px; }

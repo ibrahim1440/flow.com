@@ -7,6 +7,7 @@ import { OpsLoading } from "@/components/ops/ui";
 import { Select } from "@/components/ui/Select";
 import { AcctShell, StatusTag, STATUS_AR, TYPE_AR, money, sourceLabel, useApi, useLang, type Setup } from "../_ui/shell";
 import { DateRange, FilterCard, Section, ListFooter, ListPageSize, useFilters, useTerm } from "@/components/chrome";
+import { LocationFilter } from "../_ui/locations";
 import { useAccountantView } from "../_ui/qoyod-pages";
 
 type Row = { id: string; ref: string | null; entryNo: number; entryDate: string; type: string; status: string; description: string | null; totalDebit: string; sourceModule: string; sourceType: string | null; sourceId: string | null; lineCount: number; sodBypass: boolean };
@@ -25,7 +26,7 @@ export default function JournalsPage() {
   const [to, setTo] = useState("");
   const [q, setQ] = useState("");
   const [skip, setSkip] = useState(0);
-  const f = useFilters({ from: "", to: "", status: "", type: "", q: "" });
+  const f = useFilters({ from: "", to: "", status: "", type: "", q: "", locations: [] as string[] });
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(15);
   const url = useMemo(() => {
@@ -36,6 +37,7 @@ export default function JournalsPage() {
     if (v.from) p.set("from", v.from);
     if (v.to) p.set("to", v.to);
     if (v.q.trim()) p.set("q", v.q.trim());
+    if (qoyod && f.applied.locations.length) p.set("branches", f.applied.locations.join(","));
     return `/api/accounting/journals?${p}`;
   }, [qoyod, f.applied, page, size, status, type, from, to, q, skip]);
   const list = useApi<List>(url);
@@ -61,6 +63,7 @@ export default function JournalsPage() {
             </Select></div>
           <div className="qc-field"><span className="qc-label">{L("بحث", "Search")}</span>
             <input className="hr-input" value={f.draft.q} onChange={(e) => f.set("q", e.target.value)} placeholder={L("الوصف أو رقم القيد أو المصدر", "Description, entry no. or source")} data-testid="journal-search" /></div>
+          <LocationFilter value={f.draft.locations} onChange={(v) => f.set("locations", v)} testId="journal-locations" />
         </FilterCard>
       ) : (
       <div className="acct-row">

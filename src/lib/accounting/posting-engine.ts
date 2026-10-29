@@ -74,6 +74,9 @@ export type PostEntryInput = {
   /** A5 segregation of duties: the poster also prepared the document and the setting allowed it — recorded on the
    *  entry (JournalEntry.sodBypass) for «استثناءات فصل المهام». Not part of the payload hash. */
   sodBypass?: boolean;
+  /** «الموقع» (BATCH22 WP-B): the document's location (FinBranch id), stamped on every line whose own `dims.branchId`
+   *  is unset — one header location per document (council Q-F1). A line that names its own branch keeps it. */
+  defaultBranchId?: string | null;
 };
 
 export type PostEntryResult =
@@ -109,7 +112,8 @@ function str(v: unknown, max: number): string | null {
  * exactly but the rounded ones do not, the residue (necessarily ≤ 0.005 per line) goes to the ROUNDING role.
  * Refuses: fewer than two lines, a line with both or neither side, a negative or zero amount, an unbalanced entry.
  */
-export function normaliseLines(lines: PostingLineInput[]): { lines: NormalLine[]; total: Decimal; rounding: Decimal } {
+export function normaliseLines(lines: PostingLineInput[], defaultBranchId: string | null = null): { lines: NormalLine[]; total: Decimal; rounding: Decimal } {
+  const fallbackBranch = str(defaultBranchId, 64);
   if (!Array.isArray(lines) || lines.length < 2) throw refuse("LINES_MIN");
   let rawD = ZERO, rawC = ZERO;
   const out: NormalLine[] = lines.map((l, i) => {
@@ -144,7 +148,7 @@ export function normaliseLines(lines: PostingLineInput[]): { lines: NormalLine[]
       debit: dr,
       credit: cr,
       description: str(l.description, 500),
-      dims: { branchId: str(dims.branchId, 64), costCenterId: str(dims.costCenterId, 64), partyType: party?.type ?? null, partyId: party?.id ?? null, itemType: item?.type ?? null, itemId: item?.id ?? null },
+      dims: { branchId: str(dims.branchId, 64) ?? fallbackBranch, costCenterId: str(dims.costCenterId, 64), partyType: party?.type ?? null, partyId: party?.id ?? null, itemType: item?.type ?? null, itemId: item?.id ?? null },
     };
   });
   if (!rawD.equals(rawC)) throw refuse("UNBALANCED", `(debit ${rawD.toFixed()} ≠ credit ${rawC.toFixed()})`);
@@ -157,7 +161,7 @@ export function normaliseLines(lines: PostingLineInput[]): { lines: NormalLine[]
       role: "ROUNDING", accountId: null,
       debit: diff.isNegative() ? diff.abs() : ZERO, credit: diff.isNegative() ? ZERO : diff,
       description: "فرق تقريب (نصف للأعلى، منزلتان)",
-      dims: { branchId: null, costCenterId: null, partyType: null, partyId: null, itemType: null, itemId: null },
+      dims: { branchId: fallbackBranch, costCenterId: null, partyType: null, partyId: null, itemType: null, itemId: null },
     });
   }
   const total = out.reduce((s, l) => s.plus(l.debit), ZERO);
@@ -290,7 +294,7 @@ export async function postEntry(tx: Tx, input: PostEntryInput): Promise<PostEntr
   const day = businessDay(input.date);
 
   // Validated before the switch is consulted: a malformed posting is a bug whether or not accounting is on.
-  const norm = normaliseLines(input.lines);
+  const norm = normaliseLines(input.lines, input.defaultBranchId ?? null);
 
   const state = await engineState(tx, day);
   if (!state.on) return { status: "skipped", reason: state.reason };

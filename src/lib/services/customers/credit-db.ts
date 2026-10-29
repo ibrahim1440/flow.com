@@ -95,8 +95,8 @@ export async function loadCreditFlags(db: Db, customerIds: string[], now: Date):
         opportunityId: q.opportunityId, dealTitle: q.opportunity.title, quoteId: q.id, quoteNumber: q.quoteNumber, revision: q.revision,
         at: q.acceptedAt ?? q.issuedAt ?? q.createdAt, grandTotal: new Decimal(q.grandTotal.toString()), firstDeliveryAt: firstDelivery.get(q.id) ?? null,
       })),
-      approved.filter((p) => deals.has(p.opportunityId)).map((p) => ({
-        id: p.id, opportunityId: p.opportunityId, at: p.collectedAt, amountGross: new Decimal(p.amountGross.toString()), method: p.paymentMethod, orderNumber: null, reference: null,
+      approved.filter((p) => !!p.opportunityId && deals.has(p.opportunityId)).map((p) => ({
+        id: p.id, opportunityId: p.opportunityId ?? "", at: p.collectedAt, amountGross: new Decimal(p.amountGross.toString()), method: p.paymentMethod, orderNumber: null, reference: null,
       })),
       { termsDays: c.paymentTermsDays, now },
     );

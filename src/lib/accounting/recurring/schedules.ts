@@ -7,8 +7,9 @@
 // authorisation — the authoriser approved those exact lines (council: a standing journal is approved as a whole).
 //
 // Auto-post (journals only): set by a holder of accounting › journal_post with a recent step-up (the route), recorded
-// with who and when; under the SoD setting the authoriser is not the schedule's preparer (SOD_SELF_APPROVAL), as for
-// a manual journal's approval. Invoices are always created as drafts: issuing (numbering, ZATCA signing, the entry) is
+// with who and when as a StandingAuthorisation (RECURRING_AUTOPOST, scopeId = the schedule — batch 22 WP-A; the
+// schedule's autoPost* columns are the database's read-only mirror of it); under the SoD setting the authoriser is not
+// the schedule's preparer (SOD_SELF_APPROVAL), as for a manual journal's approval. An edit or a cancel revokes it. Invoices are always created as drafts: issuing (numbering, ZATCA signing, the entry) is
 // a person's act.
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma, TX_OPTS } from "@/lib/db";
@@ -19,6 +20,7 @@ import { dayText, parseBusinessDay, riyadhDay, addDaysUtc } from "../dates";
 import { Decimal, ZERO, roundMoney } from "../money";
 import { sodDecision, sodPolicy } from "../sod";
 import { postingRef } from "../posting-engine";
+import { grantIn, revokeLiveIn } from "../standing-auth";
 import { applyTemplate, type AppliedLine } from "./template-math";
 import { applyRefusal, checkTemplateAccounts } from "./templates";
 import { firstIndexOnOrAfter, occurrenceDate, parseRule, upcoming, type ScheduleRule } from "./schedule";
@@ -160,7 +162,7 @@ export async function saveSchedule(input: ScheduleInput, id: string | null, ctx:
     const data = {
       name, description, kind, sourceType, templateId, sourceEntryId, sourceInvoiceId, totalAmount: total, payload: payload as unknown as Prisma.InputJsonValue,
       frequency: rule.frequency, interval: rule.interval, startDate: parseBusinessDay(rule.startDate), endDate: rule.endDate ? parseBusinessDay(rule.endDate) : null,
-      maxOccurrences: rule.maxOccurrences ?? null, updatedBy: ctx.actorId, autoPost: false, autoPostApprovedBy: null, autoPostApprovedAt: null, autoPostSodBypass: false,
+      maxOccurrences: rule.maxOccurrences ?? null, updatedBy: ctx.actorId,
     };
     if (!id) {
       // A new schedule starts at its first occurrence on / after the start date (a past start date is allowed: its past
@@ -181,6 +183,8 @@ export async function saveSchedule(input: ScheduleInput, id: string | null, ctx:
     const from = last ? [today, dayText(addDaysUtc(last.dueDate, 1))].sort()[1] : [today, rule.startDate].sort()[1];
     const pos = position(rule, from, 0);
     const status = pos.done ? "COMPLETED" : cur.status;
+    // Any edit withdraws the auto-post authorisation (the authoriser approved those exact lines).
+    await revokeLiveIn(tx, "RECURRING_AUTOPOST", id, ctx.actorId, "SCHEDULE_EDITED: the recurring transaction was edited");
     await tx.recurringSchedule.update({
       where: { id },
       data: { ...data, nextIndex: pos.nextIndex, nextRunDate: pos.nextRunDate, status, ...(status === "COMPLETED" ? { pausedAt: null, pausedBy: null, pauseReason: null } : {}) },
@@ -222,7 +226,8 @@ export async function cancelSchedule(id: string, ctx: AuditContext) {
     await setAuditContext(tx, ctx);
     const s = await lockSchedule(tx, id);
     if (s.status === "COMPLETED" || s.status === "CANCELLED") throw refuse("RECURRING_STATE");
-    await tx.recurringSchedule.update({ where: { id }, data: { status: "CANCELLED", nextRunDate: null, pausedAt: null, pausedBy: null, pauseReason: null, autoPost: false, autoPostSodBypass: false, updatedBy: ctx.actorId } });
+    await revokeLiveIn(tx, "RECURRING_AUTOPOST", id, ctx.actorId, "SCHEDULE_CANCELLED: the recurring transaction was cancelled");
+    await tx.recurringSchedule.update({ where: { id }, data: { status: "CANCELLED", nextRunDate: null, pausedAt: null, pausedBy: null, pauseReason: null, updatedBy: ctx.actorId } });
     return getSchedule(id, tx);
   }, TX_OPTS);
 }
@@ -244,9 +249,13 @@ export async function setAutoPost(id: string, on: boolean, ctx: AuditContext, ex
       const self = s.createdBy === ctx.actorId || s.updatedBy === ctx.actorId;
       if (self && !sodDecision(policy, "SELF_APPROVAL")) throw refuse("SOD_SELF_APPROVAL");
       if (!sodDecision(policy, "APPROVER_POSTS")) throw refuse("SOD_APPROVER_POSTS");
-      await tx.recurringSchedule.update({ where: { id }, data: { autoPost: true, autoPostApprovedBy: ctx.actorId, autoPostApprovedAt: new Date(), autoPostSodBypass: self } });
+      // A re-authorisation replaces the live one (revoked, then granted anew: the history keeps both).
+      await revokeLiveIn(tx, "RECURRING_AUTOPOST", id, ctx.actorId, "REPLACED: auto-post authorised again");
+      await grantIn(tx, { register: "RECURRING_AUTOPOST", scopeId: id, sodBypass: self }, ctx.actorId);
+      await tx.recurringSchedule.update({ where: { id }, data: { updatedAt: new Date() } });
     } else {
-      await tx.recurringSchedule.update({ where: { id }, data: { autoPost: false, autoPostApprovedBy: null, autoPostApprovedAt: null, autoPostSodBypass: false, updatedBy: ctx.actorId } });
+      await revokeLiveIn(tx, "RECURRING_AUTOPOST", id, ctx.actorId, "WITHDRAWN: auto-post withdrawn");
+      await tx.recurringSchedule.update({ where: { id }, data: { updatedBy: ctx.actorId } });
     }
     return getSchedule(id, tx);
   }, TX_OPTS);

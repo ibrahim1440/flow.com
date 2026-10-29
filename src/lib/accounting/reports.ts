@@ -9,6 +9,7 @@ import { dayText, parseBusinessDay } from "./dates";
 import { refuse } from "./refusals";
 import { postingRef } from "./posting-engine";
 import { sourceDocHref } from "./source-links";
+import type { BranchFilter } from "./locations";
 
 const POSTED = Prisma.sql`j."status" IN ('POSTED', 'REVERSED')`;
 
@@ -31,7 +32,17 @@ export type TbRow = {
   openingDebit: string; openingCredit: string; periodDebit: string; periodCredit: string; closingDebit: string; closingCredit: string;
 };
 
-export async function trialBalance(from: Date, to: Date, opts: { includeZero?: boolean } = {}) {
+/** «الموقع»: the journal-line condition of a location filter (shared with the statements). */
+function lineBranch(f: BranchFilter | undefined): Prisma.Sql {
+  if (!f) return Prisma.empty;
+  const ids = f.ids.length ? Prisma.sql`l."branchId" IN (${Prisma.join(f.ids)})` : null;
+  if (ids && f.unassigned) return Prisma.sql` AND (${ids} OR l."branchId" IS NULL)`;
+  if (ids) return Prisma.sql` AND ${ids}`;
+  return f.unassigned ? Prisma.sql` AND l."branchId" IS NULL` : Prisma.empty;
+}
+
+/** `branches`: the lines of those locations only (a location's trial balance need not balance: AR / VAT are company-level). */
+export async function trialBalance(from: Date, to: Date, opts: { includeZero?: boolean; branches?: BranchFilter } = {}) {
   const rows = await prisma.$queryRaw<{ id: string; code: string; nameAr: string | null; nameEn: string; type: string; normalBalance: string; parentId: string | null; allowPosting: boolean; od: Prisma.Decimal; oc: Prisma.Decimal; pd: Prisma.Decimal; pc: Prisma.Decimal }[]>`
     WITH mv AS (
       SELECT l."accountId",
@@ -40,7 +51,7 @@ export async function trialBalance(from: Date, to: Date, opts: { includeZero?: b
              coalesce(sum(l."debit")  FILTER (WHERE j."entryDate" >= ${from}), 0) AS pd,
              coalesce(sum(l."credit") FILTER (WHERE j."entryDate" >= ${from}), 0) AS pc
         FROM "JournalEntryLine" l JOIN "JournalEntry" j ON j."id" = l."journalEntryId"
-       WHERE ${POSTED} AND j."entryDate" <= ${to}
+       WHERE ${POSTED} AND j."entryDate" <= ${to}${lineBranch(opts.branches)}
        GROUP BY l."accountId")
     SELECT a."id", a."code", a."nameAr", a."nameEn", a."type"::text AS type, a."normalBalance", a."parentId", a."allowPosting",
            coalesce(mv.od, 0) AS od, coalesce(mv.oc, 0) AS oc, coalesce(mv.pd, 0) AS pd, coalesce(mv.pc, 0) AS pc

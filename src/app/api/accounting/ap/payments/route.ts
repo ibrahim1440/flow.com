@@ -4,12 +4,13 @@ import { acctError, jsonBody, qp } from "@/lib/accounting/http";
 import { auditFromRequest } from "@/lib/accounting/audit";
 import { requireApRead } from "@/lib/accounting/ops/http";
 import { listPayments, recordPayment, type PaymentInput } from "@/lib/accounting/ops/ap";
+import { branchFilterOf } from "@/lib/accounting/locations";
 
 export async function GET(request: Request) {
   const { error } = await requireApRead();
   if (error) return error;
   try {
-    return NextResponse.json(await listPayments({ supplierId: qp(request, "supplierId") }));
+    return NextResponse.json(await listPayments({ supplierId: qp(request, "supplierId"), branches: branchFilterOf(request) }));
   } catch (err) {
     return acctError(err);
   }

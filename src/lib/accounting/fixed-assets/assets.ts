@@ -191,7 +191,7 @@ export async function listAssets(q: { status?: string | null; categoryId?: strin
 }
 
 export async function getAsset(id: string) {
-  const a = await prisma.fixedAsset.findUnique({ where: { id }, include: { ...ASSET_INCLUDE, events: { orderBy: [{ eventDate: "asc" }, { createdAt: "asc" }] }, additions: { orderBy: { createdAt: "asc" } }, disposals: { orderBy: { createdAt: "asc" } }, depreciationLines: { orderBy: { toDate: "asc" }, include: { run: { select: { number: true, status: true } } } } } });
+  const a = await prisma.fixedAsset.findUnique({ where: { id }, include: { ...ASSET_INCLUDE, events: { orderBy: [{ eventDate: "asc" }, { createdAt: "asc" }] }, additions: { orderBy: { createdAt: "asc" } }, disposals: { orderBy: { createdAt: "asc" }, include: { salesInvoiceLine: { select: { invoiceId: true, invoice: { select: { number: true } } } } } }, depreciationLines: { orderBy: { toDate: "asc" }, include: { run: { select: { number: true, status: true } } } } } });
   if (!a) throw opsRefuse("FA_NOT_FOUND");
   const custodian = a.custodianEmployeeId ? await prisma.hrEmployee.findUnique({ where: { id: a.custodianEmployeeId }, select: { id: true, fullNameAr: true, fullNameEn: true, employeeNo: true } }).catch(() => null) : null;
   const live = (a.status === "ACTIVE" || a.status === "FULLY_DEPRECIATED") && a.inServiceDate && a.basisDate;
@@ -202,7 +202,7 @@ export async function getAsset(id: string) {
   return {
     ...assetView(a), custodian, accounts,
     events: a.events.map((e) => ({ id: e.id, kind: e.kind, eventDate: dayText(e.eventDate), costDelta: f2(e.costDelta), accumDelta: f2(e.accumDelta), sourceType: e.sourceType, sourceId: e.sourceId, reversal: !!e.reversesEventId, glState: e.glState, journalEntryId: e.journalEntryId })),
-    additions: a.additions.map(additionView), disposals: a.disposals.map(disposalView),
+    additions: a.additions.map(additionView), disposals: a.disposals.map((x) => ({ ...disposalView(x), saleInvoice: x.salesInvoiceLine ? { id: x.salesInvoiceLine.invoiceId, number: x.salesInvoiceLine.invoice.number } : null })),
     depreciation: a.depreciationLines.map((l) => ({ id: l.id, runId: l.runId, run: l.run.number, runStatus: l.run.status, periodKey: l.periodKey, fromDate: dayText(l.fromDate), toDate: dayText(l.toDate), amount: f2(l.amount), voided: !!l.voidedAt })),
     projection: sched,
   };
@@ -226,7 +226,7 @@ function zakatFlag(v: unknown, cur: boolean | null = null): boolean | null {
   throw opsRefuse("FA_INVALID", "zakatDeductible is null, true or false.", "معالجة الزكاة: حسب التصنيف أو مخصوم أو غير مخصوم.");
 }
 
-async function cleanAsset(tx: Tx, input: AssetInput, cur: { categoryId: string } | null) {
+export async function cleanAsset(tx: Tx, input: AssetInput, cur: { categoryId: string } | null) {
   const nameAr = str(input?.nameAr, 200);
   if (!nameAr) throw opsRefuse("FA_INVALID", "nameAr.", "اسم الأصل مطلوب.");
   const categoryId = str(input.categoryId, 64) ?? cur?.categoryId ?? null;
@@ -334,57 +334,62 @@ export async function deleteDraft(id: string, ctx: AuditContext) {
 export async function activateAsset(id: string, ctx: AuditContext) {
   return prisma.$transaction(async (tx) => {
     await setAuditContext(tx, ctx);
-    const a = await lockAsset(tx, id);
-    if (a.status !== "DRAFT") throw opsRefuse("FA_STATE");
-    if (!a.inServiceDate) throw opsRefuse("FA_INVALID", "The in-service date is required.", "تاريخ بدء الاستخدام مطلوب.");
-    const cost = dec(a.cost), residual = dec(a.residualValue);
-    if (!cost.gt(0)) throw opsRefuse("FA_INVALID", "cost is above zero.", "التكلفة أكبر من صفر.");
-    if (a.inServiceDate > riyadhDay()) throw opsRefuse("FA_FUTURE_DATE");
-    checkLeaseTerm(a.category, a.usefulLifeMonths, a.inServiceDate, a.leaseEndDate);
-    const now = new Date();
-    if (a.acquisitionKind === "OPENING") {
-      const st = await tx.accountingSettings.findUnique({ where: { id: "singleton" }, select: { goLiveDate: true, openingEntryId: true } });
-      if (!st?.goLiveDate) throw opsRefuse("FA_GO_LIVE_REQUIRED");
-      assertGoLiveFirstOfMonth(st.goLiveDate);
-      if (st.openingEntryId) throw opsRefuse("FA_OPENING_FINAL");
-      if (!(a.inServiceDate < st.goLiveDate) || !(a.acquisitionDate < st.goLiveDate)) throw opsRefuse("FA_INVALID", "An opening asset was acquired and in service before the go-live date.", "الأصل الافتتاحي اقتُني وبدأ استخدامه قبل تاريخ بدء المحاسبة.");
-      const accum = dec(a.openingAccumulated ?? 0);
-      const eve = addDaysUtc(st.goLiveDate, -1);
-      await tx.fixedAssetEvent.create({ data: { assetId: id, kind: "OPENING", eventDate: eve, costDelta: cost, accumDelta: accum, sourceType: "ASSET", sourceId: id, glState: "OPENING", createdBy: ctx.actorId } });
-      await tx.fixedAsset.update({ where: { id }, data: {
-        status: isFullyDepreciated(cost, residual, accum) ? "FULLY_DEPRECIATED" : "ACTIVE", accumulatedDepreciation: accum, depreciatedThrough: eve, basisDate: st.goLiveDate, basisAccumulated: accum,
-        activatedAt: now, activatedBy: ctx.actorId, updatedBy: ctx.actorId } });
-      return { asset: assetView(await tx.fixedAsset.findUniqueOrThrow({ where: { id }, include: ASSET_INCLUDE })), glState: "OPENING", journalEntryId: null };
-    }
-    const d = a.acquisitionDate;
-    await assertPeriodOpen(tx, d);
-    const fate = await glFate(tx, d);
-    const acc = await categoryAccounts(tx, a.category, fate.post ? ["cost"] : []);
-    let counter = "", post = fate.post;
-    if (a.acquisitionKind === "MANUAL") {
-      // The paying account is needed when the entry posts; before go-live (no chart yet) the opening carries the asset.
-      if (post || a.counterAccountId) counter = await checkCounterAccount(tx, a.counterAccountId);
-    } else {
-      const inv = await invoiceLineFor(tx, a.supplierInvoiceLineId, cost, d);
-      counter = inv.accountId;
-      // The invoice never reached the books (skipped before go-live): neither does its reclass — the opening carries the asset.
-      if (!inv.inBooks) { if (fate.openingPosted) throw opsRefuse("FA_INVOICE_NOT_IN_BOOKS"); post = false; }
-    }
-    let journalEntryId: string | null = null;
-    if (post) {
-      // The asset's preparer (who entered or last edited the draft) activating it: the segregation-of-duties setting.
-      const sodBypass = await faSod(tx, ctx.actorId, [a.createdBy, a.updatedBy]);
-      const r = await postEntry(tx, {
-        source: SRC("FIXED_ASSET", id, "ACQUIRED"), date: dayText(d), createdBy: ctx.actorId, sodBypass, memo: `اقتناء أصل ثابت ${a.code} · ${a.nameAr}`,
-        lines: lines([line(acc.cost, "debit", cost, `تكلفة الأصل ${a.code}`, a.branchId), line(counter, "credit", cost, a.acquisitionKind === "MANUAL" ? `سداد الأصل ${a.code}` : `رسملة مصروف إلى الأصل ${a.code}`, a.branchId)]),
-      });
-      if (r.status === "posted") journalEntryId = r.entryId;
-    }
-    await tx.fixedAssetEvent.create({ data: { assetId: id, kind: "ACQUISITION", eventDate: d, costDelta: cost, sourceType: "ASSET", sourceId: id, glState: journalEntryId ? "POSTED" : "SKIPPED", journalEntryId, createdBy: ctx.actorId } });
-    await tx.fixedAsset.update({ where: { id }, data: {
-      status: isFullyDepreciated(cost, residual, ZERO) ? "FULLY_DEPRECIATED" : "ACTIVE", basisDate: a.inServiceDate, basisAccumulated: ZERO, activatedAt: now, activatedBy: ctx.actorId, updatedBy: ctx.actorId } });
-    return { asset: assetView(await tx.fixedAsset.findUniqueOrThrow({ where: { id }, include: ASSET_INCLUDE })), glState: journalEntryId ? "POSTED" : "SKIPPED", journalEntryId };
+    return activateAssetIn(tx, id, ctx);
   }, TX_OPTS);
+}
+
+/** activateAsset inside the caller's transaction (its audit context set) — the Qoyod import activates each row so. */
+export async function activateAssetIn(tx: Tx, id: string, ctx: AuditContext) {
+  const a = await lockAsset(tx, id);
+  if (a.status !== "DRAFT") throw opsRefuse("FA_STATE");
+  if (!a.inServiceDate) throw opsRefuse("FA_INVALID", "The in-service date is required.", "تاريخ بدء الاستخدام مطلوب.");
+  const cost = dec(a.cost), residual = dec(a.residualValue);
+  if (!cost.gt(0)) throw opsRefuse("FA_INVALID", "cost is above zero.", "التكلفة أكبر من صفر.");
+  if (a.inServiceDate > riyadhDay()) throw opsRefuse("FA_FUTURE_DATE");
+  checkLeaseTerm(a.category, a.usefulLifeMonths, a.inServiceDate, a.leaseEndDate);
+  const now = new Date();
+  if (a.acquisitionKind === "OPENING") {
+    const st = await tx.accountingSettings.findUnique({ where: { id: "singleton" }, select: { goLiveDate: true, openingEntryId: true } });
+    if (!st?.goLiveDate) throw opsRefuse("FA_GO_LIVE_REQUIRED");
+    assertGoLiveFirstOfMonth(st.goLiveDate);
+    if (st.openingEntryId) throw opsRefuse("FA_OPENING_FINAL");
+    if (!(a.inServiceDate < st.goLiveDate) || !(a.acquisitionDate < st.goLiveDate)) throw opsRefuse("FA_INVALID", "An opening asset was acquired and in service before the go-live date.", "الأصل الافتتاحي اقتُني وبدأ استخدامه قبل تاريخ بدء المحاسبة.");
+    const accum = dec(a.openingAccumulated ?? 0);
+    const eve = addDaysUtc(st.goLiveDate, -1);
+    await tx.fixedAssetEvent.create({ data: { assetId: id, kind: "OPENING", eventDate: eve, costDelta: cost, accumDelta: accum, sourceType: "ASSET", sourceId: id, glState: "OPENING", createdBy: ctx.actorId } });
+    await tx.fixedAsset.update({ where: { id }, data: {
+      status: isFullyDepreciated(cost, residual, accum) ? "FULLY_DEPRECIATED" : "ACTIVE", accumulatedDepreciation: accum, depreciatedThrough: eve, basisDate: st.goLiveDate, basisAccumulated: accum,
+      activatedAt: now, activatedBy: ctx.actorId, updatedBy: ctx.actorId } });
+    return { asset: assetView(await tx.fixedAsset.findUniqueOrThrow({ where: { id }, include: ASSET_INCLUDE })), glState: "OPENING", journalEntryId: null };
+  }
+  const d = a.acquisitionDate;
+  await assertPeriodOpen(tx, d);
+  const fate = await glFate(tx, d);
+  const acc = await categoryAccounts(tx, a.category, fate.post ? ["cost"] : []);
+  let counter = "", post = fate.post;
+  if (a.acquisitionKind === "MANUAL") {
+    // The paying account is needed when the entry posts; before go-live (no chart yet) the opening carries the asset.
+    if (post || a.counterAccountId) counter = await checkCounterAccount(tx, a.counterAccountId);
+  } else {
+    const inv = await invoiceLineFor(tx, a.supplierInvoiceLineId, cost, d);
+    counter = inv.accountId;
+    // The invoice never reached the books (skipped before go-live): neither does its reclass — the opening carries the asset.
+    if (!inv.inBooks) { if (fate.openingPosted) throw opsRefuse("FA_INVOICE_NOT_IN_BOOKS"); post = false; }
+  }
+  let journalEntryId: string | null = null;
+  if (post) {
+    // The asset's preparer (who entered or last edited the draft) activating it: the segregation-of-duties setting.
+    const sodBypass = await faSod(tx, ctx.actorId, [a.createdBy, a.updatedBy]);
+    const r = await postEntry(tx, {
+      source: SRC("FIXED_ASSET", id, "ACQUIRED"), date: dayText(d), createdBy: ctx.actorId, sodBypass, memo: `اقتناء أصل ثابت ${a.code} · ${a.nameAr}`,
+      lines: lines([line(acc.cost, "debit", cost, `تكلفة الأصل ${a.code}`, a.branchId), line(counter, "credit", cost, a.acquisitionKind === "MANUAL" ? `سداد الأصل ${a.code}` : `رسملة مصروف إلى الأصل ${a.code}`, a.branchId)]),
+    });
+    if (r.status === "posted") journalEntryId = r.entryId;
+  }
+  await tx.fixedAssetEvent.create({ data: { assetId: id, kind: "ACQUISITION", eventDate: d, costDelta: cost, sourceType: "ASSET", sourceId: id, glState: journalEntryId ? "POSTED" : "SKIPPED", journalEntryId, createdBy: ctx.actorId } });
+  await tx.fixedAsset.update({ where: { id }, data: {
+    status: isFullyDepreciated(cost, residual, ZERO) ? "FULLY_DEPRECIATED" : "ACTIVE", basisDate: a.inServiceDate, basisAccumulated: ZERO, activatedAt: now, activatedBy: ctx.actorId, updatedBy: ctx.actorId } });
+  return { asset: assetView(await tx.fixedAsset.findUniqueOrThrow({ where: { id }, include: ASSET_INCLUDE })), glState: journalEntryId ? "POSTED" : "SKIPPED", journalEntryId };
 }
 
 // ─── Additions ────────────────────────────────────────────────────────────────────────────────
@@ -509,14 +514,23 @@ export async function listAdditions(q: { from?: Date | null; to?: Date | null } 
 
 // ─── Disposals ────────────────────────────────────────────────────────────────────────────────
 
-export type DisposalInput = { disposalDate?: string; kind?: string; proceedsNet?: string | number | null; vatRate?: string | number | null; proceedsAccountId?: string | null; buyerName?: string | null; taxInvoiceRef?: string | null; reason?: string | null };
+export type DisposalInput = { disposalDate?: string; kind?: string; proceedsNet?: string | number | null; vatRate?: string | number | null; proceedsAccountId?: string | null; buyerName?: string | null; taxInvoiceRef?: string | null; reason?: string | null;
+  /** «بيع أصل ثابت» (BATCH 22 WP-F): the issued sales-invoice line the proceeds come from (its net, its disposal kind). */
+  salesInvoiceLineId?: string | null };
 
-export function disposalView(x: { id: string; number: string; disposalDate: Date; kind: string; proceedsNet: Prisma.Decimal; vatRate: Prisma.Decimal; vat: Prisma.Decimal; proceedsAccountId: string | null; buyerName: string | null; taxInvoiceRef: string | null; catchUpDepreciation: Prisma.Decimal; costRemoved: Prisma.Decimal; accumRemoved: Prisma.Decimal; gainLoss: Prisma.Decimal; reason: string | null; status: string; glState: string; journalEntryId: string | null; cancelReason: string | null; createdAt: Date; createdBy: string }) {
-  return { id: x.id, number: x.number, disposalDate: dayText(x.disposalDate), kind: x.kind, proceedsNet: f2(x.proceedsNet), vatRate: dec(x.vatRate).toFixed(2), vat: f2(x.vat), proceedsAccountId: x.proceedsAccountId, buyerName: x.buyerName, taxInvoiceRef: x.taxInvoiceRef,
+export function disposalView(x: { id: string; number: string; disposalDate: Date; kind: string; proceedsNet: Prisma.Decimal; vatRate: Prisma.Decimal; vat: Prisma.Decimal; proceedsAccountId: string | null; buyerName: string | null; taxInvoiceRef: string | null; catchUpDepreciation: Prisma.Decimal; costRemoved: Prisma.Decimal; accumRemoved: Prisma.Decimal; gainLoss: Prisma.Decimal; reason: string | null; status: string; glState: string; journalEntryId: string | null; cancelReason: string | null; createdAt: Date; createdBy: string; salesInvoiceLineId?: string | null }) {
+  return { salesInvoiceLineId: x.salesInvoiceLineId ?? null, id: x.id, number: x.number, disposalDate: dayText(x.disposalDate), kind: x.kind, proceedsNet: f2(x.proceedsNet), vatRate: dec(x.vatRate).toFixed(2), vat: f2(x.vat), proceedsAccountId: x.proceedsAccountId, buyerName: x.buyerName, taxInvoiceRef: x.taxInvoiceRef,
     catchUpDepreciation: f2(x.catchUpDepreciation), costRemoved: f2(x.costRemoved), accumRemoved: f2(x.accumRemoved), netBookValue: dec(x.costRemoved).minus(x.accumRemoved).toFixed(2), gainLoss: f2(x.gainLoss), reason: x.reason, status: x.status, glState: x.glState, journalEntryId: x.journalEntryId, cancelReason: x.cancelReason, createdAt: x.createdAt.toISOString(), createdBy: x.createdBy };
 }
 
-function cleanDisposal(input: DisposalInput) {
+function cleanDisposal(input: DisposalInput, sale: SaleLine | null = null) {
+  if (sale) {
+    // The line decides the proceeds and the kind; the date defaults to the line's supply date (refinement 4).
+    const d = input?.disposalDate ? day(input.disposalDate, "disposalDate") : sale.supplyDate;
+    notFuture(d);
+    if (d < sale.supplyDate) throw opsRefuse("FA_SALE_LINE");
+    return { d, kind: sale.disposalKind, proceedsNet: sale.net, vatRate: ZERO, vat: ZERO, buyerName: str(sale.buyerName, 200), taxInvoiceRef: str(sale.invoiceNumber, 60), reason: str(input.reason, 500) };
+  }
   const d = day(input?.disposalDate, "disposalDate");
   notFuture(d);
   const kind = String(input?.kind ?? "");
@@ -535,6 +549,31 @@ function cleanDisposal(input: DisposalInput) {
   return { d, kind, proceedsNet, vatRate, vat, buyerName: str(input.buyerName, 200), taxInvoiceRef: str(input.taxInvoiceRef, 60), reason: str(input.reason, 500) };
 }
 
+type SaleLine = { lineId: string; invoiceId: string; net: Decimal; disposalKind: "SALE" | "SCRAP"; supplyDate: Date; invoiceNumber: string | null; buyerName: string | null };
+
+/**
+ * The issued «بيع أصل ثابت» line a disposal for value clears (WP-F): a sale line of THIS asset, on an ISSUED invoice,
+ * not credited and not disposed of yet. The database re-checks the same (fa_sale_disposal_guard).
+ */
+async function saleLineFor(db: Tx | typeof prisma, assetId: string, lineId: unknown): Promise<SaleLine> {
+  if (typeof lineId !== "string" || !lineId) throw opsRefuse("FA_SALE_LINE");
+  const l = await db.salesInvoiceLine.findUnique({ where: { id: lineId }, select: { id: true, kind: true, fixedAssetId: true, disposalKind: true, lineNet: true,
+    invoice: { select: { id: true, status: true, kind: true, supplyDate: true, number: true, buyer: true } }, noteLines: { select: { invoice: { select: { kind: true, status: true } } } }, disposals: { where: { status: "POSTED" }, select: { id: true } } } });
+  if (!l || l.kind !== "FIXED_ASSET_SALE" || l.fixedAssetId !== assetId || l.invoice.status !== "ISSUED" || l.invoice.kind !== "INVOICE" || !l.invoice.supplyDate
+    || l.disposals.length || l.noteLines.some((n) => n.invoice.kind === "CREDIT_NOTE" && n.invoice.status === "ISSUED")) throw opsRefuse("FA_SALE_LINE");
+  return { lineId: l.id, invoiceId: l.invoice.id, net: dec(l.lineNet), disposalKind: l.disposalKind === "SCRAP" ? "SCRAP" : "SALE", supplyDate: l.invoice.supplyDate, invoiceNumber: l.invoice.number, buyerName: (l.invoice.buyer as { name?: string } | null)?.name ?? null };
+}
+
+/** The open sale lines of an asset (the disposal dialog offers them): issued, not credited, not disposed of. */
+export async function openSaleLines(assetId: string) {
+  const rows = await prisma.salesInvoiceLine.findMany({ where: { fixedAssetId: assetId, kind: "FIXED_ASSET_SALE", invoice: { status: "ISSUED", kind: "INVOICE" }, disposals: { none: { status: "POSTED" } } },
+    select: { id: true, lineNet: true, disposalKind: true, invoice: { select: { id: true, number: true, issueDate: true, supplyDate: true, buyer: true } }, noteLines: { select: { invoice: { select: { kind: true, status: true } } } } } });
+  return rows.filter((r) => !r.noteLines.some((n) => n.invoice.kind === "CREDIT_NOTE" && n.invoice.status === "ISSUED")).map((r) => ({
+    lineId: r.id, net: f2(r.lineNet), disposalKind: r.disposalKind, invoiceId: r.invoice.id, invoiceNumber: r.invoice.number,
+    issueDate: r.invoice.issueDate ? dayText(r.invoice.issueDate) : null, supplyDate: r.invoice.supplyDate ? dayText(r.invoice.supplyDate) : null, buyerName: (r.invoice.buyer as { name?: string } | null)?.name ?? null,
+  }));
+}
+
 async function disposalFigures(tx: Tx | typeof prisma, a: Awaited<ReturnType<typeof lockAsset>>, d: Date, proceedsNet: Decimal) {
   const through = recordedThrough(a) as Date;
   const catchUp = d > through ? chargeThrough(scheduleOf(a), dec(a.accumulatedDepreciation), d) : ZERO;
@@ -545,7 +584,7 @@ async function disposalFigures(tx: Tx | typeof prisma, a: Awaited<ReturnType<typ
 
 /** What a disposal on a day would record (no write): the depreciation to the day, the net book value, the gain / loss. */
 export async function disposalPreview(assetId: string, input: DisposalInput) {
-  const c = cleanDisposal(input);
+  const c = cleanDisposal(input, input.salesInvoiceLineId ? await saleLineFor(prisma, assetId, input.salesInvoiceLineId) : null);
   const a = await prisma.fixedAsset.findUnique({ where: { id: assetId }, include: { category: true } });
   if (!a) throw opsRefuse("FA_NOT_FOUND");
   if (a.status !== "ACTIVE" && a.status !== "FULLY_DEPRECIATED") throw opsRefuse("FA_STATE");
@@ -560,19 +599,30 @@ export async function disposalPreview(assetId: string, input: DisposalInput) {
  * «بيع أصل ثابت» line posting to the disposal-clearing role, and this disposal will clear it.
  */
 export async function disposeAsset(assetId: string, input: DisposalInput, ctx: AuditContext) {
-  const c = cleanDisposal(input);
+  const byLine = !!input?.salesInvoiceLineId;
+  if (!byLine) cleanDisposal(input); // refuses a disposal for value without its invoice line before any lock
   return prisma.$transaction(async (tx) => {
     await setAuditContext(tx, ctx);
     const a = await lockAsset(tx, assetId);
+    const sale = byLine ? await saleLineFor(tx, assetId, input.salesInvoiceLineId) : null;
+    const c = cleanDisposal(input, sale);
     if (a.status !== "ACTIVE" && a.status !== "FULLY_DEPRECIATED") throw opsRefuse("FA_STATE");
     const f = await disposalFigures(tx, a, c.d, c.proceedsNet);
     if (c.d < (a.inServiceDate as Date) || c.d < f.through) throw opsRefuse("FA_DATE_ORDER");
     await assertPeriodOpen(tx, c.d);
     const fate = await glFate(tx, c.d);
+    // BATCH22 gate S4: a disposal that posts debits FA_DISPOSAL_CLEARING — only an invoice whose issue entry is in the
+    // books credited it. An invoice issued before go-live (its entry SKIPPED) left nothing to clear: refused, as an
+    // acquisition is (before go-live both stay SKIPPED).
+    if (sale && fate.post && !(await tx.journalEntry.findFirst({ where: { sourceModule: "sales", sourceId: sale.invoiceId, sourceEvent: "ISSUED", status: "POSTED" }, select: { id: true } }))) {
+      throw opsRefuse("FA_INVOICE_NOT_IN_BOOKS", `(${sale.invoiceNumber ?? sale.invoiceId})`, `(${sale.invoiceNumber ?? sale.invoiceId})`);
+    }
     await openingPendingGuard(tx, a.id, fate);
     const gross = c.proceedsNet.plus(c.vat);
+    // A disposal from a sale line debits FA_DISPOSAL_CLEARING (the invoice credited it, and carried the VAT and the AR).
+    const clearingAccountId = sale && fate.post ? (await resolveRoles(tx, ["FA_DISPOSAL_CLEARING"])).get("FA_DISPOSAL_CLEARING") ?? null : null;
     // The proceeds account (default: the BANK role) is needed when the entry posts; before go-live it may be blank.
-    const proceedsAccountId = !gross.gt(0) ? null
+    const proceedsAccountId = sale || !gross.gt(0) ? null
       : input.proceedsAccountId ? await checkCounterAccount(tx, input.proceedsAccountId, { assetOnly: true })
       : fate.post ? await checkCounterAccount(tx, (await resolveRoles(tx, ["BANK"])).get("BANK"), { assetOnly: true }) : null;
     const id = `fad_${randomUUID().replace(/-/g, "")}`;
@@ -587,6 +637,7 @@ export async function disposeAsset(assetId: string, input: DisposalInput, ctx: A
           line(acc.expense, "debit", f.catchUp, `إهلاك حتى تاريخ الاستبعاد ${a.code}`, a.branchId), line(acc.accum, "credit", f.catchUp, `إهلاك حتى تاريخ الاستبعاد ${a.code}`, a.branchId),
           line(acc.accum, "debit", f.accum, `إلغاء مجمع إهلاك ${a.code}`, a.branchId),
           proceedsAccountId ? line(proceedsAccountId, "debit", gross, `متحصلات استبعاد ${a.code}`, a.branchId) : null,
+          clearingAccountId ? line(clearingAccountId, "debit", c.proceedsNet, `تسوية بيع الأصل ${a.code} · ${sale?.invoiceNumber ?? ""}`, a.branchId) : null,
           line(acc.cost, "credit", f.cost, `إلغاء تكلفة ${a.code}`, a.branchId),
           f.gainLoss.gt(0) ? line(acc.gainLoss, "credit", f.gainLoss, `ربح استبعاد ${a.code}`, a.branchId) : line(acc.gainLoss, "debit", f.gainLoss.abs(), `خسارة استبعاد ${a.code}`, a.branchId),
         ]) });
@@ -595,7 +646,8 @@ export async function disposeAsset(assetId: string, input: DisposalInput, ctx: A
     const glState = journalEntryId ? "POSTED" : "SKIPPED";
     await tx.fixedAssetDisposal.create({ data: {
       id, number, assetId, disposalDate: c.d, kind: c.kind, proceedsNet: c.proceedsNet, vatRate: c.vatRate, vat: c.vat, proceedsAccountId, buyerName: c.buyerName, taxInvoiceRef: c.taxInvoiceRef, reason: c.reason,
-      catchUpDepreciation: f.catchUp, costRemoved: f.cost, accumRemoved: f.accum, gainLoss: f.gainLoss, before: beforeOf(a), glState, journalEntryId, createdBy: ctx.actorId } });
+      catchUpDepreciation: f.catchUp, costRemoved: f.cost, accumRemoved: f.accum, gainLoss: f.gainLoss, before: beforeOf(a), glState, journalEntryId, createdBy: ctx.actorId,
+      salesInvoiceLineId: sale?.lineId ?? null } });
     if (f.catchUp.gt(0)) await tx.fixedAssetEvent.create({ data: { assetId, kind: "DEPRECIATION", eventDate: c.d, accumDelta: f.catchUp, sourceType: "DISPOSAL", sourceId: id, glState, journalEntryId, createdBy: ctx.actorId } });
     await tx.fixedAssetEvent.create({ data: { assetId, kind: "DISPOSAL", eventDate: c.d, costDelta: f.cost.negated(), accumDelta: f.accum.negated(), sourceType: "DISPOSAL", sourceId: id, glState, journalEntryId, createdBy: ctx.actorId } });
     await tx.fixedAsset.update({ where: { id: assetId }, data: { status: "DISPOSED", accumulatedDepreciation: f.accum, depreciatedThrough: c.d, updatedBy: ctx.actorId } });

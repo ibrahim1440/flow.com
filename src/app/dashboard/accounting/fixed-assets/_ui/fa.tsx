@@ -51,6 +51,8 @@ const SECTIONS = [
   { href: "/dashboard/accounting/fixed-assets?view=categories", ar: "الفئات", en: "Categories", view: "categories" },
   { href: "/dashboard/accounting/fixed-assets?view=reports", ar: "التقارير", en: "Reports", view: "reports" },
   { href: "/dashboard/accounting/fixed-assets?view=opening", ar: "الافتتاحي", en: "Opening", view: "opening" },
+  // Batch 22 WP-G: the register kept in Qoyod comes in as opening assets.
+  { href: "/dashboard/accounting/fixed-assets?view=import", ar: "استيراد من قيود", en: "Import from Qoyod", view: "import" },
 ];
 
 /** The accounting shell with the section's segment; `actions` sit in the page header. */

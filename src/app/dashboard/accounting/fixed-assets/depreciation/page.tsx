@@ -10,6 +10,7 @@ import { Dialog } from "@/components/hr/ui";
 import { Section, TablePager, usePaging } from "@/components/chrome";
 import { Select } from "@/components/ui/Select";
 import { Msg, money, todayRiyadh, useApi, useLang, useWrite } from "../../_ui/shell";
+import { StandingAuthCard } from "../../_ui/standing-auth";
 import { FaShell, Crumb, Tag, Money, FA_STATUS, GL_STATE, FA_PAGE_SIZES, MONTHS_AR, MONTHS_EN, type Can } from "../_ui/fa";
 
 type Preview = { year: number; month: number; periodEnd: string; periodStatus: string | null; periodOpen: boolean; gl: string; openingFinal: boolean; goLiveFirstOfMonth: boolean; unmapped: boolean; total: string; count: number; catchUp: number;
@@ -42,6 +43,7 @@ function Depreciation() {
     <FaShell title={L("الإهلاك", "Depreciation")} actions={p?.can.post ? <Btn variant="primary" disabled={blocked} busy={w.busy === "post"} onClick={post} data-testid="dep-post">{L(`+ إضافة إهلاك ${label(ym.y, ym.m)}`, `+ Post ${label(ym.y, ym.m)} depreciation`)}</Btn> : p?.can.write ? <span className="acct-hint" data-testid="dep-needs-post">{L("يتطلب صلاحية الترحيل (journal_post)", "Needs the posting duty (journal_post)")}</span> : undefined}>
       <Crumb items={[{ label: L("الإهلاك", "Depreciation") }]} />
       <Msg error={w.error ?? pv.error ?? runs.error} done={w.done} onClose={() => { w.setError(null); w.setDone(null); }} />
+      <StandingAuthCard register="DEPRECIATION" onChange={() => runs.reload()} />
       <div className="fa-filter">
         <Field label={L("السنة", "Year")}><Select value={String(ym.y)} onChange={(e) => setYm({ ...ym, y: Number(e.target.value) })} data-testid="dep-year">{years.map((y) => <option key={y} value={y}>{y}</option>)}</Select></Field>
         <Field label={L("الشهر", "Month")}><Select value={String(ym.m)} onChange={(e) => setYm({ ...ym, m: Number(e.target.value) })} data-testid="dep-month">{MONTHS_AR.map((m, i) => <option key={i} value={i + 1}>{L(m, MONTHS_EN[i])}</option>)}</Select></Field>

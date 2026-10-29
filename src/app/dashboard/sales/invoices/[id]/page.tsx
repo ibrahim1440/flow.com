@@ -5,19 +5,23 @@
 // ledger entries it posted. A DRAFT is edited here (ZT-14) and issued through a confirmation (privileged + step-up);
 // an issued document never changes — «إصدار إشعار دائن / مدين» is the only correction.
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { use, useState } from "react";
 import { OpsLoading } from "@/components/ops/ui";
 import { D21Dialog } from "@/components/ui/Dialog";
 import { Select } from "@/components/ui/Select";
 import { CATEGORY, DOC_STATUS, DocNo, FAMILY, InvShell, KIND, Msg, PAY_STATUS, REASONS, Tag, money, useApi, useLang, useWrite } from "../_ui/inv";
-import { BuyerFields, LinesEditor, Totals, type Buyer, type EditLine } from "../_ui/editor";
+import { BuyerFields, LinesEditor, Totals, useTotals, type Buyer, type EditLine } from "../_ui/editor";
 import { ZatcaPanel } from "@/app/dashboard/accounting/zatca/_ui/zatca";
 import { QRCodeSVG } from "qrcode.react";
 import { Section } from "@/components/chrome";
 import { useAccountantView } from "../../../accounting/_ui/qoyod-pages";
+import { Banner, IssueConfirm, RequestHistory, ReturnDialog, SplitButton, fmtAt, type HistoryRow } from "../_ui/request-ui";
+import { RETURN_REASON_LABEL, type ReturnReason } from "@/lib/services/invoicing/request-math";
 
-type Line = { id: string; description: string; skuCode: string | null; quantity: string; unit: "UNIT" | "KG"; unitPrice: string; discountPercent: string; discountAmount: string; taxCategory: "S" | "Z" | "E" | "O"; taxRatePercent: string; exemptionReasonCode: string | null; exemptionReason: string | null; lineNet: string; lineTax: string; lineTotal: string; orderItemId: string | null; productSkuId: string | null; originalLineId: string | null; deliveryId: string | null };
+type Line = { id: string; description: string; skuCode: string | null; quantity: string; unit: "UNIT" | "KG"; unitPrice: string; discountPercent: string; discountAmount: string; taxCategory: "S" | "Z" | "E" | "O"; taxRatePercent: string; exemptionReasonCode: string | null; exemptionReason: string | null; lineNet: string; lineTax: string; lineTotal: string; orderItemId: string | null; productSkuId: string | null; originalLineId: string | null; deliveryId: string | null;
+  kind?: "ITEM" | "FIXED_ASSET_SALE"; fixedAssetId?: string | null; disposalKind?: "SALE" | "SCRAP" | null;
+  priceIncludesVat?: boolean; unitPriceGross?: string | null; roundingDifference?: string | null };
 type Doc = {
   id: string; uuid: string; kind: string; family: "STANDARD" | "SIMPLIFIED"; status: string; number: string | null; customerId: string; orderId: string | null; source: string;
   originalInvoice: { id: string; number: string | null } | null; reasonCode: string | null; reason: string | null;
@@ -31,11 +35,14 @@ type Doc = {
   paid: string; open: string | null; creditLeft: string | null;
   entries: { id: string; ref: string | null; event: string | null; status: string }[];
   customer: { id: string; name: string; nameAr: string | null } | null; order: { id: string; orderNumber: number } | null; people: { id: string; name: string }[];
-  can: { create: boolean; issue: boolean; cancel: boolean; creditNote: boolean; ar: boolean; self: boolean };
+  can: { create: boolean; issue: boolean; cancel: boolean; creditNote: boolean; ar: boolean; self: boolean; requester: boolean; sellAssets?: boolean };
+  request: { requestedAt: string | null; requestedById: string | null; note: string | null };
+  history: HistoryRow[]; problems: { code: string; ar: string; en: string }[];
+  credit: { overLimit: boolean; overdueDays: number; hold: unknown } | null;
   zatca?: { qr: string | null; ref: string | null; status: string | null } | null;
 };
 
-const toEdit = (l: Line): EditLine => ({ description: l.description, quantity: l.quantity, unit: l.unit, unitPrice: l.unitPrice, discountPercent: l.discountPercent, taxCategory: l.taxCategory, taxRatePercent: l.taxRatePercent, exemptionReasonCode: l.exemptionReasonCode, orderItemId: l.orderItemId, productSkuId: l.productSkuId, skuCode: l.skuCode, originalLineId: l.originalLineId, deliveryId: l.deliveryId });
+const toEdit = (l: Line): EditLine => ({ description: l.description, quantity: l.quantity, unit: l.unit, unitPrice: l.unitPrice, discountPercent: l.discountPercent, taxCategory: l.taxCategory, taxRatePercent: l.taxRatePercent, exemptionReasonCode: l.exemptionReasonCode, orderItemId: l.orderItemId, productSkuId: l.productSkuId, skuCode: l.skuCode, originalLineId: l.originalLineId, deliveryId: l.deliveryId, kind: l.kind, fixedAssetId: l.fixedAssetId, disposalKind: l.disposalKind, ...(l.priceIncludesVat ? { priceIncludesVat: true, unitPriceGross: l.unitPriceGross ?? null } : {}) });
 
 export default function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -43,11 +50,13 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const qoyodView = useAccountantView();
   const router = useRouter();
   const doc = useApi<Doc>(`/api/sales/invoices/${id}`);
+  const search = useSearchParams();
+  const series = useApi<{ invoicePrefix: string; creditNotePrefix: string; debitNotePrefix: string }>("/api/sales/invoices/settings");
   const w = useWrite();
   const d = doc.data;
   type Form = { lines: EditLine[]; buyer: Buyer; family: "STANDARD" | "SIMPLIFIED"; supplyDate: string; terms: string; notes: string; reason: string };
   const [form, setForm] = useState<Form | null>(null);
-  const [dialog, setDialog] = useState<"issue" | "cancel" | null>(null);
+  const [dialog, setDialog] = useState<"issue" | "cancel" | "return" | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [problems, setProblems] = useState<{ ar: string; en: string }[]>([]);
   // The draft's form: what the user typed, else the stored draft (no effect: derived on render).
@@ -60,6 +69,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const lines = f?.lines ?? null, buyer = f?.buyer ?? null, family = f?.family ?? "STANDARD", supplyDate = f?.supplyDate ?? "", terms = f?.terms ?? "", notes = f?.notes ?? "", reason = f?.reason ?? "";
   const setLines = (lines: EditLine[]) => patch({ lines }), setBuyer = (buyer: Buyer) => patch({ buyer }), setFamily = (family: "STANDARD" | "SIMPLIFIED") => patch({ family });
   const setSupplyDate = (supplyDate: string) => patch({ supplyDate }), setTerms = (terms: string) => patch({ terms }), setNotes = (notes: string) => patch({ notes }), setReason = (reason: string) => patch({ reason });
+  const formTotals = useTotals(lines ?? []);
   if (!d) return <InvShell><Msg error={doc.error} />{doc.error ? null : <OpsLoading />}</InvShell>;
 
   const kindLabel = L(KIND[d.kind]?.[d.family]?.[0] ?? d.kind, KIND[d.kind]?.[d.family]?.[1] ?? d.kind);
@@ -68,13 +78,35 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   // the «ملخص الضريبة» card (S / Z / E), the stored ZATCA QR on screen (only when it exists) and the bottom buttons in
   // Qoyod's order. Display only: the same document, the same links, no new action.
   const qoyod = qoyodView;
-  const canEditDraft = d.status === "DRAFT" && (isNote ? d.can.creditNote : d.can.create);
-  const canIssue = d.status === "DRAFT" && (isNote ? d.can.creditNote : d.can.issue);
+  // «طلب فاتورة ضريبية» (WP-C): a requested draft is the issuer's to correct (compliance fields only, Q-F3) or send back;
+  // its requester only withdraws it. A draft not requested is Sales' to edit and request.
+  const requested = d.status === "DRAFT" && !!d.request?.requestedAt;
+  const issuerHere = isNote ? d.can.creditNote : d.can.issue;
+  const canEditDraft = d.status === "DRAFT" && (requested ? issuerHere : (isNote ? d.can.creditNote : d.can.create));
+  const canIssue = d.status === "DRAFT" && issuerHere;
+  const canRequest = d.status === "DRAFT" && !requested && (isNote ? d.can.creditNote : d.can.create);
+  const lastEvent = d.history?.length ? d.history[d.history.length - 1] : null;
+  const returned = d.status === "DRAFT" && !requested && lastEvent?.kind === "RETURNED" ? lastEvent : null;
+  const issueProblemsList = d.status === "DRAFT" && (search?.get("notReady") === "1" || requested) ? d.problems ?? [] : [];
   const person = (pid: string | null) => d.people.find((p) => p.id === pid)?.name ?? "—";
   const save = async () => {
     const r = await w.run("save", `/api/sales/invoices/${id}`, "PATCH", { family, buyer, supplyDate, paymentTermsDays: terms || undefined, notes, lines, ...(isNote ? { reason } : {}) }, L("حُفظت المسودة.", "Draft saved."));
     if (r) { setForm(null); doc.reload(); }
     return !!r;
+  };
+  const sendRequest = async () => {
+    if (canEditDraft && !(await save())) return;
+    const r = await w.run<{ warnings: { ar: string; en: string }[] }>("request", `/api/sales/invoices/${id}/request`, "POST", {}, L("أُرسل الطلب للمحاسب.", "Sent to the accountant."));
+    if (r) { setProblems(r.warnings ?? []); doc.reload(); }
+  };
+  const withdraw = async () => {
+    const r = await w.run("withdraw", `/api/sales/invoices/${id}/withdraw`, "POST", {}, L("سُحب الطلب؛ المسودة قابلة للتعديل.", "Request withdrawn; the draft can be edited."));
+    if (r) doc.reload();
+  };
+  const sendBack = async (reasonCode: ReturnReason, reason: string) => {
+    const r = await w.run("return", `/api/sales/invoices/${id}/return`, "POST", { reasonCode, reason }, L("أُعيد الطلب إلى المبيعات.", "Sent back to Sales."));
+    setDialog(null);
+    if (r) doc.reload();
   };
   const issue = async () => {
     setProblems([]);
@@ -103,11 +135,33 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             <Link className="hr-btn is-primary" href={`/dashboard/sales/invoices/${id}/credit-note`} data-testid="new-credit-note">{L("إصدار إشعار دائن", "Issue a credit note")}</Link>
           </> : null}
           {d.status === "DRAFT" && (isNote ? d.can.creditNote : d.can.cancel) ? <button type="button" className="hr-btn" onClick={() => setDialog("cancel")} data-testid="cancel-draft">{L("إلغاء المسودة", "Cancel draft")}</button> : null}
-          {d.status === "DRAFT" && canIssue ? <button type="button" className="hr-btn is-primary" onClick={() => setDialog("issue")} data-testid="issue">{isNote ? L("إصدار الإشعار", "Issue the note") : L("إصدار الفاتورة", "Issue the invoice")}</button> : null}
+          {requested && d.can.requester ? <button type="button" className="hr-btn" disabled={!!w.busy} onClick={withdraw} data-testid="withdraw-request">{L("سحب الطلب", "Withdraw the request")}</button> : null}
+          {requested && issuerHere ? <button type="button" className="hr-btn" onClick={() => setDialog("return")} data-testid="return-request">{L("إعادة إلى المبيعات", "Send back to Sales")}</button> : null}
+          {canRequest && !canIssue ? (
+            <SplitButton testId="request-split" disabled={!!w.busy} label={L("إرسال الطلب للمحاسب", "Send the request to the accountant")} onPrimary={sendRequest}
+              items={canEditDraft ? [{ id: "draft", label: L("حفظ كمسودة", "Save as draft"), onSelect: () => { void save(); } }] : []} />
+          ) : null}
+          {d.status === "DRAFT" && canIssue ? <button type="button" className="hr-btn is-primary" onClick={() => setDialog("issue")} data-testid="issue">{requested ? L("مراجعة وإصدار", "Review and issue") : isNote ? L("إصدار الإشعار", "Issue the note") : L("إصدار الفاتورة", "Issue the invoice")}</button> : null}
         </span>
       }>
       <Msg error={w.error} done={w.done} onClose={() => { w.setError(null); w.setDone(null); }} />
-      {problems.length ? <ul className="inv-check" data-testid="issue-problems">{problems.map((p, i) => <li key={i}>{L(p.ar, p.en)}</li>)}</ul> : null}
+      {requested ? (
+        <Banner tone="info" testId="request-banner">
+          <b>{L("الطلب لدى المحاسب", "With the accountant")} · <bdi>{person(d.request.requestedById)}</bdi> · <span className="hr-num">{fmtAt(d.request.requestedAt!)}</span></b>
+          {d.request.note ? <span><bdi>{d.request.note}</bdi></span> : null}
+          <span>{issuerHere ? L("صحّح بيانات الامتثال فقط (المشتري، النوع، فئة الضريبة، تاريخ التوريد، الشروط، الملاحظات)؛ أعِد الشروط التجارية إلى المبيعات.", "Correct compliance data only (buyer, type, VAT category, supply date, terms, notes); send commercial terms back to Sales.")
+            : L("لا تُعدَّل المسودة وهي لدى المحاسب؛ اسحب الطلب لتعديلها.", "The draft is locked while with the accountant; withdraw the request to edit it.")}</span>
+        </Banner>
+      ) : null}
+      {returned ? (
+        <Banner tone="warning" testId="return-banner">
+          <b>{L("أعاد المحاسب الطلب", "The accountant sent the request back")} · {L(RETURN_REASON_LABEL[returned.reasonCode as ReturnReason]?.[0] ?? "", RETURN_REASON_LABEL[returned.reasonCode as ReturnReason]?.[1] ?? "")}</b>
+          <span><bdi>{returned.reason}</bdi></span>
+          <span className="hr-num">{returned.actorName ? <bdi>{returned.actorName}</bdi> : null} · {fmtAt(returned.at)}</span>
+        </Banner>
+      ) : null}
+      {problems.length ? <ul className="inv-check" data-testid="issue-problems">{problems.map((p, i) => <li key={i}>{L(p.ar, p.en)}</li>)}</ul>
+        : issueProblemsList.length ? <div data-testid="draft-problems"><p className="acct-hint">{L("ما يمنع الإصدار الآن:", "What stops the issue now:")}</p><ul className="inv-check">{issueProblemsList.map((p, i) => <li key={i}>{L(p.ar, p.en)}</li>)}</ul></div> : null}
 
       <div className="acct-cards">
         <div className="acct-card" data-testid="state-document">
@@ -154,7 +208,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           </div>
           <div className="acct-card">
             <h2>{L("البنود", "Lines")}</h2>
-            <LinesEditor lines={lines} onChange={setLines} lockItems={d.kind === "CREDIT_NOTE"} />
+            <LinesEditor lines={lines} onChange={setLines} lockItems={d.kind === "CREDIT_NOTE"} lockCommercial={requested} sellAssets={!isNote && !!d.can.sellAssets} inclusive={qoyod && !isNote} />
             <div className="inv-grid2">
               <label className="hr-field"><span className="hr-label">{L("ملاحظات للعميل", "Notes to the customer")}</span><textarea className="hr-input" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
               <Totals lines={lines} />
@@ -227,6 +281,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
         </>
       )}
 
+      <RequestHistory rows={d.history ?? []} />
       {d.notesIssued.length ? (
         <div className="acct-card" data-testid="notes-issued">
           <h3>{L("الإشعارات على هذه الفاتورة", "Notes against this invoice")}</h3>
@@ -247,12 +302,13 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       ) : d.status === "ISSUED" ? <p className="acct-hint">{L("لم يُرحَّل قيد: المحاسبة غير مفعّلة أو المستند قبل تاريخ البدء.", "No entry: accounting is not active or the document precedes the go-live date.")}</p> : null}
 
       {dialog === "issue" ? (
-        <D21Dialog lang={lang === "en" ? "en" : "ar"} title={isNote ? L("إصدار الإشعار", "Issue the note") : L("إصدار الفاتورة الضريبية", "Issue the tax invoice")} onClose={() => setDialog(null)} testId="issue-dialog"
-          actions={<><button type="button" className="hr-btn is-primary" onClick={issue} data-testid="confirm-issue">{L("إصدار نهائي", "Issue (final)")}</button><button type="button" className="hr-btn" onClick={() => setDialog(null)}>{L("رجوع", "Back")}</button></>}>
-          <p>{L("يُعطى المستند رقمًا نهائيًا متسلسلًا وتُثبَّت بيانات البائع والمشتري والبنود. لا يمكن تعديله بعد الإصدار؛ التصحيح بإشعار دائن أو مدين.", "The document gets its final sequential number and its particulars freeze. It cannot be edited after issue; corrections are credit or debit notes.")}</p>
-          <p className="acct-hint">{L("يُرحَّل القيد في الدفاتر إن كانت المحاسبة مفعّلة.", "The journal entry is posted if accounting is active.")}</p>
-        </D21Dialog>
+        <IssueConfirm onClose={() => setDialog(null)} onConfirm={issue} busy={!!w.busy} title={requested ? L("مراجعة وإصدار", "Review and issue") : undefined}
+          facts={{ customer: (buyer?.name || d.buyer.name) ?? "", vatNumber: (buyer?.vatNumber || d.buyer.vatNumber) || null, family, kind: d.kind,
+            ...(f && formTotals.priced ? { taxable: formTotals.priced.taxableTotal.toFixed(2), tax: formTotals.priced.taxTotal.toFixed(2), grand: formTotals.priced.grandTotal.toFixed(2), breakdown: formTotals.priced.breakdown }
+              : { taxable: d.totals.taxable, tax: d.totals.tax, grand: d.totals.grand, breakdown: d.taxBreakdown ?? [] }), credit: d.credit,
+            series: (d.kind === "INVOICE" ? series.data?.invoicePrefix : d.kind === "CREDIT_NOTE" ? series.data?.creditNotePrefix : series.data?.debitNotePrefix) ?? null }} />
       ) : null}
+      {dialog === "return" ? <ReturnDialog busy={!!w.busy} onClose={() => setDialog(null)} onSubmit={sendBack} /> : null}
       {dialog === "cancel" ? (
         <D21Dialog lang={lang === "en" ? "en" : "ar"} title={L("إلغاء المسودة", "Cancel the draft")} onClose={() => setDialog(null)} testId="cancel-dialog"
           actions={<><button type="button" className="hr-btn is-danger" disabled={cancelReason.trim().length < 3} onClick={cancel} data-testid="confirm-cancel">{L("إلغاء المسودة", "Cancel draft")}</button><button type="button" className="hr-btn" onClick={() => setDialog(null)}>{L("رجوع", "Back")}</button></>}>

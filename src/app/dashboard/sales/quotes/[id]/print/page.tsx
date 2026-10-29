@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, use } from "react";
+import { useQuotesBase } from "../../base";
 import Link from "next/link";
 import { useLang, Spinner, api, formatMoney, QUOTE_STATUS_SPECS } from "../../../_components/ui";
 import { useD21Title, useD21Phone } from "@/components/shell/page-context";
@@ -129,6 +130,7 @@ export default function QuotePrintPage({
   // D1-Q (decided: strict): «Save as PDF» opens the print dialog, so with QUOTATION_PDF_WHEN_PRINT_OFF
   // false it is disabled like every other print action while printing is off; the document stays.
   const printing = usePrintDocuments();
+  const { base } = useQuotesBase();
   const pdfOnly = printing !== true && QUOTATION_PDF_WHEN_PRINT_OFF;
   const actionOn = printing === true || pdfOnly;
 
@@ -150,7 +152,7 @@ export default function QuotePrintPage({
   useD21Phone({
     title: ar ? "مستند العرض" : "Quotation document",
     sub: quote?.quoteNumber,
-    back: `/dashboard/sales/quotes/${id}`,
+    back: `${base}/${id}`,
   });
 
   if (loading) return <div className="pg"><Spinner /></div>;
@@ -168,7 +170,7 @@ export default function QuotePrintPage({
     <div className="pg">
       {/* Screen-only chrome (A-12 toolbar). None of this appears on paper. */}
       <div className="q-doc-bar print:hidden">
-        <Link href={`/dashboard/sales/quotes/${quote.id}`} className="num">{quote.quoteNumber}</Link>
+        <Link href={`${base}/${quote.id}`} className="num">{quote.quoteNumber}</Link>
         <span className="sp" />
         <span className="why">
           {seller?.sellerVatNumber
@@ -176,7 +178,7 @@ export default function QuotePrintPage({
             : (ar ? "بلا رقم ضريبي ولا QR في النسخة الحالية · أضف بيانات المنشأة من الإعدادات" : "No VAT number or QR in the current version · add the company details in Settings")}
         </span>
         <Link
-          href={`/dashboard/sales/quotes/${quote.id}/print?lang=${docLang === "ar" ? "en" : "ar"}`}
+          href={`${base}/${quote.id}/print?lang=${docLang === "ar" ? "en" : "ar"}`}
           className="btn" data-doc data-testid="doc-other-language"
         >
           {docLang === "ar" ? "English" : "العربية"}

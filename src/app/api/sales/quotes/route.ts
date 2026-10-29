@@ -1,10 +1,10 @@
 import { NextResponse } from "@/lib/api-response";
 import { assertSalesAllowed } from "@/lib/services/customers/credit-db";
 import { prisma, TX_OPTS } from "@/lib/db";
-import { requireModule, requireSub } from "@/lib/auth-server";
+import { requireQuoteView, requireQuoteWrite, dealNotOpen } from "@/lib/services/sales/quote-guard";
+import { canWriteQuotes, quotesSeeAll, writesViaAccounting } from "@/lib/services/sales/quote-access";
 import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege, hasModuleAccess } from "@/lib/auth-shared";
-import { seesAllSales } from "@/lib/services/sales/scope";
 
 import {
   nextQuoteNumber, saveQuoteLines, parseLineInputs, QUOTE_CURRENCY,
@@ -44,7 +44,8 @@ const ROW_SELECT = {
  * the server's. `summary` is the header's facts over the caller's whole scope.
  */
 export async function GET(request: Request) {
-  const { user, error } = await requireModule("sales");
+  // BATCH22 WP-E: the sales module or the accounting module (the accountant reads every quotation).
+  const { user, error } = await requireQuoteView();
   if (error) return error;
 
   const url = new URL(request.url);
@@ -60,7 +61,7 @@ export async function GET(request: Request) {
   const page = Math.max(1, Number(url.searchParams.get("page") ?? 1) || 1);
   const perPage = Math.min(100, Math.max(1, Number(url.searchParams.get("perPage") ?? 25) || 25));
 
-  const scopeAll = seesAllSales(user.permissions);
+  const scopeAll = quotesSeeAll(user.permissions);
   // A rep sees their own deals only; an owner filter cannot widen that, so it is ignored.
   const ownerId = scopeAll && ownerParam ? ownerParam : null;
 
@@ -183,7 +184,8 @@ export async function GET(request: Request) {
       scope: scopeAll ? "all" : "own",
       discountThresholdPercent: settings.effectiveThresholdPercent,
       can: {
-        write: hasSubPrivilege(user.permissions, "sales", "quote_write"),
+        write: canWriteQuotes(user.permissions),
+        viaAccounting: writesViaAccounting(user.permissions),
         approveDiscount: hasSubPrivilege(user.permissions, "sales", "quote_approve_discount"),
         createOrder: hasSubPrivilege(user.permissions, "orders", "create"),
         close: hasSubPrivilege(user.permissions, "sales", "deal_close"),
@@ -203,7 +205,8 @@ export async function GET(request: Request) {
  * whose price the browser decides.
  */
 export async function POST(request: Request) {
-  const { user, error } = await requireSub("sales", "quote_write");
+  // sales › quote_write, or (accounting module and accounting › quotes_issue) — canWriteQuotes (BATCH22 WP-E).
+  const { user, error } = await requireQuoteWrite();
   if (error) return error;
 
   let body: unknown;
@@ -242,11 +245,13 @@ export async function POST(request: Request) {
     const deal = await prisma.opportunity.findFirst({
       where: {
         id: opportunityId,
-        ...(seesAllSales(user.permissions) ? {} : { ownerId: user.id }),
+        ...(quotesSeeAll(user.permissions) ? {} : { ownerId: user.id }),
       },
       select: { id: true, customerId: true, outcome: true },
     });
     if (!deal) return NextResponse.json({ error: "Deal not found." }, { status: 404 });
+    // The accountant quotes on an existing OPEN deal only; they never open one (the deal owner decides attribution).
+    if (writesViaAccounting(user.permissions) && deal.outcome !== "OPEN") return dealNotOpen();
     if (deal.outcome === "LOST") {
       return NextResponse.json(
         { error: "This deal is lost. Reopen it before quoting again." },

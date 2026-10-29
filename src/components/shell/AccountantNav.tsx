@@ -57,7 +57,22 @@ export function QuickCreate({ lang, creates, testId = "acct-quick" }: { lang: st
   );
 }
 
-function Row({ it, icon, lang, current }: { it: ShownItem; icon: ShownGroup["icon"]; lang: string; current: boolean }) {
+/** «طلبات الفواتير» badge (BATCH 22 WP-C): the requests waiting, at most once a minute, quietly on failure. */
+const REQUESTS_ITEM = "acct.sales.requests";
+function useRequestBadge(enabled: boolean): number {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (!enabled) return;
+    let alive = true;
+    const load = () => fetch("/api/sales/invoices/requests?count=1", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((b: { count?: number } | null) => { if (alive && b && typeof b.count === "number") setN(b.count); }).catch(() => undefined);
+    load();
+    const t = setInterval(load, 120_000);
+    return () => { alive = false; clearInterval(t); };
+  }, [enabled]);
+  return n;
+}
+
+function Row({ it, icon, lang, current, badge = 0 }: { it: ShownItem; icon: ShownGroup["icon"]; lang: string; current: boolean; badge?: number }) {
   const ar = lang === "ar";
   if (it.state === "soon") {
     return (
@@ -73,6 +88,7 @@ function Row({ it, icon, lang, current }: { it: ShownItem; icon: ShownGroup["ico
     <li className="d21-acct-row">
       <Link href={it.href!} className="d21-nav" aria-current={current ? "page" : undefined} data-testid={`acctnav-${it.id}`} title={it.label}>
         <Ico name={icon} /><span>{it.label}</span>
+        {badge > 0 ? <span className="d21-badge" data-testid={`acctbadge-${it.id}`} aria-label={ar ? `${badge} بانتظارك` : `${badge} waiting`}>{badge > 99 ? "99+" : badge}</span> : null}
       </Link>
       {it.create ? (
         <Link href={it.create} className="d21-acct-plus" aria-label={ar ? `جديد: ${it.label}` : `New: ${it.label}`} title={ar ? `جديد: ${it.label}` : `New: ${it.label}`} data-testid={`acctnew-${it.id}`}>
@@ -85,6 +101,7 @@ function Row({ it, icon, lang, current }: { it: ShownItem; icon: ShownGroup["ico
 
 export function AccountantNav({ lang, tree, creates, activeGroup, activeItem, openGroup, onToggleGroup }: Props) {
   const ar = lang === "ar";
+  const requests = useRequestBadge(tree.some((g) => g.items.some((i) => i.id === REQUESTS_ITEM && i.state === "link")));
   return (
     <nav aria-label={ar ? "واجهة المحاسب" : "Accountant workspace"} data-testid="acct-nav">
       <QuickCreate lang={lang} creates={creates} />
@@ -107,11 +124,13 @@ export function AccountantNav({ lang, tree, creates, activeGroup, activeItem, op
           <div key={g.id} className="d21-grpbox" role="group" aria-labelledby={gid}>
             <button type="button" className="d21-grp" id={gid} data-testid={`acctgroup-${g.id}`} aria-expanded={isOpen} aria-controls={pid}
               data-current={activeGroup === g.id ? "true" : undefined} title={g.label} onClick={() => onToggleGroup(g.id)}>
-              <Ico name={g.icon} /><span>{g.label}</span><Ico name="chevd" small className="chev" />
+              <Ico name={g.icon} /><span>{g.label}</span>
+              {requests > 0 && !isOpen && g.items.some((x) => x.id === REQUESTS_ITEM) ? <span className="d21-badge" data-testid={`acctgroupbadge-${g.id}`} aria-label={ar ? `${requests} طلب فاتورة بانتظارك` : `${requests} invoice request(s) waiting`}>{requests > 99 ? "99+" : requests}</span> : null}
+              <Ico name="chevd" small className="chev" />
             </button>
             <div className="d21-acc" id={pid} data-open={isOpen ? "true" : undefined}>
               <div className="d21-acc-in">
-                <ul className="d21-navlist">{g.items.map((it) => <Row key={it.id} it={it} icon={g.icon} lang={lang} current={activeItem === it.id} />)}</ul>
+                <ul className="d21-navlist">{g.items.map((it) => <Row key={it.id} it={it} icon={g.icon} lang={lang} current={activeItem === it.id} badge={it.id === REQUESTS_ITEM ? requests : 0} />)}</ul>
               </div>
             </div>
           </div>

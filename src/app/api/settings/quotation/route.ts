@@ -1,7 +1,7 @@
+import { canViewQuotes } from "@/lib/services/sales/quote-access";
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { forbidden, requireAdminAction, requireAuth } from "@/lib/auth-server";
-import { hasModuleAccess } from "@/lib/auth-shared";
 import { handleDomainError } from "@/lib/api-error";
 import { parseSettingsPatch, readQuoteSettings, settingsFromRow, SELLER_FIELDS } from "@/lib/services/sales/quote-settings";
 import { DISCOUNT_APPROVAL_THRESHOLD, DISCOUNT_MAX } from "@/lib/services/sales/discount-limits";
@@ -22,7 +22,8 @@ import { DISCOUNT_APPROVAL_THRESHOLD, DISCOUNT_MAX } from "@/lib/services/sales/
 export async function GET() {
   const { user, error } = await requireAuth();
   if (error) return error;
-  if (user.role !== "admin" && !hasModuleAccess(user.permissions, "sales")) return forbidden();
+  // BATCH22 WP-E: the quotation's seller block is read by whoever may read quotations (sales or accounting — canViewQuotes).
+  if (user.role !== "admin" && !canViewQuotes(user.permissions)) return forbidden();
   try {
     const s = await readQuoteSettings(prisma);
     return NextResponse.json({

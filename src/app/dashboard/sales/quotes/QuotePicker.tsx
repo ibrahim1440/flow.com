@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Modal, api } from "../_components/ui";
 import { Ico } from "@/components/shell/icons";
+import { useQuotesBase } from "./base";
+
 
 /**
  * «+ عرض سعر» on the quotations list (Figma 181:1609). A quotation belongs to a deal, so the
@@ -22,6 +24,8 @@ type Deal = {
 type Customer = { id: string; name: string; nameAr: string | null; city: string | null; deals: Deal[] };
 
 export function QuotePicker({ lang, onClose }: { lang: "ar" | "en"; onClose: () => void }) {
+  // BATCH22 WP-E: from the accounting section the accountant picks an EXISTING open deal and never opens one.
+  const { base, accounting } = useQuotesBase();
   const ar = lang === "ar";
   const router = useRouter();
   const [q, setQ] = useState("");
@@ -48,7 +52,7 @@ export function QuotePicker({ lang, onClose }: { lang: "ar" | "en"; onClose: () 
   }, [q, ar]);
 
   const nameOf = (c: Customer) => (ar ? (c.nameAr ?? c.name) : c.name);
-  const goToEditor = (opportunityId: string) => router.push(`/dashboard/sales/quotes/new?opportunityId=${encodeURIComponent(opportunityId)}`);
+  const goToEditor = (opportunityId: string) => router.push(`${base}/new?opportunityId=${encodeURIComponent(opportunityId)}`);
 
   async function newDeal() {
     if (!chosen || busy) return;
@@ -120,7 +124,11 @@ export function QuotePicker({ lang, onClose }: { lang: "ar" | "en"; onClose: () 
               <li className="lbl" style={{ fontWeight: 400, padding: "8px 0" }}>{ar ? "لا توجد صفقة مفتوحة لهذا العميل." : "This customer has no open deal."}</li>
             )}
           </ul>
-          {canCreateDeal ? (
+          {accounting && chosen.deals.length === 0 ? (
+            <p className="lbl" style={{ fontWeight: 400, margin: 0 }} data-testid="picker-no-open-deal">
+              {ar ? "لا توجد صفقة مفتوحة — اطلب من المبيعات فتح صفقة." : "There is no open deal — ask Sales to open one."}
+            </p>
+          ) : canCreateDeal && !accounting ? (
             <div className="q-pick-new" data-testid="picker-new-deal">
               <label className="lbl" htmlFor="picker-title" style={{ fontWeight: 400 }}>
                 {ar ? "أو افتح صفقة جديدة (مرحلة التأهيل، باسمك):" : "Or open a new deal (Qualification stage, owned by you):"}

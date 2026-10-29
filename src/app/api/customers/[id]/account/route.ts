@@ -210,7 +210,7 @@ export async function GET(_request: Request, { params }: Params) {
       })), now);
       const b = outstandingBalance(
         accepted.map((q) => ({ opportunityId: q.opportunityId, grandTotal: new Decimal(q.grandTotal.toString()) })),
-        approved.map((c) => ({ opportunityId: c.opportunityId, amountGross: new Decimal(c.amountGross.toString()) })),
+        approved.map((c) => ({ opportunityId: c.opportunityId ?? "", amountGross: new Decimal(c.amountGross.toString()) })),
       );
       salesFigure = { net: s.net.toFixed(2), previousNet: s.previousNet.toFixed(2), changePercent: s.changePercent, documents: s.documents, currency: "SAR" };
       const last = approved[0];
@@ -241,7 +241,7 @@ export async function GET(_request: Request, { params }: Params) {
           opportunityId: q.opportunityId, dealTitle: q.opportunity.title, quoteId: q.id, quoteNumber: q.quoteNumber, revision: q.revision,
           at: q.acceptedAt ?? q.issuedAt ?? q.createdAt, grandTotal: new Decimal(q.grandTotal.toString()), firstDeliveryAt: firstDelivery.get(q.id) ?? null,
         })),
-        approved.map((c) => ({ id: c.id, opportunityId: c.opportunityId, at: c.collectedAt, amountGross: new Decimal(c.amountGross.toString()), method: c.paymentMethod, orderNumber: c.order?.orderNumber ?? null, reference: c.referenceNumber })),
+        approved.map((c) => ({ id: c.id, opportunityId: c.opportunityId ?? "", at: c.collectedAt, amountGross: new Decimal(c.amountGross.toString()), method: c.paymentMethod, orderNumber: c.order?.orderNumber ?? null, reference: c.referenceNumber })),
         { termsDays: customer.paymentTermsDays, now },
       );
       const m2 = (d: Decimal) => d.toFixed(2);

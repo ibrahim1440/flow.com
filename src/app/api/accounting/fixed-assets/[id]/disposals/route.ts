@@ -11,13 +11,18 @@ export async function GET(request: Request, { params }: Params) {
   const { error } = await requireFaRead();
   if (error) return error;
   try {
-    return NextResponse.json(await disposalPreview((await params).id, { disposalDate: qp(request, "disposalDate") ?? "", kind: qp(request, "kind") ?? "", proceedsNet: qp(request, "proceedsNet") }));
+    return NextResponse.json(await disposalPreview((await params).id, { disposalDate: qp(request, "disposalDate") ?? "", kind: qp(request, "kind") ?? "", proceedsNet: qp(request, "proceedsNet"), salesInvoiceLineId: qp(request, "salesInvoiceLineId") }));
   } catch (err) {
     return acctError(err);
   }
 }
 
-/** «استبعاد أصل» — { disposalDate, kind SCRAP | SALE (no proceeds: a sale for value needs the e-invoice — FA_SALE_NEEDS_INVOICE), proceedsNet, proceedsAccountId, reason }. journal_post + step-up. */
+/**
+ * «استبعاد أصل» — { disposalDate, kind SCRAP | SALE, reason } without proceeds; or { salesInvoiceLineId, disposalDate?, reason }
+ * for a disposal for value (BATCH 22 WP-F): the issued «بيع أصل ثابت» line gives the proceeds (its net) and the kind, the
+ * date defaults to its supply date, and the entry debits FA_DISPOSAL_CLEARING (no VAT: the invoice carried it). Proceeds
+ * without a line: FA_SALE_NEEDS_INVOICE. journal_post + step-up.
+ */
 export async function POST(request: Request, { params }: Params) {
   const { user, error } = await requireFaWrite({ duty: "journal_post" });
   if (error) return error;

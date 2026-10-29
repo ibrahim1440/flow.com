@@ -19,7 +19,7 @@ type Ev = { id: string; kind: string; eventDate: string; costDelta: string; accu
 type Doc = { id: string; number: string; status: string; glState: string; journalEntryId: string | null; createdAt: string };
 type Full = Asset & { custodian: { fullNameAr: string; fullNameEn: string | null; employeeNo: string } | null; events: Ev[];
   additions: (Doc & { additionDate: string; amount: string; kind: string; description: string; newUsefulLifeMonths: number | null; newResidualValue: string | null })[];
-  disposals: (Doc & { disposalDate: string; kind: string; proceedsNet: string; vat: string; netBookValue: string; gainLoss: string; catchUpDepreciation: string })[];
+  disposals: (Doc & { disposalDate: string; kind: string; proceedsNet: string; vat: string; netBookValue: string; gainLoss: string; catchUpDepreciation: string; saleInvoice?: { id: string; number: string | null } | null })[];
   depreciation: { id: string; run: string; runStatus: string; periodKey: string; fromDate: string; toDate: string; amount: string; voided: boolean }[];
   projection: { periodKey: string; charge: string; accumulated: string; nbv: string }[]; can: Can };
 type Opt = { id: string; code: string; name: string | null };
@@ -41,16 +41,18 @@ function AssetPage() {
   const [reason, setReason] = useState("");
   const today = todayRiyadh();
   const [add, setAdd] = useState({ additionDate: today, amount: "", kind: "MANUAL", counterAccountId: "", supplierInvoiceLineId: "", description: "", newUsefulLifeMonths: "", newResidualValue: "" });
-  const [dis, setDis] = useState({ disposalDate: today, kind: "SCRAP", reason: "" });
+  const [dis, setDis] = useState({ disposalDate: today, kind: "SCRAP", reason: "", salesInvoiceLineId: "" });
+  // «بيع أصل ثابت» (BATCH 22 WP-F): the asset's issued, open sale lines — a disposal for value clears one of them.
+  const saleLines = useApi<{ items: { lineId: string; net: string; disposalKind: string; invoiceId: string; invoiceNumber: string | null; supplyDate: string | null; buyerName: string | null }[] }>(`/api/accounting/fixed-assets/${id}/sale-lines`);
   const [pv, setPv] = useState<Preview | null>(null);
   const d = a.data;
   useEffect(() => {
     if (mode !== "dispose") return;
-    const q = new URLSearchParams({ disposalDate: dis.disposalDate, kind: dis.kind, proceedsNet: "0" });
+    const q = new URLSearchParams(dis.salesInvoiceLineId ? { disposalDate: dis.disposalDate, salesInvoiceLineId: dis.salesInvoiceLineId } : { disposalDate: dis.disposalDate, kind: dis.kind, proceedsNet: "0" });
     let off = false;
     fetch(`/api/accounting/fixed-assets/${id}/disposals?${q}`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((x) => { if (!off) setPv(x); }).catch(() => { if (!off) setPv(null); });
     return () => { off = true; };
-  }, [mode, dis.disposalDate, dis.kind, id]);
+  }, [mode, dis.disposalDate, dis.kind, dis.salesInvoiceLineId, id]);
   if (!d) return <FaShell title={L("الأصل", "Asset")}><Msg error={a.error} /><OpsLoading /></FaShell>;
   const live = d.status === "ACTIVE" || d.status === "FULLY_DEPRECIATED";
   const done = () => { setMode(null); setReason(""); a.reload(); lines.reload(); };
@@ -64,7 +66,10 @@ function AssetPage() {
       if (await w.run("add", `/api/accounting/fixed-assets/${id}/additions`, "POST", { ...add, amount: rev ? null : add.amount, counterAccountId: rev ? null : add.counterAccountId || opts.data?.defaults.bank || null, supplierInvoiceLineId: rev ? null : add.supplierInvoiceLineId || null, newUsefulLifeMonths: add.newUsefulLifeMonths || null, newResidualValue: add.newResidualValue || null },
         rev ? L("سُجّل تعديل التقدير وأُعيد حساب الإهلاك من تاريخه.", "Change of estimate recorded; depreciation recomputed from its date.") : L("سُجّلت الإضافة الرأسمالية وأُعيد حساب الإهلاك.", "Addition recorded; depreciation recomputed."))) done();
     }
-    if (kind === "dispose") { if (await w.run("dispose", `/api/accounting/fixed-assets/${id}/disposals`, "POST", { ...dis, proceedsNet: "0" }, L("استُبعد الأصل.", "The asset is disposed of."))) done(); }
+    if (kind === "dispose") {
+      const body = dis.salesInvoiceLineId ? { salesInvoiceLineId: dis.salesInvoiceLineId, disposalDate: dis.disposalDate, reason: dis.reason } : { disposalDate: dis.disposalDate, kind: dis.kind, reason: dis.reason, proceedsNet: "0" };
+      if (await w.run("dispose", `/api/accounting/fixed-assets/${id}/disposals`, "POST", body, L("استُبعد الأصل.", "The asset is disposed of."))) { done(); saleLines.reload(); }
+    }
     if (kind === "cancelAdd") { if (await w.run("c", `/api/accounting/fixed-assets/additions/${target}/cancel`, "POST", { reason }, L("أُلغيت الإضافة.", "Addition cancelled."))) done(); }
     if (kind === "cancelDisp") { if (await w.run("c", `/api/accounting/fixed-assets/disposals/${target}/cancel`, "POST", { reason }, L("أُلغي الاستبعاد وعاد الأصل.", "Disposal cancelled; the asset is back."))) done(); }
   }
@@ -176,12 +181,26 @@ function AssetPage() {
           <div className="acct-metrics" data-testid="fa-dispose-preview">
             <div className="acct-metric"><span className="k">{Number(pv.gainLoss) >= 0 ? L("ربح الاستبعاد", "Gain on disposal") : L("خسارة الاستبعاد", "Loss on disposal")}</span><span className={`v ${Number(pv.gainLoss) < 0 ? "is-bad" : ""}`} data-testid="fa-dispose-gl">{money(Math.abs(Number(pv.gainLoss)).toFixed(2))}</span></div>
             <div className="acct-metric"><span className="k">{L("صافي القيمة الدفترية", "Net book value")}</span><span className="v">{money(pv.netBookValue)}</span><span className="s">{L(`بعد إهلاك حتى التاريخ ${money(pv.catchUpDepreciation)}`, `after depreciation to the day ${money(pv.catchUpDepreciation)}`)}</span></div>
-            <div className="acct-metric"><span className="k">{L("المتحصلات", "Proceeds")}</span><span className="v">{money(pv.proceedsNet)}</span><span className="s">{L("بلا متحصلات (قريباً عبر فاتورة المبيعات)", "None (soon via the sales invoice)")}</span></div>
+            <div className="acct-metric"><span className="k">{L("المتحصلات", "Proceeds")}</span><span className="v">{money(pv.proceedsNet)}</span><span className="s">{dis.salesInvoiceLineId ? L("صافي بند الفاتورة (الضريبة على الفاتورة)", "The invoice line's net (the VAT is on the invoice)") : L("بلا متحصلات", "None")}</span></div>
           </div>
         ) : null}
         {pv && !pv.dateOk ? <p className="acct-bad">{L(`التاريخ قبل آخر إهلاك مسجّل (${pv.recordedThrough}).`, `The date is before the last depreciation recorded (${pv.recordedThrough}).`)}</p> : null}
-        <div className="acct-seg" role="group">{(["SCRAP", "SALE"] as const).map((k) => <button key={k} type="button" aria-pressed={dis.kind === k} onClick={() => setDis({ ...dis, kind: k })} data-testid={`fa-dispose-${k}`}>{k === "SALE" ? L("بيع", "Sale") : L("إتلاف / شطب", "Scrap / write-off")}</button>)}</div>
-        <p className={`${dis.kind === "SALE" ? "acct-warn" : "acct-hint"} fa-note`} data-testid="fa-dispose-sale-note">{L("بيع الأصل يحتاج فاتورة مبيعات إلكترونية — قريباً. يُسجَّل هنا الاستبعاد بلا متحصلات فقط (إتلاف / شطب)؛ أي متحصلات — بيع أو خردة مُباعة — تمر بسطر «بيع أصل ثابت» في فاتورة المبيعات.", "Selling an asset needs an e-invoiced sales invoice — coming soon. Here only a disposal without proceeds is recorded (scrap / write-off); any proceeds — a sale or scrap sold — go through the «fixed-asset sale» sales-invoice line.")}</p>
+        {saleLines.data?.items.length ? (
+          <fieldset className="fa-form" data-testid="fa-dispose-sale-lines">
+            <legend className="hr-label">{L("من فاتورة مبيعات صادرة (بند «بيع أصل ثابت»)", "From an issued sales invoice («fixed-asset sale» line)")}</legend>
+            {saleLines.data.items.map((s) => (
+              <label key={s.lineId} className="fa-radio">
+                <input type="radio" name="fa-sale-line" checked={dis.salesInvoiceLineId === s.lineId} onChange={() => setDis({ ...dis, salesInvoiceLineId: s.lineId, kind: s.disposalKind, disposalDate: s.supplyDate ?? dis.disposalDate })} data-testid={`fa-dispose-line-${s.lineId}`} />
+                <bdi className="acct-code" dir="ltr">{s.invoiceNumber}</bdi> · <bdi>{s.buyerName}</bdi> · {money(s.net)} · {s.disposalKind === "SCRAP" ? L("خردة مُباعة", "Scrap sold") : L("بيع", "Sale")} · <span className="hr-num">{s.supplyDate}</span>
+              </label>
+            ))}
+            <label className="fa-radio"><input type="radio" name="fa-sale-line" checked={!dis.salesInvoiceLineId} onChange={() => setDis({ ...dis, salesInvoiceLineId: "", kind: "SCRAP" })} /> {L("بلا متحصلات (إتلاف / شطب)", "Without proceeds (scrap / write-off)")}</label>
+          </fieldset>
+        ) : null}
+        {!dis.salesInvoiceLineId ? <div className="acct-seg" role="group">{(["SCRAP", "SALE"] as const).map((k) => <button key={k} type="button" aria-pressed={dis.kind === k} onClick={() => setDis({ ...dis, kind: k })} data-testid={`fa-dispose-${k}`}>{k === "SALE" ? L("بيع", "Sale") : L("إتلاف / شطب", "Scrap / write-off")}</button>)}</div> : null}
+        <p className={`${dis.kind === "SALE" && !dis.salesInvoiceLineId ? "acct-warn" : "acct-hint"} fa-note`} data-testid="fa-dispose-sale-note">{dis.salesInvoiceLineId
+          ? L("تؤخذ المتحصلات من صافي بند الفاتورة ويُقيَّد من «تسوية بيع الأصول الثابتة» بلا ضريبة (الضريبة على الفاتورة). التاريخ هو تاريخ التوريد أو بعده.", "The proceeds are the invoice line's net, debited from «fixed-asset sale clearing» with no VAT (the VAT is on the invoice). The date is the supply date or later.")
+          : L("البيع أو الخردة المُباعة بقيمة: أصدر فاتورة مبيعات فيها بند «بيع أصل ثابت» ثم اختره هنا. بدونها يُسجَّل الاستبعاد بلا متحصلات فقط (إتلاف / شطب).", "A sale or scrap sold for value: issue a sales invoice with a «fixed-asset sale» line, then choose it here. Without one, only a disposal without proceeds (scrap / write-off) is recorded.")}</p>
         <div className="fa-form">
           <Field label={L("تاريخ الاستبعاد", "Disposal date")}><input type="date" className="hr-input" value={dis.disposalDate} onChange={(e) => setDis({ ...dis, disposalDate: e.target.value })} data-testid="fa-dispose-date" /></Field>
           <Field label={L("السبب / قرار الشركة", "Reason / company decision")} wide><input className="hr-input" value={dis.reason} onChange={(e) => setDis({ ...dis, reason: e.target.value })} /></Field>
@@ -191,6 +210,10 @@ function AssetPage() {
       <Dialog open={mode === "cancelAdd" || mode === "cancelDisp"} title={mode === "cancelAdd" ? L("إلغاء الإضافة", "Cancel the addition") : L("إلغاء الاستبعاد", "Cancel the disposal")} onClose={() => setMode(null)}
         actions={<><Btn variant="danger" disabled={reason.trim().length < 3} busy={w.busy === "c"} onClick={() => act(mode as string)} data-testid="fa-cancel-confirm">{L("تأكيد الإلغاء", "Confirm")}</Btn><Btn onClick={() => setMode(null)}>{L("رجوع", "Back")}</Btn></>}>
         <p>{L("يُعكس القيد بتاريخه (يجب أن تكون فترته مفتوحة) ويعود الأصل كما كان.", "Its entry is reversed on its own date (its period must be open) and the asset goes back as it was.")}</p>
+        {mode === "cancelDisp" && d.disposals.find((x) => x.id === target)?.saleInvoice ? (() => {
+          const inv = d.disposals.find((x) => x.id === target)!.saleInvoice!;
+          return <p className="acct-warn" data-testid="fa-cancel-credit-note">{L(`الاستبعاد من فاتورة البيع ${inv.number ?? ""}: إن أُلغي البيع فأصدر بعد الإلغاء إشعارًا دائنًا على بنده. `, `This disposal clears the sale on ${inv.number ?? ""}: if the sale is undone, issue a credit note on its line after cancelling. `)}<Link href={`/dashboard/sales/invoices/${inv.id}/credit-note`}>{L("إصدار إشعار دائن", "Issue a credit note")}</Link></p>;
+        })() : null}
         <Field label={L("السبب (يُسجَّل)", "Reason (recorded)")}><textarea className="hr-input hr-textarea" value={reason} onChange={(e) => setReason(e.target.value)} data-testid="fa-cancel-reason" /></Field>
       </Dialog>
       <Dialog open={mode === "delete"} title={L("حذف المسودة", "Delete the draft")} sub={d.code} onClose={() => setMode(null)}

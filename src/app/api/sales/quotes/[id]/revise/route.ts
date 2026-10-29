@@ -1,8 +1,9 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
-import { requireSub } from "@/lib/auth-server";
+import { requireQuoteWrite } from "@/lib/services/sales/quote-guard";
+import { quotesSeeAll } from "@/lib/services/sales/quote-access";
 import { handleDomainError } from "@/lib/api-error";
-import { seesAllSales, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
+import { NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
 import { reviseQuote } from "@/lib/services/sales/quotes";
 
 type Params = { params: Promise<{ id: string }> };
@@ -16,13 +17,13 @@ type Params = { params: Promise<{ id: string }> };
  * March" has an answer that is not "whatever the row says today".
  */
 export async function POST(_request: Request, { params }: Params) {
-  const { user, error } = await requireSub("sales", "quote_write");
+  const { user, error } = await requireQuoteWrite();
   if (error) return error;
   const { id } = await params;
 
   try {
     const visible = await prisma.quote.findFirst({
-      where: { id, ...(seesAllSales(user.permissions) ? {} : { opportunity: { ownerId: user.id } }) },
+      where: { id, ...(quotesSeeAll(user.permissions) ? {} : { opportunity: { ownerId: user.id } }) },
       select: { id: true },
     });
     if (!visible) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });

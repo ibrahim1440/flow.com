@@ -101,10 +101,12 @@ const SOD_KIND: Record<string, [string, string]> = {
   JOURNAL_APPROVER_POSTED: ["قيد رحّله معتمِده", "Journal posted by its approver"],
   NOTE_SELF_ISSUED: ["إشعار أصدره مُعدّه", "Note issued by its preparer"],
   BUDGET_SELF_APPROVED: ["موازنة اعتمدها مُعدّها", "Budget approved by its preparer"],
+  RECEIPT_SELF_CONFIRMED: ["سند قبض سجّله وأكّده شخص واحد", "Receipt recorded and confirmed by one person"],
   AP_SELF_POSTED: ["فاتورة مورد رحّلها مُعدّها", "Supplier invoice posted by its preparer"],
   FA_SELF_POSTED: ["مستند أصل ثابت رحّله مُعدّه", "Fixed-asset document posted by its preparer"],
   PERIOD_REOPENED: ["إعادة فتح فترة مقفلة", "Closed period reopened"],
   RECURRING_SELF_AUTHORISED: ["ترحيل تلقائي فعّله مُعدّ المعاملة المتكررة", "Recurring auto-post authorised by its preparer"],
+  STANDING_SELF_AUTHORISED: ["تفويض دائم للجدولة منحه مُعدّ بنود السجل", "Scheduler authorised by a preparer of the register"],
 };
 
 /** «استثناءات فصل المهام» — for the auditor: every act where one person held two separated duties, and every reopen. */

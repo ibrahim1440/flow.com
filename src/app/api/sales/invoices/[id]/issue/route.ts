@@ -1,4 +1,3 @@
-import { after } from "next/server";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireAuth, requireSub } from "@/lib/auth-server";
@@ -6,7 +5,7 @@ import { auditFromRequest } from "@/lib/accounting/audit";
 import { inScope } from "@/lib/services/invoicing/http";
 import { issueDocument } from "@/lib/services/invoicing/service";
 import { invError } from "@/lib/services/invoicing/refusals";
-import { submitDocument, type SubmitResult } from "@/lib/zatca/pipeline";
+import { zatcaAfterIssue } from "@/lib/services/invoicing/issue-http";
 
 type Ctx = { params: Promise<{ id: string }> };
 // A4: a standard invoice is cleared by ZATCA inside this request (30 s timeout per call).
@@ -32,13 +31,7 @@ export async function POST(request: Request, { params }: Ctx) {
     // A4 — ZATCA Phase 2, after the commit (never inside the transaction): a standard document is cleared now, so
     // it is shared only once CLEARED (a transient failure leaves it PENDING for the queue); a simplified one is
     // reported right after the response and, failing that, by the queue within 24 h.
-    let submission: SubmitResult | { status: string; reason: string } | null = null;
-    if (r.zatca?.flow === "CLEARANCE") {
-      submission = await submitDocument(r.zatca.documentId, { actorId: user.id }).catch((e: { code?: string; message?: string }) => ({ status: "PENDING", reason: e?.code ?? "SUBMIT_FAILED" }));
-    } else if (r.zatca?.flow === "REPORTING") {
-      const docId = r.zatca.documentId;
-      after(() => submitDocument(docId, { actorId: user.id }).then(() => undefined, () => undefined));
-    }
+    const submission = await zatcaAfterIssue(r, user.id);
     return NextResponse.json({ ...r, zatcaSubmission: submission }, { status: r.replayed ? 200 : 201 });
   } catch (err) {
     return invError(err);

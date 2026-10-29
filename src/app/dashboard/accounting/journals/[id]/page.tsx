@@ -10,6 +10,7 @@ import { Dialog } from "@/components/hr/ui";
 import { SOURCE_DOC, SOURCE_EVENT, plain } from "@/lib/accounting/source-links";
 import { AcctShell, Msg, StatusTag, STATUS_AR, TYPE_AR, Term, money, sourceLabel, todayRiyadh, useApi, useLang, useWrite, type Setup } from "../../_ui/shell";
 import { JournalEditor } from "../../_ui/journal-editor";
+import { DeferFromEntry } from "../../_ui/defer-from-entry";
 
 type Line = { id: string; lineNo: number | null; debit: string; credit: string; description: string | null; branchId: string | null; costCenterId: string | null; partyType: string | null; partyId: string | null; itemType: string | null; itemId: string | null; account: { id: string; code: string; nameAr: string | null; nameEn: string; controlType: string | null } };
 type Entry = {
@@ -17,7 +18,7 @@ type Entry = {
   totalDebit: string; totalCredit: string; createdBy: string | null; submittedBy: string | null; approvedBy: string | null; postedBy: string | null; postedAt: string | null; reversedBy: string | null; rejectReason: string | null; rejectedBy: string | null; reversalReason: string | null; sodBypass: boolean; roundingAmount: string | null;
   idempotencyKey: string | null; fiscalPeriod: { year: number; periodNo: number; status: string };
   reversesEntry: { id: string; ref: string | null; entryNo: number } | null; reversedByEntry: { id: string; ref: string | null; entryNo: number; entryDate: string } | null;
-  lines: Line[]; people: Record<string, string>; audit: { id: string; at: string; actorId: string | null; action: string; reason: string | null }[];
+  lines: Line[]; attachments: { name: string; url: string }[] | null; people: Record<string, string>; audit: { id: string; at: string; actorId: string | null; action: string; reason: string | null }[];
 };
 
 const ACTION_AR: Record<string, [string, string]> = {
@@ -72,7 +73,7 @@ export default function JournalPage({ params }: { params: Promise<{ id: string }
       <Msg error={w.error ?? je.error} done={w.done} onClose={() => { w.setError(null); w.setDone(null); }} />
       {!e ? <OpsLoading /> : editing ? (
         <JournalEditor entryId={e.id} initial={{
-          entryDate: e.entryDate, description: e.description ?? "",
+          entryDate: e.entryDate, description: e.description ?? "", attachments: e.attachments ?? [],
           lines: e.lines.map((l) => ({ accountId: l.account.id, description: l.description ?? "", debit: Number(l.debit) ? l.debit : "", credit: Number(l.credit) ? l.credit : "", branchId: l.branchId ?? "", costCenterId: l.costCenterId ?? "", partyType: l.partyType ?? "", partyId: l.partyId ?? "" })),
         }} />
       ) : (
@@ -108,6 +109,13 @@ export default function JournalPage({ params }: { params: Promise<{ id: string }
               </tbody>
             </table>
           </div>
+          {e.attachments?.length ? (
+            <section className="acct-card" data-testid="je-detail-attachments">
+              <h3>{L("المرفقات", "Attachments")}</h3>
+              <ul className="acct-checks">{e.attachments.map((a, k) => <li key={k}><a href={a.url} target="_blank" rel="noopener noreferrer">{a.name}</a></li>)}</ul>
+            </section>
+          ) : null}
+          {e.type === "MANUAL" && can?.deferrals ? <DeferFromEntry entry={e} onDone={je.reload} /> : null}
           <section className="acct-card">
             <h3>{L("سجل التدقيق", "Audit trail")}</h3>
             <ol className="acct-checks" data-testid="je-audit">

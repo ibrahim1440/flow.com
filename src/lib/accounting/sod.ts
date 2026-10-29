@@ -64,7 +64,7 @@ export const FA_SOD_SOURCES = ["FIXED_ASSET", "FA_ADDITION", "FA_DISPOSAL"] as c
 const FA_SOD_SOURCES_DETAIL: Record<(typeof FA_SOD_SOURCES)[number], string> = { FIXED_ASSET: "asset activated by its preparer", FA_ADDITION: "addition entered and posted by one person", FA_DISPOSAL: "disposal entered and posted by one person" };
 
 export type SodException = {
-  kind: "JOURNAL_SELF_APPROVED" | "JOURNAL_APPROVER_POSTED" | "NOTE_SELF_ISSUED" | "AP_SELF_POSTED" | "FA_SELF_POSTED" | "PERIOD_REOPENED" | "RECURRING_SELF_AUTHORISED" | "BUDGET_SELF_APPROVED";
+  kind: "JOURNAL_SELF_APPROVED" | "JOURNAL_APPROVER_POSTED" | "NOTE_SELF_ISSUED" | "AP_SELF_POSTED" | "FA_SELF_POSTED" | "PERIOD_REOPENED" | "RECURRING_SELF_AUTHORISED" | "STANDING_SELF_AUTHORISED" | "BUDGET_SELF_APPROVED" | "RECEIPT_SELF_CONFIRMED";
   at: string; day: string; ref: string; amount: string | null; actorId: string | null; detail: string; href: string;
 };
 
@@ -76,7 +76,7 @@ export type SodException = {
 export async function sodExceptions(from: Date, to: Date): Promise<{ from: string; to: string; rows: SodException[]; counts: Record<string, number> }> {
   const end = new Date(to.getTime() + 86_400_000 - 1 + 3 * 3600_000);
   const start = new Date(from.getTime() - 3 * 3600_000);
-  const [journals, notes, ap, reopens, standing, fa, budgets] = await Promise.all([
+  const [journals, notes, ap, reopens, standing, fa, budgets, receipts] = await Promise.all([
     prisma.journalEntry.findMany({
       where: { type: { in: ["MANUAL", "ADJUSTMENT"] }, approvedAt: { gte: start, lte: end }, OR: [{ sodBypass: true }, { status: { in: ["POSTED", "REVERSED"] } }] },
       select: { id: true, entryNo: true, postingYear: true, postingSeq: true, entryDate: true, sodBypass: true, createdBy: true, submittedBy: true, approvedBy: true, approvedAt: true, postedBy: true, postedAt: true, totalDebit: true, status: true, sourceType: true },
@@ -85,14 +85,20 @@ export async function sodExceptions(from: Date, to: Date): Promise<{ from: strin
     prisma.salesInvoice.findMany({ where: { sodBypass: true, issuedAt: { gte: start, lte: end } }, select: { id: true, number: true, kind: true, issuedAt: true, issuedById: true, createdById: true, grandTotal: true }, orderBy: { issuedAt: "asc" } }),
     prisma.supplierInvoice.findMany({ where: { status: { in: ["POSTED", "CANCELLED"] }, postedAt: { gte: start, lte: end } }, select: { id: true, number: true, postedAt: true, postedBy: true, createdBy: true, lastEditedBy: true, submittedBy: true, grossTotal: true }, orderBy: { postedAt: "asc" } }),
     prisma.fiscalPeriod.findMany({ where: { reopenedAt: { gte: start, lte: end } }, select: { id: true, year: true, periodNo: true, reopenedAt: true, reopenedBy: true, reopenReason: true, reopenCount: true } }),
-    // «المعاملات المتكررة»: a standing journal whose auto-post its own preparer authorised (the SoD setting allowed it).
-    prisma.recurringSchedule.findMany({ where: { autoPostSodBypass: true, autoPostApprovedAt: { gte: start, lte: end } }, select: { id: true, refNo: true, name: true, autoPostApprovedAt: true, autoPostApprovedBy: true, payload: true } }),
+    // «التفويض الدائم» (20261124090000_standing_authorisation): a self-authorisation the SoD setting allowed — a recurring
+    // journal's auto-post authorised by its own preparer (RECURRING_SELF_AUTHORISED), or a register-wide scheduler run
+    // (deferral recognition, depreciation) authorised by a preparer of the register's live items (STANDING_SELF_AUTHORISED).
+    // Read from the authorisations themselves, so one revoked since is still listed.
+    prisma.standingAuthorisation.findMany({ where: { sodBypass: true, authorisedAt: { gte: start, lte: end } }, select: { id: true, register: true, scopeId: true, authorisedAt: true, authorisedBy: true, revokedAt: true } }),
     // «الأصول الثابتة»: an asset activated by its preparer, an addition / disposal entered and posted by one person —
     // allowed by the setting, flagged on the engine entry (FA_SOD: src/lib/accounting/fixed-assets/common.ts faSod).
     prisma.journalEntry.findMany({ where: { sourceModule: "accounting", sourceType: { in: [...FA_SOD_SOURCES] }, sodBypass: true, postedAt: { gte: start, lte: end } }, select: { id: true, entryNo: true, postingYear: true, postingSeq: true, sourceType: true, postedAt: true, postedBy: true, totalDebit: true }, orderBy: { postedAt: "asc" } }),
     // «الموازنات» (council F5): a budget approved by its preparer (creator or last editor). Deferrals have no approval step:
     // a run is posted by journal_post holders and reversed by journal_reverse holders (step-up), like any engine entry.
     prisma.glBudget.findMany({ where: { sodBypass: true, approvedAt: { gte: start, lte: end } }, select: { id: true, name: true, fiscalYear: true, revisionNo: true, approvedAt: true, approvedBy: true, createdBy: true } }),
+    // «سند قبض» (BATCH22 WP-D): a receipt for an invoice with no deal confirmed by the accountant who recorded it (the
+    // setting allowed it; SalesCollection_four_eyes_check requires the flag).
+    prisma.salesCollection.findMany({ where: { sodBypass: true, decidedAt: { gte: start, lte: end } }, select: { id: true, receiptNumber: true, decidedAt: true, decidedById: true, amountGross: true } }),
   ]);
   const rows: SodException[] = [];
   const day = (d: Date) => dayText(new Date(d.getTime() + 3 * 3600_000));
@@ -108,12 +114,22 @@ export async function sodExceptions(from: Date, to: Date): Promise<{ from: strin
   }
   for (const f of fa) rows.push({ kind: "FA_SELF_POSTED", at: f.postedAt!.toISOString(), day: day(f.postedAt!), ref: postingRef(f) ?? `#${f.entryNo}`, amount: f.totalDebit.toFixed(2), actorId: f.postedBy, detail: FA_SOD_SOURCES_DETAIL[f.sourceType as (typeof FA_SOD_SOURCES)[number]] ?? String(f.sourceType), href: `/dashboard/accounting/journals/${f.id}` });
   for (const p of reopens) rows.push({ kind: "PERIOD_REOPENED", at: p.reopenedAt!.toISOString(), day: day(p.reopenedAt!), ref: `${p.year}-${String(p.periodNo).padStart(2, "0")}`, amount: null, actorId: p.reopenedBy, detail: `#${p.reopenCount}: ${p.reopenReason ?? ""}`, href: "/dashboard/accounting/periods" });
+  const scopes = standing.map((r) => r.scopeId).filter((x): x is string => !!x);
+  const schedules = new Map((scopes.length ? await prisma.recurringSchedule.findMany({ where: { id: { in: scopes } }, select: { id: true, refNo: true, name: true, payload: true } }) : []).map((x) => [x.id, x]));
   for (const r of standing) {
-    const lines = ((r.payload as { lines?: { debit?: string }[] } | null)?.lines ?? []);
-    const amount = lines.reduce((t, l) => t.plus(l.debit ?? "0"), new Decimal(0));
-    rows.push({ kind: "RECURRING_SELF_AUTHORISED", at: r.autoPostApprovedAt!.toISOString(), day: day(r.autoPostApprovedAt!), ref: `REC-${String(r.refNo).padStart(6, "0")}`, amount: amount.toFixed(2), actorId: r.autoPostApprovedBy, detail: `the preparer authorised auto-post: ${r.name}`.slice(0, 200), href: `/dashboard/accounting/recurring/${r.id}` });
+    const revoked = r.revokedAt ? " (revoked since)" : "";
+    if (r.register === "RECURRING_AUTOPOST") {
+      const sc = r.scopeId ? schedules.get(r.scopeId) : undefined;
+      const lines = ((sc?.payload as { lines?: { debit?: string }[] } | null)?.lines ?? []);
+      const amount = lines.reduce((t, l) => t.plus(l.debit ?? "0"), new Decimal(0));
+      rows.push({ kind: "RECURRING_SELF_AUTHORISED", at: r.authorisedAt.toISOString(), day: day(r.authorisedAt), ref: sc ? `REC-${String(sc.refNo).padStart(6, "0")}` : r.id, amount: amount.toFixed(2), actorId: r.authorisedBy, detail: `the preparer authorised auto-post: ${sc?.name ?? ""}${revoked}`.slice(0, 200), href: `/dashboard/accounting/recurring/${r.scopeId}` });
+    } else {
+      const deferrals = r.register === "DEFERRAL_RECOGNITION";
+      rows.push({ kind: "STANDING_SELF_AUTHORISED", at: r.authorisedAt.toISOString(), day: day(r.authorisedAt), ref: deferrals ? "DEFERRAL_RECOGNITION" : "DEPRECIATION", amount: null, actorId: r.authorisedBy, detail: `a preparer of the register's live items authorised the scheduler to post: ${deferrals ? "deferral recognition" : "depreciation"}${revoked}`.slice(0, 200), href: deferrals ? "/dashboard/accounting/deferrals" : "/dashboard/accounting/fixed-assets/depreciation" });
+    }
   }
   for (const g of budgets) rows.push({ kind: "BUDGET_SELF_APPROVED", at: g.approvedAt!.toISOString(), day: day(g.approvedAt!), ref: `${g.name} ${g.fiscalYear} r${g.revisionNo}`, amount: null, actorId: g.approvedBy, detail: g.approvedBy === g.createdBy ? "preparer approved" : "last editor approved", href: `/dashboard/accounting/budgets/${g.id}` });
+  for (const c of receipts) rows.push({ kind: "RECEIPT_SELF_CONFIRMED", at: c.decidedAt!.toISOString(), day: day(c.decidedAt!), ref: c.receiptNumber ?? c.id, amount: c.amountGross.toFixed(2), actorId: c.decidedById, detail: "receipt recorded and confirmed by one person", href: `/dashboard/accounting/receipts?id=${c.id}` });
   rows.sort((a, b) => a.at.localeCompare(b.at));
   const counts: Record<string, number> = {};
   for (const r of rows) counts[r.kind] = (counts[r.kind] ?? 0) + 1;

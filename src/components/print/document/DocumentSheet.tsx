@@ -46,6 +46,8 @@ export type DocumentSheetProps = {
   seller?: { name: string | null; lines: ReactNode[]; testId?: string } | null;
   title: { main: string; lines: ReactNode[] };
   banner?: { tone: "warning" | "danger"; title: string; text?: string | null; testId?: string } | null;
+  /** A diagonal mark across the sheet, on screen and paper (a draft: «مسودة — ليست فاتورة ضريبية», Q-F5). */
+  watermark?: string | null;
   metaStart: DocRow[];
   metaEnd: DocRow[];
   columns: DocColumn[];
@@ -116,6 +118,7 @@ export function DocumentSheet(p: DocumentSheetProps) {
   return (
     <article className="dsh" dir={rtl ? "rtl" : "ltr"} lang={p.lang} data-testid={p.testId}>
       <div className="dsh-body" ref={bodyRef}>
+        {p.watermark ? <div className="dsh-watermark" aria-hidden="true" data-testid="doc-watermark">{p.watermark}</div> : null}
         <div className="dsh-logo">
           {/* An <img>, so it reaches paper and «Save as PDF» without "print backgrounds". */}
           {/* eslint-disable-next-line @next/next/no-img-element */}

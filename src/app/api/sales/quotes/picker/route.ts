@@ -1,9 +1,9 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
-import { requireSub } from "@/lib/auth-server";
+import { requireQuoteWrite } from "@/lib/services/sales/quote-guard";
+import { quotesSeeAll } from "@/lib/services/sales/quote-access";
 import { handleDomainError } from "@/lib/api-error";
 import { hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
-import { seesAllSales } from "@/lib/services/sales/scope";
 
 /**
  * GET /api/sales/quotes/picker?q=… — the «+ عرض سعر» picker of the quotations list
@@ -17,13 +17,13 @@ import { seesAllSales } from "@/lib/services/sales/scope";
  * Deals: OPEN only, scoped exactly as the quotation routes scope them.
  */
 export async function GET(request: Request) {
-  const { user, error } = await requireSub("sales", "quote_write");
+  const { user, error } = await requireQuoteWrite();
   if (error) return error;
   const url = new URL(request.url);
   const q = (url.searchParams.get("q") ?? "").trim().slice(0, 80);
   const customerId = url.searchParams.get("customerId");
 
-  const scopeAll = seesAllSales(user.permissions);
+  const scopeAll = quotesSeeAll(user.permissions);
   const hasCustomers = hasModuleAccess(user.permissions, "customers");
   const dealScope = scopeAll ? {} : { ownerId: user.id };
 

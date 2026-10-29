@@ -454,20 +454,20 @@ const RESOLVERS: Record<string, Resolver> = {
       },
     });
     if (!c) return null;
-    const customer = c.customer ?? c.opportunity.customer;
+    const customer = c.customer ?? c.opportunity?.customer ?? null;
     return {
       vars: {
         "collection.status": s(p.to) || c.status,
         "collection.amount": moneyText(c.amountGross, c.currency),
         "collection.reference": c.referenceNumber ?? "",
-        "deal.title": c.opportunity.title,
+        "deal.title": c.opportunity?.title ?? "",
         "customer.name": customerName(customer, lang),
-        "owner.name": c.opportunity.owner.name,
+        "owner.name": c.opportunity?.owner.name ?? "",
         ...common(e, actor),
       },
       people: {
         customer: customerPerson(customer, lang),
-        deal_owner: employeePerson(c.opportunity.owner),
+        deal_owner: employeePerson(c.opportunity?.owner),
         actor: employeePerson(actor),
       },
     };

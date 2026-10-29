@@ -1,5 +1,5 @@
 import { NextResponse } from "@/lib/api-response";
-import { acctError } from "@/lib/accounting/http";
+import { acctError, jsonBody } from "@/lib/accounting/http";
 import { auditFromRequest } from "@/lib/accounting/audit";
 import { requireFaRead, requireFaOpening, faCan } from "@/lib/accounting/fixed-assets/http";
 import { faOpeningPreview, applyFaOpening } from "@/lib/accounting/fixed-assets/opening";
@@ -20,7 +20,8 @@ export async function POST(request: Request) {
   const { user, error } = await requireFaOpening();
   if (error) return error;
   try {
-    await applyFaOpening(auditFromRequest(request, user.id, "opening fixed assets"));
+    const body = await jsonBody(request).catch(() => ({} as Record<string, unknown>));
+    await applyFaOpening(auditFromRequest(request, user.id, "opening fixed assets"), { confirmOtherLines: body.confirmOtherLines === true });
     return NextResponse.json(await faOpeningPreview());
   } catch (err) {
     return acctError(err);

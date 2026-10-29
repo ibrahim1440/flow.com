@@ -3,7 +3,8 @@
 import { NextResponse } from "@/lib/api-response";
 import { parseBusinessDay, riyadhDay, dayText } from "./dates";
 import { refuse } from "./refusals";
-import { balanceSheet, cashFlow, comparativeRange, csvBody, csvRow, incomeStatement, rangeFromQuery } from "./statements";
+import { balanceSheet, cashFlow, comparativeRange, csvBody, csvRow, incomeStatement, incomeStatementByLocation, rangeFromQuery } from "./statements";
+import { parseBranchFilter } from "./locations";
 import { vatReturn, quarterOf } from "./vat-return";
 
 const sp = (request: Request) => new URL(request.url).searchParams;
@@ -20,8 +21,11 @@ const day = (v: string | null, fallback: Date) => {
 export async function incomeFromRequest(request: Request) {
   const q = sp(request);
   const range = rangeFromQuery({ kind: q.get("kind") ?? (q.get("from") ? null : "month"), year: q.get("year"), n: q.get("n") ?? String(riyadhDay().getUTCMonth() + 1), from: q.get("from"), to: q.get("to") });
+  // «الموقع» (WP-B): by=location → one column per location + «غير محدد» + «الإجمالي» (no comparative); otherwise a
+  // location filter (branches=a,b,none) narrows the statement to those locations' lines.
+  if (q.get("by") === "location") return incomeStatementByLocation(range);
   const cmp = q.get("compare") ?? "prior";
-  return incomeStatement(range, cmp === "none" ? null : comparativeRange(range, cmp === "lastYear" ? "lastYear" : "prior"));
+  return incomeStatement(range, cmp === "none" ? null : comparativeRange(range, cmp === "lastYear" ? "lastYear" : "prior"), { branches: parseBranchFilter(q) });
 }
 
 export async function balanceFromRequest(request: Request) {
@@ -47,7 +51,7 @@ export async function vatFromRequest(request: Request) {
 
 type Pl = Awaited<ReturnType<typeof incomeStatement>>;
 export function incomeCsv(pl: Pl): string[] {
-  const head = ["section", "code", "account", ...pl.columns.map((c) => `${c.from}..${c.to}`)];
+  const head = ["section", "code", "account", ...pl.columns.map((c) => ("labelEn" in c ? String((c as { labelEn: string }).labelEn) : `${c.from}..${c.to}`))];
   const rows = [csvRow(head)];
   for (const s of pl.sections) {
     for (const l of s.lines) rows.push(csvRow([s.en, l.code, l.name, ...l.amounts]));

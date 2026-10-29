@@ -17,6 +17,9 @@ import { readInvoiceSettings, sellerSnapshot } from "./settings";
 import { postDocumentIssued } from "./postings";
 import { refuseInv, refuseWith } from "./refusals";
 import { signAtIssue, type SignedAtIssue } from "@/lib/zatca/pipeline";
+import { defaultInvoiceBranch, orderBranchId, parseBranchId, sharedBranch } from "@/lib/accounting/locations";
+import { notifyIssued, notifyRequested, writeRequestEvent } from "./request-events";
+import { commercialChanges, correctionDiff } from "./request-math";
 
 type Tx = Prisma.TransactionClient;
 const D = (v: { toString(): string } | null | undefined) => new Decimal(v == null ? 0 : v.toString());
@@ -166,6 +169,8 @@ function lineRows(lines: CleanLine[]) {
       unitPrice: l.unitPrice.toFixed(2), discountPercent: l.discountPercent.toFixed(2), discountAmount: priced.lines[i].discountAmount.toFixed(2),
       taxCategory: l.taxCategory, taxRatePercent: l.taxRatePercent.toFixed(2), exemptionReasonCode: l.exemptionReasonCode, exemptionReason: l.exemptionReason,
       lineNet: priced.lines[i].lineNet.toFixed(2), lineTax: priced.lines[i].lineTax.toFixed(2), lineTotal: priced.lines[i].lineTotal.toFixed(2),
+      // «شامل؟» (WP-K): the typed gross, for audit (the database re-checks unitPrice against it).
+      priceIncludesVat: l.priceIncludesVat, enteredGrossUnitPrice: l.enteredGrossUnitPrice?.toFixed(2) ?? null,
     })),
   };
 }
@@ -181,8 +186,12 @@ export type DraftInput = {
   kind?: InvoiceKind; family?: InvoiceFamily; customerId: string; orderId?: string | null; quoteId?: string | null;
   lines: unknown; buyer?: unknown; supplyDate?: unknown; supplyEndDate?: unknown; paymentTermsDays?: unknown; notes?: unknown;
   source?: "MANUAL" | "ORDER" | "DELIVERY"; requestKey?: string | null;
+  /** «بيع أصل ثابت» (WP-F): the actor holds accounting › fixed_assets (only then may a line sell a fixed asset). */
+  canSellAssets?: boolean;
   /** A4: an external order source (e.g. SALLA): one document per (channel, external order reference). */
   channel?: string | null; externalOrderRef?: string | null;
+  /** «الموقع» (WP-B): the selling location (FinBranch id); absent = the order's, else the requester's (never the delivery's site). */
+  branchId?: unknown;
 };
 
 /** A4: the external order source of a draft, validated (null = none). */
@@ -213,6 +222,7 @@ export async function createDraft(input: DraftInput, ctx: AuditContext) {
   }
   const { lines, problems } = parseLines(input.lines);
   if (problems.length) throw refuseWith("LINES_INVALID", { problems });
+  assertAssetLinesAllowed(lines, !!input.canSellAssets);
   return prisma.$transaction(async (tx) => {
     await setAuditContext(tx, ctx);
     return insertDraft(tx, input, lines, ext, ctx);
@@ -236,7 +246,38 @@ export async function createManualDraftIn(tx: Tx, input: Omit<DraftInput, "order
   if (hit) return { id: hit.id, replayed: true };
   const { lines, problems } = parseLines(input.lines);
   if (problems.length) throw refuseWith("LINES_INVALID", { problems });
-  return insertDraft(tx, { ...input, source: "MANUAL" }, lines, null, ctx);
+  assertAssetLinesAllowed(lines, false);
+  const r = await insertDraft(tx, { ...input, source: "MANUAL" }, lines, null, ctx);
+  // «طلبات الفواتير» (WP-C): a recurring draft enters the accountant's queue by itself, requested by the schedule's preparer.
+  await queueAutomaticDraft(tx, r.id, ctx.actorId);
+  return r;
+}
+
+/**
+ * «بيع أصل ثابت» (WP-F refinement 1): a line selling a fixed asset is the accountant's — it needs accounting ›
+ * fixed_assets as well as invoices_create, so such an invoice never comes from a Sales request (or a recurring draft).
+ */
+function assertAssetLinesAllowed(lines: CleanLine[], canSellAssets: boolean) {
+  if (!canSellAssets && lines.some((l) => l.kind === "FIXED_ASSET_SALE")) throw refuseInv("FA_LINE_ACCOUNTANT_ONLY");
+}
+
+/** An automatic draft (on delivery, recurring) enters the issuer's queue at once: REQUESTED by whoever caused it. */
+async function queueAutomaticDraft(tx: Tx, id: string, actorId: string) {
+  const at = new Date();
+  const doc = await tx.salesInvoice.update({ where: { id }, data: { requestedAt: at, requestedById: actorId }, select: { id: true, customerId: true, grandTotal: true, buyer: true, orderId: true } });
+  await writeRequestEvent(tx, { invoiceId: id, kind: "REQUESTED", actorId });
+  await notifyRequested(tx, doc, actorId, at);
+}
+
+/**
+ * «بيع أصل ثابت» × «الموقع» (WP-F refinement 5): the branch of the fixed assets a draft sells, when they all share one
+ * (null: no sale line, or assets of different / no branches — the document's own location then applies).
+ */
+async function assetSaleBranch(tx: Tx, lines: CleanLine[]): Promise<string | null> {
+  const ids = [...new Set(lines.filter((l) => l.kind === "FIXED_ASSET_SALE" && l.fixedAssetId).map((l) => l.fixedAssetId as string))];
+  if (!ids.length) return null;
+  const assets = await tx.fixedAsset.findMany({ where: { id: { in: ids } }, select: { branchId: true } });
+  return assets.length === ids.length ? sharedBranch(assets.map((a) => a.branchId)) : null;
 }
 
 async function insertDraft(tx: Tx, input: DraftInput, lines: CleanLine[], ext: { channel: string; externalOrderRef: string } | null, ctx: AuditContext) {
@@ -252,20 +293,26 @@ async function insertDraft(tx: Tx, input: DraftInput, lines: CleanLine[], ext: {
   await assertNotOverInvoiced(tx, lines, input.orderId ?? null);
   const settings = await readInvoiceSettings(tx);
   const { priced, rows } = lineRows(lines);
+  const given = await parseBranchId(tx, input.branchId);
+  // «الموقع» (WP-B × WP-F refinement 5): a draft selling a fixed asset takes the asset's branch, so the gain or loss and
+  // the depreciation land on the asset's site; otherwise the given location, else the default.
+  const assetBranch = await assetSaleBranch(tx, lines);
+  const branchId = assetBranch ?? (given !== undefined ? given : await defaultInvoiceBranch(tx, { orderId: input.orderId ?? null, actorId: ctx.actorId }));
   const created = await tx.salesInvoice.create({
     data: {
       kind: "INVOICE", family: input.family === "SIMPLIFIED" ? "SIMPLIFIED" : "STANDARD", status: "DRAFT",
-      customerId: customer.id, orderId: input.orderId ?? null, quoteId: input.quoteId ?? null,
+      customerId: customer.id, orderId: input.orderId ?? null, quoteId: input.quoteId ?? null, branchId,
       buyer: parseBuyer(input.buyer, buyerFromCustomer(customer)) as unknown as Prisma.InputJsonValue,
       supplyDate: dateOf(asDay(input.supplyDate)), supplyEndDate: dateOf(asDay(input.supplyEndDate)),
       paymentTermsDays: termsOf(input.paymentTermsDays, customer.paymentTermsDays ?? settings.defaultTermsDays),
       notes: notesOf(input.notes), source: input.source ?? (input.orderId ? "ORDER" : "MANUAL"), requestKey: input.requestKey ?? null,
       channel: ext?.channel ?? null, externalOrderRef: ext?.externalOrderRef ?? null,
       createdById: ctx.actorId, ...totalsData(priced),
-      lines: { create: rows },
     },
     select: { id: true },
   });
+  // The lines by their scalar ids (a fixed-asset sale line names its asset by id, like every other link of a line).
+  await tx.salesInvoiceLine.createMany({ data: rows.map((r, i) => ({ ...r, ...saleColumns(lines[i]), invoiceId: created.id })) });
   return { id: created.id, replayed: false };
 }
 
@@ -338,12 +385,25 @@ export async function draftOnDelivery(deliveryId: string, actorId: string): Prom
       data: {
         kind: "INVOICE", family: "STANDARD", status: "DRAFT", customerId: customer.id, orderId, buyer: buyerFromCustomer(customer) as unknown as Prisma.InputJsonValue,
         supplyDate: dateOf(d.date), paymentTermsDays: customer.paymentTermsDays ?? settings.defaultTermsDays, source: "DELIVERY", requestKey: `delivery:${deliveryId}`,
-        createdById: actorId, ...totalsData(priced), lines: { create: rows },
+        // Q-F4: the selling site (the order's location), never the site the delivery shipped from.
+        branchId: await defaultInvoiceBranch(tx, { orderId, actorId }),
+        createdById: actorId, ...totalsData(priced),
       },
       select: { id: true },
     });
+    await tx.salesInvoiceLine.createMany({ data: rows.map((r) => ({ ...r, invoiceId: created.id })) });
+    // «طلبات الفواتير» (WP-C): the delivery draft goes to the accountant's queue, requested by the dispatcher.
+    await queueAutomaticDraft(tx, created.id, actorId);
     return { id: created.id };
   }, TX_OPTS);
+}
+
+/**
+ * «بيع أصل ثابت» (WP-F): the sale-line columns of a stored row (kept outside lineRows / toClean on purpose: an ITEM line
+ * takes the database defaults; a credit / debit note's lines are ITEM_ONLY).
+ */
+function saleColumns(l: CleanLine | undefined) {
+  return l?.kind === "FIXED_ASSET_SALE" ? { kind: "FIXED_ASSET_SALE", fixedAssetId: l.fixedAssetId ?? null, disposalKind: l.disposalKind ?? "SALE" } : {};
 }
 
 /** A stored line back into the editor's shape. */
@@ -352,19 +412,35 @@ export function toClean(l: { description: string; descriptionEn: string | null; 
     description: l.description, descriptionEn: l.descriptionEn, productSkuId: l.productSkuId, orderItemId: l.orderItemId, deliveryId: l.deliveryId, originalLineId: l.originalLineId,
     skuCode: l.skuCode, quantity: D(l.quantity), unit: l.unit === "KG" ? "KG" : "UNIT", unitPrice: D(l.unitPrice), discountPercent: D(l.discountPercent),
     taxCategory: l.taxCategory as CleanLine["taxCategory"], taxRatePercent: D(l.taxRatePercent), exemptionReasonCode: l.exemptionReasonCode, exemptionReason: l.exemptionReason,
+    // A copy (a credit note's line, the issue re-check) is priced from the stored NET; the typed gross stays on the original.
+    priceIncludesVat: false, enteredGrossUnitPrice: null,
   };
 }
 
-async function lockDocument(tx: Tx, id: string) {
+export async function lockDocument(tx: Tx, id: string) {
   const rows = await tx.$queryRaw<{ id: string; status: string }[]>`SELECT "id", "status" FROM "SalesInvoice" WHERE "id" = ${id} FOR UPDATE`;
   if (!rows[0]) throw refuseInv("NOT_FOUND");
   return rows[0];
 }
 
-export type DraftPatch = { family?: unknown; lines?: unknown; buyer?: unknown; supplyDate?: unknown; supplyEndDate?: unknown; paymentTermsDays?: unknown; notes?: unknown; reasonCode?: unknown; reason?: unknown };
+export type DraftPatch = { family?: unknown; lines?: unknown; buyer?: unknown; supplyDate?: unknown; supplyEndDate?: unknown; paymentTermsDays?: unknown; notes?: unknown; reasonCode?: unknown; reason?: unknown; branchId?: unknown };
 
-/** Save a draft (header and / or lines). Lines replace the draft's lines. */
-export async function updateDraft(id: string, patch: DraftPatch, ctx: AuditContext) {
+/** Who is saving (the route passes the actor's abilities): an issuer may correct a requested draft (compliance only). */
+export type DraftEditor = { canIssue: boolean; canSellAssets?: boolean };
+
+const headerOf = (d: { family: string; buyer: unknown; supplyDate: Date | null; supplyEndDate: Date | null; paymentTermsDays: number | null; notes: string | null; reasonCode: string | null; reason: string | null }) => ({
+  family: d.family, buyer: d.buyer, supplyDate: dayOf(d.supplyDate), supplyEndDate: dayOf(d.supplyEndDate), paymentTermsDays: d.paymentTermsDays, notes: d.notes, reasonCode: d.reasonCode, reason: d.reason,
+});
+
+/**
+ * Save a draft (header and / or lines). Lines replace the draft's lines.
+ * «طلب فاتورة ضريبية» (WP-C, council Q-F3): once requested, the requester cannot edit it (REQUEST_LOCKED — withdraw
+ * it first); an issuer (`editor.canIssue`) corrects only the compliance fields — the buyer's particulars, the family,
+ * the tax category / exemption, the supply dates, the terms and the notes. Price, quantity, discount, the set of lines
+ * and the customer are refused (REQUEST_COMMERCIAL_LOCKED: «إعادة إلى المبيعات»). Each correction is recorded
+ * (EDITED_BY_ACCOUNTANT, with the field diff).
+ */
+export async function updateDraft(id: string, patch: DraftPatch, ctx: AuditContext, editor: DraftEditor = { canIssue: false }) {
   const parsed = patch.lines !== undefined ? parseLines(patch.lines) : null;
   if (parsed?.problems.length) throw refuseWith("LINES_INVALID", { problems: parsed.problems });
   return prisma.$transaction(async (tx) => {
@@ -372,6 +448,13 @@ export async function updateDraft(id: string, patch: DraftPatch, ctx: AuditConte
     const row = await lockDocument(tx, id);
     if (row.status !== "DRAFT") throw refuseInv("DRAFT_ONLY");
     const doc = (await loadDocument(tx, id))!;
+    const requested = !!doc.requestedAt;
+    if (requested && !editor.canIssue) throw refuseInv("REQUEST_LOCKED");
+    if (parsed && doc.kind === "INVOICE") assertAssetLinesAllowed(parsed.lines.filter((l, i) => !(l.kind === "FIXED_ASSET_SALE" && doc.lines[i]?.kind === "FIXED_ASSET_SALE" && doc.lines[i]?.fixedAssetId === l.fixedAssetId)), !!editor.canSellAssets);
+    if (requested && parsed) {
+      const changed = commercialChanges(doc.lines.map((l) => ({ ...l })), parsed.lines.map((l) => ({ ...l })));
+      if (changed.length) throw refuseWith("REQUEST_COMMERCIAL_LOCKED", { fields: changed }, `(${changed.slice(0, 6).join(", ")})`);
+    }
     const data: Prisma.SalesInvoiceUpdateInput = {};
     if (patch.family !== undefined && doc.kind === "INVOICE") data.family = patch.family === "SIMPLIFIED" ? "SIMPLIFIED" : "STANDARD";
     if (patch.buyer !== undefined) data.buyer = parseBuyer(patch.buyer, doc.buyer as BuyerParticulars) as unknown as Prisma.InputJsonValue;
@@ -379,6 +462,10 @@ export async function updateDraft(id: string, patch: DraftPatch, ctx: AuditConte
     if (patch.supplyEndDate !== undefined) data.supplyEndDate = dateOf(asDay(patch.supplyEndDate));
     if (patch.paymentTermsDays !== undefined) data.paymentTermsDays = termsOf(patch.paymentTermsDays, doc.paymentTermsDays ?? 30);
     if (patch.notes !== undefined) data.notes = notesOf(patch.notes);
+    // «الموقع»: editable while a draft (frozen at issue — sinv_invoice_guard).
+    const assetBranch = parsed && doc.kind === "INVOICE" ? await assetSaleBranch(tx, parsed.lines) : null;
+    const branchId = assetBranch ?? (await parseBranchId(tx, patch.branchId));
+    if (branchId !== undefined) data.branch = branchId ? { connect: { id: branchId } } : { disconnect: true };
     if (doc.kind !== "INVOICE") {
       if (patch.reasonCode !== undefined) {
         if (!(NOTE_REASONS as readonly unknown[]).includes(patch.reasonCode)) throw refuseInv("BAD_INPUT", "reasonCode.", "سبب الإصدار غير معروف.");
@@ -395,10 +482,14 @@ export async function updateDraft(id: string, patch: DraftPatch, ctx: AuditConte
       }
       const { priced, rows } = lineRows(lines);
       await tx.salesInvoiceLine.deleteMany({ where: { invoiceId: id } });
-      if (rows.length) await tx.salesInvoiceLine.createMany({ data: rows.map((r) => ({ ...r, invoiceId: id })) });
+      if (rows.length) await tx.salesInvoiceLine.createMany({ data: rows.map((r, i) => ({ ...r, ...saleColumns(lines[i]), invoiceId: id })) });
       Object.assign(data, totalsData(priced));
     }
-    await tx.salesInvoice.update({ where: { id }, data });
+    const after = await tx.salesInvoice.update({ where: { id }, data, include: { lines: { orderBy: LINE_ORDER } } });
+    if (requested) {
+      const diff = correctionDiff({ header: headerOf(doc), lines: doc.lines.map((l) => ({ ...l })) }, { header: headerOf(after), lines: after.lines.map((l) => ({ ...l })) });
+      if (diff) await writeRequestEvent(tx, { invoiceId: id, kind: "EDITED_BY_ACCOUNTANT", actorId: ctx.actorId, diff });
+    }
     return { id };
   }, TX_OPTS);
 }
@@ -406,8 +497,11 @@ export async function updateDraft(id: string, patch: DraftPatch, ctx: AuditConte
 /** A credit note's lines inherit the original line's item, unit and tax; quantity and price are the credit's. */
 function noteLinesFrom(doc: { kind: string; originalInvoiceId: string | null }, lines: CleanLine[]): CleanLine[] {
   if (doc.kind === "CREDIT_NOTE" && lines.some((l) => !l.originalLineId)) throw refuseInv("BAD_INPUT", "Each credit note line names the invoice line it credits.", "كل بند في الإشعار الدائن يحدد بند الفاتورة الذي يخفّضه.");
-  return lines.map((l) => ({ ...l, orderItemId: null }));
+  return lines.map((l) => ({ ...l, ...ITEM_ONLY, orderItemId: null }));
 }
+
+/** A note's line is never itself an asset sale: it credits / debits one (the posting reads the original line's kind). */
+const ITEM_ONLY = { kind: "ITEM" as const, fixedAssetId: null, disposalKind: null };
 
 export async function cancelDraft(id: string, reason: string, ctx: AuditContext) {
   const r = (reason ?? "").trim();
@@ -417,7 +511,9 @@ export async function cancelDraft(id: string, reason: string, ctx: AuditContext)
     const row = await lockDocument(tx, id);
     if (row.status === "CANCELLED") throw refuseInv("ALREADY_CANCELLED");
     if (row.status !== "DRAFT") throw refuseInv("DRAFT_ONLY");
-    await tx.salesInvoice.update({ where: { id }, data: { status: "CANCELLED", cancelledAt: new Date(), cancelledById: ctx.actorId, cancelReason: r.slice(0, 500) } });
+    const was = await tx.salesInvoice.findUniqueOrThrow({ where: { id }, select: { requestedAt: true } });
+    await tx.salesInvoice.update({ where: { id }, data: { status: "CANCELLED", cancelledAt: new Date(), cancelledById: ctx.actorId, cancelReason: r.slice(0, 500), requestedAt: null } });
+    if (was.requestedAt) await writeRequestEvent(tx, { invoiceId: id, kind: "CANCELLED", actorId: ctx.actorId, reason: r.slice(0, 1000) });
     return { id, status: "CANCELLED" };
   }, TX_OPTS);
 }
@@ -442,7 +538,7 @@ export async function createNote(originalId: string, input: NoteInput, ctx: Audi
       if (input.full || input.lines === undefined) {
         lines = orig.lines
           .filter((o) => D(o.lineNet).minus(credited.get(o.id) ?? ZERO).greaterThan(0))
-          .map((o): CleanLine => ({ ...toClean(o), originalLineId: o.id, orderItemId: null }));
+          .map((o): CleanLine => ({ ...toClean(o), ...ITEM_ONLY, originalLineId: o.id, orderItemId: null }));
         if (!lines.length) throw refuseInv("OVER_CREDITED", "(the invoice is fully credited)", "(الفاتورة مخفّضة بالكامل)");
         if (credited.size) throw refuseInv("OVER_CREDITED", "(part of the invoice is credited already: choose the lines)", "(خُفّض جزء من الفاتورة مسبقًا: اختر البنود)");
       } else {
@@ -451,24 +547,27 @@ export async function createNote(originalId: string, input: NoteInput, ctx: Audi
         lines = p.lines.map((l) => {
           const o = orig.lines.find((x) => x.id === l.originalLineId);
           if (!o) throw refuseInv("BAD_INPUT", "A credit note line names a line of the invoice.", "بند الإشعار يحدد بندًا من الفاتورة.");
-          return { ...toClean(o), quantity: l.quantity, unitPrice: l.unitPrice, discountPercent: l.discountPercent, originalLineId: o.id, orderItemId: null };
+          return { ...toClean(o), ...ITEM_ONLY, quantity: l.quantity, unitPrice: l.unitPrice, discountPercent: l.discountPercent, originalLineId: o.id, orderItemId: null };
         });
       }
     } else {
       const p = parseLines(input.lines ?? []);
       if (p.problems.length) throw refuseWith("LINES_INVALID", { problems: p.problems });
-      lines = p.lines.map((l) => ({ ...l, orderItemId: null }));
+      lines = p.lines.map((l) => ({ ...l, ...ITEM_ONLY, orderItemId: null }));
     }
     const { priced, rows } = lineRows(lines);
     const created = await tx.salesInvoice.create({
       data: {
         kind: input.kind, family: orig.family, status: "DRAFT", customerId: orig.customerId, orderId: orig.orderId, quoteId: orig.quoteId,
+        // A note sits at its original's location (its revenue reversal lands in the same column).
+        branchId: orig.branchId,
         originalInvoiceId: orig.id, reasonCode: input.reasonCode as string, reason,
         buyer: orig.buyer as Prisma.InputJsonValue, supplyDate: orig.supplyDate, paymentTermsDays: input.kind === "DEBIT_NOTE" ? orig.paymentTermsDays : 0,
-        source: "MANUAL", createdById: ctx.actorId, ...totalsData(priced), lines: { create: rows },
+        source: "MANUAL", createdById: ctx.actorId, ...totalsData(priced),
       },
       select: { id: true },
     });
+    await tx.salesInvoiceLine.createMany({ data: rows.map((r) => ({ ...r, invoiceId: created.id })) });
     return { id: created.id };
   }, TX_OPTS);
 }
@@ -529,8 +628,14 @@ export async function issueDocument(id: string, ctx: AuditContext, now: Date = n
     const settings = await readInvoiceSettings(tx);
     const series = seriesFor(doc.kind as InvoiceKind, { invoice: settings.invoicePrefix, creditNote: settings.creditNotePrefix, debitNote: settings.debitNotePrefix });
     const acct = await getSettings(tx);
-    if (acct.accountingActive) await assertRolesMapped(tx, doc.kind === "CREDIT_NOTE" ? ["AR", "SALES_RETURNS", "VAT_OUTPUT"] : ["AR", "SALES_REVENUE", "VAT_OUTPUT"]);
+    // «بيع أصل ثابت» (WP-F): a sale line's net posts to FA_DISPOSAL_CLEARING (not revenue); a credit note on one reverses it.
+    const originals = doc.kind !== "INVOICE" ? await tx.salesInvoiceLine.findMany({ where: { id: { in: doc.lines.map((l) => l.originalLineId).filter((x): x is string => !!x) } }, select: { id: true, kind: true } }) : [];
+    const clearing = doc.lines.map((l) => l.kind === "FIXED_ASSET_SALE" || originals.some((o) => o.id === l.originalLineId && o.kind === "FIXED_ASSET_SALE"));
+    if (acct.accountingActive) await assertRolesMapped(tx, [...(doc.kind === "CREDIT_NOTE" ? ["AR", "SALES_RETURNS", "VAT_OUTPUT"] : ["AR", "SALES_REVENUE", "VAT_OUTPUT"]), ...(clearing.some(Boolean) ? ["FA_DISPOSAL_CLEARING"] : [])]);
     const terms = doc.paymentTermsDays ?? 0;
+    // «الموقع»: a draft saved without one (before the dimension existed) takes its default now; frozen from here on.
+    const branchId = doc.branchId ?? (doc.originalInvoice ? (await tx.salesInvoice.findUnique({ where: { id: doc.originalInvoice.id }, select: { branchId: true } }))?.branchId ?? null : null)
+      ?? (await orderBranchId(tx, doc.orderId)) ?? (doc.kind === "INVOICE" ? await defaultInvoiceBranch(tx, { orderId: null, actorId: doc.createdById }) : null);
     // Totals re-derived from the stored lines (a draft saved by an older screen is corrected here, never trusted).
     const { rows } = lineRows(lines);
     for (let i = 0; i < doc.lines.length; i++) {
@@ -542,14 +647,16 @@ export async function issueDocument(id: string, ctx: AuditContext, now: Date = n
       data: {
         status: "ISSUED", series, issuedAt: now, issueDate: dateOf(stamp.day), issueTime: stamp.time, issuedById: ctx.actorId,
         supplyDate: dateOf(supplyDay), dueDate: dateOf(addDays(stamp.day, doc.kind === "CREDIT_NOTE" ? 0 : terms)),
-        seller: seller as unknown as Prisma.InputJsonValue, sodBypass, ...totalsData(priced),
+        seller: seller as unknown as Prisma.InputJsonValue, sodBypass, ...totalsData(priced), branchId,
+        // «طلبات الفواتير»: an issued document leaves the queue (CHECK SalesInvoice_request_check); the requester stays.
+        requestedAt: null,
       },
       select: { id: true, number: true, customerId: true, kind: true, grandTotal: true, taxTotal: true, issueDate: true },
     });
     const posting = await postDocumentIssued(tx, {
-      id, kind: doc.kind as InvoiceKind, number: issued.number!, customerId: issued.customerId, issueDate: dayOf(issued.issueDate)!,
+      id, kind: doc.kind as InvoiceKind, number: issued.number!, customerId: issued.customerId, issueDate: dayOf(issued.issueDate)!, branchId,
       grandTotal: D(issued.grandTotal), taxTotal: D(issued.taxTotal),
-      lines: lines.map((l, i) => ({ lineNet: new Decimal(rows[i].lineNet), productSkuId: l.productSkuId, description: l.description })),
+      lines: lines.map((l, i) => ({ lineNet: new Decimal(rows[i].lineNet), productSkuId: l.productSkuId, description: l.description, clearing: clearing[i] })),
     }, ctx.actorId);
     if (doc.kind === "CREDIT_NOTE" && doc.originalInvoiceId) {
       // The credit first settles what the original still owes; any excess stays as the customer's credit. The original
@@ -562,11 +669,33 @@ export async function issueDocument(id: string, ctx: AuditContext, now: Date = n
       }
     }
     await emitAutomationEvent(tx, { eventType: "sales.invoice_status_changed", subjectType: "SalesInvoice", subjectId: id, payload: { from: "DRAFT", to: "ISSUED", kind: doc.kind }, actorId: ctx.actorId });
+    // «طلب فاتورة ضريبية»: the history records the issue of a requested draft; the requester and the order's owner are
+    // told it can be printed (Sales keeps view / print / PDF through invoices_view and its customer scope).
+    if (doc.requestedAt) await writeRequestEvent(tx, { invoiceId: id, kind: "ISSUED", actorId: ctx.actorId });
+    await notifyIssued(tx, { id, customerId: issued.customerId, grandTotal: issued.grandTotal, buyer: doc.buyer, orderId: doc.orderId, number: issued.number! }, doc.requestedById, ctx.actorId);
     // A4 — ZATCA Phase 2: when e-invoicing is on, the document takes the EGS unit's next ICV / PIH and is signed in
     // this same transaction (last, so the unit's row lock is held briefly). Off: nothing (A2 behaviour).
     const zatca = await signAtIssue(tx, id, now);
     return { id, number: issued.number!, replayed: false, posting: posting.status === "posted" ? { status: "posted", entryId: posting.entryId } : { status: "skipped", reason: posting.reason }, zatca };
   }, TX_OPTS);
+}
+
+/**
+ * What would stop a draft from issuing now, without issuing it («soft» mode: the request answers these as warnings;
+ * the issue refuses them, NOT_READY). The same checks issueDocument runs before numbering.
+ */
+export async function draftProblems(db: Tx | typeof prisma, doc: LoadedDocument, now: Date = new Date()) {
+  const lines = doc.lines.map(toClean);
+  const reparsed = parseLines(lines.map((l) => ({ ...l, quantity: l.quantity.toString(), unitPrice: l.unitPrice.toString(), discountPercent: l.discountPercent.toString(), taxRatePercent: l.taxRatePercent.toString() })), { forIssue: true });
+  let grand = ZERO;
+  try { grand = priceInvoice(lines).grandTotal; } catch { /* the line problems say why */ }
+  const seller = await sellerSnapshot(db as Tx);
+  const supplyDay = dayOf(doc.supplyDate) ?? riyadhStamp(now).day;
+  return [
+    ...issueProblems({ kind: doc.kind as InvoiceKind, family: doc.family as InvoiceFamily, buyer: doc.buyer as BuyerParticulars, seller, supplyDate: supplyDay, lines, reasonCode: doc.reasonCode, reason: doc.reason, grandTotal: grand }),
+    ...reparsed.problems.map((p) => ({ code: p.code, ar: `البند ${p.index + 1}: ${p.ar}`, en: `Line ${p.index + 1}: ${p.en}` })),
+    ...(lines.length ? [] : [{ code: "NO_LINES", ar: "أضف بندًا واحدًا على الأقل.", en: "Add at least one line." }]),
+  ];
 }
 
 /** What an issued invoice / debit note still owes: total − Σ APPLIED applications. */

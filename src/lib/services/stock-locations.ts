@@ -32,7 +32,7 @@ export const LOCATION_ACTIONS = [
 ] as const;
 export type LocationAction = (typeof LOCATION_ACTIONS)[number];
 
-const SELECT = { id: true, code: true, nameAr: true, nameEn: true, type: true, address: true, notes: true, isActive: true, isDefault: true, isProduction: true, sortOrder: true, deactivatedAt: true, deactivatedBy: true, deactivationReason: true, createdAt: true, updatedAt: true } as const;
+const SELECT = { id: true, code: true, nameAr: true, nameEn: true, type: true, address: true, notes: true, isActive: true, isDefault: true, isProduction: true, sortOrder: true, deactivatedAt: true, deactivatedBy: true, deactivationReason: true, createdAt: true, updatedAt: true, finBranchId: true } as const;
 
 // ─── The transaction's location ─────────────────────────────────────────────────────────────────
 
@@ -323,7 +323,10 @@ export async function createLocation(body: Record<string, unknown>, actor: Actor
     const makeDefault = body.isDefault === true;
     if (makeDefault) await tx.stockLocation.updateMany({ where: { isDefault: true }, data: { isDefault: false, updatedBy: actor.id } });
     const row = await tx.stockLocation.create({
-      data: { code: f.code!, nameAr: f.nameAr!, nameEn: f.nameEn ?? null, type: f.type!, address: f.address ?? null, notes: f.notes ?? null, isDefault: makeDefault, sortOrder: (max._max.sortOrder ?? 0) + 1, createdBy: actor.id, updatedBy: actor.id },
+      data: { code: f.code!, nameAr: f.nameAr!, nameEn: f.nameEn ?? null, type: f.type!, address: f.address ?? null, notes: f.notes ?? null, isDefault: makeDefault, sortOrder: (max._max.sortOrder ?? 0) + 1, createdBy: actor.id, updatedBy: actor.id,
+        // «الموقع» (WP-B): a warehouse / other site belongs to the production site's branch (as the migration's seed); a
+        // roastery / café / branch is mapped by the owner (the locations page).
+        finBranchId: f.type === "WAREHOUSE" || f.type === "OTHER" ? (await tx.stockLocation.findFirst({ where: { isProduction: true }, select: { finBranchId: true } }))?.finBranchId ?? null : null },
       select: SELECT,
     });
     await logLocation(tx, ctx, "STOCK_LOCATION_CREATED", row, { after: { type: row.type, isDefault: row.isDefault } });
@@ -380,6 +383,25 @@ export async function updateLocation(id: string, body: Record<string, unknown>, 
       if (before.isActive) return before;
       const row = await tx.stockLocation.update({ where: { id }, data: { isActive: true, deactivatedAt: null, deactivatedBy: null, deactivationReason: null, updatedBy: actor.id }, select: SELECT });
       await logLocation(tx, ctx, "STOCK_LOCATION_REACTIVATED", row, { before: { deactivatedAt: before.deactivatedAt, reason: before.deactivationReason } });
+      return row;
+    }
+    if (action === "branch") {
+      // «الموقع» (BATCH22 WP-B): which branch (profit centre) the site belongs to — an active FinBranch, none (null), or
+      // "new": a branch made from the site (its code and names). The route requires accounting › settings_manage too.
+      const want = body.finBranchId;
+      let branchId: string | null;
+      if (want === "new") {
+        const taken = await tx.finBranch.findUnique({ where: { code: before.code }, select: { id: true } });
+        branchId = taken?.id ?? (await tx.finBranch.create({ data: { code: before.code, nameAr: before.nameAr, nameEn: before.nameEn || before.nameAr, createdBy: actor.id }, select: { id: true } })).id;
+      } else if (want === null || want === "") branchId = null;
+      else {
+        const b = typeof want === "string" ? await tx.finBranch.findUnique({ where: { id: want }, select: { id: true, active: true } }) : null;
+        if (!b?.active) throw fail(400, "LOCATION_INVALID", "الفرع المختار غير موجود أو غير نشط.", "The branch is not an active branch.");
+        branchId = b.id;
+      }
+      if (branchId === before.finBranchId) return before;
+      const row = await tx.stockLocation.update({ where: { id }, data: { finBranchId: branchId, updatedBy: actor.id }, select: SELECT });
+      await logLocation(tx, ctx, "STOCK_LOCATION_UPDATED", row, { changed: { finBranchId: { from: before.finBranchId, to: branchId } } });
       return row;
     }
     if (action) throw fail(400, "OPS_BAD_INPUT", "إجراء غير معروف.", "Unknown action.");

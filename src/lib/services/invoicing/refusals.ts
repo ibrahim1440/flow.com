@@ -28,6 +28,17 @@ export const INV_REFUSALS = {
   ALREADY_REVERSED: { status: 409, en: "This application is already reversed.", ar: "أُلغي هذا التخصيص مسبقًا." },
   SETTINGS_INVALID: { status: 400, en: "A setting is not valid.", ar: "قيمة إعداد غير صالحة." },
   INVOICE_DB: { status: 409, en: "The invoice register refused the change.", ar: "رفض سجل الفواتير التغيير." },
+  // «طلب فاتورة ضريبية» (20261126090000_invoice_requests; council Q-F3).
+  REQUEST_LOCKED: { status: 409, en: "This draft was sent to the accountant: withdraw the request to edit it.", ar: "أُرسلت المسودة للمحاسب: اسحب الطلب لتعديلها." },
+  REQUEST_COMMERCIAL_LOCKED: { status: 409, en: "Before issue the accountant corrects compliance fields only; price, quantity, discount, lines and the customer go back to Sales («إعادة إلى المبيعات»).", ar: "يصحح المحاسب قبل الإصدار حقول الامتثال فقط؛ السعر والكمية والخصم والبنود والعميل تُعاد إلى المبيعات («إعادة إلى المبيعات»)." },
+  ALREADY_REQUESTED: { status: 409, en: "This draft is already with the accountant.", ar: "هذه المسودة لدى المحاسب بالفعل." },
+  NOT_REQUESTED: { status: 409, en: "This draft is not in the accountant's queue.", ar: "هذه المسودة ليست في طابور المحاسب." },
+  REQUEST_NOT_YOURS: { status: 403, en: "Only the person who sent the request withdraws it.", ar: "يسحب الطلب من أرسله فقط." },
+  RETURN_REASON_REQUIRED: { status: 400, en: "Choose the reason and explain it (at least 10 characters).", ar: "اختر سبب الإعادة واشرحه (10 أحرف على الأقل)." },
+  // «بيع أصل ثابت» (20261128090000_fa_sale_invoice).
+  FA_LINE_ACCOUNTANT_ONLY: { status: 403, en: "A line selling a fixed asset is added by the accountant (accounting › fixed assets).", ar: "بند بيع الأصل الثابت يضيفه المحاسب (صلاحية الأصول الثابتة)." },
+  FA_SALE: { status: 409, en: "The fixed-asset sale rules refused the change.", ar: "رفضت قواعد بيع الأصول الثابتة التغيير." },
+  REQUEST_KEY_REQUIRED: { status: 400, en: "«Save and issue» needs a request key (a replay returns the same invoice).", ar: "«حفظ وإصدار» يحتاج مفتاح طلب (إعادة الإرسال تعيد الفاتورة نفسها)." },
 } satisfies Record<string, R>;
 
 export type InvRefusalCode = keyof typeof INV_REFUSALS;
@@ -44,13 +55,14 @@ const DB: [RegExp, InvRefusalCode][] = [
   [/SINV: a receipt is applied only once approved/, "COLLECTION_NOT_APPROVED"],
   [/SINV: an issued invoice never changes|SINV: a line of an issued or cancelled invoice|SINV: a line is added or changed only on a draft|SINV: a cancelled draft never changes/, "DRAFT_ONLY"],
   [/SINV: a credit or debit note names an issued invoice/, "ORIGINAL_NOT_ISSUED"],
+  [/FA_SALE: /, "FA_SALE"],
   [/SINV: /, "INVOICE_DB"],
 ];
 
 export function sinvDbRefusal(message: string): AccountingError | null {
-  if (!/SINV: /.test(message)) return null;
+  if (!/SINV: |FA_SALE: /.test(message)) return null;
   const hit = DB.find(([re]) => re.test(message))!;
-  const line = (/SINV: [^\n"]*/.exec(message)?.[0] ?? "").slice(0, 300);
+  const line = (/(SINV|FA_SALE): [^\n"]*/.exec(message)?.[0] ?? "").slice(0, 300);
   return refuseInv(hit[1], `(${line})`);
 }
 

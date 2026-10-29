@@ -3,6 +3,7 @@ import { NextResponse } from "@/lib/api-response";
 import { requireModule } from "@/lib/auth-server";
 import { acctError, qp } from "@/lib/accounting/http";
 import { rangeOf, trialBalance } from "@/lib/accounting/reports";
+import { branchFilterOf } from "@/lib/accounting/locations";
 
 // A5 council fix: formulas neutralised (CWE-1236), numbers kept (src/lib/accounting/csv.ts).
 const csvCell = (v: string | null) => acctCsvCell(v);
@@ -13,7 +14,7 @@ export async function GET(request: Request) {
   if (error) return error;
   try {
     const { from, to } = rangeOf(qp(request, "from"), qp(request, "to"));
-    const tb = await trialBalance(from, to, { includeZero: qp(request, "includeZero") === "1" });
+    const tb = await trialBalance(from, to, { includeZero: qp(request, "includeZero") === "1", branches: branchFilterOf(request) });
     if (qp(request, "format") === "csv") {
       const head = "code,name_ar,name_en,opening_debit,opening_credit,period_debit,period_credit,closing_debit,closing_credit";
       const body = tb.rows.map((r) => [r.code, r.nameAr, r.nameEn, r.openingDebit, r.openingCredit, r.periodDebit, r.periodCredit, r.closingDebit, r.closingCredit].map(csvCell).join(","));

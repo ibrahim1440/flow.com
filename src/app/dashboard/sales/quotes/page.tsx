@@ -10,7 +10,7 @@ import { initials } from "@/components/d21/labels";
 import { shortDate } from "@/components/d21/format";
 import { QuotePane } from "./QuotePane";
 import { QuotePicker } from "./QuotePicker";
-import { useAccountantView } from "../../accounting/_ui/qoyod-pages";
+import { useQuotesBase } from "./base";
 
 /**
  * Quotations list, built to `crm-quotes` 1440 (`181:1609`, EN `1528:1930`) and 1024
@@ -81,7 +81,10 @@ const PER_PAGE = 25;
  */
 function RowAction({ quote, lang }: { quote: Quote; lang: "ar" | "en" }) {
   const ar = lang === "ar";
-  const href = `/dashboard/sales/quotes/${quote.id}`;
+  const { base, accounting } = useQuotesBase();
+  const href = `${base}/${quote.id}`;
+  // From the accounting section the order and the decision stay with Sales (BATCH22 WP-E): the row only opens the quotation.
+  if (accounting && quote.status !== "DRAFT") return <Link href={href} className="btn sm g">{ar ? "عرض" : "View"}</Link>;
   let text: string;
   let quiet = false;
   if (quote.status === "DRAFT") text = ar ? "متابعة التحرير" : "Continue editing";
@@ -102,8 +105,9 @@ export default function QuotesPage() {
   const lang = useLang();
   const ar = lang === "ar";
   const phone = usePhone();
-  // Qoyod parity: read-only in the accountant workspace (Sales owns quotations) — no «+ عرض سعر».
-  const readOnly = useAccountantView();
+  // Qoyod parity: read-only in the accountant workspace by default (Sales owns quotations); «+ عرض سعر» only for a viewer the
+  // server says may write (canWriteQuotes: sales › quote_write, or accounting › quotes_issue — BATCH22 WP-E).
+  const { base, accounting: accountingBase } = useQuotesBase();
 
   const [data, setData] = useState<Payload | null>(null);
   const [status, setStatus] = useState("");
@@ -119,7 +123,12 @@ export default function QuotesPage() {
   const [success, setSuccess] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [picker, setPicker] = useState(false);
+  const [pickerState, setPicker] = useState(false);
+  // «+ عرض سعر» from the accountant sidebar lands here with ?pick=1 (BATCH22 WP-E): the deal picker opens once the server
+  // says the viewer may write (the data arrives after hydration, so the first render matches the server's).
+  const [pickDismissed, setPickDismissed] = useState(false);
+  const pickAsked = !!data?.can.write && !pickDismissed && typeof window !== "undefined" && new URLSearchParams(window.location.search).get("pick") === "1";
+  const picker = pickerState || pickAsked;
   const filterBox = useRef<HTMLDivElement | null>(null);
 
   useD21Phone({ title: ar ? "عروض الأسعار" : "Quotations" });
@@ -339,7 +348,7 @@ export default function QuotesPage() {
       <Ico name="dl" small /> {ar ? "تصدير" : "Export"}
     </a>
   );
-  const newBtn = data.can.write && !readOnly ? (
+  const newBtn = data.can.write ? (
     <button type="button" className="btn p" onClick={() => setPicker(true)} data-testid="new-quote">
       <Ico name="plus" small /> {ar ? "عرض سعر" : "Quotation"}
     </button>
@@ -390,7 +399,7 @@ export default function QuotesPage() {
     </nav>
   );
 
-  const pickerDialog = picker ? <QuotePicker lang={lang} onClose={() => setPicker(false)} /> : null;
+  const pickerDialog = picker ? <QuotePicker lang={lang} onClose={() => { setPicker(false); setPickDismissed(true); }} /> : null;
 
   if (phone) {
     return (
@@ -414,7 +423,7 @@ export default function QuotesPage() {
               return (
                 <div key={q.id} className="mrow rowlink" data-testid={`m-quote-${q.quoteNumber}`}>
                   <div style={{ minWidth: 0 }}>
-                    <Link href={`/dashboard/sales/quotes/${q.id}`} className="who open" style={{ textDecoration: "none" }}>
+                    <Link href={`${base}/${q.id}`} className="who open" style={{ textDecoration: "none" }}>
                       <bdi>{customerName(q)}</bdi>
                     </Link>
                   </div>
@@ -505,7 +514,7 @@ export default function QuotesPage() {
                   return (
                     <tr key={q.id} data-testid={`quote-row-${q.quoteNumber}`} className={selected === q.id ? "sel" : undefined}>
                       <td>
-                        <Link href={`/dashboard/sales/quotes/${q.id}`} className="id" data-testid={`open-quote-${q.quoteNumber}`}
+                        <Link href={`${base}/${q.id}`} className="id" data-testid={`open-quote-${q.quoteNumber}`}
                           onClick={(e) => openPreview(e, q.id)} aria-describedby={undefined}
                           style={{ color: "var(--text-secondary)" }}>
                           {q.quoteNumber}
@@ -514,7 +523,7 @@ export default function QuotesPage() {
                       <td style={{ whiteSpace: "normal", paddingBlock: 3 }}>
                         <span className="who" style={{ display: "block", lineHeight: "22px" }}><bdi>{customerName(q)}</bdi></span>
                         <span className="sm" style={{ display: "block", lineHeight: "18px" }}>
-                          <Link href={`/dashboard/sales/deals/${q.opportunity.id}`}><bdi>{q.opportunity.title}</bdi></Link>
+                          {accountingBase ? <bdi>{q.opportunity.title}</bdi> : <Link href={`/dashboard/sales/deals/${q.opportunity.id}`}><bdi>{q.opportunity.title}</bdi></Link>}
                           {rev && <> · {rev}</>}
                         </span>
                       </td>

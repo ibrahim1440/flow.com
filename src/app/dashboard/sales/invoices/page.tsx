@@ -9,9 +9,11 @@ import { OpsLoading } from "@/components/ops/ui";
 import { Select } from "@/components/ui/Select";
 import { DOC_STATUS, DocNo, FAMILY, InvShell, KIND, PAY_STATUS, Tag, money, useApi, useLang } from "./_ui/inv";
 import { DateRange, FilterCard, Section, ListFooter, ListPageSize, useFilters, useTerm } from "@/components/chrome";
+import { LocationFilter } from "../../accounting/_ui/locations";
 import { moneyMinus, useAccountantView } from "../../accounting/_ui/qoyod-pages";
 import { D21Dialog } from "@/components/ui/Dialog";
 import { useRouter } from "next/navigation";
+import { RequestQueue } from "./_ui/queue";
 
 type Row = {
   id: string; kind: string; family: string; status: string; number: string | null; customerId: string; customerName: string; orderId: string | null; orderNumber: number | null;
@@ -19,7 +21,7 @@ type Row = {
   open: string | null; payment: "PAID" | "PARTIAL" | "UNPAID" | null; overdue: boolean; source: string;
 };
 type List = { items: Row[]; total: number; take: number; skip: number; byStatus: Record<string, number>; can: { create: boolean; view: boolean } };
-type Search = { tab?: string; orderId?: string; customerId?: string };
+type Search = { tab?: string; orderId?: string; customerId?: string; view?: string };
 const NO_SEARCH: Promise<Search> = Promise.resolve({});
 /** Qoyod's payment-state words for an issued invoice (QOYOD-REF §1.5; «معلقة» for unpaid is to confirm — Questions §4). */
 const Q_PAY: Record<string, [string, string, "warning" | "info" | "success"]> = {
@@ -28,6 +30,11 @@ const Q_PAY: Record<string, [string, string, "warning" | "info" | "success"]> = 
 
 export default function InvoicesPage({ searchParams = NO_SEARCH }: { searchParams?: Promise<Search> }) {
   const sp = use(searchParams);
+  // «طلبات الفواتير» (BATCH 22 WP-C): the accountant's queue of requested drafts.
+  return sp.view === "requests" ? <RequestQueue /> : <InvoiceList sp={sp} />;
+}
+
+function InvoiceList({ sp }: { sp: Search }) {
   const notes = sp.tab === "notes";
   const { L } = useLang();
   // Qoyod parity (accountant workspace only): the filter card, Qoyod's column order and words, the dark title bar and
@@ -46,7 +53,7 @@ export default function InvoicesPage({ searchParams = NO_SEARCH }: { searchParam
   const [to, setTo] = useState("");
   const [q, setQ] = useState("");
   const [skip, setSkip] = useState(0);
-  const f = useFilters({ from: "", to: "", status: "", family: "", customerId: "", q: "" });
+  const f = useFilters({ from: "", to: "", status: "", family: "", customerId: "", q: "", locations: [] as string[] });
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(15);
   const custs = useApi<{ items: { id: string; name: string; nameAr: string | null }[] }>(qoyod ? "/api/sales/invoices/customers?q=" : null);
@@ -61,6 +68,8 @@ export default function InvoicesPage({ searchParams = NO_SEARCH }: { searchParam
     if (v.q.trim()) p.set("q", v.q.trim());
     if (sp.orderId) p.set("orderId", sp.orderId);
     if (v.customerId || sp.customerId) p.set("customerId", v.customerId || sp.customerId!);
+    // «الموقع» (WP-B).
+    if (qoyod && f.applied.locations.length) p.set("branches", f.applied.locations.join(","));
     return `/api/sales/invoices?${p}`;
   }, [qoyod, f.applied, page, size, notes, status, family, from, to, q, skip, sp.orderId, sp.customerId]);
   const list = useApi<List>(url);
@@ -99,6 +108,7 @@ export default function InvoicesPage({ searchParams = NO_SEARCH }: { searchParam
             </Select></div>
           <div className="qc-field"><span className="qc-label">{L("بحث", "Search")}</span>
             <input className="hr-input" value={f.draft.q} onChange={(e) => f.set("q", e.target.value)} placeholder={L("رقم الفاتورة أو العميل", "Invoice number or customer")} data-testid="invoice-search" /></div>
+          <LocationFilter value={f.draft.locations} onChange={(v) => f.set("locations", v)} testId="invoice-locations" />
         </FilterCard>
       ) : <>
       <div className="acct-row">

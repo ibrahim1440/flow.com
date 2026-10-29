@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useLang, Spinner, api } from "../../_components/ui";
+import { useQuotesBase } from "../base";
 
 /**
  * Raise a draft quotation and open its editor.
@@ -20,6 +21,7 @@ export default function NewQuotePage() {
   const lang = useLang();
   const ar = lang === "ar";
   const opportunityId = search.get("opportunityId");
+  const { base } = useQuotesBase();
 
   const [createError, setCreateError] = useState("");
 
@@ -53,7 +55,7 @@ export default function NewQuotePage() {
       });
       if (cancelled) return;
       if (res.ok && res.data.quote) {
-        router.replace(`/dashboard/sales/quotes/${res.data.quote.id}`);
+        router.replace(`${base}/${res.data.quote.id}`);
       } else {
         setCreateError(res.data.error ?? (ar ? "تعذّر إنشاء العرض." : "Could not create the quotation."));
       }
@@ -62,7 +64,7 @@ export default function NewQuotePage() {
     return () => {
       cancelled = true;
     };
-  }, [opportunityId, router, ar]);
+  }, [opportunityId, router, ar, base]);
 
   if (error) {
     return (

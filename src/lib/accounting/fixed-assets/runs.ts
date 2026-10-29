@@ -118,7 +118,9 @@ export type RunResult = { status: "posted"; run: Awaited<ReturnType<typeof getRu
  * live line for the month are taken; nothing left → { status: "nothing" } (`opts.allowNothing`, the scheduler's call)
  * or the refusal FA_RUN_NOTHING (a person pressing the button).
  */
-export async function runDepreciationForMonth(year: unknown, month: unknown, ctx: AuditContext, opts: { allowNothing?: boolean } = {}): Promise<RunResult> {
+/** `opts.standing`: the scheduler's run under a StandingAuthorisation (DEPRECIATION, 20261124090000) — its id recorded on the
+ *  run, its sodBypass on the entry; ctx.actorId is then the authoriser (the entry's postedBy). */
+export async function runDepreciationForMonth(year: unknown, month: unknown, ctx: AuditContext, opts: { allowNothing?: boolean; standing?: { id: string; sodBypass: boolean } } = {}): Promise<RunResult> {
   const b = monthBounds(year, month);
   const runId = await prisma.$transaction(async (tx) => {
     await setAuditContext(tx, { ...ctx, reason: ctx.reason ?? `depreciation ${b.key}` });
@@ -133,11 +135,11 @@ export async function runDepreciationForMonth(year: unknown, month: unknown, ctx
     const total = ls.reduce((t, l) => t.plus(l.amount), ZERO);
     let journalEntryId: string | null = null;
     if (fate.post) {
-      const r = await postEntry(tx, { source: { module: "accounting", type: "FA_DEPRECIATION_RUN", id, event: "POSTED" }, date: dayText(b.end), createdBy: ctx.actorId, memo: `إهلاك الأصول الثابتة ${b.key} (${number})`, lines: runEntryLines(ls, b.key) });
+      const r = await postEntry(tx, { source: { module: "accounting", type: "FA_DEPRECIATION_RUN", id, event: "POSTED" }, date: dayText(b.end), createdBy: ctx.actorId, memo: `إهلاك الأصول الثابتة ${b.key} (${number})`, lines: runEntryLines(ls, b.key), ...(opts.standing ? { sodBypass: opts.standing.sodBypass } : {}) });
       if (r.status === "posted") journalEntryId = r.entryId;
     }
     const glState = journalEntryId ? "POSTED" : "SKIPPED";
-    await tx.fixedAssetDepreciationRun.create({ data: { id, number, year: b.y, month: b.m, periodEnd: b.end, totalAmount: total, assetCount: ls.length, glState, journalEntryId, createdBy: ctx.actorId } });
+    await tx.fixedAssetDepreciationRun.create({ data: { id, number, year: b.y, month: b.m, periodEnd: b.end, totalAmount: total, assetCount: ls.length, glState, journalEntryId, createdBy: ctx.actorId, standingAuthorisationId: opts.standing?.id ?? null } });
     for (const l of ls) {
       await tx.fixedAssetDepreciationLine.create({ data: { runId: id, assetId: l.assetId, periodKey: b.key, fromDate: new Date(`${l.fromDate}T00:00:00Z`), toDate: b.end, amount: dec(l.amount), categoryId: l.categoryId, branchId: l.branchId, expenseAccountId: l.expenseAccountId, accumAccountId: l.accumAccountId } });
       await tx.fixedAssetEvent.create({ data: { assetId: l.assetId, kind: "DEPRECIATION", eventDate: b.end, accumDelta: dec(l.amount), sourceType: "RUN", sourceId: id, glState, journalEntryId, createdBy: ctx.actorId } });

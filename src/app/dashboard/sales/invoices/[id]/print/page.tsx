@@ -112,9 +112,10 @@ function InvoiceDoc({ id, lang }: { id: string; lang: DocLang }) {
         logo={{ src: BRAND_PRIMARY_SRC, alt: L("حِقبة", "Hiqbah"), width: Math.round(54 * BRAND_PRIMARY_VIEWBOX.w / BRAND_PRIMARY_VIEWBOX.h), height: 54 }}
         seller={{ name: sellerName, lines: sellerLines, testId: "doc-seller" }}
         title={{ main: t.main, lines: [<span key="alt" className="alt" lang={ar ? "en" : "ar"} dir={ar ? "ltr" : "rtl"}>{t.alt}</span>] }}
-        banner={draft ? { tone: "warning", title: L("معاينة · ليست فاتورة", "Preview · not an invoice"), text: L("مسودة غير صادرة: لا رقم ولا رمز QR، ولا تُسلَّم للعميل.", "An unissued draft: no number and no QR; not to be given to the customer."), testId: "inv-draft-banner" }
+        banner={draft ? { tone: "warning", title: L("مسودة — ليست فاتورة ضريبية", "Draft — not a tax invoice"), text: L("مسودة غير صادرة: لا رقم ولا رمز QR، ولا تُسلَّم للعميل. يُعطى الرقم عند الإصدار.", "An unissued draft: no number and no QR; not to be given to the customer. The number is given at issue."), testId: "inv-draft-banner" }
           : data.zatca?.notShareable ? { tone: "warning", title: L("لم تعتمدها الهيئة بعد · لا تُسلَّم للعميل", "Not cleared by ZATCA yet · not for the customer"), text: L("الفاتورة الضريبية تُسلَّم بعد اعتماد الهيئة فقط؛ يظهر رمز QR المعتمد عند الاعتماد.", "A tax invoice is shared only once ZATCA clears it; the cleared QR appears then."), testId: "inv-not-cleared-banner" }
           : data.zatca?.testCopy ? { tone: "warning", title: L("نسخة اختبار · غير صالحة للعميل", "Test copy · not valid for the customer"), text: L(`صدرت في بيئة ${data.zatca.environment === "SANDBOX" ? "التجربة (بوابة المطورين)" : "المحاكاة"} لدى الهيئة.`, `Issued in ZATCA's ${data.zatca.environment === "SANDBOX" ? "developer portal (sandbox)" : "simulation"} environment.`), testId: "inv-test-banner" } : null}
+        watermark={draft ? L("مسودة — ليست فاتورة ضريبية", "DRAFT — NOT A TAX INVOICE") : null}
         metaStart={metaStart} metaEnd={metaEnd}
         columns={invoiceColumns(lang)}
         rows={data.lines.map((l, i) => invoiceCells(l, i + 1, lang))}

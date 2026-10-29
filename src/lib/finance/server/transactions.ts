@@ -798,8 +798,8 @@ export async function collectionSuggestion(db: Db, scope: FinanceScope, txnId: s
       select: { id: true, status: true, paymentMethod: true, amountGross: true, amountTax: true, referenceNumber: true, collectedAt: true, customer: { select: { name: true, nameAr: true } }, opportunity: { select: { title: true, customer: { select: { name: true, nameAr: true } } } } },
     });
     return cs.map((c) => {
-      const cust = c.customer ?? c.opportunity.customer;
-      return { id: c.id, status: c.status, paymentMethod: c.paymentMethod, amountGross: toMinor(c.amountGross), amountTax: toMinor(c.amountTax), referenceNumber: c.referenceNumber, collectedAt: c.collectedAt.toISOString(), customer: cust?.name ?? null, customerAr: cust?.nameAr ?? null, deal: c.opportunity.title };
+      const cust = c.customer ?? c.opportunity?.customer ?? null;
+      return { id: c.id, status: c.status, paymentMethod: c.paymentMethod, amountGross: toMinor(c.amountGross), amountTax: toMinor(c.amountTax), referenceNumber: c.referenceNumber, collectedAt: c.collectedAt.toISOString(), customer: cust?.name ?? null, customerAr: cust?.nameAr ?? null, deal: c.opportunity?.title ?? null };
     });
   };
   const t = await db.bankTransaction.findUnique({ where: { id: txnId } });

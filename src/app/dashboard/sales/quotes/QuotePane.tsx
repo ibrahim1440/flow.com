@@ -6,6 +6,8 @@ import { pick, QUOTE_STATUS_SPECS, formatMoney, num, api } from "../_components/
 import { Ico } from "@/components/shell/icons";
 import { shortDate } from "@/components/d21/format";
 import { useAccountantView } from "../../accounting/_ui/qoyod-pages";
+import { useQuotesBase } from "./base";
+
 
 /**
  * The quotation preview of `crm-quotes` (1440 `181:1609`, docked beside the list; over it from
@@ -47,6 +49,7 @@ export function QuotePane({
   id: string; lang: "ar" | "en"; onClose: () => void; onChanged: (message: string) => void;
 }) {
   const ar = lang === "ar";
+  const { base } = useQuotesBase();
   const [data, setData] = useState<Detail | null>(null);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -116,7 +119,7 @@ export function QuotePane({
           </span>
         ) : <span className="lbl">{ar ? "عرض سعر" : "Quotation"}</span>}
         <span className="sp" />
-        <Link href={`/dashboard/sales/quotes/${id}`} className="lk" data-testid="open-quote-page">
+        <Link href={`${base}/${id}`} className="lk" data-testid="open-quote-page">
           {ar ? "فتح الصفحة" : "Open page"} <Ico name="back" small className="fwd" />
         </Link>
         <button type="button" className="ib" onClick={onClose} aria-label={ar ? "إغلاق المعاينة" : "Close preview"} data-testid="close-quote-pane">
@@ -243,13 +246,13 @@ export function QuotePane({
             <button type="button" className="btn p" disabled={busy} aria-busy={busy || undefined} onClick={() => decide("APPROVE", true)} data-testid="pane-approve-issue">
               {ar ? "اعتماد الخصم وإصدار العرض" : "Approve discount and issue"}
             </button>
-          ) : q.status === "DRAFT" && data.can.write && !readOnly && st !== "PENDING" && st !== "REJECTED" ? (
-            <Link href={`/dashboard/sales/quotes/${id}`} className="btn p">{ar ? "متابعة وإصدار" : "Continue and issue"}</Link>
+          ) : q.status === "DRAFT" && data.can.write && st !== "PENDING" && st !== "REJECTED" ? (
+            <Link href={`${base}/${id}`} className="btn p">{ar ? "متابعة وإصدار" : "Continue and issue"}</Link>
           ) : null}
-          {q.status === "DRAFT" && data.can.write && !readOnly ? (
-            <Link href={`/dashboard/sales/quotes/${id}`} className="btn" data-testid="pane-edit-lines">{ar ? "تعديل البنود" : "Edit lines"}</Link>
+          {q.status === "DRAFT" && data.can.write ? (
+            <Link href={`${base}/${id}`} className="btn" data-testid="pane-edit-lines">{ar ? "تعديل البنود" : "Edit lines"}</Link>
           ) : (
-            <Link href={`/dashboard/sales/quotes/${id}`} className="btn">{ar ? "فتح العرض" : "Open quotation"}</Link>
+            <Link href={`${base}/${id}`} className="btn">{ar ? "فتح العرض" : "Open quotation"}</Link>
           )}
         </div>
       )}

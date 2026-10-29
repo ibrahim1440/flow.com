@@ -11,6 +11,8 @@ import {
 import { projectedCommissionFor } from "@/lib/services/commissions/accrual";
 import { collectionScope, collectionWhere, seesAllSales } from "@/lib/services/sales/scope";
 import { canViewInvoices } from "@/lib/services/invoicing/access";
+import { branchWhere, parseBranchFilter } from "@/lib/accounting/locations";
+import { receiptAbilities } from "@/lib/services/sales/receipts";
 
 /**
  * Sales collections — the list, and recording a new one.
@@ -39,9 +41,15 @@ export async function GET(request: Request) {
   try {
     const rows = await prisma.salesCollection.findMany({
       where: {
-        ...collectionWhere(user.permissions, user.id),
-        ...(status ? { status: status as never } : {}),
-        ...(opportunityId ? { opportunityId } : {}),
+        AND: [
+          collectionWhere(user.permissions, user.id),
+          {
+            ...(status ? { status: status as never } : {}),
+            ...(opportunityId ? { opportunityId } : {}),
+          },
+          // «الموقع» (WP-B): branches=a,b,none.
+          branchWhere(parseBranchFilter(url.searchParams)),
+        ],
       },
       orderBy: [{ submittedAt: "desc" }],
       take: 200,
@@ -49,7 +57,10 @@ export async function GET(request: Request) {
         id: true, status: true, amountGross: true, amountTax: true, amountNet: true,
         currency: true, paymentMethod: true, collectedAt: true, referenceNumber: true,
         note: true, submittedAt: true, decidedAt: true, decisionReason: true,
-        reversedAt: true, reversalReason: true, collectionEventId: true,
+        reversedAt: true, reversalReason: true, collectionEventId: true, branchId: true,
+        // «سند قبض» (BATCH22 WP-D): the voucher number, the source, a return for correction and its correction.
+        source: true, receiptNumber: true, decisionReasonCode: true, replacesCollectionId: true,
+        correctedBy: { select: { id: true, status: true } },
         submittedBy: { select: { id: true, name: true } },
         decidedBy: { select: { id: true, name: true } },
         reversedBy: { select: { id: true, name: true } },
@@ -77,9 +88,11 @@ export async function GET(request: Request) {
       },
     });
 
-    const canVerify = hasSubPrivilege(user.permissions, "commissions", "collection_verify");
-    const canReject = hasSubPrivilege(user.permissions, "commissions", "collection_reject");
-    const canReverse = hasSubPrivilege(user.permissions, "commissions", "collection_reverse");
+    // BATCH22 WP-D: accounting › receipts_confirm decides too (the commissions keys keep working).
+    const rc = receiptAbilities(user.permissions);
+    const canVerify = rc.confirm;
+    const canReject = rc.reject;
+    const canReverse = rc.reverse;
 
     // Per row, because the answer is per row: the same Finance user may approve one
     // collection and be refused the next because they recorded it themselves.
@@ -294,6 +307,7 @@ export async function POST(request: Request) {
           note: typeof b.note === "string" ? b.note : null,
           idempotencyKey,
           submittedById: user.id,
+          branchId: b.branchId,
         }),
       TX_OPTS,
     );

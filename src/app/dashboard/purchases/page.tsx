@@ -71,7 +71,7 @@ export default function PurchasesPage() {
         </PageHeader>
         {tabs.length > 1 && tab ? <Tabs label={L("أقسام المشتريات", "Purchases sections")} value={tab} onChange={open} items={tabs} underline /> : null}
         <div className="pur-body">
-          {tab === "invoices" ? <InvoicesTab suppliers={suppliers} /> : null}
+          {tab === "invoices" ? <InvoicesTab key={sp.get("kind") ?? "all"} suppliers={suppliers} kind={sp.get("kind") === "SIMPLE" ? "SIMPLE" : null} /> : null}
           {tab === "receipts" ? <ReceiptsTab canReceive={canReceive} canDraft={canDraft} initialBean={bean} /> : null}
           {tab === "suppliers" ? <SuppliersTab /> : null}
           {tab === "claims" ? <ClaimsTab suppliers={suppliers} initialSupplier={sp.get("supplier") ?? undefined} /> : null}

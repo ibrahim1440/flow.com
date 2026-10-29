@@ -6,6 +6,7 @@
 //   حالة الدفعات · فواتير المبيعات   agingReport (AR sub-ledger)  = «أعمار الذمم» /api/accounting/ar/aging: totals.totalOpen, totals.overdue
 //   حالة الدفعات · فواتير المشتريات  apAging (AP sub-ledger)      = «أعمار الدائنين» /api/accounting/ap/aging: total, total − buckets.current
 //   الإيرادات والمصروفات (شهريًا)    incomeStatement per month    = «قائمة الدخل»: revenue, and expenses = revenue − net profit
+//                                   (the location filter: the branches the chosen sites map to — «الموقع», WP-B)
 //   أعلى 5 عملاء عليهم مستحقات       agingReport rows (by balance) = the AR aging rows
 //   أعلى 5 موردين لهم مستحقات        apAging suppliers (by total)  = the AP aging rows
 //   العملاء (شهريًا)                 arItems (the AR statement items): أنشئت = invoices + debit notes issued in the month,
@@ -37,7 +38,8 @@ import { openOf } from "@/lib/services/invoicing/ar-math";
 import { lowBySite } from "@/lib/services/stock-reorder";
 import { listLocations } from "@/lib/services/stock-locations";
 import { deferralBacklog } from "./deferrals";
-import { SCHEDULER_GL_RUNS } from "./due-runners";
+import { schedulerState } from "./standing-auth";
+import type { BranchFilter } from "./locations";
 
 export type HomeInput = {
   from: string; to: string; locationIds: string[];
@@ -54,11 +56,11 @@ export async function accountantHome(input: HomeInput) {
   const [ar, ap, gl, stock, activity, deferrals] = await Promise.all([
     can.ar ? arWidgets(can.arScope, from, to, months) : null,
     can.ap ? apWidgets(from, to, months) : null,
-    can.gl ? glTrend(months, to) : null,
+    can.gl ? glTrend(months, to, await branchesOfSites(input.locationIds)) : null,
     can.stock ? stockWidget(input.locationIds, can.cost) : null,
     recentActivity(can),
-    // The scheduler does not recognise deferrals (council ruling 2, interim): the alert says so.
-    can.gl ? deferralBacklog().then((b) => ({ ...b, scheduler: SCHEDULER_GL_RUNS.deferrals })) : null,
+    // Whether the scheduler recognises deferrals (a live StandingAuthorisation, batch 22 WP-A): the alert says so.
+    can.gl ? Promise.all([deferralBacklog(), schedulerState()]).then(([b, st]) => ({ ...b, scheduler: st.DEFERRAL_RECOGNITION.state })) : null,
   ]);
   return { range: { from, to }, months, ar, ap, gl, stock, activity, deferrals };
 }
@@ -108,8 +110,20 @@ async function apWidgets(from: string, to: string, months: string[]) {
   };
 }
 
+/**
+ * «الموقع» (BATCH22 WP-B): the page's location picker names stock sites; the ledger's location is their branch. The
+ * revenue / expense trend reads the lines of the branches the chosen sites map to (none chosen: the whole company; sites
+ * with no branch: nothing).
+ */
+async function branchesOfSites(locationIds: string[]): Promise<BranchFilter> {
+  if (!locationIds.length) return null;
+  const rows = await prisma.stockLocation.findMany({ where: { id: { in: locationIds } }, select: { finBranchId: true } });
+  const ids = [...new Set(rows.map((r) => r.finBranchId).filter((x): x is string => !!x))];
+  return { ids: ids.length ? ids : ["-"], unassigned: false };
+}
+
 /** Revenue and expenses per month, each month one income statement (the report's own totals). */
-async function glTrend(months: string[], to: string) {
+async function glTrend(months: string[], to: string, branches: BranchFilter = null) {
   const [settings, accounts] = await Promise.all([
     prisma.accountingSettings.findUnique({ where: { id: "singleton" }, select: { accountingActive: true } }),
     prisma.account.count(),
@@ -119,7 +133,7 @@ async function glTrend(months: string[], to: string) {
     const y = Number(m.slice(0, 4)), n = Number(m.slice(5, 7));
     const last = new Date(Date.UTC(y, n, 0));
     const toDay = dayText(last) > to ? new Date(`${to}T00:00:00Z`) : last;
-    const pl = await incomeStatement({ from: new Date(Date.UTC(y, n - 1, 1)), to: toDay, label: m }, null);
+    const pl = await incomeStatement({ from: new Date(Date.UTC(y, n - 1, 1)), to: toDay, label: m }, null, { branches });
     const revenue = new Decimal(pl.totals.revenue[0]);
     rows.push({ month: m, revenue: fix2(revenue), expenses: fix2(revenue.minus(pl.totals.netProfit[0])), netProfit: pl.totals.netProfit[0] });
   }

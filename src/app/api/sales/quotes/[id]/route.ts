@@ -1,9 +1,10 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
-import { requireModule, requireSub } from "@/lib/auth-server";
+import { requireQuoteView, requireQuoteWrite } from "@/lib/services/sales/quote-guard";
+import { canWriteQuotes, quotesSeeAll, writesViaAccounting } from "@/lib/services/sales/quote-access";
 import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
-import { seesAllSales, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
+import { NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
 import {
   saveQuoteLines, parseLineInputs, isEditable, isRevisable, hasExpired, discountApprovalState,
   liveDocumentFigures, type QuoteStatus,
@@ -19,13 +20,13 @@ type Params = { params: Promise<{ id: string }> };
 
 /** GET /api/sales/quotes/[id] — one quotation, its lines and what may be done to it. */
 export async function GET(_request: Request, { params }: Params) {
-  const { user, error } = await requireModule("sales");
+  const { user, error } = await requireQuoteView();
   if (error) return error;
   const { id } = await params;
 
   try {
     const quote = await prisma.quote.findFirst({
-      where: { id, ...(seesAllSales(user.permissions) ? {} : { opportunity: { ownerId: user.id } }) },
+      where: { id, ...(quotesSeeAll(user.permissions) ? {} : { opportunity: { ownerId: user.id } }) },
       select: {
         id: true, quoteNumber: true, revision: true, status: true, currency: true,
         validUntil: true, subtotal: true, discountTotal: true, taxTotal: true, grandTotal: true,
@@ -91,7 +92,8 @@ export async function GET(_request: Request, { params }: Params) {
         orderable: status === "ACCEPTED" && quote.orderLinks.length === 0,
       },
       can: {
-        write: hasSubPrivilege(user.permissions, "sales", "quote_write"),
+        write: canWriteQuotes(user.permissions),
+        viaAccounting: writesViaAccounting(user.permissions),
         approveDiscount: canApproveDiscount,
         // SIMPLE MODE off: an approver does not approve a discount on a quotation they raised.
         approveThisDiscount: canApproveDiscount && (isSimpleMode() || quote.createdById !== user.id),
@@ -122,7 +124,7 @@ export async function GET(_request: Request, { params }: Params) {
  * way to change it is a new revision with its own number — which is what `revise` does.
  */
 export async function PUT(request: Request, { params }: Params) {
-  const { user, error } = await requireSub("sales", "quote_write");
+  const { user, error } = await requireQuoteWrite();
   if (error) return error;
   const { id } = await params;
 
@@ -144,7 +146,7 @@ export async function PUT(request: Request, { params }: Params) {
 
   try {
     const quote = await prisma.quote.findFirst({
-      where: { id, ...(seesAllSales(user.permissions) ? {} : { opportunity: { ownerId: user.id } }) },
+      where: { id, ...(quotesSeeAll(user.permissions) ? {} : { opportunity: { ownerId: user.id } }) },
       select: { id: true, status: true, customerId: true, opportunity: { select: { customerId: true } } },
     });
     if (!quote) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });
@@ -210,13 +212,13 @@ export async function PUT(request: Request, { params }: Params) {
 
 /** DELETE /api/sales/quotes/[id] — discard a draft that was raised by mistake. */
 export async function DELETE(_request: Request, { params }: Params) {
-  const { user, error } = await requireSub("sales", "quote_write");
+  const { user, error } = await requireQuoteWrite();
   if (error) return error;
   const { id } = await params;
 
   try {
     const quote = await prisma.quote.findFirst({
-      where: { id, ...(seesAllSales(user.permissions) ? {} : { opportunity: { ownerId: user.id } }) },
+      where: { id, ...(quotesSeeAll(user.permissions) ? {} : { opportunity: { ownerId: user.id } }) },
       select: { id: true, status: true, quoteNumber: true },
     });
     if (!quote) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });

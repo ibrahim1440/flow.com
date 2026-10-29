@@ -36,7 +36,7 @@ function SideCard({ title, rows, children }: { title: string; rows: [string, Rea
   );
 }
 
-function Rows({ s, cols, from, to, testId }: { s: Section; cols: number; from: string; to: string; testId?: string }) {
+function Rows({ s, cols, from, to, testId, wide }: { s: Section; cols: number; from: string; to: string; testId?: string; wide?: boolean }) {
   const { L } = useLang();
   return (
     <>
@@ -44,19 +44,19 @@ function Rows({ s, cols, from, to, testId }: { s: Section; cols: number; from: s
       {s.lines.length === 0 ? <tr className="is-muted"><td colSpan={cols + 1}>{L("لا حركة", "No movement")}</td></tr> : s.lines.map((l) => (
         <tr key={l.accountId} className="is-clickable">
           <td><Link href={gl(l.accountId, from, to)} data-testid={`st-line-${l.code}`}><span className="acct-code">{l.code}</span> {L(l.name, l.nameEn)}</Link></td>
-          {l.amounts.map((a, i) => <td key={i} className={`num hr-num${i > 0 ? " acct-hide-m" : ""}`}>{money(a)}</td>)}
+          {l.amounts.map((a, i) => <td key={i} className={`num hr-num${i > 0 && !wide ? " acct-hide-m" : ""}`}>{money(a)}</td>)}
         </tr>
       ))}
-      <tr className="is-total"><td>{L(`مجموع ${s.ar}`, `Total ${s.en.toLowerCase()}`)}</td>{s.totals.map((t, i) => <td key={i} className={`num hr-num${i > 0 ? " acct-hide-m" : ""}`}>{money(t)}</td>)}</tr>
+      <tr className="is-total"><td>{L(`مجموع ${s.ar}`, `Total ${s.en.toLowerCase()}`)}</td>{s.totals.map((t, i) => <td key={i} className={`num hr-num${i > 0 && !wide ? " acct-hide-m" : ""}`}>{money(t)}</td>)}</tr>
     </>
   );
 }
 
-function SumRow({ label, values, strong, testId, pct }: { label: string; values: (string | null)[]; strong?: boolean; testId?: string; pct?: boolean }) {
+function SumRow({ label, values, strong, testId, pct, wide }: { label: string; values: (string | null)[]; strong?: boolean; testId?: string; pct?: boolean; wide?: boolean }) {
   return (
     <tr className={strong ? "is-total is-grand" : "is-sub"} data-testid={testId}>
       <td>{label}</td>
-      {values.map((v, i) => <td key={i} className={`num hr-num${i > 0 ? " acct-hide-m" : ""}`}>{pct ? pctText(v) : money(v ?? "0")}</td>)}
+      {values.map((v, i) => <td key={i} className={`num hr-num${i > 0 && !wide ? " acct-hide-m" : ""}`}>{pct ? pctText(v) : money(v ?? "0")}</td>)}
     </tr>
   );
 }
@@ -102,6 +102,49 @@ export function IncomeStatement({ query }: { query: string }) {
         <p className="acct-hint">{L("صف الحساب يفتح دفتر الأستاذ للفترة نفسها، ومنه القيد ثم المستند المصدر. قيد إقفال السنة لا يدخل قائمة الدخل.", "An account row opens its ledger for the same period, then the entry and its source document. The year-end closing entry is left out of the P&L.")}</p>
         <p className="acct-hint" data-testid="pl-cogs-basis">{L("الإيراد يُثبت عند إصدار الفاتورة وتكلفة المبيعات عند التسليم: إن صدرت الفاتورة في شهر والتسليم في آخر يتأثر الهامش، فاجعل نقطة الفوترة «عند التسليم».", "Revenue is recognised when the invoice is issued and its cost when the goods are delivered: an invoice and its delivery in different months move the margin — set the invoicing point to «on delivery».")}</p>
       </aside>
+    </div>
+  );
+}
+
+type PlByLocation = Omit<Pl, "columns"> & { layout: "byLocation"; columns: { from: string; to: string; label: string; labelEn: string; branchId: string | null; kind: "branch" | "unassigned" | "total" }[] };
+
+/**
+ * «قائمة الدخل حسب الموقع» (BATCH22 WP-B): one column per location, «غير محدد», then «الإجمالي» — the company income
+ * statement. Every journal line sits in exactly one location column, so the columns add up to the total (the check
+ * under the table says so, from the figures shown). All columns stay visible on a phone (the table scrolls).
+ */
+export function IncomeByLocation({ query }: { query: string }) {
+  const { L } = useLang();
+  const r = useApi<PlByLocation>(`/api/accounting/statements/income?${query}&by=location`);
+  if (r.error) return <p role="alert" className="hr-err">{r.error}</p>;
+  if (!r.data) return <OpsLoading />;
+  const d = r.data, c = d.columns, cols = c.length, from = c[0].from, to = c[0].to;
+  const sec = (k: string) => d.sections.find((s) => s.key === k)!;
+  const net = d.totals.netProfit.map((x) => Number(x));
+  const sumOfLocations = net.slice(0, -1).reduce((s, x) => s + x, 0);
+  const adds = Math.abs(sumOfLocations - net[net.length - 1]) < 0.005;
+  return (
+    <div className="acct-loc-pl">
+      <p className={`acct-balanced ${adds ? "is-ok" : "is-bad"}`} data-testid="pl-loc-check">
+        {L("مجموع أعمدة المواقع", "Sum of the location columns")} <span className="hr-num">{money(sumOfLocations.toFixed(2))}</span> = {L("الإجمالي", "Total")} <span className="hr-num">{money(d.totals.netProfit[cols - 1])}</span> · {adds ? L("● متطابق", "● Adds up") : L("● غير متطابق", "● Does not add up")}
+      </p>
+      <div className="hr-tablewrap">
+        <table className="hr-table is-dense acct-statement" data-testid="pl-loc-table">
+          <thead><tr><th>{L("الحساب", "Account")}</th>{c.map((x, i) => <th key={i} className="num" data-testid={`pl-loc-col-${x.kind === "branch" ? x.branchId : x.kind}`}>{L(x.label, x.labelEn)}</th>)}</tr></thead>
+          <tbody>
+            <Rows s={sec("REVENUE")} cols={cols} from={from} to={to} wide testId="pl-revenue" />
+            <Rows s={sec("COST_OF_SALES")} cols={cols} from={from} to={to} wide />
+            <SumRow label={L("مجمل الربح", "Gross profit")} values={d.totals.grossProfit} wide testId="pl-gross" />
+            <SumRow label={L("هامش مجمل الربح", "Gross margin")} values={d.totals.grossMarginPct} pct wide />
+            <Rows s={sec("OPERATING_EXPENSE")} cols={cols} from={from} to={to} wide />
+            <SumRow label={L("الربح التشغيلي", "Operating profit")} values={d.totals.operatingProfit} wide />
+            {sec("OTHER_INCOME_EXPENSE").lines.length ? <Rows s={sec("OTHER_INCOME_EXPENSE")} cols={cols} from={from} to={to} wide /> : null}
+            {sec("ZAKAT").lines.length ? <><SumRow label={L("الربح قبل الزكاة", "Profit before zakat")} values={d.totals.profitBeforeZakat} wide /><Rows s={sec("ZAKAT")} cols={cols} from={from} to={to} wide /></> : null}
+            <SumRow label={L("صافي الربح (الخسارة)", "Net profit (loss)")} values={d.totals.netProfit} strong wide testId="pl-net" />
+          </tbody>
+        </table>
+      </div>
+      <p className="acct-hint">{L("الموقع يُحمل على رأس المستند ويُختم على كل سطر من قيده؛ تكلفة البضاعة المسلّمة تتبع موقع البيع (الطلب). «غير محدد»: سطور بلا موقع. المركز المالي لا يُقسَّم حسب الموقع (الذمم والضريبة وحقوق الملكية على مستوى المنشأة).", "The location is set on the document header and stamped on every line of its entry; the cost of goods delivered follows the selling location (the order). «Unassigned»: lines with no location. The balance sheet is not split by location (AR, VAT and equity are company-level).")}</p>
     </div>
   );
 }

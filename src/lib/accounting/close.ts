@@ -9,6 +9,7 @@
 //   inventory     inventory sub-ledger = GL (A3 reconciliation: no UNEXPLAINED difference)         FAIL
 //   supplierClaims open supplier claims (net) = SUPPLIER_CLAIMS («نقص من المورد»)                 FAIL (WARN: opening pending)
 //   fixedAssets   the fixed-asset register = its GL accounts; the month's depreciation is run     FAIL / WARN (NA: none)
+//   faSaleClearing FA_DISPOSAL_CLEARING = the issued «بيع أصل ثابت» lines without a disposal (BATCH 22 WP-F)  FAIL / WARN (NA)
 //   fixedAssetsReview  December only, with assets: review the useful lives and residual values      WARN (IAS 16.51)
 //   deferrals     unrecognised deferrals = their balance-sheet accounts («قوالب التأجيل»)          FAIL (WARN: opening pending)
 //   ar / ap       AR sub-ledger = GL (AR − customer advances); AP open items = GL                  WARN / FAIL
@@ -33,6 +34,7 @@ import { loadAccountInfo } from "./statements";
 import { reconciliation } from "./ops/valuation";
 import { rollForward as faRollForward } from "./fixed-assets/reports";
 import { deferralReconciliation } from "./deferrals";
+import { saleClearingTieOut } from "./fixed-assets/sale-clearing";
 import { agingReport } from "@/lib/services/invoicing/ar";
 
 type Tx = Prisma.TransactionClient;
@@ -107,6 +109,13 @@ export async function closeChecklist(periodId: string) {
         "/dashboard/accounting/fixed-assets?status=ACTIVE", live));
     }
   }
+  // «بيع أصل ثابت» (BATCH 22 WP-F): FA_DISPOSAL_CLEARING = the issued sale lines not yet cleared by a disposal (FAIL on a
+  // difference); open lines are a WARN — record the disposal (the asset leaves the books) or credit the line.
+  const sc2 = await saleClearingTieOut(prisma, toDay);
+  out.push(check("faSaleClearing", !sc2.mapped && !sc2.openLines && !sc2.strandedLines ? "NA" : !sc2.matched ? "FAIL" : sc2.openLines ? "WARN" : "PASS",
+    sc2.strandedLines ? `${sc2.strandedLines} استبعاد سوّى بند بيع فاتورته خارج الدفاتر (صدرت قبل بدء التشغيل)` : !sc2.matched ? `تسوية بيع الأصول الثابتة ${sc2.gl} ≠ بنود البيع المفتوحة ${sc2.open} (الفرق ${sc2.difference})` : sc2.openLines ? `${sc2.openLines} بند بيع أصل ثابت صدر ولم يُسجَّل استبعاده (${sc2.open})` : "تسوية بيع الأصول الثابتة = صفر بعد الاستبعادات",
+    sc2.strandedLines ? `${sc2.strandedLines} disposal(s) cleared a sale line whose invoice is not in the books (issued before go-live)` : !sc2.matched ? `Fixed-asset sale clearing ${sc2.gl} ≠ open sale lines ${sc2.open} (difference ${sc2.difference})` : sc2.openLines ? `${sc2.openLines} issued fixed-asset sale line(s) without their disposal (${sc2.open})` : "Fixed-asset sale clearing is zero after the disposals",
+    "/dashboard/accounting/fixed-assets/disposals", sc2.openLines || null, new Decimal(sc2.difference)));
   // «قوالب التأجيل» (council F2): the unrecognised amount of the schedules = their balance-sheet accounts, difference 0;
   // WARN when the difference is only the go-live opening still to post.
   const dr = await deferralReconciliation(toDay);

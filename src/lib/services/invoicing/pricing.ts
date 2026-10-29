@@ -9,9 +9,13 @@
 //   document VAT  = Σ over (category, rate) of round(Σ line net × rate)   ← rounded ONCE per category, on the total
 //   taxable       = Σ line net;  payable = taxable + document VAT
 // The quotation engine (services/sales/quotes.ts priceQuote) sums rounded line VAT; this engine deliberately does
-// not reuse it, so an invoice and its quotation may differ by 0.01 on VAT (the INV299 case). Prices are VAT-exclusive
-// in A2 (the inclusive mode, T-1, is not offered). The database checks the same arithmetic at issue
-// (sinv_invoice_guard), so a figure computed anywhere else is refused.
+// not reuse it, so an invoice and its quotation may differ by 0.01 on VAT (the INV299 case). Prices are stored
+// VAT-exclusive. «شامل؟» (batch 22 WP-K, 20261202090000_inclusive_entry): a line may be ENTERED VAT-inclusive
+// (priceIncludesVat + unitPriceGross); the SERVER derives the net unit price (netFromGross, half-up, 2 dp) and stores the
+// typed gross beside it for audit — the E-10 rule above is unchanged (no plug line), so qty × gross may differ from the
+// line's value by a few halalas («فرق التقريب», inclusiveDifference). The database checks the same arithmetic at issue
+// (sinv_invoice_guard) and the gross→net step on every line (SalesInvoiceLine_inclusive_check), so a figure computed
+// anywhere else is refused.
 import { Decimal, ZERO, roundMoney, toDecimal, MoneyError } from "@/lib/accounting/money";
 
 export { Decimal };
@@ -37,7 +41,8 @@ export const EXEMPTION_REASONS: { code: string; category: Exclude<TaxCategory, "
   { code: "VATEX-SA-34-1", category: "Z", ar: "النقل الدولي للسلع", en: "International transport of goods" },
   { code: "VATEX-SA-35", category: "Z", ar: "الأدوية والمعدات الطبية", en: "Medicines and medical equipment" },
   { code: "VATEX-SA-29", category: "E", ar: "الخدمات المالية", en: "Financial services" },
-  { code: "VATEX-SA-30", category: "E", ar: "العقارات السكنية", en: "Qualifying residential real estate" },
+  // ZATCA's wording (BATCH22 gate S1): every real-estate supply of Art. 30 — a commercial building or plot included.
+  { code: "VATEX-SA-30", category: "E", ar: "التوريدات العقارية المذكورة في المادة 30 من اللائحة التنفيذية لنظام ضريبة القيمة المضافة", en: "Real estate transactions mentioned in Article 30 of the VAT Regulations" },
   { code: "VATEX-SA-OOS", category: "O", ar: "خارج نطاق ضريبة القيمة المضافة", en: "Out of scope of VAT" },
 ];
 
@@ -93,6 +98,21 @@ export type PricedInvoice = {
   /** Σ informational line VAT − document VAT (E-10 vs the per-line sum; usually 0, at most a few halalas). */
   lineVatDifference: Decimal;
 };
+
+/** «شامل؟»: the net unit price of a VAT-inclusive one — round_half_up(gross ÷ (1 + rate), 2); a 0 % rate keeps it. */
+export function netFromGross(gross: Decimal, ratePercent: Decimal): Decimal {
+  if (ratePercent.isZero()) return gross;
+  return gross.times(HUNDRED).dividedBy(HUNDRED.plus(ratePercent)).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+}
+
+/** «فرق التقريب» of an inclusive line: what the typed gross gives (qty × gross, less the discount) minus the line's value
+ *  (net + its informational VAT). Zero at qty 1 with no discount; at most a few halalas otherwise. */
+export function inclusiveDifference(l: InvoiceLineInput & { enteredGrossUnitPrice: Decimal | null }): Decimal {
+  if (!l.enteredGrossUnitPrice) return ZERO;
+  const typed = roundMoney(l.quantity.times(l.enteredGrossUnitPrice));
+  const expected = typed.minus(roundMoney(typed.times(l.discountPercent).dividedBy(HUNDRED)));
+  return expected.minus(priceInvoiceLine(l).lineTotal);
+}
 
 export function priceInvoiceLine(l: InvoiceLineInput): PricedInvoiceLine {
   const gross = roundMoney(l.quantity.times(l.unitPrice));
@@ -151,11 +171,21 @@ export type RawLine = {
   description?: unknown; descriptionEn?: unknown; productSkuId?: unknown; orderItemId?: unknown; deliveryId?: unknown; originalLineId?: unknown;
   skuCode?: unknown; quantity?: unknown; unit?: unknown; unitPrice?: unknown; discountPercent?: unknown;
   taxCategory?: unknown; taxRatePercent?: unknown; exemptionReasonCode?: unknown; exemptionReason?: unknown;
+  /** «شامل؟»: the price is typed VAT-inclusive (`unitPriceGross`); `unitPrice` is then derived, never read. */
+  priceIncludesVat?: unknown; unitPriceGross?: unknown; enteredGrossUnitPrice?: unknown;
+  /** «بيع أصل ثابت» (BATCH 22 WP-F): FIXED_ASSET_SALE with the asset and the disposal it will make (SALE | SCRAP). */
+  kind?: unknown; fixedAssetId?: unknown; disposalKind?: unknown;
 };
+
+export type LineKind = "ITEM" | "FIXED_ASSET_SALE";
 
 export type CleanLine = InvoiceLineInput & {
   description: string; descriptionEn: string | null; productSkuId: string | null; orderItemId: string | null; deliveryId: string | null;
   originalLineId: string | null; skuCode: string | null; unit: "UNIT" | "KG"; exemptionReasonCode: string | null; exemptionReason: string | null;
+  /** «شامل؟» — the gross unit price as typed (audit); unitPrice is the net derived from it. */
+  priceIncludesVat: boolean; enteredGrossUnitPrice: Decimal | null;
+  /** Absent = ITEM. A FIXED_ASSET_SALE line sells one asset (quantity 1, no SKU / order line / delivery). */
+  kind?: LineKind; fixedAssetId?: string | null; disposalKind?: "SALE" | "SCRAP" | null;
 };
 
 const txt = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, max) : "");
@@ -187,13 +217,18 @@ export function parseLines(raw: unknown, opts: { forIssue?: boolean } = {}): { l
     if (!description) p(i, "DESCRIPTION", "اكتب وصف البند.", "Describe the line.");
     const quantity = dec(r.quantity, 3, 9);
     if (!quantity || quantity.lessThanOrEqualTo(0)) p(i, "QUANTITY", "الكمية رقم أكبر من صفر (3 منازل عشرية على الأكثر).", "The quantity is a number above zero (at most 3 decimals).");
-    const unitPrice = dec(r.unitPrice, 2);
-    if (!unitPrice) p(i, "PRICE", "سعر الوحدة رقم موجب بمنزلتين عشريتين على الأكثر.", "The unit price is a positive number with at most 2 decimals.");
+    const inclusive = r.priceIncludesVat === true;
+    const typedGross = inclusive ? dec(r.unitPriceGross ?? r.enteredGrossUnitPrice, 2) : null;
+    if (inclusive && !typedGross) p(i, "PRICE_GROSS", "السعر شامل الضريبة رقم موجب بمنزلتين عشريتين على الأكثر.", "The VAT-inclusive price is a positive number with at most 2 decimals.");
+    let unitPrice = inclusive ? null : dec(r.unitPrice, 2);
+    if (!inclusive && !unitPrice) p(i, "PRICE", "سعر الوحدة رقم موجب بمنزلتين عشريتين على الأكثر.", "The unit price is a positive number with at most 2 decimals.");
     const discountPercent = r.discountPercent === undefined || r.discountPercent === null || r.discountPercent === "" ? new Decimal(0) : dec(r.discountPercent, 2);
     if (!discountPercent || discountPercent.greaterThan(100)) p(i, "DISCOUNT", "نسبة الخصم من 0 إلى 100.", "The discount is 0 to 100 percent.");
     const taxCategory = (typeof r.taxCategory === "string" && (TAX_CATEGORIES as readonly string[]).includes(r.taxCategory) ? r.taxCategory : "S") as TaxCategory;
     const rate = r.taxRatePercent === undefined || r.taxRatePercent === null || r.taxRatePercent === "" ? new Decimal(taxCategory === "S" ? DEFAULT_VAT_RATE : 0) : dec(r.taxRatePercent, 2);
     if (!rate || rate.greaterThan(100)) p(i, "RATE", "نسبة الضريبة من 0 إلى 100.", "The VAT rate is 0 to 100.");
+    // «شامل؟»: the net is derived on the server from the typed gross and the line's rate (a 0 % line: gross = net).
+    if (inclusive && typedGross && rate && !rate.greaterThan(100)) unitPrice = netFromGross(typedGross, rate);
     const exemptionReasonCode = txt(r.exemptionReasonCode, 40) || null;
     const exemptionReason = txt(r.exemptionReason, 300) || (exemptionReasonCode ? EXEMPTION_REASONS.find((e) => e.code === exemptionReasonCode)?.ar ?? null : null);
     if (opts.forIssue && rate) {
@@ -202,6 +237,10 @@ export function parseLines(raw: unknown, opts: { forIssue?: boolean } = {}): { l
       if (taxCategory !== "S" && !exemptionReason) p(i, "EXEMPTION_REASON", "اذكر سبب الإعفاء أو نسبة الصفر.", "State the exemption reason.");
     }
     const unit = r.unit === "KG" ? "KG" : "UNIT";
+    const faSale = r.kind === "FIXED_ASSET_SALE";
+    const fixedAssetId = faSale ? idOrNull(r.fixedAssetId) : null;
+    if (faSale && !fixedAssetId) p(i, "FA_ASSET", "اختر الأصل الثابت المُباع.", "Choose the fixed asset sold.");
+    if (faSale && quantity && !quantity.equals(1)) p(i, "FA_QTY", "بند بيع الأصل الثابت كميته 1.", "A fixed-asset sale line has quantity 1.");
     lines.push({
       description, descriptionEn: txt(r.descriptionEn, 300) || null,
       productSkuId: idOrNull(r.productSkuId), orderItemId: idOrNull(r.orderItemId), deliveryId: idOrNull(r.deliveryId), originalLineId: idOrNull(r.originalLineId),
@@ -209,6 +248,8 @@ export function parseLines(raw: unknown, opts: { forIssue?: boolean } = {}): { l
       quantity: quantity ?? new Decimal(0), unitPrice: unitPrice ?? new Decimal(0), discountPercent: discountPercent ?? new Decimal(0),
       taxCategory, taxRatePercent: rate ?? new Decimal(0), exemptionReasonCode: taxCategory === "S" ? null : exemptionReasonCode,
       exemptionReason: taxCategory === "S" ? null : exemptionReason, unit,
+      priceIncludesVat: inclusive && !!typedGross, enteredGrossUnitPrice: inclusive ? typedGross : null,
+      ...(faSale ? { kind: "FIXED_ASSET_SALE" as const, fixedAssetId, disposalKind: r.disposalKind === "SCRAP" ? "SCRAP" as const : "SALE" as const, productSkuId: null, orderItemId: null, deliveryId: null } : {}),
     });
   });
   return { lines, problems };

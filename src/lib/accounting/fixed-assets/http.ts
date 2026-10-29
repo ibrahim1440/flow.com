@@ -44,6 +44,24 @@ export async function requireFaOpening(): Promise<{ user: User; error: NextRespo
   return { user, error: refused };
 }
 
+/**
+ * «استيراد الأصول من قيود» (batch 22 WP-G): accounting › fixed_assets AND accounting › opening_balance (the import
+ * writes the register's opening), through the central gate (verified individual), and — to import or undo — a step-up.
+ * The preview writes nothing: the same two keys, no step-up.
+ */
+export async function requireFaImport(opts: { stepUp: boolean }): Promise<{ user: User; error: NextResponse | null }> {
+  const { user, error } = await requireSub("accounting", "fixed_assets");
+  if (error) return { user, error };
+  if (!hasSubPrivilege(user.permissions, "accounting", "opening_balance")) return { user, error: forbidden() };
+  const refused = await privilegedGate(user, "accounting", "opening_balance");
+  if (refused) return { user, error: refused };
+  if (opts.stepUp) {
+    const stale = requireFreshAuth(user);
+    if (stale) return { user, error: stale };
+  }
+  return { user, error: null };
+}
+
 /** What the viewer may do (the pages draw only these controls). */
 export const faCan = (p: Permissions) => {
   const write = hasSubPrivilege(p, "accounting", "fixed_assets");
@@ -52,5 +70,6 @@ export const faCan = (p: Permissions) => {
     post: write && hasSubPrivilege(p, "accounting", "journal_post"),
     reverse: write && hasSubPrivilege(p, "accounting", "journal_reverse"),
     opening: hasSubPrivilege(p, "accounting", "opening_balance"),
+    import: write && hasSubPrivilege(p, "accounting", "opening_balance"),
   };
 };

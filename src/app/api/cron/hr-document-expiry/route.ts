@@ -2,6 +2,7 @@ import { NextResponse } from "@/lib/api-response";
 import { cronAuthorized } from "@/lib/cron/auth";
 import { runExpiryCheck } from "@/lib/hr/services/document-expiry";
 import { deliverPendingEmails } from "@/lib/notifications/deliver";
+import { invoiceQueueDigest } from "@/lib/services/invoicing/requests";
 
 /**
  * The daily document-expiry check (feat/hr-expiry-email), called by Vercel Cron once a day at 03:00 UTC
@@ -18,8 +19,11 @@ export async function GET(request: Request) {
   if (!auth.ok) return NextResponse.json({ error: "غير مصرّح", errorEn: "Unauthorized" }, { status: 401 });
   try {
     const report = await runExpiryCheck({ trigger: "cron" });
+    // «طلبات الفواتير» (BATCH 22 WP-C): the daily digest of overdue tax invoice requests rides this daily notification
+    // run (no new cron). Its failure never fails the HR check.
+    const invoiceQueue = await invoiceQueueDigest().catch((e: unknown) => { console.error("[invoice-queue] digest failed:", (e as Error)?.name ?? "error"); return null; });
     const emails = await deliverPendingEmails({ limit: 200 });
-    return NextResponse.json({ ok: true, ...report, emails: emails.length });
+    return NextResponse.json({ ok: true, ...report, invoiceQueue, emails: emails.length });
   } catch (e) {
     console.error("[hr-expiry] cron run failed:", (e as Error)?.name ?? "error");
     return NextResponse.json({ ok: false, error: "تعذّر تشغيل فحص انتهاء الوثائق", errorEn: "The document-expiry check could not run" }, { status: 500 });

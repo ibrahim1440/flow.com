@@ -19,8 +19,9 @@ const day = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : 
 const todayRiyadh = () => dayText(riyadhDay());
 
 /** The customer of a receipt: its own customerId, else its deal's. */
-async function receiptCustomer(db: Db, c: { customerId: string | null; opportunityId: string }): Promise<string | null> {
+async function receiptCustomer(db: Db, c: { customerId: string | null; opportunityId: string | null }): Promise<string | null> {
   if (c.customerId) return c.customerId;
+  if (!c.opportunityId) return null;
   const o = await db.opportunity.findUnique({ where: { id: c.opportunityId }, select: { customerId: true } });
   return o?.customerId ?? null;
 }
@@ -59,7 +60,7 @@ export async function arItems(db: Db, customerIds: string[] | null) {
     }
   }
   for (const r of receipts) {
-    const cust = r.customerId ?? r.opportunity.customerId;
+    const cust = r.customerId ?? r.opportunity?.customerId ?? null;
     if (!cust) continue;
     const b = bucket(cust);
     const amount = D(r.amountGross);
@@ -110,8 +111,8 @@ export async function agingReport(db: Db, customerIds: string[] | null, asOf: st
 // ── applications ────────────────────────────────────────────────────────────────────────────────────
 
 async function lockCollectionRow(tx: Tx, id: string) {
-  const r = await tx.$queryRaw<{ id: string; status: string; customerId: string | null; opportunityId: string; amountGross: string; paymentMethod: string; collectedAt: Date; orderId: string | null; referenceNumber: string | null }[]>`
-    SELECT "id", "status"::text AS status, "customerId", "opportunityId", "amountGross"::text, "paymentMethod"::text AS "paymentMethod", "collectedAt", "orderId", "referenceNumber"
+  const r = await tx.$queryRaw<{ id: string; status: string; customerId: string | null; opportunityId: string | null; amountGross: string; paymentMethod: string; collectedAt: Date; orderId: string | null; referenceNumber: string | null; branchId: string | null }[]>`
+    SELECT "id", "status"::text AS status, "customerId", "opportunityId", "amountGross"::text, "paymentMethod"::text AS "paymentMethod", "collectedAt", "orderId", "referenceNumber", "branchId"
       FROM "SalesCollection" WHERE "id" = ${id} FOR UPDATE`;
   return r[0] ?? null;
 }
@@ -159,7 +160,7 @@ export async function applyToInvoice(input: ApplyInput, ctx: AuditContext) {
     // from before the go-live date sits in the opening balances, not in CUSTOMER_ADVANCES). A credit-note credit is
     // AR against AR (same party): no entry.
     if (receipt && (await postedEntry(tx, "COLLECTION", receipt.id, "RECEIVED"))) {
-      const r = await postApplication(tx, { applicationId: app.id, collectionId: receipt.id, customerId, amount, date: today, invoiceNumber: inv.number! }, ctx.actorId, "APPLIED");
+      const r = await postApplication(tx, { applicationId: app.id, collectionId: receipt.id, customerId, amount, date: today, invoiceNumber: inv.number!, branchId: receipt.branchId }, ctx.actorId, "APPLIED");
       posting = r.status;
     }
     return { id: app.id, posting };
@@ -174,13 +175,13 @@ export async function unapply(applicationId: string, reason: string, ctx: AuditC
     await setAuditContext(tx, { ...ctx, reason: why });
     const rows = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "ArApplication" WHERE "id" = ${applicationId} FOR UPDATE`;
     if (!rows[0]) throw refuseInv("NOT_FOUND");
-    const a = await tx.arApplication.findUniqueOrThrow({ where: { id: applicationId }, include: { invoice: { select: { number: true } } } });
+    const a = await tx.arApplication.findUniqueOrThrow({ where: { id: applicationId }, include: { invoice: { select: { number: true } }, collection: { select: { branchId: true } } } });
     if (a.status !== "APPLIED") throw refuseInv("ALREADY_REVERSED");
     await tx.arApplication.update({ where: { id: a.id }, data: { status: "REVERSED", reversedAt: new Date(), reversedById: ctx.actorId, reverseReason: why.slice(0, 500) } });
     if (a.collectionId) {
       if (a.atReceipt) {
         if (await postedEntry(tx, "COLLECTION", a.collectionId, "RECEIVED")) {
-          await postApplication(tx, { applicationId: a.id, collectionId: a.collectionId, customerId: a.customerId, amount: D(a.amount), date: todayRiyadh(), invoiceNumber: a.invoice.number ?? "" }, ctx.actorId, "UNAPPLIED");
+          await postApplication(tx, { applicationId: a.id, collectionId: a.collectionId, customerId: a.customerId, amount: D(a.amount), date: todayRiyadh(), invoiceNumber: a.invoice.number ?? "", branchId: a.collection?.branchId ?? null }, ctx.actorId, "UNAPPLIED");
         }
       } else {
         const e = await postedEntry(tx, "COLLECTION", a.collectionId, `APPLIED.${a.id}`);
@@ -193,34 +194,85 @@ export async function unapply(applicationId: string, reason: string, ctx: AuditC
 
 // ── the collection workflow's hooks (inside approveCollection / reverseCollection's transaction) ─────
 
+/** How a confirmed receipt is applied (BATCH22 WP-D «سند قبض»):
+ *  · omitted — the A2 rule: its order's open invoices, oldest due first; the rest stays the customer's credit;
+ *  · "AUTO" — the confirmation default: its own invoice (an accountant receipt) and its order's open invoices first, then
+ *    the customer's other open invoices, oldest due first; the rest stays the customer's credit;
+ *  · a list — exactly these parts (each ≤ what the invoice still owes, together ≤ the receipt). */
+export type ReceiptAllocation = "AUTO" | { invoiceId: string; amount: string }[];
+export type ReceiptConfirmOptions = { depositAccountId?: string | null; allocation?: ReceiptAllocation; sodBypass?: boolean; receiptNumber?: string | null };
+
+type OpenDoc = { id: string; kind: string; number: string | null; issueDate: Date | null; dueDate: Date | null; grandTotal: Prisma.Decimal; orderId?: string | null };
+
+/** The customer's open invoices / debit notes (locked), as debit items, with what each still owes. */
+export async function openDebits(tx: Db, customerId: string, where: Prisma.SalesInvoiceWhereInput = {}, lock = true): Promise<(DebitItem & { orderId: string | null })[]> {
+  const invoices: OpenDoc[] = await tx.salesInvoice.findMany({ where: { customerId, status: "ISSUED", kind: { in: ["INVOICE", "DEBIT_NOTE"] }, ...where }, select: { id: true, kind: true, number: true, issueDate: true, dueDate: true, grandTotal: true, orderId: true } });
+  if (!invoices.length) return [];
+  if (lock) await tx.$queryRaw`SELECT "id" FROM "SalesInvoice" WHERE "id" = ANY(${invoices.map((i) => i.id)}) ORDER BY "id" FOR UPDATE`;
+  const sums = await tx.arApplication.groupBy({ by: ["invoiceId"], where: { invoiceId: { in: invoices.map((i) => i.id) }, status: "APPLIED" }, _sum: { amount: true } });
+  return invoices.map((i) => ({ id: i.id, kind: i.kind as "INVOICE", number: i.number!, issueDate: day(i.issueDate), dueDate: i.dueDate ? day(i.dueDate) : null, total: D(i.grandTotal), applied: D(sums.find((s) => s.invoiceId === i.id)?._sum.amount), orderId: i.orderId ?? null }));
+}
+
+/** The default allocation of a receipt at confirmation (pure over the open items): its own invoice, its order's, then the oldest. */
+export function proposeAllocation(amount: Decimal, debits: (DebitItem & { orderId: string | null })[], first: { invoiceId?: string | null; orderId?: string | null }): { id: string; amount: Decimal }[] {
+  const own = debits.filter((d) => d.id === first.invoiceId);
+  const ofOrder = debits.filter((d) => d.id !== first.invoiceId && !!first.orderId && d.orderId === first.orderId);
+  const rest = debits.filter((d) => d.id !== first.invoiceId && !(first.orderId && d.orderId === first.orderId));
+  const out: { id: string; amount: Decimal }[] = [];
+  let left = amount;
+  for (const group of [own, ofOrder, rest]) {
+    if (left.lessThanOrEqualTo(0)) break;
+    const r = allocateFifo(left, group);
+    out.push(...r.parts);
+    left = r.left;
+  }
+  return out;
+}
+
 /**
- * A receipt was approved: apply it to the open invoices of its order (oldest due first; the rest stays the
- * customer's credit), then post RECEIVED (Dr cash / bank / card clearing; Cr AR for the part applied, Cr customer
- * advances for the rest). No customer (a deal without one): nothing to do — the receipt is not an AR item.
+ * A receipt was approved: apply it (by default to the open invoices of its order, oldest due first; the rest stays the
+ * customer's credit — or as the confirmation chose, ReceiptConfirmOptions), then post RECEIVED (Dr the deposit account,
+ * or cash / bank / card clearing by method; Cr AR for the part applied, Cr customer advances for the rest). No customer
+ * (a deal without one): nothing to do — the receipt is not an AR item.
  */
-export async function onCollectionApproved(tx: Tx, collectionId: string, actorId: string) {
-  const c = await tx.salesCollection.findUnique({ where: { id: collectionId }, select: { id: true, customerId: true, opportunityId: true, orderId: true, amountGross: true, paymentMethod: true, collectedAt: true, referenceNumber: true, status: true } });
+export async function onCollectionApproved(tx: Tx, collectionId: string, actorId: string, opts: ReceiptConfirmOptions = {}) {
+  const c = await tx.salesCollection.findUnique({ where: { id: collectionId }, select: { id: true, customerId: true, opportunityId: true, orderId: true, invoiceId: true, amountGross: true, paymentMethod: true, collectedAt: true, referenceNumber: true, receiptNumber: true, receiptMemo: true, depositAccountId: true, sodBypass: true, status: true, branchId: true } });
   if (!c || c.status !== "APPROVED") return null;
   const customerId = await receiptCustomer(tx, c);
   if (!customerId) return null;
   const amount = D(c.amountGross);
-  let applied = ZERO;
-  if (c.orderId) {
-    const invoices = await tx.salesInvoice.findMany({ where: { orderId: c.orderId, customerId, status: "ISSUED", kind: { in: ["INVOICE", "DEBIT_NOTE"] } }, select: { id: true, kind: true, number: true, issueDate: true, dueDate: true, grandTotal: true } });
-    if (invoices.length) {
-      await tx.$queryRaw`SELECT "id" FROM "SalesInvoice" WHERE "id" = ANY(${invoices.map((i) => i.id)}) ORDER BY "id" FOR UPDATE`;
-      const sums = await tx.arApplication.groupBy({ by: ["invoiceId"], where: { invoiceId: { in: invoices.map((i) => i.id) }, status: "APPLIED" }, _sum: { amount: true } });
-      const debits: DebitItem[] = invoices.map((i) => ({ id: i.id, kind: i.kind as "INVOICE", number: i.number!, issueDate: day(i.issueDate), dueDate: i.dueDate ? day(i.dueDate) : null, total: D(i.grandTotal), applied: D(sums.find((s) => s.invoiceId === i.id)?._sum.amount) }));
-      const { parts } = allocateFifo(amount, debits);
-      const today = new Date(`${todayRiyadh()}T00:00:00Z`);
-      for (const p of parts) {
-        await tx.arApplication.create({ data: { customerId, invoiceId: p.id, collectionId: c.id, amount: p.amount.toFixed(2), appliedDate: today, atReceipt: true, createdById: actorId } });
-        applied = applied.plus(p.amount);
-      }
+  let parts: { id: string; amount: Decimal }[] = [];
+  if (opts.allocation === undefined) {
+    if (c.orderId) parts = allocateFifo(amount, await openDebits(tx, customerId, { orderId: c.orderId })).parts;
+  } else if (opts.allocation === "AUTO") {
+    parts = proposeAllocation(amount, await openDebits(tx, customerId), { invoiceId: c.invoiceId, orderId: c.orderId });
+  } else {
+    const want = opts.allocation.map((a) => {
+      let v: Decimal;
+      try { v = new Decimal(String(a?.amount ?? "").trim()); } catch { throw refuseInv("BAD_INPUT", "allocation amount.", "مبلغ التخصيص غير صالح."); }
+      return { id: String(a?.invoiceId ?? ""), amount: v };
+    }).filter((a) => !a.amount.isZero());
+    if (new Set(want.map((w) => w.id)).size !== want.length) throw refuseInv("BAD_INPUT", "An invoice is named twice in the allocation.", "فاتورة مكررة في التخصيص.");
+    const debits = await openDebits(tx, customerId, { id: { in: want.map((w) => w.id) } });
+    let total = ZERO;
+    for (const w of want) {
+      const d = debits.find((x) => x.id === w.id);
+      if (!d) throw refuseInv("CUSTOMER_MISMATCH");
+      const why = applicationRefusal(w.amount, { amount, applied: total }, d);
+      if (why) throw refuseWith("OVER_APPLIED", { reason: why }, `(${why.en})`);
+      total = total.plus(w.amount);
     }
+    parts = want;
   }
-  const posting = await postReceiptReceived(tx, { collectionId: c.id, amount, appliedAtReceipt: applied, method: c.paymentMethod, customerId, date: dayText(riyadhDay(c.collectedAt)), ref: c.referenceNumber ?? c.id.slice(-8) }, actorId);
-  return { applied: applied.toFixed(2), posting: posting.status };
+  let applied = ZERO;
+  const today = new Date(`${todayRiyadh()}T00:00:00Z`);
+  for (const p of parts) {
+    await tx.arApplication.create({ data: { customerId, invoiceId: p.id, collectionId: c.id, amount: p.amount.toFixed(2), appliedDate: today, atReceipt: true, createdById: actorId } });
+    applied = applied.plus(p.amount);
+  }
+  const ref = c.receiptNumber ?? c.referenceNumber ?? c.id.slice(-8);
+  const posting = await postReceiptReceived(tx, { collectionId: c.id, amount, appliedAtReceipt: applied, method: c.paymentMethod, depositAccountId: c.depositAccountId, customerId, date: dayText(riyadhDay(c.collectedAt)), ref, memo: c.receiptMemo, sodBypass: c.sodBypass, branchId: c.branchId }, actorId);
+  return { applied: applied.toFixed(2), posting: posting.status, parts: parts.map((p) => ({ invoiceId: p.id, amount: p.amount.toFixed(2) })) };
 }
 
 /** A receipt was reversed: its applications are reversed and every posting of it is reversed. */

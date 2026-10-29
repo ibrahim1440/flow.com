@@ -33,8 +33,12 @@ import { PI_STATUS, type PurchaseCan } from "./invoices";
 import { SupplierDialog } from "./suppliers";
 import { fmtDate, fmtTime } from "../../employees/_ui/shared";
 import { LocationSelect, useLocations } from "../../inventory/_parts/locations";
+import { UNASSIGNED_LOCATION, useLocations as useBranches } from "../../accounting/_ui/locations";
 import { InvoiceClaims, type Claim, type CreditNoteRow } from "./claims";
 import { locationName } from "@/lib/inventory/locations";
+import { useAccountantView } from "../../accounting/_ui/qoyod-pages";
+import { AddMore, PartyCard, SplitButton, TaxSummary, useShiftA } from "@/components/forms/QoyodForm";
+import type { SupplierRow } from "./suppliers";
 
 type Meta = { can: PurchaseCan; sodSelfAllowed: boolean; simpleMode: boolean; viewer: { id: string }; shortfall?: { tolerancePercent: number; abandonReverseVat: boolean } };
 type Supplier = { id: string; name: string; vatNumber: string | null; isNonResident?: boolean; kind?: string; paymentTermsDays: number | null };
@@ -52,6 +56,8 @@ type ServerLine = {
   kind: "GRN" | "STOCK" | "EXPENSE" | "IMPORT_VAT" | "LANDED_COST"; purchaseRecordId: string | null; targetPurchaseRecordId?: string | null; landedCostType?: string | null; stockKind: string | null; stockItemId: string | null; expenseCategoryId: string | null; description: string;
   quantity: string | null; net: string; vatRate: string; vat: string; gross: string; matchedValue: string | null; variance: string | null;
   taxCode: string | null; customsValue: string | null; selfAssessedVat: string | null;
+  /** «شامل؟» (WP-K): the supplier's gross as typed (the net derived on the server). */
+  priceIncludesVat?: boolean; grossEntered?: string | null;
   billedQty?: string | null; shortfallQty?: string | null; shortfallNet?: string | null; shortfallTreatment?: string | null; shortfallReason?: string | null;
   receipt: { id: string; own: boolean; reversed: boolean; quantity: number; costPerUnit: number; date: string } | null;
   item: { stockKind: string; id: string; bean: { serialNumber: string; beanType: string; beanTypeAr: string | null } | null; material: { code: string; name: string; nameAr: string | null; unitOfMeasure: string; categoryId: string | null } | null } | null;
@@ -60,6 +66,8 @@ type Invoice = {
   id: string; number: string; supplierId: string; supplier: { name: string; vatNumber: string | null }; supplierRef: string; invoiceDate: string; dueDate: string; status: string; notes: string | null;
   customsDeclarationNo: string | null; customsDeclarationDate: string | null; origin: string; receivedDate: string | null; updatedAt: string;
   receivingLocationId?: string | null; receivingLocation?: { id: string; code: string; nameAr: string; nameEn: string | null } | null;
+  /** «الموقع» (WP-B): the invoice's location (FinBranch); null «غير محدد». */
+  branchId?: string | null;
   netTotal: string; vatTotal: string; grossTotal: string; paidTotal: string; creditedTotal?: string; outstanding: string; claims?: Claim[]; creditNotes?: CreditNoteRow[]; createdBy: string; lastEditedBy: string | null; submittedBy: string | null; postedBy: string | null;
   journalEntryId: string | null; received: boolean; reversedReceipts: number; cancelReason: string | null; cancelledAt: string | null; cancelledBy: string | null; lines: ServerLine[];
   allocations: { id: string; amount: string; payment: { number: string; paymentDate: string; status: string } }[];
@@ -79,6 +87,9 @@ type Line = {
   receipt: { id: string; itemId: string; quantity: string; unitCost: string; reversed?: boolean } | null;
   /** «المستلم أقل من الفاتورة»: the quantity on the supplier's invoice and the treatment ("" = the default / tolerance). */
   short: boolean; billedQty: string; shortTreatment: "" | "CLAIM" | "LOSS"; shortReason: string;
+  /** «شامل؟» (WP-K; an expense or a landed cost): the gross typed from the paper, and its VAT when the paper differs by a
+   *  halala ("" = derived). The server derives the net (ap.ts inclusiveSplit) and re-checks the ±0.01. */
+  incl?: boolean; gross?: string; vatPaper?: string;
 };
 let seq = 0;
 const blankLine = (pick = ""): Line => ({ key: `l${++seq}`, pick, stockItemId: "", newLot: null, quantity: "", unitCost: "", taxCode: "", customsValue: "", description: "", purchaseRecordId: "", net: "", expenseCategoryId: "", receipt: null, targetPurchaseRecordId: "", landedCostType: "FREIGHT", short: false, billedQty: "", shortTreatment: "", shortReason: "" });
@@ -86,6 +97,14 @@ const lineKindOf = (pick: string): PurchaseLineKind => (pick === "EXPENSE" ? "EX
 const UNIT: Record<string, [string, string]> = { KG: ["كغ", "kg"], GRAM: ["غ", "g"], PIECE: ["حبة", "pcs"], UNIT: ["وحدة", "units"], LITER: ["لتر", "L"] };
 const addDays = (d: string, n: number) => new Date(Date.parse(d) + n * 86_400_000).toISOString().slice(0, 10);
 const STOCK_TEMPLATES = ["GREEN_COFFEE", "PACKAGING", "GENERAL"];
+/** Display only («شامل؟»): net = round_half_up(G ÷ (1 + r), 2), VAT = G − net (or the paper's VAT) — the server's rule. */
+const splitGrossText = (g: string, rate: number, vatPaper: string): { net: string; vat: string } => {
+  const G = Math.round(Number(plainNumber(g) || 0) * 100);
+  const paper = plainNumber(vatPaper);
+  const vat = paper ? Math.round(Number(paper) * 100) : G - Math.round((G * 100) / (100 + rate));
+  return { net: ((G - vat) / 100).toFixed(2), vat: (vat / 100).toFixed(2) };
+};
+const inclKind = (pick: string) => pick === "EXPENSE" || pick === "LANDED";
 
 /** `expense` (Qoyod parity «فواتير بسيطة», `?mode=expense`): a new invoice that starts as ONE expense line — supplier,
  *  date, expense category, VAT and amount — with the stock / landed-cost / import line kinds hidden. Same API, same checks. */
@@ -108,15 +127,23 @@ export function PurchaseInvoiceForm({ id, expense = false }: { id: string | null
   const data = inv.data;
   const can = meta.data?.can;
   const activity = useApi<{ entries: Activity[] }>(id ? `/api/purchases/invoices/${id}/activity?lang=${lang}` : null);
-  const [form, setForm] = useState<{ base: Invoice | null | "receipt"; supplierId: string; supplierRef: string; invoiceDate: string; dueDate: string; dueTouched: boolean; notes: string; customsNo: string; customsDate: string; receivedDate: string; locationId?: string; lines: Line[] } | null>(null);
+  const [form, setForm] = useState<{ base: Invoice | null | "receipt"; supplierId: string; supplierRef: string; invoiceDate: string; dueDate: string; dueTouched: boolean; notes: string; customsNo: string; customsDate: string; receivedDate: string; locationId?: string; branchId?: string; lines: Line[] } | null>(null);
   const [editing, setEditing] = useState(false);
   const { state: locState } = useLocations(false);
+  // «الموقع» (WP-B, SupplierInvoice.branchId): "" = the default (the receiving site's branch, else yours), "none" = «غير محدد».
+  const branches = useBranches();
   const [dialog, setDialog] = useState<null | "post" | "return" | "cancel" | "cancelPosted">(null);
   const [reason, setReason] = useState("");
   const [beanFor, setBeanFor] = useState<string | null>(null);
   const [matFor, setMatFor] = useState<string | null>(null);
   const [newSupplier, setNewSupplier] = useState(false);
   const [saved, setSaved] = useState<SaveResult | null>(null);
+  // Batch 22 WP-J (QOYOD-REF §8.2): in the accountant workspace the form reads as Qoyod's «إنشاء فاتورة مشتريات» — the
+  // header in Qoyod's order and words, the supplier card with «الرصيد الحالي», «إضافة المزيد» (Shift+A), «ملخص الضريبة»
+  // and «حفظ وموافقة ▾» (Q-F2). Same payload and checks; elsewhere the form is unchanged.
+  const qoyod = useAccountantView();
+  const supRows = useApi<{ rows: SupplierRow[] }>(qoyod ? "/api/purchases/suppliers" : null);
+  const [payAfter, setPayAfter] = useState(false);
 
   const categories = useMemo(() => (cats.data ?? []).filter((c) => c.isActive && !c.archivedAt && STOCK_TEMPLATES.includes(c.template)), [cats.data]);
   const catName = (c: Category) => (lang === "ar" ? c.nameAr : c.nameEn || c.nameAr);
@@ -128,13 +155,14 @@ export function PurchaseInvoiceForm({ id, expense = false }: { id: string | null
   function fromInvoice(x: Invoice) {
     return {
       base: x, supplierId: x.supplierId, supplierRef: x.supplierRef, invoiceDate: x.invoiceDate, dueDate: x.dueDate, dueTouched: true, notes: x.notes ?? "",
-      customsNo: x.customsDeclarationNo ?? "", customsDate: x.customsDeclarationDate ?? "", receivedDate: x.receivedDate ?? todayRiyadh(), locationId: x.receivingLocationId ?? "",
+      customsNo: x.customsDeclarationNo ?? "", customsDate: x.customsDeclarationDate ?? "", receivedDate: x.receivedDate ?? todayRiyadh(), locationId: x.receivingLocationId ?? "", branchId: x.branchId ?? "",
       lines: x.lines.map((l): Line => {
         const b = blankLine();
         const vatRate = l.taxCode ?? "";
         if (l.kind === "IMPORT_VAT") return { ...b, pick: "IMPORT", taxCode: "P-IMP15", customsValue: l.customsValue ?? "", description: l.description === "—" ? "" : l.description };
-        if (l.kind === "LANDED_COST") return { ...b, pick: "LANDED", targetPurchaseRecordId: l.targetPurchaseRecordId ?? "", landedCostType: l.landedCostType ?? "FREIGHT", net: l.net, taxCode: vatRate, description: l.description === "—" ? "" : l.description };
-        if (l.kind === "EXPENSE") return { ...b, pick: "EXPENSE", expenseCategoryId: l.expenseCategoryId ?? "", description: l.description === "—" ? "" : l.description, net: l.net, taxCode: vatRate };
+        const incl = l.priceIncludesVat ? { incl: true, gross: l.grossEntered ?? l.gross, vatPaper: l.vat } : {};
+        if (l.kind === "LANDED_COST") return { ...b, ...incl, pick: "LANDED", targetPurchaseRecordId: l.targetPurchaseRecordId ?? "", landedCostType: l.landedCostType ?? "FREIGHT", net: l.net, taxCode: vatRate, description: l.description === "—" ? "" : l.description };
+        if (l.kind === "EXPENSE") return { ...b, ...incl, pick: "EXPENSE", expenseCategoryId: l.expenseCategoryId ?? "", description: l.description === "—" ? "" : l.description, net: l.net, taxCode: vatRate };
         const kind = l.item?.stockKind;
         const catId = kind === "GREEN_BEAN" ? greenCat?.id : l.item?.material?.categoryId;
         const pick = catId ? `cat:${catId}` : "";
@@ -194,7 +222,14 @@ export function PurchaseInvoiceForm({ id, expense = false }: { id: string | null
   };
   // Import VAT: no net, the VAT on the customs value · reverse charge: nothing on the invoice, the VAT self-assessed.
   const calc = f.lines.map((l) => {
-    const code = codeOf(l), rate = PURCHASE_TAX_INFO[code].rate, net = netOf(l);
+    const code = codeOf(l), rate = PURCHASE_TAX_INFO[code].rate;
+    if (l.incl && inclKind(l.pick)) {
+      // «شامل؟»: reverse charge — nothing is payable to the supplier for VAT (gross = net, the VAT self-assessed).
+      if (code === "P-RC15") { const g = plainNumber(l.gross ?? "") || "0.00"; return { code, net: sumAmounts([g]), vat: "0.00", self: lineVatText(g, rate), gross: sumAmounts([g]) }; }
+      const sp = splitGrossText(l.gross ?? "", rate, rate ? l.vatPaper ?? "" : "");
+      return { code, net: sp.net, vat: sp.vat, self: "0.00", gross: sumAmounts([sp.net, sp.vat]) };
+    }
+    const net = netOf(l);
     const vat = code === "P-IMP15" ? lineVatText(plainNumber(l.customsValue) || "0", rate) : code === "P-RC15" ? "0.00" : lineVatText(net, rate);
     const self = code === "P-RC15" ? lineVatText(net, rate) : "0.00";
     return { code, net, vat, self, gross: sumAmounts([net, vat]) };
@@ -213,6 +248,15 @@ export function PurchaseInvoiceForm({ id, expense = false }: { id: string | null
   const registerLabel = (r: RegisterReceipt) => `${r.purchaseDate.slice(0, 10)} · ${r.supplier.name} · ${r.item ? (lang === "ar" ? r.item.nameAr ?? r.item.name : r.item.name) : r.type} · ${r.quantity}${r.value ? ` · ${money(r.value)}` : ""}`;
   const hasStock = f.lines.some(isStock);
   const receivingSite = f.locationId || locState?.lastReceivingId || locState?.defaultId || "";
+  const addLine = () => set({ lines: [...f.lines, blankLine(expense && !id ? "EXPENSE" : "")] });
+  useShiftA(addLine, editable);
+  const supRow = supRows.data?.rows.find((r) => r.id === f.supplierId);
+  // «ملخص الضريبة»: the taxable base and the VAT per category (S / S-NR / Z / E / O / RC / IMP), as the lines compute them.
+  const taxRows = (() => {
+    const m = new Map<string, { base: number; vat: number }>();
+    calc.forEach((c, i) => { const k = c.code; const x = m.get(k) ?? { base: 0, vat: 0 }; x.base += Number(f.lines[i]?.pick === "IMPORT" ? plainNumber(f.lines[i].customsValue) || 0 : c.net); x.vat += Number(c.vat) + Number(c.self); m.set(k, x); });
+    return [...m.entries()].map(([k, x]) => ({ key: k, label: L(PURCHASE_TAX_INFO[k as PurchaseTaxCode].ar, PURCHASE_TAX_INFO[k as PurchaseTaxCode].en), base: money(x.base.toFixed(2)), vat: money(x.vat.toFixed(2)) }));
+  })();
 
   const itemLabel = (l: Line): string => {
     const c = catOf(l.pick);
@@ -247,11 +291,14 @@ export function PurchaseInvoiceForm({ id, expense = false }: { id: string | null
     receivedDate: f.receivedDate || null, expectedUpdatedAt: data?.updatedAt ?? null,
     // Phase 3: «موقع الاستلام» — where the goods are received (default: the person's last one, else the default site).
     receivingLocationId: receivingSite || null,
+    ...(f.branchId ? { branchId: f.branchId === UNASSIGNED_LOCATION ? null : f.branchId } : {}),
     lines: f.lines.map((l) => {
       const taxCode = codeOf(l), vatRate = String(PURCHASE_TAX_INFO[taxCode].rate);
       if (l.pick === "IMPORT") return { kind: "IMPORT_VAT", customsValue: plainNumber(l.customsValue) || "0", description: l.description || null, taxCode };
-      if (l.pick === "LANDED") return { kind: "LANDED_COST", targetPurchaseRecordId: l.targetPurchaseRecordId, landedCostType: l.landedCostType, net: plainNumber(l.net) || "0", vatRate, taxCode, description: l.description || null };
-      if (l.pick === "EXPENSE") return { kind: "EXPENSE", expenseCategoryId: l.expenseCategoryId, description: l.description || null, net: plainNumber(l.net) || "0", vatRate, taxCode };
+      // «شامل؟» (WP-K): the gross goes to the server, which derives the net (a zero-rated line carries no VAT adjustment).
+      const incl = l.incl ? { priceIncludesVat: true, grossEntered: plainNumber(l.gross ?? "") || "0", vat: Number(vatRate) > 0 && taxCode !== "P-RC15" && plainNumber(l.vatPaper ?? "") ? plainNumber(l.vatPaper ?? "") : null, net: "0" } : {};
+      if (l.pick === "LANDED") return { kind: "LANDED_COST", targetPurchaseRecordId: l.targetPurchaseRecordId, landedCostType: l.landedCostType, net: plainNumber(l.net) || "0", vatRate, taxCode, description: l.description || null, ...incl };
+      if (l.pick === "EXPENSE") return { kind: "EXPENSE", expenseCategoryId: l.expenseCategoryId, description: l.description || null, net: plainNumber(l.net) || "0", vatRate, taxCode, ...incl };
       if (l.pick === "GRN") return { kind: "GRN", purchaseRecordId: l.purchaseRecordId, net: plainNumber(l.net) || null, vatRate, taxCode, description: l.description || null };
       const c = catOf(l.pick);
       const green = c?.template === "GREEN_COFFEE";
@@ -281,14 +328,14 @@ export function PurchaseInvoiceForm({ id, expense = false }: { id: string | null
       if (l.pick === "IMPORT" && !(Number(plainNumber(l.customsValue)) > 0)) return L(`السطر ${n}: أدخل وعاء الضريبة حسب البيان الجمركي (أكبر من صفر).`, `Line ${n}: enter the VAT base per the customs declaration (above zero).`);
       if (l.pick === "IMPORT" && !importOk) return L(`السطر ${n}: ضريبة الاستيراد تُفوتر من الجمارك أو المخلّص الجمركي فقط — غيّر نوع المورد أو احذف السطر.`, `Line ${n}: import VAT is billed by customs or a clearing agent only — change the supplier's kind or remove the line.`);
       if (l.pick === "LANDED" && !l.targetPurchaseRecordId) return L(`السطر ${n}: اختر الاستلام الذي تُضاف إليه التكلفة.`, `Line ${n}: choose the receipt the cost is added to.`);
-      if (l.pick === "LANDED" && !(Number(plainNumber(l.net)) > 0)) return L(`السطر ${n}: المبلغ أكبر من صفر.`, `Line ${n}: the amount is above zero.`);
+      if (l.pick === "LANDED" && !(Number(plainNumber(l.incl ? l.gross ?? "" : l.net)) > 0)) return L(`السطر ${n}: المبلغ أكبر من صفر.`, `Line ${n}: the amount is above zero.`);
       if (codeOf(l) === "P-S15" && !supplier?.vatNumber) return L(`السطر ${n}: «أساسية 15% · قابلة للاسترداد» تحتاج الرقم الضريبي للمورد. اختر «غير قابلة للاسترداد» أو «خارج النطاق / مورد غير مسجل»، أو أضف رقمه الضريبي.`, `Line ${n}: «Standard 15% · recoverable» needs the supplier's VAT number. Choose «not recoverable» or «out of scope / unregistered supplier», or add its VAT number.`);
     }
     if (hasImport && (!f.customsNo.trim() || !f.customsDate)) return L("ضريبة الاستيراد تحتاج رقم البيان الجمركي وتاريخه.", "Import VAT needs the customs declaration's number and date.");
     return null;
   }
 
-  async function save(action: "draft" | "receive" | "post") {
+  async function save(action: "draft" | "receive" | "post", then?: "pay") {
     const problem = check();
     if (problem) { w.setError(problem); return; }
     const ok = action === "draft" ? L("حُفظت المسودة. لم يتحرك المخزون ولا الحسابات.", "Draft saved. Nothing moved in stock or the books.")
@@ -297,9 +344,12 @@ export function PurchaseInvoiceForm({ id, expense = false }: { id: string | null
     const r = await w.run<SaveResult>(action, id ? `/api/purchases/invoices/${id}` : "/api/purchases/invoices", id ? "PUT" : "POST", payload(action), ok);
     if (!r) return;
     setEditing(false);
+    // «حفظ وموافقة وتسجيل سداد»: on to the existing «تسجيل سداد لمورد» dialog, prefilled with this invoice.
+    const payHref = then === "pay" && r.invoice.status === "POSTED" ? `/dashboard/accounting/ap?view=payments&pay=${encodeURIComponent(r.invoice.supplierId)}&invoice=${encodeURIComponent(r.invoice.id)}` : null;
     // With green lots received the form stays as it was behind «اطبع الملصق» until the person moves on.
-    if (r.lots.length) { setSaved(r); return; }
+    if (r.lots.length) { setPayAfter(!!payHref); setSaved(r); return; }
     setForm(null);
+    if (payHref) { router.push(payHref); return; }
     if (!id) router.replace(`/dashboard/purchases/invoices/${r.invoice.id}`); else { inv.reload(); activity.reload(); }
   }
   function afterLots() {
@@ -307,6 +357,7 @@ export function PurchaseInvoiceForm({ id, expense = false }: { id: string | null
     setSaved(null);
     setForm(null);
     if (!r) return;
+    if (payAfter) { setPayAfter(false); router.push(`/dashboard/accounting/ap?view=payments&pay=${encodeURIComponent(r.invoice.supplierId)}&invoice=${encodeURIComponent(r.invoice.id)}`); return; }
     if (!id) router.replace(`/dashboard/purchases/invoices/${r.invoice.id}`); else { inv.reload(); greens.reload(); activity.reload(); }
   }
   async function act(kind: "post" | "return" | "cancel" | "cancelPosted") {
@@ -410,10 +461,20 @@ export function PurchaseInvoiceForm({ id, expense = false }: { id: string | null
           <label className="pi-cell pi-amount"><span className="pi-lbl">{L("وعاء الضريبة حسب البيان الجمركي (CIF + الرسوم)", "VAT base per customs declaration (CIF + duty)")}</span>
             {ro ? <span className="hr-num">{money(l.customsValue)}</span> : <input className="hr-input acct-amount" inputMode="decimal" value={l.customsValue} onChange={(e) => setLine(l.key, { customsValue: e.target.value })} placeholder="0.00" data-testid={`pi-customs-value-${i}`} aria-label={L("وعاء الضريبة حسب البيان الجمركي (CIF + الرسوم)", "VAT base per customs declaration (CIF + duty)")} />}
           </label>
+        ) : l.incl && inclKind(l.pick) ? (
+          <div className="pi-cell pi-amount"><span className="pi-lbl">{L("المبلغ شامل الضريبة", "Amount incl. VAT")}</span>
+            {ro ? <span className="hr-num">{money(l.gross ?? "")}</span> : <input className="hr-input acct-amount" inputMode="decimal" value={l.gross ?? ""} onChange={(e) => setLine(l.key, { gross: e.target.value })} placeholder="0.00" data-testid={`pi-gross-${i}`} aria-label={L("المبلغ شامل الضريبة", "Amount incl. VAT")} />}
+            {!ro && PURCHASE_TAX_INFO[calc[i].code].rate > 0 && calc[i].code !== "P-RC15" ? (
+              <input className="hr-input acct-amount" inputMode="decimal" value={l.vatPaper ?? ""} onChange={(e) => setLine(l.key, { vatPaper: e.target.value })} placeholder={calc[i].vat} title={L("ضريبة الفاتورة الورقية (±0.01)", "The paper's VAT (±0.01)")} aria-label={L("ضريبة الفاتورة الورقية", "The paper's VAT")} data-testid={`pi-vat-paper-${i}`} />
+            ) : null}
+            {editable && qoyod ? <label className="pur-check" style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked onChange={() => setLine(l.key, { incl: false, net: calc[i].net, gross: "", vatPaper: "" })} data-testid={`pi-incl-${i}`} /> {L("شامل؟", "Incl. VAT?")}</label> : <span className="hr-caption">{L("شامل الضريبة", "VAT inclusive")}</span>}
+          </div>
         ) : (
-          <label className="pi-cell pi-amount"><span className="pi-lbl">{L("المبلغ قبل الضريبة", "Amount before VAT")}</span>
+          <div className="pi-cell pi-amount"><span className="pi-lbl">{L("المبلغ قبل الضريبة", "Amount before VAT")}</span>
             {ro ? <span className="hr-num">{money(l.net)}</span> : <input className="hr-input acct-amount" inputMode="decimal" value={l.net} onChange={(e) => setLine(l.key, { net: e.target.value })} placeholder="0.00" data-testid={`pi-net-${i}`} aria-label={L("المبلغ", "Amount")} />}
-          </label>
+            {/* «شامل؟» (WP-K): an expense / a landed cost typed by the paper's gross; net and VAT derived on the server. */}
+            {editable && qoyod && inclKind(l.pick) ? <label className="pur-check" style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={false} onChange={() => setLine(l.key, { incl: true, gross: calc[i].gross === "0.00" ? "" : calc[i].gross, vatPaper: "" })} data-testid={`pi-incl-${i}`} /> {L("شامل؟", "Incl. VAT?")}</label> : null}
+          </div>
         )}
         <label className="pi-cell pi-vat"><span className="pi-lbl">{L("فئة الضريبة", "VAT category")}</span>
           {ro || l.pick === "IMPORT" ? <span data-testid={`pi-vat-ro-${i}`}>{L(PURCHASE_TAX_INFO[calc[i].code].ar, PURCHASE_TAX_INFO[calc[i].code].en)}</span> : (
@@ -425,7 +486,7 @@ export function PurchaseInvoiceForm({ id, expense = false }: { id: string | null
         </label>
         <div className="pi-cell pi-total"><span className="pi-lbl">{L("الإجمالي", "Total")}</span>
           <strong className="hr-num" data-testid={`pi-total-${i}`}>{money(calc[i]?.gross ?? 0)}</strong>
-          <span className="hr-caption hr-num">{L("صافي", "net")} {money(calc[i]?.net ?? 0)} · {L("ضريبة", "VAT")} {money(calc[i]?.vat ?? 0)}{Number(calc[i]?.self) ? <> · {L("محتسبة ذاتيًا", "self-assessed")} {money(calc[i].self)}</> : null}</span>
+          <span className="hr-caption hr-num">{qoyod ? L("الاجمالي قبل الضريبة", "Before VAT") : L("صافي", "net")} {money(calc[i]?.net ?? 0)} · {qoyod ? L("قيمة الضريبة", "VAT amount") : L("ضريبة", "VAT")} {money(calc[i]?.vat ?? 0)}{Number(calc[i]?.self) ? <> · {L("محتسبة ذاتيًا", "self-assessed")} {money(calc[i].self)}</> : null}</span>
         </div>
         {editable ? <Btn variant="ghost" size="sm" className="pi-remove" aria-label={L(`حذف السطر ${i + 1}`, `Remove line ${i + 1}`)} title={L("حذف السطر", "Remove line")} disabled={f.lines.length === 1} onClick={() => set({ lines: f.lines.filter((x) => x.key !== l.key) })} data-testid={`pi-remove-${i}`}><span aria-hidden="true">✕</span><span className="pi-remove-word">{L("حذف", "Remove")}</span></Btn> : <span />}
         {isStock(l) ? shortEditor(l, i, ro) : null}
@@ -501,14 +562,27 @@ export function PurchaseInvoiceForm({ id, expense = false }: { id: string | null
         {legacyStock ? (
           <div data-testid="pi-legacy-stock"><Notice tone="warning">{L("أُدخلت هذه المسودة عبر واجهة الذمم الدائنة بسطور مخزون تضيف تكلفة فقط (بلا بضاعة مستلمة)، فلا تُفتح هنا للتعديل. ألغها وأدخلها من جديد كفاتورة مشتريات؛ سطر «تكلفة إضافية على شحنة» يضيف التكلفة إلى استلام.", "This draft was entered through the accounts-payable API with stock lines that only add cost (no goods received), so it is not edited here. Cancel it and enter it again as a purchase invoice; a «landed cost» line adds cost to a receipt.")}</Notice></div>
         ) : null}
+        {qoyod ? (
+          <PartyCard title={L("تفاصيل بيانات المورد", "Supplier details")} empty={L("اختر المورد لتظهر بياناته ورصيده.", "Choose the supplier to see its details and balance.")} testId="pi-party"
+            rows={supplier ? [
+              { k: L("الاسم", "Name"), v: supplier.name },
+              { k: L("الرقم الضريبي", "VAT number"), v: supplier.vatNumber ? <bdi className="acct-code">{supplier.vatNumber}</bdi> : L("غير مسجل", "Not on file") },
+              { k: L("شروط الدفع", "Payment terms"), v: L(`${supplier.paymentTermsDays ?? 30} يومًا`, `${supplier.paymentTermsDays ?? 30} days`) },
+              ...(supRow?.openBalance !== undefined && supRow?.openBalance !== null ? [{ k: L("الرصيد الحالي", "Current balance"), v: <bdi className="hr-num">{money(supRow.openBalance)} {L("ر.س", "SAR")}</bdi>, tone: Number(supRow.openBalance) > 0 ? ("bad" as const) : ("good" as const), testId: "pi-party-balance" }] : []),
+            ] : null} />
+        ) : null}
         <section className="pi-head" aria-label={L("بيانات الفاتورة", "Invoice details")}>
           <label className="hr-field pi-sup"><span className="hr-label">{L("المورد", "Supplier")}{editable ? " *" : ""}</span>
             {editable ? (
-              <Select value={f.supplierId} onChange={(e) => { if (e.target.value === "__new__") { setNewSupplier(true); return; } set({ supplierId: e.target.value }); }} placeholder={L("اختر المورد", "Choose the supplier")} data-testid="inv-supplier">
-                <option value="">{L("اختر المورد", "Choose the supplier")}</option>
-                {can?.suppliers ? <option value="__new__">{L("＋ مورد جديد", "＋ New supplier")}</option> : null}
-                {(sups.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </Select>
+              <span className="pi-sup-row" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <Select value={f.supplierId} onChange={(e) => { if (e.target.value === "__new__") { setNewSupplier(true); return; } set({ supplierId: e.target.value }); }} placeholder={L("اختر المورد", "Choose the supplier")} data-testid="inv-supplier">
+                  <option value="">{L("اختر المورد", "Choose the supplier")}</option>
+                  {can?.suppliers && !qoyod ? <option value="__new__">{L("＋ مورد جديد", "＋ New supplier")}</option> : null}
+                  {(sups.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </Select>
+                {/* Qoyod's inline «+» beside the supplier (hidden without the privilege — never a 403-only button). */}
+                {qoyod && can?.suppliers ? <button type="button" className="hr-btn hr-iconbtn" aria-label={L("مورد جديد", "New supplier")} title={L("مورد جديد", "New supplier")} onClick={() => setNewSupplier(true)} data-testid="inv-supplier-new">+</button> : null}
+              </span>
             ) : <span className="strong">{data?.supplier.name}</span>}
             <span className="acct-hint">{supplier?.vatNumber ? <>{L("الرقم الضريبي", "VAT no.")} <bdi className="acct-code">{supplier.vatNumber}</bdi></> : L("لا رقم ضريبي مسجّل", "No VAT number on file")}</span>
           </label>
@@ -516,15 +590,21 @@ export function PurchaseInvoiceForm({ id, expense = false }: { id: string | null
             {editable ? <input className="hr-input" dir="ltr" value={f.supplierRef} onChange={(e) => set({ supplierRef: e.target.value })} data-testid="inv-ref" placeholder="INV-2026-0412" /> : <bdi className="acct-code">{f.supplierRef}</bdi>}
             <span className="acct-hint">{L("لا يتكرر للمورد نفسه", "Unique per supplier")}</span>
           </label>
-          <label className="hr-field"><span className="hr-label">{L("تاريخ الفاتورة", "Invoice date")}</span>
+          <label className="hr-field"><span className="hr-label">{qoyod ? L("تاريخ الإصدار", "Issue date") : L("تاريخ الفاتورة", "Invoice date")}</span>
             {editable ? <input type="date" className="hr-input" value={f.invoiceDate} onChange={(e) => set({ invoiceDate: e.target.value })} data-testid="inv-date" /> : <span className="hr-num">{f.invoiceDate}</span>}
           </label>
+          {qoyod ? (
+            <label className="hr-field"><span className="hr-label">{L("شروط الدفع", "Payment terms")}</span>
+              <span className="hr-input" aria-readonly="true" data-testid="inv-terms" style={{ display: "flex", alignItems: "center" }}>{supplier ? L(`${supplier.paymentTermsDays ?? 30} يومًا`, `${supplier.paymentTermsDays ?? 30} days`) : L("حسب المورد", "Per the supplier")}</span>
+              <span className="acct-hint">{L("من بطاقة المورد؛ يُحسب منها تاريخ الاستحقاق", "From the supplier's card; the due date follows")}</span>
+            </label>
+          ) : null}
           <label className="hr-field"><span className="hr-label">{L("تاريخ الاستحقاق", "Due date")}</span>
             {editable ? <input type="date" className="hr-input" value={dueShown} onChange={(e) => set({ dueDate: e.target.value, dueTouched: true })} data-testid="inv-due" /> : <span className="hr-num">{f.dueDate}</span>}
             <span className="acct-hint">{L(`من شروط المورد: ${supplier?.paymentTermsDays ?? 30} يومًا`, `From the supplier's terms: ${supplier?.paymentTermsDays ?? 30} days`)}</span>
           </label>
           {(editable && hasStock) || data?.receivedDate ? (
-            <label className="hr-field"><span className="hr-label">{L("تاريخ الاستلام", "Received on")}</span>
+            <label className="hr-field"><span className="hr-label">{qoyod ? L("تاريخ التوريد", "Supply date") : L("تاريخ الاستلام", "Received on")}</span>
               {editable && hasStock ? <input type="date" className="hr-input" value={f.receivedDate} max={todayRiyadh()} onChange={(e) => set({ receivedDate: e.target.value })} data-testid="inv-received-date" /> : <span className="hr-num">{data?.receivedDate ?? "—"}</span>}
               <span className="acct-hint">{L("يوم دخول البضاعة المخزن — تاريخ الاستلام وحركة التكلفة", "The day the goods came in — the receipt's and cost movement's day")}</span>
             </label>
@@ -537,6 +617,16 @@ export function PurchaseInvoiceForm({ id, expense = false }: { id: string | null
               <span className="acct-hint">{L("المكان الذي تدخله البضاعة؛ يمكن تحويلها لاحقًا إلى موقع آخر", "Where the goods come in; they can be transferred to another location later")}</span>
             </label>
           ) : null}
+          {editable && branches.length ? (
+            <label className="hr-field"><span className="hr-label">{qoyod ? L("الموقع", "Location") : L("الموقع (مركز الربح)", "Location (profit centre)")}</span>
+              <Select value={f.branchId ?? ""} onChange={(e) => set({ branchId: e.target.value })} data-testid="inv-branch" aria-label={L("الموقع", "Location")}>
+                <option value="">{L("الافتراضي (موقع الاستلام، وإلا موقعك)", "Default (the receiving site's, else yours)")}</option>
+                {branches.map((b) => <option key={b.id} value={b.id}>{L(b.nameAr, b.nameEn)}</option>)}
+                <option value={UNASSIGNED_LOCATION}>{L("غير محدد", "Unassigned")}</option>
+              </Select>
+              <span className="acct-hint">{L("يُرحَّل على كل سطور القيد؛ يُجمَّد بعد الترحيل", "Posted on every line of the entry; frozen once posted")}</span>
+            </label>
+          ) : null}
           {hasImport || data?.customsDeclarationNo ? <>
             <label className="hr-field"><span className="hr-label">{L("رقم البيان الجمركي", "Customs declaration no.")}{editable ? " *" : ""}</span>
               {editable ? <input className="hr-input" dir="ltr" value={f.customsNo} onChange={(e) => set({ customsNo: e.target.value })} data-testid="inv-customs-no" placeholder="1234567" /> : <bdi className="acct-code">{f.customsNo || "—"}</bdi>}
@@ -545,7 +635,7 @@ export function PurchaseInvoiceForm({ id, expense = false }: { id: string | null
               {editable ? <input type="date" className="hr-input" value={f.customsDate} onChange={(e) => set({ customsDate: e.target.value })} data-testid="inv-customs-date" /> : <span className="hr-num">{f.customsDate || "—"}</span>}
             </label>
           </> : null}
-          <label className="hr-field pi-notes"><span className="hr-label">{L("ملاحظات", "Notes")}</span>
+          <label className="hr-field pi-notes"><span className="hr-label">{qoyod ? L("وصف الفاتورة", "Invoice description") : L("ملاحظات", "Notes")}</span>
             {editable ? <input className="hr-input" value={f.notes} onChange={(e) => set({ notes: e.target.value })} placeholder={L("اختياري", "Optional")} /> : <span>{f.notes || "—"}</span>}
           </label>
         </section>
@@ -553,14 +643,16 @@ export function PurchaseInvoiceForm({ id, expense = false }: { id: string | null
         <h2 className="pi-h2">{L("السطور", "Lines")} <span className="acct-hint">{L("الضريبة على كل سطر وتُقرَّب لأقرب هللة", "VAT per line, rounded to the halala")}</span></h2>
         <div className="pi-lines" data-testid="inv-lines">
           <div className="pi-line pi-linehead" aria-hidden="true">
-            <span>#</span><span>{L("التصنيف", "Category")}</span><span>{L("الصنف / البيان", "Item / description")}</span><span>{L("الكمية", "Quantity")}</span><span>{L("تكلفة الوحدة", "Unit cost")}</span><span>{L("فئة الضريبة", "VAT category")}</span><span>{L("الإجمالي", "Total")}</span><span />
+            {qoyod
+              ? <><span>#</span><span>{L("التصنيف", "Category")}</span><span>{L("المنتج / الوصف", "Product / description")}</span><span>{L("الكمية", "Quantity")}</span><span>{L("سعر الوحدة", "Unit price")}</span><span>{L("الضريبة %", "VAT %")}</span><span>{L("القيمة", "Amount")}</span><span /></>
+              : <><span>#</span><span>{L("التصنيف", "Category")}</span><span>{L("الصنف / البيان", "Item / description")}</span><span>{L("الكمية", "Quantity")}</span><span>{L("تكلفة الوحدة", "Unit cost")}</span><span>{L("فئة الضريبة", "VAT category")}</span><span>{L("الإجمالي", "Total")}</span><span /></>}
           </div>
           {f.lines.map((l, i) => lineEditor(l, i))}
         </div>
         {editable && expense && !id ? <div className="acct-actions">
           <Btn size="sm" variant="ghost" onClick={() => set({ lines: [...f.lines, blankLine("EXPENSE")] })} data-testid="inv-add-expense">+ {L("مصروف", "Expense")}</Btn>
         </div> : editable ? <div className="acct-actions">
-          <Btn size="sm" onClick={() => set({ lines: [...f.lines, blankLine()] })} data-testid="inv-add-line">+ {L("سطر", "Line")}</Btn>
+          {qoyod ? <AddMore onClick={addLine} label={L("إضافة المزيد", "Add more")} testId="inv-add-line" /> : <Btn size="sm" onClick={() => set({ lines: [...f.lines, blankLine()] })} data-testid="inv-add-line">+ {L("سطر", "Line")}</Btn>}
           {greenCat ? <Btn size="sm" variant="ghost" onClick={() => set({ lines: [...f.lines, blankLine(`cat:${greenCat.id}`)] })}>+ {L("بن أخضر", "Green coffee")}</Btn> : null}
           <Btn size="sm" variant="ghost" onClick={() => set({ lines: [...f.lines, blankLine("EXPENSE")] })} data-testid="inv-add-expense">+ {L("مصروف", "Expense")}</Btn>
           <Btn size="sm" variant="ghost" onClick={() => set({ lines: [...f.lines, blankLine("LANDED")] })} data-testid="inv-add-landed">+ {L("تكلفة إضافية على شحنة", "Landed cost")}</Btn>
@@ -579,9 +671,25 @@ export function PurchaseInvoiceForm({ id, expense = false }: { id: string | null
             <div><span>{L("المتبقي", "Remaining")}</span><strong className="hr-num" data-testid="pi-outstanding">{money(data.outstanding)}</strong></div>
           </> : null}
         </div>
+        {qoyod ? <TaxSummary title={L("ملخص الضريبة", "VAT summary")} head={[L("الفئة", "Category"), L("الاجمالي قبل الضريبة", "Taxable amount"), L("قيمة الضريبة", "VAT")]} rows={taxRows} testId="pi-tax-summary" /> : null}
 
         <div className="acct-actions pi-actions" data-testid="pi-actions">
-          {editable ? <>
+          {editable && qoyod ? <>
+            {/* Q-F2: «حفظ وموافقة ▾» when the viewer may approve their own invoice; else «حفظ وتقديم للاعتماد». */}
+            {mayPostOwn ? (
+              <SplitButton label={L("حفظ وموافقة", "Save and approve")} busy={w.busy === "post"} disabled={!!w.busy || (hasStock && !can?.receive)} onClick={() => save("post")} testId="pi-approve" menuLabel={L("خيارات الحفظ", "Save options")}
+                items={[
+                  ...(can?.ap ? [{ label: L("حفظ وموافقة وتسجيل سداد", "Save, approve and record a payment"), onClick: () => save("post", "pay"), testId: "pi-approve-pay" }] : []),
+                  ...(!data?.received ? [{ label: L("حفظ كمسودة", "Save as draft"), onClick: () => save("draft"), testId: "pi-approve-draft" }] : []),
+                ]} />
+            ) : (
+              <Btn variant="primary" busy={w.busy === "receive"} disabled={!!w.busy || (hasStock && !can?.receive)} onClick={() => save("receive")} data-testid="pi-receive">{hasStock || data?.received ? L("حفظ واستلام وتقديم للاعتماد", "Save, receive and submit") : L("حفظ وتقديم للاعتماد", "Save and submit")}</Btn>
+            )}
+            {!data?.received ? <Btn variant="ghost" busy={w.busy === "draft"} disabled={!!w.busy} onClick={() => save("draft")} data-testid="pi-save-draft">{L("حفظ كمسودة", "Save as draft")}</Btn> : null}
+            {editing ? <Btn variant="ghost" onClick={() => { setEditing(false); setForm(null); }}>{L("تراجع عن التعديل", "Discard changes")}</Btn> : null}
+            {!id ? <Link className="hr-btn is-ghost" href="/dashboard/purchases?tab=invoices">{L("إلغاء", "Cancel")}</Link> : null}
+            {!mayPostOwn ? <span className="acct-hint" data-testid="pi-needs-approver">{L("يحتاج اعتماد شخص آخر", "Needs another person's approval")}</span> : null}
+          </> : editable ? <>
             <Btn variant="primary" busy={w.busy === "receive"} disabled={!!w.busy || (hasStock && !can?.receive)} onClick={() => save("receive")} data-testid="pi-receive">{hasStock || data?.received ? L("حفظ واستلام", "Save and receive") : L("حفظ وتقديم للاعتماد", "Save and submit")}</Btn>
             {mayPostOwn ? <Btn busy={w.busy === "post"} disabled={!!w.busy || (hasStock && !can?.receive)} onClick={() => save("post")} data-testid="pi-receive-post">{hasStock || data?.received ? L("حفظ واستلام واعتماد", "Save, receive and approve") : L("حفظ واعتماد", "Save and approve")}</Btn> : null}
             {!data?.received ? <Btn variant="ghost" busy={w.busy === "draft"} disabled={!!w.busy} onClick={() => save("draft")} data-testid="pi-save-draft">{L("حفظ كمسودة", "Save as draft")}</Btn> : null}

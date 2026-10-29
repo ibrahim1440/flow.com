@@ -126,6 +126,19 @@ export const EVENTS: NotificationEventDef[] = [
     }),
   },
   {
+    // BATCH22 WP-E: a quotation issued from the accounting section on a Sales deal — its owner knows it went out.
+    key: "sales.quote_issued_by_accounting", category: "sales", severity: "info",
+    label: { ar: "أصدر قسم المحاسبة عرض سعر على صفقتك", en: "Accounting issued a quotation on your deal" },
+    recipients: [{ person: "dealOwner" }], requires: [MOD("sales")],
+    trigger: "POST /api/sales/quotes/[id]/transition to ISSUED through accounting › quotes_issue (automation event sales.quote_status_changed, byAccounting)",
+    render: (f) => ({
+      titleAr: `أصدر قسم المحاسبة عرض السعر ${s(f.quoteNumber)} على صفقتك`,
+      titleEn: `Accounting issued quotation ${s(f.quoteNumber)} on your deal`,
+      bodyAr: s(f.customerName), bodyEn: s(f.customerName),
+      link: f.quoteId ? `/dashboard/sales/quotes/${enc(s(f.quoteId))}` : "/dashboard/sales/quotes",
+    }),
+  },
+  {
     key: "sales.discount_pending", category: "sales", severity: "warning",
     label: { ar: "عرض سعر ينتظر اعتمادك للخصم", en: "A quotation's discount awaits your approval" },
     recipients: [{ perm: [sales("quote_approve_discount")] }], requires: [MOD("sales")], scope: "customer",
@@ -199,10 +212,37 @@ export const EVENTS: NotificationEventDef[] = [
     trigger: "approve / reject / reverse collection (automation event sales.collection_status_changed)",
     render: (f) => ({
       severity: f.status === "APPROVED" ? "success" : "warning",
-      titleAr: `التحصيل ${s(f.reference) ? `${s(f.reference)} ` : ""}${COLLECTION_AR[s(f.status)] ?? s(f.status)}`,
-      titleEn: `Collection ${s(f.reference) ? `${s(f.reference)} ` : ""}${COLLECTION_EN[s(f.status)] ?? s(f.status)}`,
+      titleAr: `التحصيل ${s(f.reference) ? `${s(f.reference)} ` : ""}${f.returned === "yes" ? "أُعيد إليك للتصحيح" : COLLECTION_AR[s(f.status)] ?? s(f.status)}`,
+      titleEn: `Collection ${s(f.reference) ? `${s(f.reference)} ` : ""}${f.returned === "yes" ? "was returned to you for correction" : COLLECTION_EN[s(f.status)] ?? s(f.status)}`,
       bodyAr: [s(f.customerName), s(f.amount)].filter(Boolean).join(" · "), bodyEn: [s(f.customerName), s(f.amount)].filter(Boolean).join(" · "),
       link: "/dashboard/sales/collections",
+    }),
+  },
+  // «طلب فاتورة ضريبية» (20261126090000_invoice_requests): the accountant sent a request back, or issued it.
+  {
+    key: "sales.invoice_request_returned", category: "sales", severity: "warning",
+    label: { ar: "أُعيد طلب الفاتورة الضريبية إليك", en: "Your tax invoice request was sent back" },
+    recipients: [{ person: "requester" }], requires: [MOD("sales")],
+    trigger: "returnRequest (lib/services/invoicing/requests.ts): POST /api/sales/invoices/[id]/return",
+    render: (f) => ({
+      titleAr: `أعاد المحاسب طلب الفاتورة: ${s(f.customerName)}`,
+      titleEn: `The accountant sent back the invoice request: ${sEn(f, "customerName")}`,
+      bodyAr: [s(f.reasonAr), s(f.reason)].filter(Boolean).join(" — "),
+      bodyEn: [s(f.reasonEn), s(f.reason)].filter(Boolean).join(" — "),
+      link: `/dashboard/sales/invoices/${enc(s(f.invoiceId))}`,
+    }),
+  },
+  {
+    key: "sales.invoice_issued", category: "sales", severity: "success",
+    label: { ar: "صدرت الفاتورة الضريبية التي طلبتها", en: "The tax invoice you requested was issued" },
+    recipients: [{ person: "requester" }, { person: "orderOwner" }], requires: [MOD("sales")],
+    trigger: "issueDocument (lib/services/invoicing/service.ts) of a requested draft, or of an order's invoice",
+    render: (f) => ({
+      titleAr: `صدرت الفاتورة ${s(f.number)}`,
+      titleEn: `Invoice ${s(f.number)} was issued`,
+      bodyAr: [s(f.customerName), s(f.amount)].filter(Boolean).join(" · ") + " · يمكنك طباعتها أو تنزيلها.",
+      bodyEn: [sEn(f, "customerName"), s(f.amount)].filter(Boolean).join(" · ") + " · You can print or download it.",
+      link: `/dashboard/sales/invoices/${enc(s(f.invoiceId))}`,
     }),
   },
   // ── Finance ──
@@ -217,6 +257,21 @@ export const EVENTS: NotificationEventDef[] = [
       bodyAr: [s(f.amount), f.submitterName ? `سجّله ${s(f.submitterName)}` : ""].filter(Boolean).join(" · "),
       bodyEn: [s(f.amount), f.submitterName ? `recorded by ${s(f.submitterName)}` : ""].filter(Boolean).join(" · "),
       link: "/dashboard/sales/collections",
+    }),
+  },
+  {
+    // BATCH22 WP-D «سند قبض»: the accountants who confirm receipts, linked to their own queue (the Finance event above
+    // keeps its recipients and its link to the collections screen).
+    key: "finance.receipt_pending", category: "finance", severity: "warning",
+    label: { ar: "سند قبض بانتظار التأكيد", en: "A receipt awaits confirmation" },
+    recipients: [{ perm: [{ module: "accounting", sub: "receipts_confirm" }] }], requires: [MOD("accounting")],
+    trigger: "submitCollection / recordAccountantReceipt (automation event sales.collection_status_changed → PENDING_VERIFICATION)",
+    render: (f) => ({
+      titleAr: `سند قبض بانتظار التأكيد: ${s(f.customerName)}`,
+      titleEn: `Receipt awaiting confirmation: ${s(f.customerName)}`,
+      bodyAr: [s(f.amount), f.submitterName ? `سجّله ${s(f.submitterName)}` : ""].filter(Boolean).join(" · "),
+      bodyEn: [s(f.amount), f.submitterName ? `recorded by ${s(f.submitterName)}` : ""].filter(Boolean).join(" · "),
+      link: "/dashboard/accounting/receipts",
     }),
   },
   {
@@ -596,6 +651,35 @@ export const EVENTS: NotificationEventDef[] = [
     },
   },
   {
+    // «طلبات الفواتير» (20261126090000_invoice_requests): a salesperson asked for a tax invoice; the issuer reviews it.
+    key: "finance.invoice_requested", category: "finance", severity: "info",
+    label: { ar: "طلب فاتورة ضريبية جديد", en: "A new tax invoice request" },
+    recipients: [{ perm: [sales("invoices_issue")] }], requires: [MOD("accounting")],
+    trigger: "requestInvoice (lib/services/invoicing/requests.ts): POST /api/sales/invoices/[id]/request",
+    render: (f) => ({
+      titleAr: `طلب فاتورة ضريبية: ${s(f.customerName)}`,
+      titleEn: `Tax invoice request: ${sEn(f, "customerName")}`,
+      bodyAr: [s(f.amount), f.requesterName ? `طلبها ${s(f.requesterName)}` : "", f.orderNumber ? `الطلب #${s(f.orderNumber)}` : ""].filter(Boolean).join(" · "),
+      bodyEn: [s(f.amount), f.requesterName ? `requested by ${s(f.requesterName)}` : "", f.orderNumber ? `order #${s(f.orderNumber)}` : ""].filter(Boolean).join(" · "),
+      link: "/dashboard/sales/invoices?view=requests",
+    }),
+  },
+  {
+    // The daily digest (the existing daily notification job, /api/cron/hr-document-expiry): requests waiting past the
+    // service level (two business days) or within five days of the legal limit (the 15th of the month after supply).
+    key: "finance.invoice_queue_overdue", category: "finance", severity: "warning",
+    label: { ar: "طلبات فواتير متأخرة", en: "Overdue invoice requests" },
+    recipients: [{ perm: [sales("invoices_issue")] }], requires: [MOD("accounting")],
+    trigger: "invoiceQueueDigest (lib/services/invoicing/requests.ts), daily: GET /api/cron/hr-document-expiry",
+    render: (f) => ({
+      titleAr: `${s(f.count)} طلب فاتورة متأخر`,
+      titleEn: `${s(f.count)} overdue invoice request(s)`,
+      bodyAr: [Number(f.pastLimit) > 0 ? `${s(f.pastLimit)} قريب من الموعد النظامي أو تجاوزه` : "", f.oldestDays ? `الأقدم منذ ${s(f.oldestDays)} يوم عمل` : ""].filter(Boolean).join(" · "),
+      bodyEn: [Number(f.pastLimit) > 0 ? `${s(f.pastLimit)} near or past the legal limit` : "", f.oldestDays ? `oldest ${s(f.oldestDays)} business day(s)` : ""].filter(Boolean).join(" · "),
+      link: "/dashboard/sales/invoices?view=requests",
+    }),
+  },
+  {
     // «المعاملات المتكررة» (20261120090000_recurring_journals): the runner found that a recurring transaction's preparer or
     // its auto-post authoriser no longer holds the right — the transaction was paused, or switched to drafts only.
     key: "finance.recurring_attention", category: "finance", severity: "warning",
@@ -613,6 +697,21 @@ export const EVENTS: NotificationEventDef[] = [
         link: f.scheduleId ? `/dashboard/accounting/recurring/${enc(s(f.scheduleId))}` : "/dashboard/accounting/recurring",
       };
     },
+  },
+  {
+    // «التفويض الدائم» (20261124090000_standing_authorisation, batch 22 WP-A): at a scheduler run the authoriser of a
+    // register-wide standing authorisation (deferral recognition, depreciation) was deactivated or lost the register's
+    // duty or journal_post — the authorisation was revoked (RIGHTS_LAPSED) and the register is back to person-run.
+    key: "finance.standing_auth_lapsed", category: "finance", severity: "warning",
+    label: { ar: "أُلغي تفويض دائم للجدولة", en: "A standing authorisation of the scheduler lapsed" },
+    recipients: [{ perm: [{ module: "accounting", sub: "settings_manage" }] }, { person: "authoriser" }], requires: [MOD("accounting")],
+    trigger: "authoriseRun (lib/accounting/standing-auth.ts, the scheduler /api/cron/recurring): the authoriser was deactivated or no longer holds the register's sub (deferrals / fixed_assets) or accounting › journal_post",
+    render: (f) => ({
+      titleAr: `أُلغي التفويض الدائم: ${s(f.labelAr)}`, titleEn: `Standing authorisation revoked: ${s(f.labelEn)}`,
+      bodyAr: "من منح التفويض لم يعد يملك الصلاحية؛ لن ترحّل الجدولة هذا السجل حتى يُمنح تفويض جديد. شغّله من «تشغيل المستحق الآن».",
+      bodyEn: `The authoriser no longer holds the right (${s(f.reason)}); the scheduler will not post this register until it is authorised again. Run it with «Run due now».`,
+      link: s(f.register) === "DEPRECIATION" ? "/dashboard/accounting/fixed-assets/depreciation" : "/dashboard/accounting/deferrals",
+    }),
   },
   // ── System ──
   {

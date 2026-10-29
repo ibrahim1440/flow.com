@@ -9,6 +9,7 @@ import { refuse } from "@/lib/accounting/refusals";
 import { auditFromRequest } from "@/lib/accounting/audit";
 import { isBusinessDay, parseBusinessDay, dayText } from "@/lib/accounting/dates";
 import { postingRef } from "@/lib/accounting/posting-engine";
+import { branchWhere, parseBranchFilter } from "@/lib/accounting/locations";
 
 const STATUSES = new Set(["DRAFT", "SUBMITTED", "APPROVED", "POSTED", "REVERSED"]);
 const TYPES = new Set(["MANUAL", "AUTO", "REVERSAL", "ADJUSTMENT", "OPENING", "CLOSING"]);
@@ -37,6 +38,9 @@ export async function GET(request: Request) {
     if (from || to) where.entryDate = { ...(from ? { gte: parseBusinessDay(from) } : {}), ...(to ? { lte: new Date(parseBusinessDay(to).getTime() + 86_399_999) } : {}) };
     const accountId = q.get("accountId");
     if (accountId) where.lines = { some: { accountId } };
+    // «الموقع» (WP-B): entries with a line at one of these locations (branches=a,b,none — none: a line with no location).
+    const bf = parseBranchFilter(q);
+    if (bf) where.AND = [{ lines: { some: { ...(accountId ? { accountId } : {}), ...branchWhere(bf) } } }];
     const text = (q.get("q") ?? "").trim().slice(0, 80);
     if (text) {
       const n = Number(text.replace(/^#/, ""));

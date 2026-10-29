@@ -35,19 +35,26 @@ import { Decimal, ZERO, toDecimal } from "../money";
 import { flushPostings, lockHolders, type CostKind } from "./cost-ledger";
 import { qty4, stockLineNet } from "./costing";
 import { opsRefuse } from "./refusals";
-import { cleanLines, getInvoice, header, lineRows, lockInvoice, nextNumber, ownReceipts, postInvoiceTx, receiptReversed, refDuplicate, totals, type InvoiceInput, type InvoiceLineInput, type LineShortfall } from "./ap";
+import { purchaseTaxCategories, purchaseTaxCodeForRate } from "./purchase-tax";
+import { cleanLines, getInvoice, header, inclusiveSplit, lineRows, lockInvoice, nextNumber, ownReceipts, postInvoiceTx, receiptReversed, refDuplicate, totals, type InvoiceInput, type InvoiceLineInput, type LineShortfall } from "./ap";
 import { resolveShortfallTreatment, supplierShortfallFromRow } from "./supplier-shortfall";
 import { claimsOfInvoice, openClaimsBySupplier } from "./supplier-claims";
 import { receiveGreen, receiveMaterial, reverseReceipt, type ReceiptUser } from "@/lib/services/purchase-receipts";
 import { greenLotFields } from "@/lib/services/green-lots";
 import { receivingLocationId as resolveReceivingLocation } from "@/lib/services/stock-locations";
 import { invoiceSummary, logPurchaseActivity, withDeniedLog } from "./purchase-activity";
+import { defaultBranchForActor, siteBranchId } from "../locations";
 
 type Tx = Prisma.TransactionClient;
 
 export type PurchaseAction = "draft" | "receive" | "post";
 export type PurchaseLineInput = {
   kind: "STOCK" | "GRN" | "EXPENSE" | "IMPORT_VAT" | "LANDED_COST";
+  /** «شامل؟» (EXPENSE / LANDED_COST): the supplier's gross, the net derived on the server (ap.ts inclusiveSplit); `vat`
+   *  the paper's VAT within ±0.01. */
+  priceIncludesVat?: boolean | null;
+  grossEntered?: string | number | null;
+  vat?: string | number | null;
   /** LANDED_COST: the receipt (any supplier) and FREIGHT | DUTY | CLEARANCE | INSURANCE. */
   targetPurchaseRecordId?: string | null;
   landedCostType?: string | null;
@@ -83,6 +90,8 @@ export type PurchaseInvoiceInput = {
   receivedDate?: string | null;
   /** Phase 3: «موقع الاستلام» — the location the goods are received at (default: the default receiving site). */
   receivingLocationId?: string | null;
+  /** «الموقع» (WP-B): absent = the receiving site's branch, else the preparer's. */
+  branchId?: string | null;
   /** SA3: an edit sends the invoice's updatedAt as it read it; anything else is INVOICE_STALE. */
   expectedUpdatedAt?: string | null;
   lines: PurchaseLineInput[]; action?: PurchaseAction;
@@ -146,6 +155,13 @@ async function expectedNet(tx: Tx, lines: PurchaseLineInput[], stock: Stock[]): 
     if (l.kind === "STOCK") total = total.plus(stock.find((s) => s.i === i)?.net ?? ZERO);
     else if (l.kind === "IMPORT_VAT") continue;
     else if (l.kind === "GRN" && (l.net === undefined || l.net === null || l.net === "")) total = total.plus(await grnValue(tx, String(l.purchaseRecordId ?? "")));
+    else if (l.priceIncludesVat === true) {
+      // «شامل؟»: the net the server will derive (the rate of the line's category; 15 % unless named otherwise).
+      const code = l.taxCode ?? purchaseTaxCodeForRate(l.vatRate === undefined || l.vatRate === null || l.vatRate === "" ? 15 : Number(l.vatRate));
+      const rate = (code ? (await purchaseTaxCategories(tx)).byCode.get(code)?.rate : undefined) ?? 15;
+      const vatGiven = l.vat === undefined || l.vat === null || l.vat === "" ? null : new Decimal(String(l.vat));
+      try { total = total.plus(inclusiveSplit(new Decimal(String(l.grossEntered ?? 0)), new Decimal(String(rate)), vatGiven)?.net ?? ZERO); } catch { /* refused later by cleanLines */ }
+    }
     else total = total.plus(new Decimal(String(l.net ?? 0)));
   }
   return total;
@@ -186,7 +202,7 @@ async function saveTx(input: PurchaseInvoiceInput, id: string | null, user: Rece
   }
   return prisma.$transaction(async (tx) => {
     await setAuditContext(tx, ctx);
-    const { h, supplier } = await header(tx, input as InvoiceInput);
+    const { h, supplier, branchId: givenBranch } = await header(tx, input as InvoiceInput);
     // Phase 3: where the goods are received (an active location; none given → the default site).
     const receivingLocationId = await resolveReceivingLocation(tx, input?.receivingLocationId);
     // Serialise every save of one (supplier, supplier invoice no.): a double submit waits for the first.
@@ -200,6 +216,8 @@ async function saveTx(input: PurchaseInvoiceInput, id: string | null, user: Rece
       if (cur.origin === "AP" && cur.lines.some((l) => l.kind === "STOCK")) throw opsRefuse("LEGACY_STOCK_DRAFT");
       if (cur.status === "POSTED") throw (await ownReceipts(tx, cur.id)).length ? opsRefuse("INVOICE_POSTED_RECEIVED") : opsRefuse("INVOICE_STATE");
       if (cur.status === "CANCELLED") throw opsRefuse("INVOICE_STATE");
+      // «فواتير بسيطة»: a simple invoice is edited in its own form (its vendor, gross lines and receipt).
+      if (cur.kind === "SIMPLE") throw opsRefuse("SIMPLE_ONLY_HERE");
     } else {
       // The same request again (a double click, a retry after a lost answer): its preparer gets the first one back.
       const twin = await tx.$queryRaw<{ id: string; status: string; createdBy: string; createdAt: Date; netTotal: Prisma.Decimal; n: number }[]>`
@@ -287,9 +305,10 @@ async function saveTx(input: PurchaseInvoiceInput, id: string | null, user: Rece
     for (const [i, l] of lines.entries()) {
       const vatRate = l.vatRate ?? null;
       const taxCode = l.taxCode ?? null;
-      if (l.kind === "EXPENSE") { out.push({ kind: "EXPENSE", expenseCategoryId: l.expenseCategoryId ?? null, description: l.description ?? null, net: l.net ?? "0", vatRate, taxCode }); continue; }
+      const incl = l.priceIncludesVat === true ? { priceIncludesVat: true, grossEntered: l.grossEntered ?? null, vat: l.vat ?? null } : {};
+      if (l.kind === "EXPENSE") { out.push({ kind: "EXPENSE", expenseCategoryId: l.expenseCategoryId ?? null, description: l.description ?? null, net: l.net ?? "0", vatRate, taxCode, ...incl }); continue; }
       if (l.kind === "IMPORT_VAT") { out.push({ kind: "IMPORT_VAT", description: l.description ?? null, net: "0", customsValue: l.customsValue ?? null, vatRate, taxCode: taxCode ?? "P-IMP15" }); continue; }
-      if (l.kind === "LANDED_COST") { out.push({ kind: "LANDED_COST", targetPurchaseRecordId: l.targetPurchaseRecordId ?? null, landedCostType: l.landedCostType ?? null, description: l.description ?? null, net: l.net ?? "0", vatRate, taxCode }); continue; }
+      if (l.kind === "LANDED_COST") { out.push({ kind: "LANDED_COST", targetPurchaseRecordId: l.targetPurchaseRecordId ?? null, landedCostType: l.landedCostType ?? null, description: l.description ?? null, net: l.net ?? "0", vatRate, taxCode, ...incl }); continue; }
       if (l.kind === "GRN") {
         const value = await grnValue(tx, String(l.purchaseRecordId ?? ""));
         let net: string | number = l.net ?? value.toFixed(2);
@@ -365,11 +384,13 @@ async function saveTx(input: PurchaseInvoiceInput, id: string | null, user: Rece
 
     const clean = await cleanLines(tx, supplier, out, { no: h.customsDeclarationNo }, shortfalls);
     if (cur) await tx.supplierInvoiceLine.deleteMany({ where: { invoiceId: invId } });
+    // «الموقع»: as given, else kept, else the receiving site's branch, else the preparer's.
+    const branchId = givenBranch !== undefined ? givenBranch : cur?.branchId ?? (await siteBranchId(tx, receivingLocationId)) ?? (await defaultBranchForActor(tx, user.id));
     const now = new Date();
     await tx.supplierInvoice.update({
       where: { id: invId },
       data: {
-        ...h, ...totals(clean), lastEditedBy: user.id, lines: { create: lineRows(clean) }, receivingLocationId,
+        ...h, ...totals(clean), lastEditedBy: user.id, lines: { create: lineRows(clean) }, receivingLocationId, branchId,
         // The receipt day: set when this save receives; kept when an edit keeps earlier receipts; none for a draft.
         receivedDate: action === "draft" ? null : stock.length ? receivedDate : keep.size ? cur?.receivedDate ?? null : null,
         ...(action === "draft" ? { status: "DRAFT", submittedBy: null, submittedAt: null } : { status: "SUBMITTED", submittedBy: user.id, submittedAt: now }),

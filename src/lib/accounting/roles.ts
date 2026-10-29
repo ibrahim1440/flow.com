@@ -65,6 +65,9 @@ export const ACCOUNT_ROLES: RoleDef[] = [
   { key: "FA_ACCUMULATED_DEPRECIATION", ar: "مجمع الإهلاك", en: "Accumulated depreciation", group: "fixedAssets", phase: "A3", types: ["ASSET"], seedCode: "1290" },
   { key: "FA_DEPRECIATION_EXPENSE", ar: "مصروف الإهلاك", en: "Depreciation expense", group: "fixedAssets", phase: "A3", types: ["EXPENSE"], seedCode: "6600" },
   { key: "FA_DISPOSAL_GAIN_LOSS", ar: "أرباح وخسائر استبعاد الأصول الثابتة", en: "Gain / loss on disposal of fixed assets", group: "fixedAssets", phase: "A3", types: ["EXPENSE", "REVENUE"], seedCode: "7300" },
+  // «بيع أصل ثابت» (20261128090000_fa_sale_invoice): the sales-invoice line of an asset sale credits it (instead of revenue);
+  // the register's disposal debits it. Its balance is the issued sale lines not yet matched by a disposal (the close check).
+  { key: "FA_DISPOSAL_CLEARING", ar: "تسوية بيع الأصول الثابتة", en: "Fixed-asset sale clearing", group: "fixedAssets", phase: "A3", types: ["LIABILITY"], seedCode: "2195" },
   { key: "BANK_FEES", ar: "رسوم البنوك ونقاط البيع", en: "Bank & POS fees", group: "other", phase: "A2", types: ["EXPENSE"], seedCode: "6310" },
   { key: "DELIVERY_APP_COMMISSION", ar: "عمولات تطبيقات التوصيل", en: "Delivery-app commissions", group: "other", phase: "A2", types: ["EXPENSE"], seedCode: "6300" },
   { key: "ROUNDING", ar: "فروقات التقريب", en: "Rounding differences", group: "other", phase: "A1", types: ["EXPENSE"], seedCode: "6900", requiredForActivation: true },

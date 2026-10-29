@@ -61,13 +61,19 @@ export async function faOpeningPreview(db: Db = prisma) {
   };
 }
 
-/** Write the fixed-asset lines into the opening grid (replacing the tool's previous ones; every other line kept). */
-export async function applyFaOpening(ctx: AuditContext) {
+/**
+ * Write the fixed-asset lines into the opening grid (replacing the tool's previous ones; every other line kept).
+ * Batch 22 WP-G: when the grid holds OTHER lines (entered by hand) on the same fixed-asset accounts, the register would
+ * count them twice — refused (FA_OPENING_DOUBLE_COUNT) unless the accountant confirms they are something else
+ * (`confirmOtherLines`, recorded in the audit reason).
+ */
+export async function applyFaOpening(ctx: AuditContext, opts: { confirmOtherLines?: boolean } = {}) {
   return prisma.$transaction(async (tx) => {
-    await setAuditContext(tx, { ...ctx, reason: ctx.reason ?? "opening fixed assets" });
+    await setAuditContext(tx, { ...ctx, reason: `${ctx.reason ?? "opening fixed assets"}${opts.confirmOtherLines ? " (other grid lines on the FA accounts confirmed as not fixed assets)" : ""}` });
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('accounting:opening', 0))`;
     const p = await faOpeningPreview(tx);
     if (p.openingPosted) throw opsRefuse("OPENING_ALREADY_POSTED");
+    if (p.otherGridLines.count > 0 && !opts.confirmOtherLines) throw opsRefuse("FA_OPENING_DOUBLE_COUNT", `(${p.otherGridLines.count})`, `(${p.otherGridLines.count})`);
     assertGoLiveFirstOfMonth(p.goLiveDate ? new Date(`${p.goLiveDate}T00:00:00Z`) : null);
     if (p.unmapped) await resolveRoles(tx, [FA_ROLES.cost, FA_ROLES.accum]);
     const grid = await tx.openingBalanceLine.findMany({ orderBy: { lineNo: "asc" } });

@@ -12,6 +12,7 @@ import { OpsLoading, OpsEmpty, Btn, Field } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
 import { Select } from "@/components/ui/Select";
 import { AcctShell, Msg, StatusTag, acctFetch, money, todayRiyadh, useApi, useLang, useWrite, type Setup } from "../_ui/shell";
+import { StandingAuthCard } from "../_ui/standing-auth";
 import { DEFERRED_SCOPE, KIND_LABEL, LINE_STATUS, PRORATA_HELP, RULE_LABEL, RUN_STATUS, SCHEDULE_STATUS, accName, type AccountRef, type Branch } from "../_ui/plan";
 
 type Overview = {
@@ -74,6 +75,7 @@ function DeferralsPageScreen() {
       <Msg error={w.error ?? ov.error} done={w.done} onClose={() => { w.setError(null); w.setDone(null); }} />
       <p className="acct-scope">{L("المصروف المدفوع مقدماً والإيراد المؤجل يُعترف بهما شهرًا بشهر: قيد واحد متوازن لكل تشغيل، ولا يُعترف بالشهر مرتين، والفترة المقفلة ترفض.", "Prepaid expenses and deferred revenue are recognised month by month: one balanced entry per run, a month never twice, a closed period refused.")}
         {d && !d.accounting.active ? <b> {L("المحاسبة غير مفعّلة: تُسجَّل التشغيلات بلا قيود.", "Accounting is not active: runs are recorded with no entry.")}</b> : null}</p>
+      <StandingAuthCard register="DEFERRAL_RECOGNITION" />
       {d && d.backlog.overdueCount > 0 ? (
         <div role="alert" className="acct-banner-note" data-testid="def-backlog">
           <b>{L(`${d.backlog.overdueCount} ${d.backlog.overdueCount === 1 ? "شهر مستحق" : "أشهر مستحقة"} لم يُعترف بها`, `${d.backlog.overdueCount} month(s) due, not recognised`)}</b>

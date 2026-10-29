@@ -162,3 +162,8 @@
   .dsh-bar, .dsh-gate, .dsh-wait, .dsh-err { display: none !important }
   .dsh-wrap { max-width: none }
 }
+
+/* A draft's diagonal mark (BATCH 22 WP-C, Q-F5): printed too (text, not a background), behind the content. */
+.dsh-body { position: relative }
+.dsh-watermark { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; z-index: 0;
+  font: 700 54px/1.2 var(--dsh-ui); color: rgba(163, 68, 53, 0.13); transform: rotate(-24deg); text-align: center; white-space: nowrap; }

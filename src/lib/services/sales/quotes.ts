@@ -3,6 +3,7 @@ import { assertSalesAllowed } from "../customers/credit-db";
 import { Decimal, ZERO, roundMoney, parseFiniteDecimal } from "../commissions/engine";
 import { DISCOUNT_APPROVAL_THRESHOLD, DISCOUNT_MAX } from "./discount-limits";
 import { settingsFromRow } from "./quote-settings";
+import { netFromGross } from "../invoicing/pricing";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -54,7 +55,17 @@ export type LineInput = {
   discountPercent?: Decimal;
   taxRatePercent?: Decimal;
   position?: number;
+  /** «شامل؟» (batch 22 WP-K): the price was typed VAT-inclusive (`unitPriceGross`); the NET unit price is derived on the
+   *  server exactly as on an invoice (netFromGross: half-up, 2 dp) and is what the quote stores and an invoice copies. */
+  priceIncludesVat?: boolean;
+  unitPriceGross?: Decimal | null;
 };
+
+/** A line typed VAT-inclusive, as the net line it is (unitPrice derived from the gross at the line's rate); else as is. */
+export function toNetLine(line: LineInput): LineInput {
+  if (!line.priceIncludesVat || !line.unitPriceGross) return line;
+  return { ...line, unitPrice: netFromGross(line.unitPriceGross, line.taxRatePercent ?? ZERO) };
+}
 
 export type PricedLine = {
   /** Quantity x unit price, before any discount. */
@@ -102,7 +113,7 @@ export function priceLine(line: LineInput): PricedLine {
  * usually agree and occasionally not, and "usually" is not a property a document has.
  */
 export function priceQuote(lines: LineInput[]): PricedQuote {
-  const priced = lines.map(priceLine);
+  const priced = lines.map(toNetLine).map(priceLine);
   const sum = (pick: (p: PricedLine) => Decimal) =>
     roundMoney(priced.reduce((acc, p) => acc.plus(pick(p)), ZERO));
 
@@ -203,16 +214,21 @@ export function parseLineInputs(raw: unknown[]): LineInput[] {
       return d;
     };
 
-    return {
+    // «شامل؟»: the gross is typed (2 dp at most) and the net unit price derived from it — the request's unitPrice is not read.
+    const inclusive = l.priceIncludesVat === true;
+    const gross = inclusive ? dec(l.unitPriceGross, "VAT-inclusive unit price") : null;
+    if (gross && !gross.equals(gross.toDecimalPlaces(2))) throw { _appCode: 400, message: `Line ${i + 1}: the VAT-inclusive unit price has at most 2 decimals.` };
+    return toNetLine({
       productSkuId: typeof l.productSkuId === "string" && l.productSkuId ? l.productSkuId : null,
       description: typeof l.description === "string" ? l.description : null,
       quantity: dec(l.quantity, "quantity"),
       unit: typeof l.unit === "string" && l.unit ? l.unit : "KG",
-      unitPrice: dec(l.unitPrice, "unit price"),
+      unitPrice: inclusive ? ZERO : dec(l.unitPrice, "unit price"),
       discountPercent: dec(l.discountPercent, "discount", "0"),
       taxRatePercent: dec(l.taxRatePercent, "tax rate", "0"),
       position: i,
-    };
+      priceIncludesVat: inclusive, unitPriceGross: gross,
+    });
   });
 }
 
@@ -479,6 +495,8 @@ export async function saveQuoteLines(
     throw { _appCode: 400, message: problems[0].message, problems };
   }
 
+  // «شامل؟»: a line typed VAT-inclusive is stored as its net line (the converter to an invoice copies the net).
+  input = { ...input, lines: input.lines.map(toNetLine) };
   const priced = priceQuote(input.lines);
 
   // Replaced wholesale rather than diffed. A draft's lines have no history worth

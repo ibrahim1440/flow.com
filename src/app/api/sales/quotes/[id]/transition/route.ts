@@ -1,9 +1,11 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
-import { requireSub, assertPrivilegedGate } from "@/lib/auth-server";
+import { assertPrivilegedGate } from "@/lib/auth-server";
+import { requireQuoteWrite } from "@/lib/services/sales/quote-guard";
+import { quotesSeeAll, writesViaAccounting } from "@/lib/services/sales/quote-access";
 import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
-import { seesAllSales, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
+import { NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
 import { advanceToQuotationStage, winOnAcceptedQuote } from "@/lib/services/sales/lifecycle";
 import { issueQuote, decideQuote } from "@/lib/services/sales/quotes";
 import { emitAutomationEvent } from "@/lib/automation/emit";
@@ -23,7 +25,7 @@ type Params = { params: Promise<{ id: string }> };
  * domain stays free of the permission model and the check stays where the session is.
  */
 export async function POST(request: Request, { params }: Params) {
-  const { user, error } = await requireSub("sales", "quote_write");
+  const { user, error } = await requireQuoteWrite();
   if (error) return error;
   const { id } = await params;
 
@@ -48,6 +50,14 @@ export async function POST(request: Request, { params }: Params) {
   // the opportunity transition route checks it. Required even when the deal is already
   // closed, because an accepted quotation is itself the basis a deal is won, ordered and
   // collected on. Refused before any read or write, so nothing is half-applied.
+  // BATCH22 WP-E: from the accounting section a quotation is only ISSUED; accepting / rejecting it stays with Sales.
+  const viaAccounting = writesViaAccounting(user.permissions);
+  if (viaAccounting && to !== "ISSUED") {
+    return NextResponse.json(
+      { error: "قبول عرض السعر أو رفضه أو إنهاؤه يبقى لدى المبيعات.", errorEn: "Accepting, rejecting or expiring a quotation stays with Sales.", code: "SALES_ONLY" },
+      { status: 403 },
+    );
+  }
   if (to === "ACCEPTED" && !hasSubPrivilege(user.permissions, "sales", "deal_close")) {
     return NextResponse.json(
       { error: "Recording a quotation as accepted closes the deal, and needs the deal-close permission." },
@@ -59,10 +69,13 @@ export async function POST(request: Request, { params }: Params) {
     // Scoped before anything else. Reaching another rep's quotation by editing the id in the
     // URL is the first thing anybody tries, and this is where it stops.
     const visible = await prisma.quote.findFirst({
-      where: { id, ...(seesAllSales(user.permissions) ? {} : { opportunity: { ownerId: user.id } }) },
-      select: { id: true, opportunityId: true },
+      where: { id, ...(quotesSeeAll(user.permissions) ? {} : { opportunity: { ownerId: user.id } }) },
+      select: { id: true, opportunityId: true, opportunity: { select: { outcome: true } } },
     });
     if (!visible) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });
+    if (viaAccounting && visible.opportunity.outcome !== "OPEN") {
+      return NextResponse.json({ error: "لا توجد صفقة مفتوحة — اطلب من المبيعات فتح صفقة.", errorEn: "There is no open deal — ask Sales to open one.", code: "DEAL_NOT_OPEN" }, { status: 409 });
+    }
 
     const canApproveDiscount = hasSubPrivilege(user.permissions, "sales", "quote_approve_discount");
 
@@ -83,7 +96,8 @@ export async function POST(request: Request, { params }: Params) {
           eventType: "sales.quote_status_changed",
           subjectType: "Quote",
           subjectId: id,
-          payload: { to: "ISSUED" },
+          // The deal owner is told when a quotation went out from the accounting section (sales.quote_issued_by_accounting).
+          payload: { to: "ISSUED", ...(viaAccounting ? { byAccounting: true } : {}) },
           actorId: user.id,
         });
         return {

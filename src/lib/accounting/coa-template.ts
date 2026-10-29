@@ -9,6 +9,7 @@
 //   ★ 7300 gain / loss on disposal of fixed assets (IAS 16.68: a gain is not revenue — other income / expense);
 //   ★ the fixed-asset accounts (1210 … 1290) refuse manual journals: the fixed-asset register posts them;
 //   ★ 5410 abnormal roast loss (normal loss is absorbed into roasted cost; only loss above standard is expensed);
+//   ★ 2195 fixed-asset sale clearing (the FA_DISPOSAL_CLEARING role: a sale line «بيع أصل ثابت» credits it, the disposal clears it);
 //   ★ 2152 deferred revenue – subscriptions & prepaid orders (the DEFERRED_REVENUE role of «قوالب التأجيل»);
 //   ★ branch cash accounts are generic (1111 main branch, 1112 roastery) — the owner renames / adds branches.
 // Control accounts (AR, AP, inventory, VAT, GRNI, payroll and commission liabilities) refuse MANUAL journals:
@@ -80,6 +81,7 @@ const ROWS: T[] = [
   ["2160", "إكراميات مستحقة للموظفين", "Tips payable to staff", L, C, "2100", true],
   ["2170", "الزكاة المستحقة", "Zakat payable", L, C, "2100", true],
   ["2180", "التزامات الإيجار - متداولة", "Lease liabilities – current", L, C, "2100", true],
+  ["2195", "تسوية بيع الأصول الثابتة", "Fixed-asset sale clearing", L, C, "2100", true, "CLEARING", false],
   ["2200", "الالتزامات غير المتداولة", "Non-current liabilities", L, C, "2000", false],
   ["2210", "مخصص مكافأة نهاية الخدمة", "End-of-service benefits provision", L, C, "2200", true, "PAYROLL", false],
   ["2220", "قروض وتمويل طويل الأجل", "Long-term financing", L, C, "2200", true],

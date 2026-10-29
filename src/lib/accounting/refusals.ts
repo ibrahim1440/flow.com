@@ -75,6 +75,9 @@ export const REFUSALS = {
   AUTO_POST_JOURNALS_ONLY: { status: 400, en: "Only a recurring journal may post automatically; invoices are always created as drafts.", ar: "الترحيل التلقائي للقيود فقط؛ الفواتير تُنشأ مسودات دائمًا." },
   RECURRING_PREPARER_RIGHTS: { status: 409, en: "The recurring transaction's preparer no longer holds the duty to create it (or the account is deactivated): it was paused.", ar: "مُعدّ المعاملة المتكررة لم يعد يملك صلاحية إنشائها (أو أوقف حسابه)؛ أوقفت مؤقتًا." },
   RUN_NOT_FAILED: { status: 409, en: "Only a failed run is retried.", ar: "يُعاد تشغيل الدفعة الفاشلة فقط." },
+  // «التفويض الدائم» (20261124090000_standing_authorisation).
+  STANDING_AUTH_EXISTS: { status: 409, en: "A standing authorisation is live already: revoke it first.", ar: "يوجد تفويض دائم قائم؛ ألغه أولًا." },
+  STANDING_AUTH_FINAL: { status: 409, en: "This standing authorisation is revoked already (grant a new one).", ar: "هذا التفويض الدائم ملغى مسبقًا (امنح تفويضًا جديدًا)." },
   // «الموازنات» / «قوالب التأجيل» (20261122090000_budgets_deferrals).
   BUDGET_LOCKED: { status: 409, en: "An approved budget is locked: change it through a revision.", ar: "الموازنة المعتمدة مقفلة؛ عدّلها بإنشاء نسخة جديدة منها." },
   BUDGET_STATE: { status: 409, en: "The budget is not in a state that allows this.", ar: "حالة الموازنة لا تسمح بهذا الإجراء." },
@@ -88,6 +91,9 @@ export const REFUSALS = {
   DEFERRAL_STATE: { status: 409, en: "The deferral schedule or run is not in a state that allows this.", ar: "حالة جدول التأجيل أو التشغيل لا تسمح بهذا الإجراء." },
   DEFERRAL_FUTURE_MONTH: { status: 409, en: "A month is recognised in it or after it, never in advance.", ar: "يُعترف بالشهر خلاله أو بعده، لا مقدمًا." },
   DEFERRAL_FROZEN: { status: 409, en: "A deferral schedule's amounts and lines never change, and a month is recognised once.", ar: "مبالغ جدول التأجيل وأشهره لا تتغير، ويُعترف بكل شهر مرة واحدة." },
+  // «الموقع» (20261125090000_location_dimension).
+  LOCATION_INVALID: { status: 400, en: "The location is not an active location (branch).", ar: "الموقع المختار غير موجود أو غير نشط." },
+  LOCATION_FROZEN: { status: 409, en: "The location of a posted or issued document never changes: move it with a reclass journal.", ar: "موقع المستند بعد ترحيله أو إصداره لا يتغير؛ انقله بقيد إعادة تبويب." },
 } satisfies Record<string, R>;
 
 export type RefusalCode = keyof typeof REFUSALS;
@@ -113,6 +119,7 @@ const DB: [RegExp, RefusalCode, string][] = [
   [/LEDGER: a closed fiscal period is reopened only with a reason/, "REASON_REQUIRED", ""],
   [/LEDGER: an approved budget is locked|LEDGER: an archived budget is final/, "BUDGET_LOCKED", ""],
   [/LEDGER: a deferral (schedule|month|run)|LEDGER: deferral templates/, "DEFERRAL_FROZEN", ""],
+  [/LEDGER: the location of a posted document never changes/, "LOCATION_FROZEN", ""],
   [/LEDGER: /, "LEDGER_DB", ""],
 ];
 

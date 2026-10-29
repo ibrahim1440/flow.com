@@ -800,6 +800,7 @@ export const API_ERROR_TEMPLATES_AR: ReadonlyArray<readonly [string, string]> = 
   ["Item ${item.id}: productionRequiredQuantity ${p.productionRequiredQuantity}kg does not match the ${stillNeeded}kg that must be produced.", "السطر {0}: كمية الإنتاج {1} كغ لا تطابق {2} كغ المطلوب إنتاجها."],
   ["Line ${i + 1}: ${field} is not a number.", "السطر {0}: {1} ليس رقمًا."],
   ["Line ${i + 1}: ${field} is required.", "السطر {0}: {1} مطلوب."],
+  ["Line ${i + 1}: the VAT-inclusive unit price has at most 2 decimals.", "السطر {0}: السعر شامل الضريبة بمنزلتين عشريتين على الأكثر."],
   ["Line ${line.position + 1} (\"${line.description ?? \"no description\"}\") has no catalogue product, so it cannot be ordered. Replace it with a product, or raise the order for the remaining lines from a revised quotation.", "السطر {0} («{1}») بلا منتج من الكتالوج، فلا يُطلب. استبدله بمنتج أو أنشئ الطلب لباقي الأسطر من عرض معدّل."],
   ["Line ${line.position + 1} (${line.productSku?.skuCode ?? \"product\"}) is for ${qty.toString()} packs. An order is placed in whole packs; revise the quotation before ordering.", "السطر {0} ({1}) لـ{2} عبوة. يُطلب بعبوات كاملة؛ عدّل عرض السعر قبل الطلب."],
   ["Material code \"${code}\" already exists.", "رمز المادة «{0}» مستخدم مسبقًا."],

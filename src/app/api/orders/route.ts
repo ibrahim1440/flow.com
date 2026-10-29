@@ -10,6 +10,7 @@ import { canSeeCustomerContact, CUSTOMER_OPERATIONS_SELECT } from "@/lib/auth/cu
 import { deliveryLotsFor } from "@/lib/services/delivery-lots";
 import { autoPrepareOrder } from "@/lib/services/orders/preparation";
 import { orderPipelines } from "@/lib/services/orders/pipeline";
+import { parseBranchId } from "@/lib/accounting/locations";
 
 export async function GET(request: Request) {
   // Production and Dispatch workers need to read orders to see what to roast / deliver
@@ -108,6 +109,8 @@ export async function POST(request: Request) {
     // POST /api/orders/fulfillment-preview for the pre-submit view and the preparation
     // review for the binding reservation.
     const resolvedItems = await resolveOrderLines(prisma, items);
+    // «الموقع» (WP-B): an explicit selling location, validated; absent = the creator's default (create-order.ts).
+    const branchId = await parseBranchId(prisma, body.branchId);
 
     // In a transaction, so the advisory lock inside createOrderWithNumber actually holds.
     //
@@ -128,6 +131,7 @@ export async function POST(request: Request) {
             notes: typeof body.notes === "string" ? body.notes.trim() || null : null,
             // The creating user owns the order (owner decision, fix/order-owner).
             ownerId: user.id,
+            ...(branchId !== undefined ? { branchId } : {}),
           },
           resolvedItems,
           canSeeCustomerContact(user.permissions),

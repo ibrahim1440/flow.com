@@ -3,7 +3,9 @@ import { Decimal, ZERO, roundMoney } from "../commissions/engine";
 import { accrueForCollection } from "../commissions/accrual";
 import { emitAutomationEvent } from "@/lib/automation/emit";
 // Sales invoicing A2: the AR sub-ledger and the ledger postings of a receipt (approved → RECEIVED, reversed → reversal).
-import { onCollectionApproved, onCollectionReversed } from "@/lib/services/invoicing/ar";
+import { onCollectionApproved, onCollectionReversed, type ReceiptAllocation } from "@/lib/services/invoicing/ar";
+import { defaultCollectionBranch, parseBranchId } from "@/lib/accounting/locations";
+import { receiptSelfConfirmAllowed } from "./receipt-four-eyes";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -224,6 +226,10 @@ export type SubmitInput = {
   note: string | null;
   idempotencyKey: string;
   submittedById: string;
+  /** «الموقع» (WP-B): absent = the branch the order's issued invoices share, else the order's, else the recorder's. */
+  branchId?: unknown;
+  /** «نسخ وتصحيح» (BATCH22 WP-D): the returned collection this one corrects. */
+  replacesCollectionId?: string | null;
 };
 
 export type SubmitResult = {
@@ -315,8 +321,12 @@ export async function submitCollection(tx: Tx, input: SubmitInput): Promise<Subm
     select: { orderId: true },
   });
 
+  const given = await parseBranchId(tx, input.branchId);
+  const branchId = given !== undefined ? given : await defaultCollectionBranch(tx, { orderId: order?.orderId ?? null, recorderId: input.submittedById });
+
   const created = await tx.salesCollection.create({
     data: {
+      branchId,
       opportunityId: input.opportunityId,
       quoteId: summary.document.quoteId,
       orderId: order?.orderId ?? null,
@@ -331,6 +341,7 @@ export async function submitCollection(tx: Tx, input: SubmitInput): Promise<Subm
       collectedAt: input.collectedAt,
       note: input.note?.trim() || null,
       submittedById: input.submittedById,
+      replacesCollectionId: input.replacesCollectionId ?? null,
     },
     select: { id: true },
   });
@@ -345,7 +356,52 @@ export type DecisionResult = {
   collectionEventId: string | null;
   /** Commission actually posted by this decision, per employee. Empty on a replay. */
   commission: { employeeId: string; amount: string }[];
+  /** «سند قبض»: the voucher number the confirmation took (null before / without one). */
+  receiptNumber?: string | null;
+  /** How the confirmation applied the money and whether it posted (null when nothing to apply / before go-live). */
+  application?: { applied: string; posting: string; parts: { invoiceId: string; amount: string }[] } | null;
 };
+
+/** What the accountant edits at confirmation (BATCH22 WP-D), before the number is taken. Never the amount, the date,
+ *  the method, the deal or the payer: those are the commission basis and the rep's claim. */
+export type ConfirmFields = {
+  depositAccountId?: string | null;
+  memo?: string | null;
+  allocation?: ReceiptAllocation;
+  /** «الموقع» (WP-B): absent = keep the recorded one (or its default); null = «غير محدد». */
+  branchId?: string | null;
+};
+
+const bi = (code: string, status: number, ar: string, en: string) => ({ _appCode: status, code, message: ar, errorEn: en });
+
+/**
+ * The deposit account of a confirmation: a postable, active, leaf cash or bank account, or the card-clearing account
+ * (the CLEARING account mapped to the CARD_CLEARING role — not any clearing account; council ruling). The database
+ * re-checks the coarse rule (sales_collection_receipt_guard).
+ */
+export async function assertDepositAccount(tx: Tx, accountId: string) {
+  const a = await tx.account.findUnique({ where: { id: accountId }, select: { id: true, controlType: true, allowPosting: true, isActive: true, _count: { select: { children: true } }, roles: { select: { role: true } } } });
+  const ok = !!a && a.isActive && a.allowPosting && a._count.children === 0
+    && (a.controlType === "CASH" || a.controlType === "BANK" || (a.controlType === "CLEARING" && a.roles.some((r) => r.role === "CARD_CLEARING")));
+  if (!ok) throw bi("DEPOSIT_ACCOUNT", 400, "حساب الإيداع يجب أن يكون حساب صندوق أو بنك أو تسوية بطاقات قابلًا للترحيل.", "The deposit account must be a postable cash, bank or card-clearing account.");
+}
+
+/**
+ * Does the customer have an OPEN deal — one Sales can still collect against? An open deal (outcome OPEN), or a won deal
+ * whose accepted quotation is not fully claimed yet. While one exists the money is Sales' to record (commission), so the
+ * accountant's receipt for an invoice with no deal is refused (owner, 2026-10-29).
+ */
+export async function customerOpenDeal(tx: Pick<Tx, "$queryRaw">, customerId: string): Promise<{ id: string; title: string } | null> {
+  const rows = await tx.$queryRaw<{ id: string; title: string }[]>`
+    SELECT o."id", o."title" FROM "Opportunity" o
+     WHERE o."customerId" = ${customerId}
+       AND (o."outcome"::text = 'OPEN'
+            OR (o."outcome"::text = 'WON' AND EXISTS (
+                  SELECT 1 FROM (SELECT q."grandTotal" FROM "Quote" q WHERE q."opportunityId" = o."id" AND q."status" = 'ACCEPTED' ORDER BY q."revision" DESC LIMIT 1) q
+                   WHERE q."grandTotal" - coalesce((SELECT sum(c."amountGross") FROM "SalesCollection" c WHERE c."opportunityId" = o."id" AND c."status" IN ('APPROVED', 'PENDING_VERIFICATION')), 0) > 0)))
+     ORDER BY o."updatedAt" DESC LIMIT 1`;
+  return rows[0] ?? null;
+}
 
 /**
  * Lock one collection for a decision, and read the fields a decision needs.
@@ -360,7 +416,7 @@ async function lockCollection(tx: Tx, id: string) {
       id: string;
       status: string;
       submittedById: string;
-      opportunityId: string;
+      opportunityId: string | null;
       customerId: string | null;
       orderId: string | null;
       amountGross: string;
@@ -368,11 +424,15 @@ async function lockCollection(tx: Tx, id: string) {
       currency: string;
       collectedAt: Date;
       collectionEventId: string | null;
+      branchId: string | null;
+      source: string;
+      invoiceId: string | null;
+      receiptNumber: string | null;
     }[]
   >`
     SELECT "id", "status"::text AS status, "submittedById", "opportunityId", "customerId",
            "orderId", "amountGross"::text, "amountTax"::text, "currency", "collectedAt",
-           "collectionEventId"
+           "collectionEventId", "branchId", "source", "invoiceId", "receiptNumber"
       FROM "SalesCollection"
      WHERE "id" = ${id}
        FOR UPDATE
@@ -392,14 +452,14 @@ async function lockCollection(tx: Tx, id: string) {
  */
 export async function approveCollection(
   tx: Tx,
-  input: { collectionId: string; actorId: string },
+  input: { collectionId: string; actorId: string; confirm?: ConfirmFields },
 ): Promise<DecisionResult> {
   const row = await lockCollection(tx, input.collectionId);
 
   if (row.status === "APPROVED") {
     // A replayed approval. Behind the lock, so the first one has finished: report what it
     // did rather than doing it again.
-    return { status: "APPROVED", replayed: true, collectionEventId: row.collectionEventId, commission: [] };
+    return { status: "APPROVED", replayed: true, collectionEventId: row.collectionEventId, commission: [], receiptNumber: row.receiptNumber };
   }
   if (row.status !== "PENDING_VERIFICATION") {
     throw {
@@ -407,19 +467,34 @@ export async function approveCollection(
       message: `This collection is ${row.status.toLowerCase().replace(/_/g, " ")} and can no longer be approved.`,
     };
   }
-  if (row.submittedById === input.actorId) {
-    throw {
-      _appCode: 403,
-      message:
-        "The person who recorded a collection cannot be the one who verifies it. " +
-        "Ask another member of Finance.",
-    };
+  const accountant = row.source === "ACCOUNTANT";
+  const self = row.submittedById === input.actorId;
+  // A Sales collection: never its own submitter, no exception. An accountant's receipt (no commission): a second person
+  // whenever another eligible confirmer exists — the owner rule, receipt-four-eyes.ts (receiptSelfConfirmAllowed);
+  // otherwise the recorder confirms it, flagged (sodBypass) and listed.
+  if (self && (!accountant || !(await receiptSelfConfirmAllowed(tx, input.actorId)))) {
+    throw accountant
+      ? bi("SOD_SELF_CONFIRM", 403, "من سجّل سند القبض لا يؤكده؛ يؤكده شخص آخر.", "The person who recorded a receipt cannot confirm it. Ask another accountant.")
+      : {
+          _appCode: 403,
+          message:
+            "The person who recorded a collection cannot be the one who verifies it. " +
+            "Ask another member of Finance.",
+        };
   }
+  if (accountant && row.customerId) {
+    const open = await customerOpenDeal(tx, row.customerId);
+    if (open) throw bi("CUSTOMER_HAS_OPEN_DEAL", 409, `للعميل صفقة مفتوحة («${open.title}»)؛ يُسجّل التحصيل من المبيعات على الصفقة.`, `The customer has an open deal ("${open.title}"); Sales records the collection on the deal.`);
+  }
+  const c = input.confirm ?? {};
+  if (c.depositAccountId) await assertDepositAccount(tx, c.depositAccountId);
+  const confirmBranch = await parseBranchId(tx, c.branchId);
+  const memo = c.memo?.trim() ? c.memo.trim().slice(0, 500) : null;
 
   // One row into the commission engine's input table, stamped so it can never be confused
   // with a sandbox event. The unique key on (sourceSystem, externalRef) is the last line of
-  // defence against a duplicate approval creating a second accrual.
-  const event = await tx.collectionEvent.create({
+  // defence against a duplicate approval creating a second accrual. An accountant's receipt has no deal: no event.
+  const event = accountant ? null : await tx.collectionEvent.create({
     data: {
       sourceSystem: COLLECTION_SOURCE,
       externalRef: row.id,
@@ -437,36 +512,49 @@ export async function approveCollection(
     select: { id: true },
   });
 
-  await tx.salesCollection.update({
+  // The database numbers the voucher here (sales_collection_receipt_guard: «RCT-YYYY-NNNNNN», gapless).
+  const updated = await tx.salesCollection.update({
     where: { id: row.id },
     data: {
       status: "APPROVED",
-      collectionEventId: event.id,
+      collectionEventId: event?.id ?? null,
       decidedById: input.actorId,
       decidedAt: new Date(),
       decisionReason: null,
+      // «الموقع»: the accountant may set it at confirm (WP-D); a receipt recorded before the dimension existed takes its
+      // default here, in the same write that decides it (frozen from now on — location_branch_frozen).
+      ...(confirmBranch !== undefined ? { branchId: confirmBranch } : row.branchId ? {} : { branchId: await defaultCollectionBranch(tx, { orderId: row.orderId, recorderId: row.submittedById }) }),
+      ...(c.depositAccountId ? { depositAccountId: c.depositAccountId } : {}),
+      ...(memo ? { receiptMemo: memo } : {}),
+      ...(accountant && self ? { sodBypass: true } : {}),
     },
+    select: { receiptNumber: true },
   });
 
-  const outcomes = await accrueForCollection(tx, event.id, input.actorId);
-  // A2: apply the receipt to its order's open invoices and post it (a no-op before accounting's go-live).
-  await onCollectionApproved(tx, row.id, input.actorId);
+  const outcomes = event ? await accrueForCollection(tx, event.id, input.actorId) : [];
+  // A2: apply the receipt to its open invoices and post it (a no-op before accounting's go-live).
+  const application = await onCollectionApproved(tx, row.id, input.actorId, c.allocation !== undefined ? { allocation: c.allocation } : accountant ? { allocation: "AUTO" } : {});
   await emitCollectionStatus(tx, row.id, "PENDING_VERIFICATION", "APPROVED", input.actorId);
 
   return {
     status: "APPROVED",
     replayed: false,
-    collectionEventId: event.id,
+    collectionEventId: event?.id ?? null,
     commission: outcomes.map((o) => ({ employeeId: o.employeeId, amount: o.delta.toFixed(2) })),
+    receiptNumber: updated.receiptNumber,
+    application,
   };
 }
 
 /** Finance does not agree. Nothing financial happens, and the reason is required. */
 export async function rejectCollection(
   tx: Tx,
-  input: { collectionId: string; actorId: string; reason: string },
+  input: { collectionId: string; actorId: string; reason: string; reasonCode?: "RETURN_FOR_CORRECTION" | null },
 ): Promise<DecisionResult> {
   const reason = input.reason?.trim() ?? "";
+  if (input.reasonCode === "RETURN_FOR_CORRECTION" && reason.length < 10) {
+    throw bi("REASON_REQUIRED", 400, "إعادة السند للتصحيح تحتاج سببًا واضحًا (10 أحرف على الأقل).", "Returning a receipt for correction needs a reason (at least 10 characters).");
+  }
   if (reason.length < 3) {
     throw { _appCode: 400, message: "Rejecting a collection needs a reason." };
   }
@@ -481,7 +569,7 @@ export async function rejectCollection(
       message: `This collection is ${row.status.toLowerCase().replace(/_/g, " ")} and can no longer be rejected.`,
     };
   }
-  if (row.submittedById === input.actorId) {
+  if (row.submittedById === input.actorId && !(row.source === "ACCOUNTANT" && (await receiptSelfConfirmAllowed(tx, input.actorId)))) {
     throw {
       _appCode: 403,
       message: "The person who recorded a collection cannot be the one who decides it.",
@@ -495,6 +583,7 @@ export async function rejectCollection(
       decidedById: input.actorId,
       decidedAt: new Date(),
       decisionReason: reason,
+      decisionReasonCode: input.reasonCode ?? null,
     },
   });
 
@@ -529,17 +618,20 @@ export async function reverseCollection(
       message: "Only an approved collection can be reversed.",
     };
   }
-  if (!row.collectionEventId) {
+  const accountant = row.source === "ACCOUNTANT";
+  if (!row.collectionEventId && !accountant) {
     // The check constraint makes this unreachable; the guard is here so that if it ever
     // becomes reachable it fails loudly instead of silently skipping the correction.
     throw { _appCode: 500, message: "This approved collection has no commission event to reverse." };
   }
 
   const now = new Date();
-  await tx.collectionEvent.update({
-    where: { id: row.collectionEventId },
-    data: { status: "REVERSED", reversedAt: now },
-  });
+  if (row.collectionEventId) {
+    await tx.collectionEvent.update({
+      where: { id: row.collectionEventId },
+      data: { status: "REVERSED", reversedAt: now },
+    });
+  }
 
   await tx.salesCollection.update({
     where: { id: row.id },
@@ -551,7 +643,7 @@ export async function reverseCollection(
     },
   });
 
-  const outcomes = await accrueForCollection(tx, row.collectionEventId, input.actorId);
+  const outcomes = row.collectionEventId ? await accrueForCollection(tx, row.collectionEventId, input.actorId) : [];
   // A2: the receipt's AR applications and every ledger posting of it are reversed with it.
   await onCollectionReversed(tx, row.id, reason, input.actorId);
   await emitCollectionStatus(tx, row.id, "APPROVED", "REVERSED", input.actorId);
@@ -561,6 +653,8 @@ export async function reverseCollection(
     replayed: false,
     collectionEventId: row.collectionEventId,
     commission: outcomes.map((o) => ({ employeeId: o.employeeId, amount: o.delta.toFixed(2) })),
+    // A reversal keeps the voucher number (shown «معكوس»).
+    receiptNumber: row.receiptNumber,
   };
 }
 

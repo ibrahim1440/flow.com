@@ -100,6 +100,16 @@ export async function notifyFromAutomationEvent(tx: Tx, e: Input): Promise<void>
     }
     case "sales.quote_status_changed": {
       const to = str(p.to);
+      if (to === "ISSUED" && p.byAccounting === true) {
+        const q = await tx.quote.findUnique({ where: { id: e.subjectId }, select: { id: true, quoteNumber: true, opportunity: { select: { ownerId: true, customer: { select: { name: true, nameAr: true } } } } } });
+        if (!q) return;
+        await notify(tx, {
+          event: "sales.quote_issued_by_accounting", dedupeKey: `${q.id}:ISSUED`, actorId, entity,
+          facts: { quoteNumber: q.quoteNumber, customerName: custName(q.opportunity.customer), quoteId: q.id },
+          people: { dealOwner: q.opportunity.ownerId },
+        });
+        return;
+      }
       if (to !== "ACCEPTED" && to !== "REJECTED" && to !== "EXPIRED") return;
       const q = await tx.quote.findUnique({ where: { id: e.subjectId }, select: { id: true, quoteNumber: true, opportunity: { select: { ownerId: true, customerId: true, customer: { select: { name: true, nameAr: true } } } } } });
       if (!q) return;
@@ -115,19 +125,26 @@ export async function notifyFromAutomationEvent(tx: Tx, e: Input): Promise<void>
       const to = str(p.to);
       const c = await tx.salesCollection.findUnique({
         where: { id: e.subjectId },
-        select: { id: true, customerId: true, referenceNumber: true, amountGross: true, currency: true, submittedById: true, submittedBy: { select: { name: true } }, customer: { select: { name: true, nameAr: true } }, opportunity: { select: { customer: { select: { name: true, nameAr: true } } } } },
+        select: { id: true, customerId: true, referenceNumber: true, receiptNumber: true, decisionReasonCode: true, source: true, amountGross: true, currency: true, submittedById: true, submittedBy: { select: { name: true } }, customer: { select: { name: true, nameAr: true } }, opportunity: { select: { customer: { select: { name: true, nameAr: true } } } } },
       });
       if (!c) return;
-      const customerName = custName(c.customer ?? c.opportunity.customer);
+      const customerName = custName(c.customer ?? c.opportunity?.customer ?? null);
       if (to === "PENDING_VERIFICATION") {
+        // An accountant's receipt (no deal) is not Finance's commission queue: only the accountants are told.
+        if (c.source !== "ACCOUNTANT") {
+          await notify(tx, {
+            event: "finance.collection_pending", dedupeKey: c.id, actorId, entity,
+            facts: { customerName, amount: money(c.amountGross, c.currency), submitterName: c.submittedBy.name },
+          });
+        }
         await notify(tx, {
-          event: "finance.collection_pending", dedupeKey: c.id, actorId, entity,
+          event: "finance.receipt_pending", dedupeKey: c.id, actorId, entity,
           facts: { customerName, amount: money(c.amountGross, c.currency), submitterName: c.submittedBy.name },
         });
       } else if (to === "APPROVED" || to === "REJECTED" || to === "REVERSED") {
         await notify(tx, {
           event: "sales.collection_decided", dedupeKey: `${c.id}:${to}`, actorId, entity,
-          facts: { status: to, reference: c.referenceNumber, customerName, amount: money(c.amountGross, c.currency) },
+          facts: { status: to, reference: c.receiptNumber ?? c.referenceNumber, customerName, amount: money(c.amountGross, c.currency), returned: to === "REJECTED" && c.decisionReasonCode === "RETURN_FOR_CORRECTION" ? "yes" : "no" },
           people: { submitter: c.submittedById },
         });
         if (to !== "REJECTED") checkCreditStandingLater([c.customerId]);

@@ -19,6 +19,7 @@ import { splitTitle } from "@/components/d21/labels";
 import { shortDate } from "@/components/d21/format";
 import { DISCOUNT_MAX } from "@/lib/services/sales/discount-limits";
 import { useAccountantView } from "../../../accounting/_ui/qoyod-pages";
+import { useQuotesBase } from "../base";
 
 /**
  * The quotation — editor while it is a draft (GX A-10, Figma 1230:121651 / EN 1230:147423,
@@ -102,7 +103,7 @@ type Quote = {
 };
 
 type State = { editable: boolean; revisable: boolean; expired: boolean; orderable: boolean };
-type Can = { write: boolean; approveDiscount: boolean; approveThisDiscount: boolean; createOrder: boolean; close: boolean };
+type Can = { write: boolean; approveDiscount: boolean; approveThisDiscount: boolean; createOrder: boolean; close: boolean; viaAccounting?: boolean; reject?: boolean };
 type DiscountInfo = { state: "NOT_NEEDED" | "PENDING" | "APPROVED" | "REJECTED"; approvedBy: string | null; rejectedBy: string | null };
 /** The lines as frozen at issue (`issuedSnapshot.lines`): the names the customer was sent. */
 type SnapLine = { position: number; name: string | null; nameAr: string | null; description: string | null };
@@ -160,8 +161,11 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   const [canRaw, setCan] = useState<Can | null>(null);
   // Qoyod parity: in the accountant workspace a quotation is read-only (Sales owns it — QOYOD-REF §5.1): no edit, issue,
   // accept, revise, discount decision or order from here. The server's rules are unchanged.
+  // BATCH22 WP-E: writing follows the server (canWriteQuotes); from the accounting section a quotation is only edited and
+  // issued — accepting, rejecting, the discount decision and the order stay with Sales.
   const readOnly = useAccountantView();
-  const can = canRaw && readOnly ? { ...canRaw, write: false, close: false, createOrder: false, approveThisDiscount: false } : canRaw;
+  const { base, accounting: accountingBase } = useQuotesBase();
+  const can = canRaw && (readOnly || accountingBase) ? { ...canRaw, close: false, createOrder: false, approveThisDiscount: false, ...(canRaw.viaAccounting ? { reject: false } : {}) } : canRaw;
   const [threshold, setThreshold] = useState("10");
   const [discount, setDiscount] = useState<DiscountInfo | null>(null);
   const [notes, setNotes] = useState("");
@@ -270,7 +274,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
     sub: quote
       ? `${quote.quoteNumber} · ${editable ? `${ar ? "المراجعة" : "revision"} ${quote.revision}` : (customerName ?? quote.opportunity.title)}`
       : undefined,
-    back: "/dashboard/sales/quotes",
+    back: base,
     ownBar: phoneBar,
   });
   useEffect(() => {
@@ -366,7 +370,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       method: "POST",
     });
     setBusy(false);
-    if (res.ok) window.location.href = `/dashboard/sales/quotes/${res.data.quote.id}`;
+    if (res.ok) window.location.href = `${base}/${res.data.quote.id}`;
     else setError(res.data.error ?? "");
   }
 
@@ -377,7 +381,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         <p className="notice er" role="alert" data-testid="alert-error" style={{ marginBottom: 12 }}>
           {error || (ar ? "العرض غير موجود." : "Quotation not found.")}
         </p>
-        <Link href="/dashboard/sales/quotes" className="btn sm">
+        <Link href={base} className="btn sm">
           {ar ? "كل عروض الأسعار" : "All quotations"}
         </Link>
       </div>
@@ -427,7 +431,8 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
 
   // ── The facts under the title, each its own element so the bidi algorithm cannot move a
   //    separator between two numerals. ──
-  const dealHref = `/dashboard/sales/deals/${quote.opportunity.id}`;
+  // A deal page is Sales': from the accounting section the deal is named, not linked (the route guard would refuse it).
+  const dealHref = accountingBase ? base : `/dashboard/sales/deals/${quote.opportunity.id}`;
   const meta: React.ReactNode[] = [
     <span key="st" className={`st ${STATUS_DOT[quote.status] ?? ""}`} data-testid="quote-status">{statusLabel(quote.status)}</span>,
     <span key="who">
@@ -477,7 +482,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       {ar ? "قَبِل العميل" : "Customer accepted"}
     </button>
   ) : null;
-  const rejectBtn = quote.status === "ISSUED" && can.write ? (
+  const rejectBtn = quote.status === "ISSUED" && can.write && can.reject !== false ? (
     <button type="button" className="btn" disabled={busy} onClick={() => setDialog("reject")} data-testid="reject-quote">
       {ar ? "رفَضه العميل" : "Customer rejected"}
     </button>
@@ -495,7 +500,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   // An accepted quotation is the document a collection is recorded against, but the collection
   // belongs to the DEAL — one deal can have revisions, and the money is owed on the deal, not on
   // a piece of paper. So this is a route back rather than a second place to record one.
-  const collectionLink = quote.status === "ACCEPTED" ? (
+  const collectionLink = quote.status === "ACCEPTED" && !accountingBase ? (
     <Link href={`${dealHref}#collections`} data-testid="go-to-collection" className="btn">
       {ar ? "تسجيل تحصيل على الصفقة" : "Record a collection on the deal"}
     </Link>
@@ -874,7 +879,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
      marked, because it is the document a customer was actually sent. */
   const showChain = !editable || quote.supersedes != null || quote.supersededBy != null;
   const chainLink = (r: { id: string; quoteNumber: string; revision: number }) => (
-    <Link href={`/dashboard/sales/quotes/${r.id}`}>
+    <Link href={`${base}/${r.id}`}>
       <span className="id">{r.quoteNumber}</span> · {revisionText(r.revision)}
     </Link>
   );
@@ -951,7 +956,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       </Link>,
     );
     moreItems.push(
-      <Link key="doc" role="menuitem" href={`/dashboard/sales/quotes/${quote.id}/print`} data-testid="open-print">
+      <Link key="doc" role="menuitem" href={`${base}/${quote.id}/print`} data-testid="open-print">
         {ar ? "مستند العرض" : "Quotation document"}
       </Link>,
     );
@@ -1195,8 +1200,9 @@ function OrderDialog({
  */
 function QuoteDocumentLink({ id, ar }: { id: string; ar: boolean }) {
   const printing = usePrintDocuments();
+  const { base } = useQuotesBase();
   return (
-    <Link href={`/dashboard/sales/quotes/${id}/print`} data-testid="open-print" className="btn">
+    <Link href={`${base}/${id}/print`} data-testid="open-print" className="btn">
       {printing === true
         ? <><Printer size={16} aria-hidden /> {ar ? "طباعة" : "Print"}</>
         : <><FileText size={16} aria-hidden /> {ar ? "مستند العرض" : "Quotation document"}</>}

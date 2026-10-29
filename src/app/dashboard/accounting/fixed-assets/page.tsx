@@ -14,6 +14,7 @@ import { FaShell, Crumb, Tag, Money, nameOf, FA_STATUS, FA_PAGE_SIZES, type Asse
 import { Categories } from "./_ui/categories";
 import { Reports } from "./_ui/reports";
 import { Opening } from "./_ui/opening";
+import { Import } from "./_ui/import";
 
 type List = { total: number; rows: Asset[]; page: number; size: number; can: Can; summary: { byStatus: Record<string, number>; cost: string; accumulated: string; netBookValue: string } };
 type Options = { categories: { id: string; nameAr: string; nameEn: string | null }[]; branches: { id: string; nameAr: string | null; nameEn: string }[] };
@@ -40,6 +41,7 @@ function Register() {
     <FaShell title={L("الأصول الثابتة", "Fixed assets")} actions={
       <span className="acct-actions">
         {d?.can.write ? <Link className="hr-btn is-primary" href="/dashboard/accounting/fixed-assets/new" data-testid="fa-new">{L("+ إضافة أصل", "+ Add asset")}</Link> : null}
+        {d?.can.write ? <Link className="hr-btn" href="/dashboard/accounting/fixed-assets?view=import" data-testid="fa-import-link">{L("استيراد من قيود", "Import from Qoyod")}</Link> : null}
         <Link className="hr-btn" href="/dashboard/accounting/fixed-assets?view=categories" data-testid="fa-categories-link">{L("تصنيفات الأصول", "Asset categories")}</Link>
         <a className="hr-btn" href={`/api/accounting/fixed-assets/reports?report=register&format=csv`} data-testid="fa-export">{L("تصدير", "Export")}</a>
       </span>
@@ -113,6 +115,7 @@ function Router() {
   const { L } = useLang();
   if (view === "categories") return <FaShell title={L("تصنيفات الأصول", "Asset categories")}><Crumb items={[{ label: L("تصنيفات الأصول", "Asset categories") }]} /><Categories /></FaShell>;
   if (view === "reports") return <FaShell title={L("تقارير الأصول الثابتة", "Fixed-asset reports")}><Crumb items={[{ label: L("التقارير", "Reports") }]} /><Reports /></FaShell>;
+  if (view === "import") return <FaShell title={L("استيراد الأصول من قيود", "Import assets from Qoyod")}><Crumb items={[{ label: L("استيراد من قيود", "Import from Qoyod") }]} /><Import /></FaShell>;
   if (view === "opening") return <FaShell title={L("الأصول عند بدء المحاسبة", "Assets at go-live")}><Crumb items={[{ label: L("الافتتاحي", "Opening") }]} /><Opening /></FaShell>;
   return <Register />;
 }

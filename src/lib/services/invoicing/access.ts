@@ -19,6 +19,8 @@ export const canCreateInvoices = (p: P) => sub(p, "sales", "invoices_create");
 export const canIssueInvoices = (p: P) => sub(p, "sales", "invoices_issue");
 export const canCancelInvoices = (p: P) => sub(p, "sales", "invoices_cancel");
 export const canCreditNote = (p: P) => sub(p, "sales", "invoices_credit_note");
+/** «بيع أصل ثابت» (BATCH 22 WP-F): a line selling a fixed asset needs accounting › fixed_assets (with invoices_create / issue). */
+export const canSellAssets = (p: P) => hasModuleAccess(p as Permissions, "accounting") && sub(p, "accounting", "fixed_assets");
 export const canAr = (p: P) => hasModuleAccess(p as Permissions, "accounting") && sub(p, "accounting", "ar");
 
 /**
@@ -32,6 +34,6 @@ export function seesAllInvoices(p: P): boolean {
 export function abilities(p: P) {
   return {
     view: canViewInvoices(p), create: canCreateInvoices(p), issue: canIssueInvoices(p), cancel: canCancelInvoices(p),
-    creditNote: canCreditNote(p), ar: canAr(p), all: seesAllInvoices(p),
+    creditNote: canCreditNote(p), ar: canAr(p), all: seesAllInvoices(p), sellAssets: canSellAssets(p),
   };
 }

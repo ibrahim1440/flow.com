@@ -7,14 +7,17 @@ import { useMemo, useState } from "react";
 import { FilterChip, Notice, OpsLoading } from "@/components/ops/ui";
 import { DownloadIcon } from "../../inventory/_parts/shared";
 import { money, todayRiyadh, useApi, useLang } from "../../accounting/_ui/shell";
-import { DateRange, FilterCard, Section, ListFooter, ListPageSize, useFilters, usePaging, useTerm } from "@/components/chrome";
+import { DateRange, FilterCard, Section, ListFooter, ListPageSize, SIMPLE_BILL_HREF, useFilters, usePaging, useTerm } from "@/components/chrome";
 import { Select } from "@/components/ui/Select";
 import { useAccountantView } from "../../accounting/_ui/qoyod-pages";
+import { LocationFilter } from "../../accounting/_ui/locations";
 
 export type PurchaseCan = { draft: boolean; ap: boolean; receive: boolean; inventory: boolean; read: boolean; suppliers: boolean; changeReceived?: boolean; adjust?: boolean };
 export type InvoiceListRow = {
   id: string; number: string; supplierId: string; supplierName: string; supplierRef: string; invoiceDate: string; dueDate: string; status: string; received: boolean;
   netTotal: string; vatTotal: string; grossTotal: string; paidTotal: string; outstanding: string; overdueDays: number;
+  /** «فواتير بسيطة» (WP-H) and «الموقع» (WP-B). */
+  kind?: string; vendorName?: string | null; branchId?: string | null;
 };
 type ListResponse = { rows: InvoiceListRow[]; summary: Record<string, { count: number; gross: string; outstanding: string }>; can: PurchaseCan; sodSelfAllowed: boolean; simpleMode: boolean; viewer: { id: string } };
 
@@ -29,21 +32,21 @@ export const PI_STATUS: Record<string, [string, string, string]> = {
 const PERIODS = ["30", "90", "365"] as const;
 const minusDays = (n: number) => new Date(Date.parse(todayRiyadh()) - n * 86_400_000).toISOString().slice(0, 10);
 
-export function InvoicesTab({ suppliers }: { suppliers: { id: string; name: string }[] }) {
+export function InvoicesTab({ suppliers, kind = null }: { suppliers: { id: string; name: string }[]; kind?: "SIMPLE" | null }) {
   const { L, lang } = useLang();
   // Qoyod parity (accountant workspace only): the filter card, Qoyod's column order and words, the dark title bar and
   // the pager; everyone else keeps this tab as it was. Same API and query parameters (status, supplier, from, to, q).
   const qoyod = useAccountantView();
   const t = useTerm();
-  const f = useFilters({ from: "", to: "", status: "", supplierId: "", q: "" });
+  const f = useFilters({ from: "", to: "", status: "", supplierId: "", q: "", locations: [] as string[] });
   const [status, setStatus] = useState("");
   const [supplierId, setSupplierId] = useState("");
   const [period, setPeriod] = useState<string>("");
   const [q, setQ] = useState("");
   const a = f.applied;
   const params = (qoyod
-    ? new URLSearchParams({ ...(a.status ? { status: a.status } : {}), ...(a.supplierId ? { supplierId: a.supplierId } : {}), ...(a.from ? { from: a.from } : {}), ...(a.to ? { to: a.to } : {}), ...(a.q.trim() ? { q: a.q.trim() } : {}) })
-    : new URLSearchParams({ ...(status ? { status } : {}), ...(supplierId ? { supplierId } : {}), ...(period ? { from: minusDays(Number(period)) } : {}), ...(q.trim() ? { q: q.trim() } : {}) })).toString();
+    ? new URLSearchParams({ ...(a.status ? { status: a.status } : {}), ...(a.supplierId ? { supplierId: a.supplierId } : {}), ...(a.from ? { from: a.from } : {}), ...(a.to ? { to: a.to } : {}), ...(a.q.trim() ? { q: a.q.trim() } : {}), ...(a.locations.length ? { branches: a.locations.join(",") } : {}), ...(kind ? { kind } : {}) })
+    : new URLSearchParams({ ...(status ? { status } : {}), ...(supplierId ? { supplierId } : {}), ...(period ? { from: minusDays(Number(period)) } : {}), ...(q.trim() ? { q: q.trim() } : {}), ...(kind ? { kind } : {}) })).toString();
   const list = useApi<ListResponse>(`/api/purchases/invoices${params ? `?${params}` : ""}`);
   const all = useApi<ListResponse>("/api/purchases/invoices");
   const s = all.data?.summary ?? {};
@@ -84,6 +87,7 @@ export function InvoicesTab({ suppliers }: { suppliers: { id: string; name: stri
             </Select></div>
           <div className="qc-field"><span className="qc-label">{L("بحث", "Search")}</span>
             <input type="search" className="hr-input" placeholder={L("رقم الفاتورة أو المورد أو رقم فاتورة المورد", "Invoice no., supplier or supplier ref")} value={f.draft.q} onChange={(e) => f.set("q", e.target.value)} data-testid="pi-search" /></div>
+          <LocationFilter value={f.draft.locations} onChange={(v) => f.set("locations", v)} testId="pi-locations" />
         </FilterCard>
       ) : null}
       {qoyod ? null : (
@@ -103,7 +107,9 @@ export function InvoicesTab({ suppliers }: { suppliers: { id: string; name: stri
       ) : qoyod ? (
         // المرجع · المورد · التاريخ · تاريخ الاستحقاق · القيمة الاجمالية · الرصيد · الحالة · الخيارات (QOYOD-REF §2.4, to confirm;
         // net, VAT and paid stay in the CSV, the tooltip and on the invoice).
-        <Section title={t("purchaseInvoices")} testId="pi-section" actions={<a className="hr-btn is-ghost is-sm" href={`/api/purchases/invoices/export${params ? `?${params}` : ""}`} download data-testid="pi-export"><DownloadIcon />{L("تصدير CSV", "Export CSV")}</a>}>
+        <Section title={kind === "SIMPLE" ? t("simpleBills") : t("purchaseInvoices")} testId="pi-section" actions={<>
+          {kind === "SIMPLE" && list.data?.can.draft ? <Link className="hr-btn is-primary is-sm" href={SIMPLE_BILL_HREF} data-testid="pi-new-simple">+ {L("فاتورة بسيطة", "Simple bill")}</Link> : null}
+          <a className="hr-btn is-ghost is-sm" href={`/api/purchases/invoices/export${params ? `?${params}` : ""}`} download data-testid="pi-export"><DownloadIcon />{L("تصدير CSV", "Export CSV")}</a></>}>
         <ListPageSize {...pager} />
         <div className="hr-tablewrap">
           <table className="hr-table is-mrow pur-invoices" data-testid="pi-table" data-layout="qoyod" aria-label={L("فواتير المشتريات", "Purchase invoices")}>
@@ -116,6 +122,7 @@ export function InvoicesTab({ suppliers }: { suppliers: { id: string; name: stri
               {pageRows.map((r) => (
                 <tr key={r.id} className={r.status === "CANCELLED" ? "is-muted" : undefined} data-testid={`pi-row-${r.number}`}>
                   <td><Link className="acct-code" href={`/dashboard/purchases/invoices/${r.id}`}>{r.number}</Link>{r.received ? <span className="pur-tag" title={L("استلمت البضاعة بنفسها", "Received its goods itself")}>{L("مستلمة", "Received")}</span> : null}
+                    {r.kind === "SIMPLE" ? <span className="pur-tag" data-testid={`pi-simple-${r.number}`}>{L("بسيطة", "Simple")}</span> : null}
                     <span className="hr-caption" style={{ display: "block" }}>{L("فاتورة المورد", "Supplier ref")} <bdi className="acct-code">{r.supplierRef}</bdi></span></td>
                   <td className="m-title"><span className="strong">{r.supplierName}</span><span className="hr-msub"><bdi className="acct-code">{r.supplierRef}</bdi> · <span className="hr-num">{r.invoiceDate}</span></span></td>
                   <td className="hr-hide-compact hr-num">{r.invoiceDate}</td>

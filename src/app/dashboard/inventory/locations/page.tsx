@@ -20,6 +20,7 @@ import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
 import { LOCATION_TYPES, LOCATION_TYPE_LABEL, isTransitLocation, locationName, locationTypeLabel, suggestLocationCode, type LocationType } from "@/lib/inventory/locations";
 import { useLocations, type Loc } from "../_parts/locations";
+import { useLocations as useBranches } from "../../accounting/_ui/locations";
 
 type Refusal = { msg: string; href?: string | null };
 
@@ -28,6 +29,11 @@ export default function LocationsPage() {
   const { lang } = useI18n();
   const L = useL();
   const canWrite = !!user && hasSubPrivilege(user.permissions, "inventory", "adjust");
+  // «الموقع» (BATCH22 WP-B): the branch (profit centre) a site belongs to — what its documents post to. Mapping it needs
+  // inventory › adjust and accounting › settings_manage (the route checks both).
+  const canMapBranch = canWrite && !!user && hasSubPrivilege(user.permissions, "accounting", "settings_manage");
+  const branches = useBranches();
+  const branchName = (id: string | null | undefined) => { const b = branches.find((x) => x.id === id); return b ? (lang === "ar" ? b.nameAr : b.nameEn) : id ? id : L("غير محدد", "Unassigned"); };
   const { state, failed, reload } = useLocations(true);
   const [showInactive, setShowInactive] = useState(false);
   const [editing, setEditing] = useState<Loc | "new" | null>(null);
@@ -43,7 +49,7 @@ export default function LocationsPage() {
   const active = all.filter((l) => l.isActive && !isTransitLocation(l)).sort((a, b) => a.sortOrder - b.sortOrder);
   const rows = [...active, ...transit, ...(showInactive ? all.filter((l) => !l.isActive) : [])];
   const withValue = all.some((l) => typeof l.valueEstimate === "number");
-  const cols = withValue ? 6 : 5;
+  const cols = withValue ? 7 : 6;
   const value = (l: Loc) => (typeof l.valueEstimate === "number" ? <span className="hr-num">{L(`${formatMoney(l.valueEstimate.toFixed(2))} ر.س`, `SAR ${formatMoney(l.valueEstimate.toFixed(2))}`)}</span> : null);
 
   async function call(url: string, method: string, body?: unknown): Promise<{ ok: true } | { ok: false; refusal: Refusal }> {
@@ -117,6 +123,7 @@ export default function LocationsPage() {
                   <th className="hr-hide-mobile">{L("النوع", "Type")}</th>
                   <th className="hr-hide-mobile">{L("الرصيد فيه", "Holds")}</th>
                   {withValue ? <th className="hr-hide-mobile" title={L("تقدير: كمية الموقع × متوسط التكلفة للشركة. التقييم للشركة كلها، لا لكل موقع.", "An estimate: the site's quantity × the company moving-average cost. Valuation is company-wide, not per site.")}>{L("القيمة حسب الموقع (تقديرية)", "Value by site (estimate)")}</th> : null}
+                  <th className="hr-hide-mobile" title={L("الفرع المحاسبي الذي تُرحَّل إليه مستندات الموقع (الموقع في التقارير)", "The accounting branch the site's documents post to (the location in the reports)")}>{L("الفرع المحاسبي", "Accounting branch")}</th>
                   <th className="hr-hide-mobile">{L("الحالة", "Status")}</th>
                   <th aria-label={L("الإجراءات", "Actions")} />
                 </tr>
@@ -137,12 +144,21 @@ export default function LocationsPage() {
                           {!l.isActive ? <span className="stk-flag tone-warning">{L("موقوف", "Inactive")}</span> : null}
                         </span> : null}
                         <span className="hr-msub">{pair(l.type)} · {holds(l)}</span>
+                        {!isTransitLocation(l) ? <span className="hr-msub">{L("الفرع المحاسبي: ", "Accounting branch: ")}{branchName(l.finBranchId)}</span> : null}
                         {withValue ? <span className="hr-msub">{L("القيمة التقديرية: ", "Estimated value: ")}{value(l)}</span> : null}
                         {!l.isActive && l.deactivationReason ? <span className="hr-msub">{L("سبب الإيقاف: ", "Deactivated: ")}{l.deactivationReason}</span> : null}
                       </td>
                       <td className="hr-hide-mobile">{pair(l.type)}{l.address ? <span className="stk-sub">{l.address}</span> : null}</td>
                       <td className="hr-hide-mobile">{holds(l)}</td>
                       {withValue ? <td className="hr-hide-mobile" data-testid={`loc-value-${l.code}`}>{value(l)}</td> : null}
+                      <td className="hr-hide-mobile" data-testid={`loc-branch-${l.code}`}>{isTransitLocation(l) ? "—" : canMapBranch && l.isActive ? (
+                        <Select value={l.finBranchId ?? ""} disabled={busy} aria-label={L(`الفرع المحاسبي لـ ${l.nameAr}`, `Accounting branch of ${l.nameEn || l.nameAr}`)} data-testid={`loc-branch-select-${l.code}`}
+                          onChange={(e) => act(l, { action: "branch", finBranchId: e.target.value || null }, L("رُبط الموقع بالفرع المحاسبي.", "The site's accounting branch is set."))}>
+                          <option value="">{L("غير محدد", "Unassigned")}</option>
+                          {branches.map((b) => <option key={b.id} value={b.id}>{lang === "ar" ? b.nameAr : b.nameEn}</option>)}
+                          <option value="new">{L("فرع جديد باسم الموقع", "A new branch named after the site")}</option>
+                        </Select>
+                      ) : branchName(l.finBranchId)}</td>
                       <td className="hr-hide-mobile">{l.isActive ? L("نشط", "Active") : L("موقوف", "Inactive")}</td>
                       <td className="stk-acts stk-macts">
                         {isTransitLocation(l) ? <Link className="hr-btn is-sm is-ghost" href="/dashboard/inventory/transfers?status=IN_TRANSIT" data-testid="loc-transit-open">{L("التحويلات في الطريق", "Transfers in transit")}</Link> : canWrite ? (l.isActive ? (
