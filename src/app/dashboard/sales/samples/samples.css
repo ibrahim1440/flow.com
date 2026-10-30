@@ -1,0 +1,5 @@
+/* «العيّنات»: the Segmented control holds buttons (a filter, not pages) — the same look as its links. Tokens only. */
+.d21 .d21-seg button { all: unset; display: block; padding: 5px 12px; border-radius: 7px; font-size: 13px; line-height: 22px; color: var(--text-muted); white-space: nowrap; cursor: pointer }
+.d21 .d21-seg button:hover { color: var(--text-primary) }
+.d21 .d21-seg button[aria-current] { background: var(--surface); color: var(--text-primary); font-weight: 500; box-shadow: var(--shadow-sheet) }
+.d21 .d21-seg button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }

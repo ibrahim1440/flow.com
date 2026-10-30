@@ -354,3 +354,9 @@
 .d21-lang-err { position: absolute; top: calc(100% + 6px); inset-inline-end: 0; z-index: 80; display: none; white-space: nowrap; padding: 6px 10px; border-radius: 8px; background: var(--status-danger-tint); color: var(--status-danger); font-size: 12.5px; box-shadow: var(--shadow-pop); }
 .d21-lang-err[data-show] { display: block; }
 .d21-menu .d21-lang-ico { width: 16px; height: 16px; stroke-width: 1.5; color: var(--text-muted); }
+
+/* The sales rep's bar (batch 24 council fix round 1): it stays on every sales page; a page's own sticky action bar sits just above it. */
+@media (max-width: 767.98px) {
+  .d21[data-repbar] .d21 .sticky-act, .d21[data-repbar] .sticky-act { bottom: var(--d21-tabbar); padding-bottom: 12px; }
+  .d21[data-repbar] .d21-body { padding-bottom: calc(var(--d21-tabbar) + 76px); }
+}

@@ -6,7 +6,7 @@ import { uploadPresigned } from "@vercel/blob/client";
 import { UPLOAD_STALL_MS, classifyUploadError, sniffDirectType, DIRECT_MESSAGES } from "@/lib/services/customers/direct-upload-rules";
 
 type Msg = { error?: string; errorEn?: string; code?: string };
-export type DirectResult = { ok: true } | { ok: false; message: Msg; retry: boolean };
+export type DirectResult = { ok: true; id?: string } | { ok: false; message: Msg; retry: boolean };
 
 async function postJson(url: string, body: unknown): Promise<{ status: number; data: Msg & Record<string, unknown> } | null> {
   const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
@@ -57,6 +57,7 @@ export async function directUpload(opts: {
   opts.onProgress(100);
   const fin = await postJson(`${base}/finalize`, { uploadId });
   if (!fin) return { ok: false, message: NO_CONNECTION, retry: true };
-  if (fin.status === 200 || fin.status === 201) return { ok: true };
+  // The row takes the upload's id (direct-upload.ts): the dates of a contract are set on it next (batch 24 WP-C).
+  if (fin.status === 200 || fin.status === 201) return { ok: true, id: uploadId };
   return { ok: false, message: fin.data, retry: fin.status >= 500 || fin.status === 409 };
 }

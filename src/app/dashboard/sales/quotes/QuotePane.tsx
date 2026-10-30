@@ -228,7 +228,7 @@ export function QuotePane({
             <dl className="q-props q-pane-tot" data-testid="pane-totals">
               <dt>{ar ? "المجموع قبل الخصم" : "Subtotal"}</dt><dd><bdi className="n">{formatMoney(q.subtotal)}</bdi></dd>
               {Number(q.discountTotal) > 0 && (<><dt>{ar ? "الخصم " : "Discount "}<bdi>{effText}</bdi></dt><dd><bdi className="n">−{formatMoney(q.discountTotal)}</bdi></dd></>)}
-              <dt>{ar ? "الوعاء الخاضع للضريبة" : "Taxable base"}</dt>
+              <dt>{ar ? "المبلغ قبل الضريبة" : "Before VAT"}</dt>
               <dd><bdi className="n">{formatMoney((Number(q.subtotal) - Number(q.discountTotal)).toFixed(2))}</bdi></dd>
               <dt>{ar ? "ضريبة القيمة المضافة" : "VAT"}{rates.length === 1 && <> {pct(rates[0])}</>}</dt><dd><bdi className="n">{formatMoney(q.taxTotal)}</bdi></dd>
               <dt className="g">{ar ? "الإجمالي · ر.س" : "Total · SAR"}</dt><dd className="g"><bdi className="n">{formatMoney(q.grandTotal)}</bdi></dd>

@@ -5,7 +5,7 @@ import {
   ClipboardList, UserPlus, KanbanSquare, Percent, CalendarCheck, FileText, Target, BarChart3,
   ScrollText, Briefcase, Landmark, Boxes, Workflow, Zap, MessageSquareText, QrCode,
   Contact, UserRound, CalendarDays, Banknote, Laptop,
-  Flame, ListChecks, Coffee, Bell, Megaphone, Mail,
+  Flame, ListChecks, Coffee, Bell, Megaphone, Mail, Sun, FlaskRound,
 } from "lucide-react";
 import { hasModuleAccess, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 import type { D21IconName } from "@/components/shell/icons";
@@ -233,6 +233,15 @@ export const NAV: NavNode[] = [
   // Phase 11, 1737:2); its pages (اليوم · مهامي · بانتظار اعتمادي · التقويم · الفريق) are the page's own tabs,
   // because «الفريق» depends on the HR reporting line, not on a permission the tree can read. One's own HR
   // requests are «خدماتي»'s (owner decision): the old «طلباتي» tab redirects to /dashboard/me#requests.
+  // «يومي» (batch 24 WP-B): the sales rep's day — who to call today and why, the month's target, deals in
+  // negotiation, the book by tier. First in the sidebar of anyone holding the sales module, and the home of a sales
+  // persona (`salesHome`, lib/workspace/landing.ts). Not drawn for the admin role (it has no book of its own; it opens
+  // a rep's day from «/dashboard/my-day?rep=…»). The «جديد» it offers is the sales module's.
+  {
+    id: "myday", ar: "يومي", en: "My day", icon: Sun, href: "/dashboard/my-day",
+    anyOf: IN_SALES, unlessAny: [{ module: "sales", role: "admin" }],
+    shell: { icon: "home", creates: "sales" },
+  },
   { id: "workspace", ar: "مساحة عملي", en: "My Workspace", icon: ListChecks, href: "/dashboard/workspace", shell: { icon: "inbox" } },
   { id: "dashboard", ar: "لوحة التحكم", en: "Dashboard", icon: LayoutDashboard, href: "/dashboard", shell: { ar: "لوحة التشغيل", en: "Operations dashboard", icon: "pulse", creates: "operations" } },
   {
@@ -258,14 +267,9 @@ export const NAV: NavNode[] = [
         ar: "إدارة العملاء",
         en: "Customer management",
         icon: UserPlus,
-        shell: { ar: "العملاء", en: "Customers", icon: "users" },
+        // The rep's sidebar (batch 24 WP-B): «عملائي» for somebody who sees only their own book.
+        shell: { ar: "العملاء", en: "Customers", icon: "users", own: { ar: "عملائي", en: "My customers", unlessAny: [sales("lead_assign")] } },
         children: [
-          {
-            id: "sales.customers.leads",
-            ar: "العملاء المحتملون", en: "Leads",
-            href: "/dashboard/sales/leads",
-            anyOf: IN_SALES,
-          },
           {
             // The one customers entry, for everyone who holds the module (20:236: «المبيعات ›
             // العملاء»). Somebody without the Sales CRM — the legacy order-taking role holds
@@ -275,6 +279,12 @@ export const NAV: NavNode[] = [
             href: "/dashboard/customers",
             anyOf: [{ module: "customers" }],
           },
+          {
+            id: "sales.customers.leads",
+            ar: "العملاء المحتملون", en: "Leads",
+            href: "/dashboard/sales/leads",
+            anyOf: IN_SALES,
+          },
         ],
       },
       {
@@ -282,7 +292,7 @@ export const NAV: NavNode[] = [
         ar: "الفرص والمتابعات",
         en: "Opportunities and follow-ups",
         icon: KanbanSquare,
-        shell: { ar: "الصفقات", en: "Deals", icon: "deal" },
+        shell: { ar: "الصفقات", en: "Deals", icon: "deal", own: { ar: "صفقاتي", en: "My deals", unlessAny: [sales("lead_assign")] } },
         children: [
           {
             id: "sales.pipeline.board",
@@ -297,6 +307,8 @@ export const NAV: NavNode[] = [
             ar: "الأنشطة والمتابعات", en: "Activities and follow-ups",
             href: "/dashboard/sales/activities",
             anyOf: IN_SALES,
+            // A rep meets it as «أنشطتي» in the sidebar instead (`sales.myactivities`, batch 24 WP-B).
+            requiresAll: [sales("lead_assign")],
           },
         ],
       },
@@ -327,6 +339,39 @@ export const NAV: NavNode[] = [
         ],
       },
       {
+        // «العيّنات» (batch 24 WP-B): the samples of one's own deals (a manager: everyone's) and where each stands —
+        // GET /api/sales/samples, scoped through the deal. A list only; a sample is requested from its deal.
+        id: "sales.samples",
+        ar: "العيّنات", en: "Samples",
+        icon: FlaskRound,
+        href: "/dashboard/sales/samples",
+        anyOf: IN_SALES,
+        shell: { icon: "flask" },
+      },
+      {
+        // «أنشطتي» (batch 24 WP-B): the rep's sidebar lists the follow-ups as an entry of their own (BATCH24-DESIGN.md
+        // «المبيعات: عملائي، صفقاتي، عروض الأسعار، العيّنات، أنشطتي»). The same page and the same gate as
+        // `sales.pipeline.activities`, which the manager keeps as the board's second tab — one placement per viewer.
+        id: "sales.myactivities",
+        ar: "الأنشطة والمتابعات", en: "Activities and follow-ups",
+        href: "/dashboard/sales/activities",
+        anyOf: IN_SALES,
+        unlessAny: [sales("lead_assign")],
+        shell: { ar: "أنشطتي", en: "My activities", icon: "cal" },
+      },
+      {
+        // «متابعة الفريق» (batch 24 WP-C; moved to the Sales group by council fix round 1, P0-13 — where the sales manager
+        // looks for it). One row per rep — target %, collections, deals in negotiation, late reorders, contracts ending,
+        // last activity, and «بدون مندوب» — each opening that rep's «يومي» read-only. The audience of the team's reports
+        // (seesTeamReports); GET /api/sales/team enforces it. Sorted by name: no ranking. One placement (no duplicate).
+        id: "sales.team",
+        ar: "متابعة الفريق", en: "Team overview",
+        icon: Users2,
+        href: "/dashboard/sales/team",
+        anyOf: [sales("lead_assign"), { module: "sales", role: "admin" }],
+        shell: { icon: "users" },
+      },
+      {
         // GX A-P08 (1229:114164): the gear → «الإعدادات › المبيعات», trail «الإعدادات / المبيعات».
         id: "sales.settings",
         ar: "إعدادات المبيعات",
@@ -348,6 +393,14 @@ export const NAV: NavNode[] = [
     ar: "المالية",
     en: "Finance",
     icon: Landmark,
+    // The rep's sidebar group «فلوسي» (batch 24 WP-B) — for somebody who only sees their own money (the same viewers
+    // whose «الأداء» reads «هدفي وعمولتي»). A group label only (`groupText` with the viewer); the trail keeps «المالية».
+    shell: {
+      own: {
+        ar: "فلوسي", en: "My money",
+        unlessAny: [FINANCE, ACCOUNTING, ...DECIDES_COLLECTIONS, commissions("view_team"), commissions("approve"), commissions("record_payout"), commissions("manage_plans"), { module: "analytics" }],
+      },
+    },
     children: [
       {
         // Cash management, receipt allocation and the monthly cash budget. Its six areas are
@@ -387,7 +440,7 @@ export const NAV: NavNode[] = [
           ar: "الأداء", en: "Performance", icon: "chart",
           crumb: { ar: "الأداء والعمولات", en: "Performance & commissions" },
           own: {
-            ar: "أهدافي وعمولاتي", en: "My targets & commissions",
+            ar: "هدفي وعمولتي", en: "My target & commission",
             // The rep's trail «أدائي / عمولاتي» (GX A-05 rep, gx.py perf_shell): no «المالية».
             crumb: { ar: "أدائي", en: "My performance" },
             unlessAny: [commissions("view_team"), commissions("approve"), commissions("record_payout"), commissions("manage_plans"), { module: "analytics" }],
@@ -933,9 +986,9 @@ export function visibleNav(v: Viewer, tree: NavNode[] = NAV): NavNode[] {
 // ── Direction 2.1 presentation helpers (labels and the top-bar trail) ──
 
 /** A module id or a SHELL_GROUPS key, as the sidebar names it. */
-export function groupText(id: string, lang: string): string | null {
+export function groupText(id: string, lang: string, v?: Viewer): string | null {
   const mod = NAV.find((n) => n.id === id);
-  if (mod) return shellText(mod, lang);
+  if (mod) return shellText(mod, lang, v);
   const g = SHELL_GROUPS[id];
   return g ? (lang === "ar" ? g.ar : g.en) : null;
 }

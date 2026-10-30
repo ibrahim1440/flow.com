@@ -8,11 +8,11 @@ import {
   QUOTE_STATUS_SPECS, LEAD_SOURCE_LABELS,
 } from "../../_components/ui";
 import { Ico } from "@/components/shell/icons";
-import { useD21Title, usePhone, useD21Phone } from "@/components/shell/page-context";
+import { useD21Title, usePhone, useD21Phone, useCreateRequest } from "@/components/shell/page-context";
 import { splitTitle } from "@/components/d21/labels";
 import { ACTIVITY_OUTCOMES } from "@/lib/services/sales/qualification";
 import {
-  currencyLabel, dayCount, dayUnit, daysFromToday, dueText, money2, relativeDays, shortDate, whole,
+  dayCount, dayUnit, daysFromToday, dueText, money2, relativeDays, shortDate, whole,
 } from "@/components/d21/format";
 import { CollectionsPanel, type CollectionRow, type Summary } from "./CollectionsPanel";
 import {
@@ -20,6 +20,14 @@ import {
 } from "./PipelinePanels";
 import { stagePrimaryAction, type StageAction } from "@/lib/services/sales/stage-actions";
 import { parseSampleSkip, type StagePurpose } from "@/lib/services/sales/stages";
+import { SampleDialog } from "../../_components/SampleDialog";
+
+
+/** FOLLOWUPS sales UI bug 4: a product's Arabic name on the Arabic screen (its English name, else its code, otherwise). */
+function skuName(sku: { skuCode: string; name: string | null; nameAr?: string | null } | null | undefined, ar: boolean): string | null {
+  if (!sku) return null;
+  return (ar ? sku.nameAr || sku.name : sku.name) || sku.skuCode;
+}
 
 /**
  * Deal detail — built to the approved frame `crm-deal` (Figma `176:1032` / `177:1168`;
@@ -75,7 +83,7 @@ type Deal = {
     fromStock?: boolean; issuedAt?: string | null;
     /** «للعميل من كل محصول عيّنة واحدة»: a second sample of the product and the manager's decision on it. */
     approval?: "NOT_NEEDED" | "PENDING" | "APPROVED" | "DECLINED"; approvalNote?: string | null;
-    productSku: { id: string; skuCode: string; name: string | null } | null;
+    productSku: { id: string; skuCode: string; name: string | null; nameAr?: string | null } | null;
   }[];
   activities: {
     id: string; type: string; subject: string; body: string | null; outcome: string | null;
@@ -137,7 +145,7 @@ const OUTCOME_LABELS: Record<string, { en: string; ar: string }> = {
 };
 
 const UNIT_LABELS: Record<string, { en: string; ar: string }> = {
-  KG: { en: "kg", ar: "كغ" }, G: { en: "g", ar: "غ" }, PCS: { en: "pcs", ar: "قطعة" },
+  KG: { en: "kg", ar: "كجم" }, G: { en: "g", ar: "غ" }, PCS: { en: "pcs", ar: "قطعة" },
   GRAM: { en: "g", ar: "غ" }, UNIT: { en: "units", ar: "عبوة" },
 };
 
@@ -148,6 +156,8 @@ const ACTIVITY_LABELS: Record<string, { en: string; ar: string }> = {
   NOTE: { en: "Note", ar: "ملاحظة" },
   TASK: { en: "Task", ar: "مهمة" },
   SAMPLE_FOLLOW_UP: { en: "Sample follow-up", ar: "متابعة عينة" },
+  WHATSAPP: { en: "WhatsApp", ar: "واتساب" },
+  EMAIL: { en: "Email", ar: "بريد" },
 };
 
 export default function DealDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -233,6 +243,9 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
     back: "/dashboard/sales/pipeline",
     ownBar: true,
   });
+  // Batch 24 WP-A: «عيّنة» from the customer page lands here with ?new=sample — the existing request form
+  // (one sample per product, the manager's approval for a second) opens on arrival.
+  useCreateRequest("sample", () => setDialog("sample"), !!deal && !!can?.write && deal.outcome === "OPEN");
   useEffect(() => {
     if (!more) return;
     const close = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest("[data-deal-more]")) setMore(false); };
@@ -289,7 +302,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   const L = (x: { ar: string; en: string } | { nameAr: string; nameEn: string }) =>
     "ar" in x ? (ar ? x.ar : x.en) : (ar ? x.nameAr : x.nameEn);
   const open = deal.outcome === "OPEN";
-  const cur = currencyLabel(deal.currency, lang);
+  const cur = (lang === "ar" && deal.currency === "SAR" ? "ريال" : deal.currency);
   const acceptedQuote = deal.quotes.find((q) => q.status === "ACCEPTED");
   const qty = (q: string, unit: string) =>
     `${unit === "KG" ? money2(q) : q} ${UNIT_LABELS[unit] ? pick(UNIT_LABELS, unit, lang) : unit}`;
@@ -438,8 +451,8 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
     if (!s.sentAt) continue;
     entries.push({
       key: `s-${s.id}`, at: s.sentAt, kind: "sample",
-      title: <>{ar ? "أُرسلت عيّنة" : "Sample sent"} · <bdi>{s.productSku?.name ?? s.productSku?.skuCode ?? s.description}</bdi></>,
-      // In a sentence the quantity reads plainly («2 كغ»); the samples table keeps two decimals.
+      title: <>{ar ? "أُرسلت عيّنة" : "Sample sent"} · <bdi>{skuName(s.productSku, ar) ?? s.description}</bdi></>,
+      // In a sentence the quantity reads plainly («2 كجم»); the samples table keeps two decimals.
       detail: <><span className="n">{Number(s.quantity)}</span> {UNIT_LABELS[s.unit] ? pick(UNIT_LABELS, s.unit, lang) : s.unit}</>,
       when: shortDate(s.sentAt, lang),
     });
@@ -551,46 +564,10 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
 
   const notYet = <span style={{ color: "var(--text-muted)" }}>{ar ? "غير متوفر بعد" : "Not available yet"}</span>;
 
-  // ── Sections shared by the desktop and phone layouts ──
-  const samplesBlock = (
+  // The decisions on one sample (approve / decline, mark sent, cancel, record the result) — the table cell on a desktop,
+  // the card's button row on a phone (FOLLOWUPS sales UI bug 6: they were cut off at 390).
+  const sampleButtons = (s: Deal["samples"][number]) => (
     <>
-      {/* ── Samples ── */}
-      <div className="bh">
-        <h2 className="bt">{ar ? "العيّنات" : "Samples"}</h2>
-        {can.write && open && (
-          <button type="button" className="lk" data-testid="add-sample" onClick={() => setDialog("sample")}>
-            <Ico name="plus" small />{ar ? "طلب عيّنة" : "Request sample"}
-          </button>
-        )}
-      </div>
-      {deal.samples.length === 0 ? (
-        <p className="lbl" style={{ fontWeight: 400, margin: "0 0 32px" }}>{ar ? "لا توجد عيّنات." : "No samples."}</p>
-      ) : (
-        <div style={{ overflowX: "auto", marginBottom: 32 }}>
-          <table className="t dense"><tbody>
-            {deal.samples.map((s) => (
-              <tr key={s.id} data-testid={`sample-${s.id}`}>
-                <td style={{ whiteSpace: "normal", minWidth: 160 }}><span className="who">{s.productSku?.name ?? s.productSku?.skuCode ?? s.description}</span>
-                  {s.description && s.productSku && <span className="sm"> · {s.description}</span>}
-                  {/* Which kind it is, said plainly: only a stock sample ever leaves the shelf. */}
-                  <span className="sm" data-testid={`sample-kind-${s.id}`}> · {s.fromStock
-                    ? (ar ? "من المخزون" : "from stock")
-                    : (ar ? "للتسجيل فقط · لا يُصرف من المخزون" : "record only · no stock movement")}</span></td>
-                <td className="num">{qty(s.quantity, s.unit)}</td>
-                <td><span className={`st ${awaitsManager(s) ? "" : SAMPLE_ST[s.status] ?? ""}`} data-testid={`sample-status-${s.id}`}>
-                  {awaitsManager(s) ? pick(SAMPLE_APPROVAL_LABELS, "PENDING", lang) : pick(SAMPLE_LABELS, s.status, lang)}</span></td>
-                <td className="sm" style={{ whiteSpace: "normal", maxWidth: 240 }}>
-                  {s.sentAt ? shortDate(s.sentAt, lang) : ""}
-                  {s.feedbackScore !== null && <> · {ar ? "التقييم" : "score"} {s.feedbackScore}/5</>}
-                  {/* A second sample of the product: the manager's decision, and the reason of a decline. */}
-                  {(s.approval === "APPROVED" || s.approval === "DECLINED") && (
-                    <span data-testid={`sample-approval-${s.id}`}>{s.sentAt || s.feedbackScore !== null ? " · " : ""}{pick(SAMPLE_APPROVAL_LABELS, s.approval, lang)}
-                      {/* A long reason wraps, clamped to two lines (full text on hover), so the action buttons stay in view (I-45). */}
-                      {s.approval === "DECLINED" && s.approvalNote && <>: <bdi data-testid={`sample-approval-note-${s.id}`} title={s.approvalNote}
-                        style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", overflowWrap: "anywhere" }}>{s.approvalNote}</bdi></>}</span>
-                  )}
-                </td>
-                {canSend && <td style={{ textAlign: "end" }}>
                   {can.approveSample && awaitsManager(s) && (
                     <>
                       <button type="button" className="btn sm" data-testid={`approve-sample-${s.id}`} disabled={busy}
@@ -621,7 +598,68 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
                       {ar ? "تسجيل النتيجة" : "Record result"}
                     </button>
                   )}
-                </td>}
+    </>
+  );
+  // ── Sections shared by the desktop and phone layouts ──
+  const samplesBlock = (
+    <>
+      {/* ── Samples ── */}
+      <div className="bh">
+        <h2 className="bt">{ar ? "العيّنات" : "Samples"}</h2>
+        {can.write && open && (
+          <button type="button" className="lk" data-testid="add-sample" onClick={() => setDialog("sample")}>
+            <Ico name="plus" small />{ar ? "طلب عيّنة" : "Request sample"}
+          </button>
+        )}
+      </div>
+      {deal.samples.length === 0 ? (
+        <p className="lbl" style={{ fontWeight: 400, margin: "0 0 32px" }}>{ar ? "لا توجد عيّنات." : "No samples."}</p>
+      ) : phone ? (
+        <ul className="deal-smp-cards" data-testid="sample-cards">
+          {deal.samples.map((s) => (
+            <li key={s.id} data-testid={`sample-${s.id}`}>
+              <div className="deal-smp-top">
+                <b><bdi>{skuName(s.productSku, ar) ?? s.description}</bdi></b>
+                <span className={`st ${awaitsManager(s) ? "" : SAMPLE_ST[s.status] ?? ""}`} data-testid={`sample-status-${s.id}`}>
+                  {awaitsManager(s) ? pick(SAMPLE_APPROVAL_LABELS, "PENDING", lang) : pick(SAMPLE_LABELS, s.status, lang)}</span>
+              </div>
+              <div className="deal-smp-sub">
+                <span>{qty(s.quantity, s.unit)}</span>
+                <span data-testid={`sample-kind-${s.id}`}>{s.fromStock ? (ar ? "من المخزون" : "from stock") : (ar ? "للتسجيل فقط" : "record only")}</span>
+                {s.sentAt ? <span>{shortDate(s.sentAt, lang)}</span> : null}
+                {s.feedbackScore !== null ? <span>{ar ? "التقييم" : "score"} {s.feedbackScore}/5</span> : null}
+              </div>
+              {s.approval === "DECLINED" && s.approvalNote ? <div className="deal-smp-sub"><bdi data-testid={`sample-approval-note-${s.id}`}>{s.approvalNote}</bdi></div> : null}
+              {canSend ? <div className="deal-smp-act">{sampleButtons(s)}</div> : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div style={{ overflowX: "auto", marginBottom: 32 }}>
+          <table className="t dense"><tbody>
+            {deal.samples.map((s) => (
+              <tr key={s.id} data-testid={`sample-${s.id}`}>
+                <td style={{ whiteSpace: "normal", minWidth: 160 }}><span className="who"><bdi>{skuName(s.productSku, ar) ?? s.description}</bdi></span>
+                  {s.description && s.productSku && <span className="sm"> · {s.description}</span>}
+                  {/* Which kind it is, said plainly: only a stock sample ever leaves the shelf. */}
+                  <span className="sm" data-testid={`sample-kind-${s.id}`}> · {s.fromStock
+                    ? (ar ? "من المخزون" : "from stock")
+                    : (ar ? "للتسجيل فقط · لا يُصرف من المخزون" : "record only · no stock movement")}</span></td>
+                <td className="num">{qty(s.quantity, s.unit)}</td>
+                <td><span className={`st ${awaitsManager(s) ? "" : SAMPLE_ST[s.status] ?? ""}`} data-testid={`sample-status-${s.id}`}>
+                  {awaitsManager(s) ? pick(SAMPLE_APPROVAL_LABELS, "PENDING", lang) : pick(SAMPLE_LABELS, s.status, lang)}</span></td>
+                <td className="sm" style={{ whiteSpace: "normal", maxWidth: 240 }}>
+                  {s.sentAt ? shortDate(s.sentAt, lang) : ""}
+                  {s.feedbackScore !== null && <> · {ar ? "التقييم" : "score"} {s.feedbackScore}/5</>}
+                  {/* A second sample of the product: the manager's decision, and the reason of a decline. */}
+                  {(s.approval === "APPROVED" || s.approval === "DECLINED") && (
+                    <span data-testid={`sample-approval-${s.id}`}>{s.sentAt || s.feedbackScore !== null ? " · " : ""}{pick(SAMPLE_APPROVAL_LABELS, s.approval, lang)}
+                      {/* A long reason wraps, clamped to two lines (full text on hover), so the action buttons stay in view (I-45). */}
+                      {s.approval === "DECLINED" && s.approvalNote && <>: <bdi data-testid={`sample-approval-note-${s.id}`} title={s.approvalNote}
+                        style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", overflowWrap: "anywhere" }}>{s.approvalNote}</bdi></>}</span>
+                  )}
+                </td>
+                {canSend && <td style={{ textAlign: "end" }}>{sampleButtons(s)}</td>}
               </tr>
             ))}
           </tbody></table>
@@ -693,9 +731,9 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
             {/* The customer file's figure (release item I-44): the balance owed from receivables once invoiced,
                 else the accepted quotations not yet invoiced or paid — labelled as such, as on the customer file. */}
             {deal.customerBalance?.ar ? (
-              <><dt>{ar ? "الرصيد المستحق" : "Balance due"}</dt><dd data-testid="deal-customer-balance"><span className="n">{whole(deal.customerBalance.ar.outstanding)}</span> {ar ? "ر.س" : "SAR"}</dd></>
+              <><dt>{ar ? "الرصيد المستحق" : "Balance due"}</dt><dd data-testid="deal-customer-balance">{ar ? <><bdi className="n">{whole(deal.customerBalance.ar.outstanding)}</bdi> ريال</> : <>SAR <bdi className="n">{whole(deal.customerBalance.ar.outstanding)}</bdi></>}</dd></>
             ) : deal.customerBalance ? (
-              <><dt>{ar ? "عروض مقبولة لم تُفوتر" : "Accepted, not invoiced"}</dt><dd data-testid="deal-customer-balance"><span className="n">{whole(deal.customerBalance.outstanding)}</span> {ar ? "ر.س" : "SAR"}</dd></>
+              <><dt>{ar ? "عروض مقبولة لم تُفوتر" : "Accepted, not invoiced"}</dt><dd data-testid="deal-customer-balance">{ar ? <><bdi className="n">{whole(deal.customerBalance.outstanding)}</bdi> ريال</> : <>SAR <bdi className="n">{whole(deal.customerBalance.outstanding)}</bdi></>}</dd></>
             ) : (
               <><dt>{ar ? "الرصيد المستحق" : "Balance due"}</dt><dd>{notYet}</dd></>
             )}
@@ -1180,7 +1218,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
                   <th>{ar ? "المراجعة" : "Revision"}</th>
                   <th>{ar ? "الحالة" : "Status"}</th>
                   <th className="num">{ar ? "قبل الضريبة" : "Before VAT"}</th>
-                  <th className="num">{ar ? `الإجمالي · ${currencyLabel(deal.currency, lang)}` : `Total · ${deal.currency}`}</th>
+                  <th className="num">{ar ? `الإجمالي · ${(lang === "ar" && deal.currency === "SAR" ? "ريال" : deal.currency)}` : `Total · ${deal.currency}`}</th>
                   <th>{ar ? "صالح حتى" : "Valid until"}</th>
                 </tr></thead>
                 <tbody>
@@ -1371,147 +1409,6 @@ function ActivityDialog({
   );
 }
 
-/**
- * «طلب عيّنة». The rep's whole job is: pick the product, say how many bags, send the request. A product in units is a
- * STOCK sample — it goes to the dispatch queue as REQUESTED and leaves the shelf only when dispatch issues it, so there
- * is no status to choose. Free text or kilograms / grams stay what they always were: a record-only sample with no
- * stock movement, still allowed (and labelled as such) for the coffee that does not come out of a packed bag.
- */
-function SampleDialog({
-  ar, opportunityId, sampledProductIds, manager, onClose, onDone,
-}: {
-  ar: boolean; opportunityId: string;
-  /** The coffee products this customer already had a sample of («للعميل من كل محصول عيّنة واحدة»). */
-  sampledProductIds: string[];
-  /** A sales manager / admin: a second sample is recorded with their own approval. */
-  manager: boolean;
-  onClose: () => void; onDone: (requested: boolean, replayed: boolean, approval?: string) => void;
-}) {
-  const [skus, setSkus] = useState<{ id: string; skuCode: string; name: string | null; coffee?: { id: string } | null }[]>([]);
-  const [productSkuId, setProductSkuId] = useState("");
-  const [description, setDescription] = useState("");
-  const [quantity, setQuantity] = useState("1");
-  const [unit, setUnit] = useState("UNIT");
-  const [status, setStatus] = useState("PREPARING");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  // One key per opening of the dialog: a double click or a retry after a lost answer is the same request, and the
-  // server answers it with the request it already recorded (`replayed`) instead of a second one.
-  const [requestKey] = useState(() => `smp-${typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`);
-  // A product is always counted in units (the server refuses a product in KG / GRAM); free text keeps any unit.
-  const unitShown = productSkuId ? "UNIT" : unit;
-  // Same rule as the server (sample-rules.ts isStockSample): a product counted in units is issued from stock.
-  const fromStock = !!productSkuId && unitShown === "UNIT";
-  // Owner decision «للعميل من كل محصول عيّنة واحدة»: a stock sample is one unit (the server refuses more).
-  const wholeOk = !fromStock || quantity.trim() === "1";
-  // The same coffee through any of its SKUs counts (ProductSKU.productId): a second one waits for the manager.
-  const productId = skus.find((s) => s.id === productSkuId)?.coffee?.id ?? null;
-  const alreadySampled = fromStock && !!productId && sampledProductIds.includes(productId);
-
-  useEffect(() => {
-    // The catalogue endpoint answers with a bare array of SKUs, already filtered to the
-    // active ones (each with its coffee product, `coffee.id`).
-    api<{ id: string; skuCode: string; name: string | null; coffee?: { id: string } | null }[]>("/api/products").then((r) => {
-      if (r.ok && Array.isArray(r.data)) setSkus(r.data);
-    });
-  }, []);
-
-  return (
-    <Modal
-      title={ar ? "طلب عيّنة" : "Request a sample"}
-      onClose={onClose}
-      testId="sample-dialog"
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose}>{ar ? "إلغاء" : "Cancel"}</Button>
-          <Button
-            disabled={busy || (!productSkuId && description.trim().length < 2) || Number(quantity) <= 0 || !wholeOk}
-            testId="save-sample"
-            onClick={async () => {
-              setBusy(true);
-              setErr("");
-              const res = await api<{ error?: string; errorEn?: string; replayed?: boolean; sample?: { approval?: string } }>("/api/sales/samples", {
-                method: "POST",
-                body: {
-                  opportunityId, productSkuId: productSkuId || null, description, quantity, unit: unitShown,
-                  ...(fromStock ? { requestKey } : { status }),
-                },
-              });
-              setBusy(false);
-              // A replay (200, the request already recorded a moment ago) is a success: the same request, once.
-              if (res.ok) onDone(fromStock, res.data.replayed === true, res.data.sample?.approval);
-              else setErr((ar ? res.data.error : res.data.errorEn ?? res.data.error) ?? "");
-            }}
-          >
-            {alreadySampled && !manager
-              ? (ar ? "إرسال للموافقة" : "Send for approval")
-              : fromStock ? (ar ? "إرسال الطلب" : "Send request") : (ar ? "حفظ" : "Save")}
-          </Button>
-        </>
-      }
-    >
-      {err && <Alert kind="error">{err}</Alert>}
-      {alreadySampled && (
-        <div data-testid="sample-second-warning">
-          <Alert kind="info">
-            {ar
-              ? "سبق إرسال عينة من هذا المحصول لهذا العميل؛ يحتاج طلب عينة ثانية موافقة المدير"
-              : "This customer has already had a sample of this product; a second sample needs the sales manager's approval"}
-            {manager
-              ? (ar ? " — ويُسجَّل طلبك بموافقتك." : " — your request records your own approval.")
-              : (ar ? " — يُرسل طلبك إلى المدير ولا يصل إلى قسم الشحن قبل موافقته." : " — your request goes to the manager and reaches dispatch only once approved.")}
-          </Alert>
-        </div>
-      )}
-      <Field id="smp-sku" label={ar ? "المنتج" : "Product"}>
-        <Select id="smp-sku" value={productSkuId} onChange={setProductSkuId}>
-          <option value="">{ar ? "— وصف حر —" : "— free text —"}</option>
-          {skus.map((s) => (
-            <option key={s.id} value={s.id}>{s.name ?? s.skuCode}</option>
-          ))}
-        </Select>
-      </Field>
-      {!productSkuId && (
-        <Field id="smp-desc" label={ar ? "الوصف" : "Description"} required>
-          <TextInput id="smp-desc" value={description} onChange={setDescription} />
-        </Field>
-      )}
-      <div className="grid grid-cols-2 gap-3">
-        <Field id="smp-qty" label={ar ? "الكمية" : "Quantity"} required
-          error={wholeOk ? undefined : (ar ? "العيّنة وحدة واحدة من كل محصول" : "A sample is one unit of each product")}>
-          <TextInput id="smp-qty" value={quantity} onChange={setQuantity} inputMode={fromStock ? "numeric" : "decimal"} />
-        </Field>
-        <Field id="smp-unit" label={ar ? "الوحدة" : "Unit"}>
-          <Select id="smp-unit" value={unitShown} onChange={setUnit}>
-            <option value="UNIT">{ar ? "عبوة" : "UNIT"}</option>
-            {/* Kilograms / grams are for a free-text (record-only) sample; a product is always requested in bags. */}
-            <option value="KG" disabled={!!productSkuId}>{ar ? "كجم (للتسجيل فقط)" : "KG (record only)"}</option>
-            <option value="GRAM" disabled={!!productSkuId}>{ar ? "غرام (للتسجيل فقط)" : "GRAM (record only)"}</option>
-          </Select>
-        </Field>
-      </div>
-      {!fromStock && (
-        <Field id="smp-status" label={ar ? "الحالة" : "Status"}>
-          <Select id="smp-status" value={status} onChange={setStatus}>
-            <option value="PREPARING">{pick(SAMPLE_LABELS, "PREPARING", ar ? "ar" : "en")}</option>
-            <option value="SENT">{pick(SAMPLE_LABELS, "SENT", ar ? "ar" : "en")}</option>
-          </Select>
-        </Field>
-      )}
-      {/* It matters at the moment a sample is requested: what will (and will not) happen to the stock. */}
-      <p data-ui="field-hint" data-testid="sample-stock-hint">
-        {fromStock
-          ? (ar
-            ? "يصل الطلب إلى قسم الشحن. لا يُخصم شيء من المخزون الآن؛ يُخصم عند صرف العيّنة فقط، وترى حالتها هنا."
-            : "The request goes to dispatch. Nothing is deducted now; the stock leaves only when the sample is issued, and you see its status here.")
-          : (ar
-            ? "عيّنة للتسجيل فقط: لا تُحرّك المخزون. لصرفها من المخزون اختر منتجًا بالعبوة."
-            : "Record-only sample: it does not move stock. To have it issued from stock, pick a product (requested in units).")}
-      </p>
-    </Modal>
-  );
-}
-
 /** «تسجيل النتيجة»: what the customer thought of a sent sample — the existing score (1–5) and notes. */
 function FeedbackDialog({
   ar, sample, busy, onClose, onSubmit,
@@ -1535,7 +1432,7 @@ function FeedbackDialog({
         </>
       }
     >
-      <p data-ui="field-hint"><bdi>{sample.productSku?.name ?? sample.productSku?.skuCode ?? sample.description}</bdi></p>
+      <p data-ui="field-hint"><bdi>{skuName(sample.productSku, ar) ?? sample.description}</bdi></p>
       <Field id="smp-score" label={ar ? "تقييم العميل" : "Customer's score"} required>
         <Select id="smp-score" value={score} onChange={setScore}>
           <option value="">{ar ? "— اختر —" : "— choose —"}</option>

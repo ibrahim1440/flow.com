@@ -136,3 +136,58 @@ button.acc-contact-name:hover { text-decoration: underline }
 .d21 .acc-phone .acc-note { margin: 8px 0 0 }
 .d21 .acc-today { font-family: var(--f-ui); font-size: 22px }
 .d21 .acc-credit-badges { display: inline-flex; margin-inline-start: 12px; vertical-align: middle; font-size: 12px; line-height: 22px; font-weight: 500; }
+
+/* ── Batch 24 WP-A: the rep's customer page ── */
+/* The header action bar: one primary («عرض سعر»), the rest quiet; wraps instead of clipping. */
+.d21 .acc .act.acc-actbar { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; max-width: 640px }
+.d21 .acc .acc-actbar .btn svg { flex: none }
+.d21 .acc .acc-tel { color: inherit; text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px }
+.d21 .acc .acc-tel:hover { color: var(--text-link) }
+/* The facts row: four short answers the rep wants before a call. */
+.d21 .acc-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0 0 24px; padding: 0 }
+.d21 .acc-facts > div { border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px 12px; background: var(--surface); min-width: 0 }
+.d21 .acc-facts dt { font-size: 12px; color: var(--text-muted); margin: 0 0 2px }
+.d21 .acc-facts dd { margin: 0; font-weight: 600; font-size: 14px; color: var(--text-primary); overflow-wrap: anywhere }
+.d21 .acc-facts dd.warn { color: var(--status-warning) }
+.d21 .acc-phone .acc-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 16px }
+/* The phone's sticky bar: 📞 💬 📝 and the primary «عرض». */
+/* The phone's ONE bottom bar on the customer page (council fix round 2, item 5): it replaces the rep's tabs. */
+.d21 .acc-phone .sticky-act.acc-quickbar { display: grid; grid-template-columns: 48px 48px 48px 48px minmax(0, 1fr); gap: 8px; padding-bottom: max(12px, env(safe-area-inset-bottom)) }
+.d21 .acc-phone .acc-quickbar .btn { min-height: 44px; justify-content: center; padding-inline: 8px }
+/* The activity dialog's one-tap chips. */
+.acc-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center }
+.acc-chip { min-height: 36px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border-control); background: var(--surface); color: var(--text-primary); font: inherit; font-size: 13.5px; cursor: pointer }
+.acc-chip:hover { background: var(--surface-hover) }
+.acc-chip.on { background: var(--action-primary); border-color: var(--action-primary); color: var(--text-inverse) }
+.acc-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }
+.acc-chip-select { width: auto !important; min-width: 140px; min-height: 36px }
+/* «على أي صفقة؟» — one tap per deal. */
+.acc-pick { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; min-width: min(420px, 80vw) }
+.acc-pick-row { width: 100%; text-align: start; display: grid; gap: 2px; padding: 12px 14px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--surface); cursor: pointer; font: inherit; color: var(--text-primary) }
+.acc-pick-row:hover, .acc-pick-row:focus-visible { border-color: var(--action-primary); background: var(--surface-hover) }
+.acc-pick-row small { color: var(--text-muted); font-size: 12.5px }
+@media (max-width: 1279.98px) { .d21 .acc-facts { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
+/* FOLLOWUPS sales UI bug 10: long stage names («تجربة وتقييم العينات») wrap inside their own step instead of
+   running into the next one. */
+.d21 .acc-track .acc-step b { white-space: normal; overflow-wrap: anywhere; line-height: 1.35 }
+.d21 .acc-track .track > li { min-width: 0 }
+.d21 .acc-track { max-width: 560px }
+/* Batch 24 integration: the tier pill beside the name, and the contract fact as a fifth fact of the header row. */
+.d21 .acc-tier { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; margin-inline-start: 10px; border-radius: 999px; font-size: 12px; font-weight: 500; vertical-align: middle; background: var(--surface-subtle); color: var(--text-secondary); box-shadow: inset 0 0 0 1px var(--border-subtle) }
+.d21 .acc-tier.is-vip { background: var(--status-warning-tint); color: var(--brand-signature); box-shadow: none; font-weight: 600 }
+.d21 .acc-facts:has(> .contract-fact) { grid-template-columns: repeat(5, minmax(0, 1fr)) }
+@media (max-width: 1279.98px) { .d21 .acc-facts:has(> .contract-fact) { grid-template-columns: repeat(2, minmax(0, 1fr)) } .d21 .acc-facts > .contract-fact { grid-column: 1 / -1 } }
+.d21 .acc-phone .acc-facts:has(> .contract-fact) { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+.d21 .acc-phone .acc-facts > .contract-fact { grid-column: 1 / -1 }
+.d21 .acc-subline .acc-tier { margin-inline: 0 6px }
+/* Files tab on the phone (batch 24 integration): cards like the deal's samples, the validity pill on its own line. */
+.d21 .acc-file-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px }
+.d21 .acc-file-cards > li { border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px; display: grid; gap: 6px; background: var(--surface); min-width: 0 }
+.d21 .acc-file-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px }
+.d21 .acc-file-top a { font-weight: 600; overflow-wrap: anywhere; min-width: 0 }
+.d21 .acc-file-top .acc-muted { flex: none; white-space: nowrap }
+.d21 .acc-file-validity { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px }
+.d21 .acc-file-sub { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; color: var(--text-muted) }
+.d21 .acc-file-cards .acc-file-act { display: flex; flex-wrap: wrap; gap: 8px }
+.d21 .acc-file-cards .acc-file-act .btn { min-height: 40px }
+.d21 .acc-file-cards .acc-file-act { white-space: normal; text-align: start } .d21 .acc-file-cards .acc-file-act > * + * { margin-inline-start: 0 }

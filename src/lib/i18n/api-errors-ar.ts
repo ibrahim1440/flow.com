@@ -4,6 +4,10 @@
  * Keys are the English exactly as sent.
  */
 export const API_ERRORS_AR: Readonly<Record<string, string>> = {
+  // ── «يومي» (batch 24 WP-B) ──
+  "Only a sales manager may open another rep's day.": "فتح يوم مندوب آخر للمدير فقط.",
+  "rep is not an employee id.": "المندوب غير صحيح.",
+  "Only a sales manager may list the reps.": "قائمة المندوبين للمدير فقط.",
   // ── Sales CRM optimization (29 Oct 2026) ──
   "Only a sales manager, a commission manager or the administrator changes the account owner.": "تغيير المسؤول عن الحساب لمدير المبيعات أو مدير العمولات أو المدير فقط.",
   "Only credit control (customers › sales_hold) or the administrator changes the credit limit, terms or price list.": "تغيير حد الائتمان أو شروط الدفع أو قائمة الأسعار لمسؤول الائتمان أو المدير فقط.",

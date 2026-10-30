@@ -79,7 +79,7 @@ export async function GET(_request: Request, { params }: Params) {
             fromStock: true, issuedAt: true,
             // A second sample of a product for this customer and its manager's decision (20261205090000_sample_approval).
             approvalRequired: true, approvedAt: true, declinedAt: true, approvalNote: true,
-            productSku: { select: { id: true, skuCode: true, name: true } },
+            productSku: { select: { id: true, skuCode: true, name: true, nameAr: true } },
           },
         },
         activities: {

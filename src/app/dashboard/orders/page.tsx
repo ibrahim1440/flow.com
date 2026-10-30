@@ -168,7 +168,9 @@ export default function OrdersPage() {
   };
   const [showForm, setShowForm] = useState(false);
   // «جديد» from the shell (A-3): `?new=1` opens the same form as «طلب جديد».
-  useCreateRequest("order", () => setShowForm(true), canCreate);
+  // Batch 24 WP-A: «+ جديد › طلب» from a customer page carries `customerId`, so the form opens on that customer.
+  const askedCustomer = params.get("customerId");
+  useCreateRequest("order", () => { setShowForm(true); if (askedCustomer) setForm((f) => ({ ...f, customerId: askedCustomer })); }, canCreate);
   // In-flight guard for the create-order write, so the button cannot be pressed twice.
   //
   // Two flags on purpose. The state drives the disabled attribute; the ref is what

@@ -5,7 +5,7 @@ import { handlePrismaError } from "@/lib/api-error";
 import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
 import { customerVisibilityWhere } from "@/lib/services/sales/scope";
 
-export async function GET() {
+export async function GET(request?: Request) {
   const { user, error } = await requireAnyModule("customers", "orders");
   if (error) return error;
 
@@ -17,7 +17,11 @@ export async function GET() {
     },
   };
   // A scoped sales rep lists their own book only (services/sales/scope.ts); everyone else as before.
-  const where = customerVisibilityWhere(user);
+  // `?owner=me` («عملائي», batch 24): only narrows what the viewer may already see to the customers whose account
+  // owner they are (`accountOwnerId = me`, the batch's one definition, as Ctrl K) — it can never widen anything.
+  const mine = request ? new URL(request.url).searchParams.get("owner") === "me" : false;
+  const visible = customerVisibilityWhere(user);
+  const where = mine ? { AND: [visible, { accountOwnerId: user.id }] } : visible;
   // F4 / review F-1: orders:view alone (production, dispatch) lists customers by name for the
   // order screens; the contact record (phone, email, address, opt-out) is the customers module's.
   const customers = canSeeCustomerContact(user.permissions)

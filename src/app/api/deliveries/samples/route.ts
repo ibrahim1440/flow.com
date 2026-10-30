@@ -32,7 +32,7 @@ export async function GET() {
         units: Number(r.quantity),
         description: r.description,
         requestedAt: r.createdAt,
-        sku: r.productSku ? { id: r.productSku.id, skuCode: r.productSku.skuCode, name: r.productSku.name, pack: packSizeLabel(r.productSku.weightGrams) } : null,
+        sku: r.productSku ? { id: r.productSku.id, skuCode: r.productSku.skuCode, name: r.productSku.name, nameAr: r.productSku.nameAr, pack: packSizeLabel(r.productSku.weightGrams) } : null,
         customer: r.opportunity.customer ? { name: r.opportunity.customer.name, nameAr: r.opportunity.customer.nameAr } : null,
         rep: r.opportunity.owner?.name ?? null,
         freeUnits: r.productSku ? free.get(r.productSku.id)?.unitsFree ?? 0 : 0,

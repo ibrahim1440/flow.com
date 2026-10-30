@@ -9,6 +9,7 @@ import { PerfNotice, PerfLoading, PerfNote } from "../_components/perf";
 import { usePhone, useD21Phone } from "@/components/shell/page-context";
 import { SettingsNav } from "../../_components/tools-ui";
 import { DISCOUNT_APPROVAL_THRESHOLD, DISCOUNT_MAX } from "@/lib/services/sales/discount-limits";
+import { TierSettings } from "./TierSettings";
 
 /**
  * Pipeline configuration — Direction 2.1, GX A-P08 «المبيعات» settings (`1229:114164`, EN
@@ -529,6 +530,10 @@ export default function SalesSettingsPage() {
           </p>
         </div>
       </div>
+
+      <div className="hr" style={{ margin: "28px 0" }} />
+      {/* batch 24 WP-B: the thresholds of «يومي» (tiers, growth, contact days). */}
+      <TierSettings />
 
       {(adding || editing) && (
         <StageDialog

@@ -3,6 +3,7 @@ import { cronAuthorized } from "@/lib/cron/auth";
 import { runExpiryCheck } from "@/lib/hr/services/document-expiry";
 import { deliverPendingEmails } from "@/lib/notifications/deliver";
 import { invoiceQueueDigest } from "@/lib/services/invoicing/requests";
+import { prisma } from "@/lib/db";
 
 /**
  * The daily document-expiry check (feat/hr-expiry-email), called by Vercel Cron once a day at 03:00 UTC
@@ -22,6 +23,7 @@ export async function GET(request: Request) {
     // «طلبات الفواتير» (BATCH 22 WP-C): the daily digest of overdue tax invoice requests rides this daily notification
     // run (no new cron). Its failure never fails the HR check.
     const invoiceQueue = await invoiceQueueDigest().catch((e: unknown) => { console.error("[invoice-queue] digest failed:", (e as Error)?.name ?? "error"); return null; });
+    // «صلاحية العقد» has its own daily job since batch 24's council fix round 1: GET /api/cron/contract-notices.
     const emails = await deliverPendingEmails({ limit: 200 });
     return NextResponse.json({ ok: true, ...report, invoiceQueue, emails: emails.length });
   } catch (e) {

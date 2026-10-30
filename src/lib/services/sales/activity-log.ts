@@ -20,7 +20,8 @@ import { parseQualificationInput } from "./needs";
 
 type Tx = PrismaNS.TransactionClient;
 
-export const ACTIVITY_TYPES = ["CALL", "VISIT", "MEETING", "NOTE", "TASK", "SAMPLE_FOLLOW_UP"];
+// WHATSAPP «واتساب» and EMAIL «بريد»: 20261206090000_sales_myday (recorded, never sent).
+export const ACTIVITY_TYPES = ["CALL", "VISIT", "MEETING", "NOTE", "TASK", "SAMPLE_FOLLOW_UP", "WHATSAPP", "EMAIL"];
 
 export type ActivityInput = {
   type?: unknown; subject?: unknown; body?: unknown; outcome?: unknown; dueAt?: unknown; completed?: unknown;

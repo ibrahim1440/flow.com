@@ -71,7 +71,7 @@ const SOURCES = ["WALK_IN", "REFERRAL", "PHONE", "SOCIAL", "EXHIBITION", "WEBSIT
 const SOURCE_LABELS = LEAD_SOURCE_LABELS;
 
 /** The activity types a follow-up on a lead can be. TASK is reserved for scheduling. */
-const LOG_TYPES = ["CALL", "VISIT", "MEETING", "NOTE"];
+const LOG_TYPES = ["CALL", "WHATSAPP", "VISIT", "MEETING", "EMAIL", "NOTE"];
 /**
  * What happened, in Arabic, in the order a salesperson thinks about it: the attempts that
  * went nowhere, the ones that landed, and then the two endings.
@@ -96,6 +96,8 @@ const TYPE_LABELS: Record<string, { en: string; ar: string }> = {
   NOTE: { en: "Note", ar: "ملاحظة" },
   TASK: { en: "Scheduled follow-up", ar: "متابعة مجدولة" },
   SAMPLE_FOLLOW_UP: { en: "Sample follow-up", ar: "متابعة عيّنة" },
+  WHATSAPP: { en: "WhatsApp", ar: "واتساب" },
+  EMAIL: { en: "Email", ar: "بريد" },
 };
 
 export default function LeadDetailPage() {

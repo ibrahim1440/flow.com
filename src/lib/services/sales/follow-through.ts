@@ -19,7 +19,8 @@ import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 
 type Tx = PrismaNS.TransactionClient;
 
-export const CONTACT_TYPES = ["CALL", "VISIT", "MEETING"] as const;
+// A WhatsApp conversation or an email is a contact too (20261206090000_sales_myday).
+export const CONTACT_TYPES = ["CALL", "VISIT", "MEETING", "WHATSAPP", "EMAIL"] as const;
 /** The planned-contact types a recorded result fulfils (rule 2). */
 const FULFILLABLE = ["CALL", "VISIT", "MEETING", "TASK"];
 /** WorkTask statuses that still promise something (lib/workspace/rules.ts OPEN_STATUSES, minus review). */

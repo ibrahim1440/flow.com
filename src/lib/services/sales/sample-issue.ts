@@ -285,7 +285,7 @@ export async function pendingSamples(db: typeof prisma = prisma) {
     take: 200,
     select: {
       id: true, status: true, quantity: true, description: true, createdAt: true,
-      productSku: { select: { id: true, skuCode: true, name: true, weightGrams: true } },
+      productSku: { select: { id: true, skuCode: true, name: true, nameAr: true, weightGrams: true } },
       opportunity: { select: { customer: { select: { name: true, nameAr: true } }, owner: { select: { name: true } } } },
     },
   });

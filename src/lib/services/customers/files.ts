@@ -109,6 +109,8 @@ export function customerFileHeaders(f: { fileName: string; mimeType: string; siz
 export const CUSTOMER_FILE_SELECT = {
   id: true, category: true, title: true, fileName: true, mimeType: true, sizeBytes: true, sha256: true, createdAt: true,
   uploadedBy: { select: { id: true, name: true } },
+  // «صلاحية العقد» (20261206100000_customer_contract_validity): contracts and price agreements only.
+  validFrom: true, validUntil: true, renewalNoticeDays: true,
 } as const;
 
 /** Where the bytes of a new upload may go, and up to what size (the route checks it first). */

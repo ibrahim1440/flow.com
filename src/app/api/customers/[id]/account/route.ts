@@ -7,16 +7,20 @@ import { seesAllSales, collectionWhere, managesNewClientExclusion, NOT_FOUND_MES
 import {
   Decimal, acceptedDocumentPerDeal, creditPosition, monthlyQuantities, orderRhythm, outstandingBalance,
   salesLast12Months, statementOfAccount, usualItems, type OrderRow,
+  monthlyKg,
 } from "@/lib/services/customers/aggregates";
 import { deliveryLotsFor } from "@/lib/services/delivery-lots";
 import { orderPipelines } from "@/lib/services/orders/pipeline";
 import { CUSTOMER_FILE_SELECT, uploadLimit } from "@/lib/services/customers/files";
+import { mayEditValidity } from "@/lib/services/customers/contracts";
+import { DEFAULT_RENEWAL_NOTICE_DAYS } from "@/lib/services/customers/contract-rules";
 import { directUploadOffered } from "@/lib/services/customers/direct-upload";
 import { creditLog, creditView } from "@/lib/services/customers/credit-db";
 import { customerInScope } from "@/lib/services/sales/customer-access";
 import { mayChangeAccountOwner, mayChangeCreditTerms } from "@/lib/services/customers/account-guard";
 import { canViewInvoices } from "@/lib/services/invoicing/access";
 import { arBalanceOwed } from "@/lib/services/customers/balance";
+import { tiersForCustomers } from "@/lib/services/sales/my-day/tier";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -90,7 +94,7 @@ export async function GET(_request: Request, { params }: Params) {
                 id: true, quantityKg: true, quantityUnits: true, beanTypeName: true,
                 // For the orders board's stage (services/orders/pipeline.ts), shown in the orders tab.
                 deliveredUnits: true, deliveredQty: true, productId: true,
-                productSku: { select: { name: true, skuCode: true, productId: true, weightGrams: true } },
+                productSku: { select: { name: true, nameAr: true, skuCode: true, productId: true, weightGrams: true, product: { select: { productNameEn: true, productNameAr: true } } } },
                 product: { select: { productNameEn: true, productNameAr: true } },
               },
             },
@@ -100,7 +104,16 @@ export async function GET(_request: Request, { params }: Params) {
       : null;
     const asRows: OrderRow[] = (orderRows ?? []).map((o) => ({
       id: o.id, orderNumber: o.orderNumber, createdAt: o.createdAt, status: o.status,
-      items: o.items.map((i) => ({ quantityKg: i.quantityKg, name: i.productSku?.name ?? i.product?.productNameAr ?? i.product?.productNameEn ?? i.beanTypeName })),
+      // «الأصناف المعتادة» names the COFFEE (the product), in the screen's language — as the deal page does (council fix
+      // round 2, item 4): the English name, and its Arabic one for the Arabic screen; the typed name when neither exists.
+      items: o.items.map((i) => {
+        const p = i.product ?? i.productSku?.product ?? null;
+        return {
+          quantityKg: i.quantityKg,
+          name: p?.productNameEn || i.productSku?.name || p?.productNameAr || i.beanTypeName,
+          nameAr: p?.productNameAr || i.productSku?.nameAr || null,
+        };
+      }),
     }));
 
     // ── Sales (sales module, owner-scoped) ─────────────────────────────────────────────
@@ -139,7 +152,7 @@ export async function GET(_request: Request, { params }: Params) {
           select: {
             id: true, description: true, quantity: true, unit: true, status: true, sentAt: true,
             feedbackScore: true, createdAt: true,
-            productSku: { select: { name: true, skuCode: true } },
+            productSku: { select: { name: true, nameAr: true, skuCode: true } },
             opportunity: { select: { id: true, title: true } },
           },
         })
@@ -304,7 +317,7 @@ export async function GET(_request: Request, { params }: Params) {
       timeline.push({ key: `a-${a.id}`, at: a.completedAt ?? a.createdAt, kind: "activity", activity: a });
     }
     for (const s of samples ?? []) {
-      if (s.sentAt) timeline.push({ key: `s-${s.id}`, at: s.sentAt, kind: "sample", sample: { id: s.id, name: s.productSku?.name ?? s.productSku?.skuCode ?? s.description, quantity: s.quantity.toString(), unit: s.unit, deal: s.opportunity } });
+      if (s.sentAt) timeline.push({ key: `s-${s.id}`, at: s.sentAt, kind: "sample", sample: { id: s.id, name: s.productSku?.name ?? s.productSku?.skuCode ?? s.description, nameAr: s.productSku?.nameAr ?? null, quantity: s.quantity.toString(), unit: s.unit, deal: s.opportunity } });
     }
     const stageMoves = (deals ?? []).flatMap((d) => d.stageEvents.filter((e) => e.fromStageId && e.toStageId).map((e) => ({ ...e, used: false })));
     for (const q of quotes ?? []) {
@@ -365,11 +378,17 @@ export async function GET(_request: Request, { params }: Params) {
       customer: { ...customer, creditLimit: customer.creditLimit?.toFixed(2) ?? null },
       source: source ? { leadId: source.leadId, convertedAt: source.convertedAt, source: source.lead.source, sourceNote: source.lead.sourceNote } : null,
       sections: { sales, orders, scope: sales ? (all ? "all" : "own") : null, files: true },
+      // The derived tier within the account owner's book («VIP» / «عادي» / «صغير», WP-B «يومي»); sales viewers only.
+      // Only to the account owner or a team viewer: a rep who reaches a colleague's customer (through a deal or an
+      // order) does not read where it ranks in the colleague's book (council fix round 1, seat 6).
+      tier: sales && (all || customer.accountOwner?.id === user.id) ? ((await tiersForCustomers(prisma, [id], now)).get(id) ?? null) : null,
       metrics: {
         sales12m: salesFigure,
         balance,
         lastOrder: rhythm?.lastOrder ?? null,
         cadenceDays: rhythm?.cadenceDays ?? null,
+        // THE monthly kilograms (last 90 days ÷ 3) — the same figure as the tier and «يومي» (aggregates.monthlyKg).
+        kgPerMonth: orders ? monthlyKg(asRows, now) : null,
         monthly: orders ? monthlyQuantities(asRows, now) : null,
         usualItems: orders ? usualItems(asRows, now) : null,
         unpricedOrders: orders && orderRows ? orderRows.filter((o) => o.opportunityLinks.length === 0).length : null,
@@ -390,6 +409,8 @@ export async function GET(_request: Request, { params }: Params) {
         : null,
       // 20 MB with the private Blob store, 5 MB in the database (services/customers/file-store.ts).
       fileLimits: { maxBytes: uploadLimit().maxBytes, direct: directUploadOffered() },
+      // The company's contract notice period (days before the end date; the file's own value wins).
+      contractNoticeDays: (await prisma.systemConfig.findUnique({ where: { id: "singleton" }, select: { contractRenewalNoticeDays: true } }))?.contractRenewalNoticeDays ?? DEFAULT_RENEWAL_NOTICE_DAYS,
       openDeal: primary ? {
         ...primary, amount: primary.amount.toFixed(2), stageEvents: primary.stageEvents,
         nextStep: nextStep && nextStep.opportunity?.id === primary.id ? nextStep : null,
@@ -418,6 +439,8 @@ export async function GET(_request: Request, { params }: Params) {
         // The file routes' own rule (direct-upload.ts editableCustomer): the customer is in the viewer's book,
         // which this route has already established for a scoped rep.
         manageFiles: canEdit(p, "customers"),
+        // «صلاحية العقد» (batch 24 WP-C): the contract dates — the account owner or a sales manager (contracts.ts).
+        editFileDates: mayEditValidity(user, { accountOwnerId: customer.accountOwner?.id ?? null }),
         logActivity: hasSubPrivilege(p, "sales", "lead_write"),
         quote: hasSubPrivilege(p, "sales", "quote_write"),
         createDeal: hasSubPrivilege(p, "sales", "lead_convert"),

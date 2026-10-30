@@ -1,4 +1,4 @@
-import { hasModuleAccess, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
+import { canEdit, hasModuleAccess, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 import type { Viewer } from "@/lib/nav/registry";
 
 /**
@@ -24,6 +24,13 @@ export type CreateAction = {
   /** The owning page with `?new=<kind>`. */
   href: string;
   permitted: (v: Viewer) => boolean;
+  /** Its keyboard letter in the batch-24 sales menu (N, Q, S, O, C, L), shown beside it and pressed anywhere. */
+  key?: string;
+  /**
+   * The action is done ON a customer (batch 24): on a customer page the shell opens it there
+   * (`/dashboard/customers/<id>?new=<kind>`); elsewhere it first asks «لأي عميل؟».
+   */
+  onCustomer?: "activity" | "quote" | "sample";
 };
 
 const p = (v: Viewer): Permissions => v.permissions;
@@ -57,4 +64,55 @@ export const CREATE_ACTIONS: Record<string, CreateAction[]> = {
 export function createActions(viewer: Viewer, moduleId: string | undefined): CreateAction[] {
   if (!moduleId) return [];
   return (CREATE_ACTIONS[moduleId] ?? []).filter((a) => a.permitted(viewer));
+}
+
+// ── Batch 24 WP-A: «+ جديد» everywhere for a sales user ──────────────────────────────────────
+// The rep's menu (BATCH24-DESIGN §WP-A 2, mockup «زر + جديد»): نشاط N · عرض سعر Q · طلب عيّنة S · طلب O ·
+// عميل جديد C · عميل محتمل L — on EVERY page, not only inside Sales. Each item is offered only when the
+// API it ends at would accept it (the same checks as the customer page's buttons and the pages' own
+// create buttons): nothing new is granted.
+const onCustomer = (v: Viewer) => hasModuleAccess(p(v), "customers");
+export const SALES_MENU: CreateAction[] = [
+  { id: "sales.activity.new", key: "N", onCustomer: "activity", labelAr: "نشاط (اتصال، زيارة، واتساب)", labelEn: "Activity (call, visit, WhatsApp)", href: "/dashboard/customers",
+    permitted: (v) => hasSubPrivilege(p(v), "sales", "lead_write") && onCustomer(v) },
+  { id: "sales.quote.new", key: "Q", onCustomer: "quote", labelAr: "عرض سعر", labelEn: "Quotation", href: "/dashboard/sales/quotes/new",
+    permitted: (v) => hasSubPrivilege(p(v), "sales", "quote_write") },
+  { id: "sales.sample.new", key: "S", onCustomer: "sample", labelAr: "طلب عيّنة", labelEn: "Sample request", href: "/dashboard/customers",
+    permitted: (v) => hasSubPrivilege(p(v), "sales", "lead_write") && onCustomer(v) },
+  { ...ORDER, key: "O" },
+  { id: "customers.customer.new", key: "C", labelAr: "عميل جديد", labelEn: "New customer", href: "/dashboard/customers?new=customer",
+    permitted: (v) => canEdit(p(v), "customers") },
+  { id: "sales.lead.new", key: "L", labelAr: "عميل محتمل", labelEn: "Lead", href: "/dashboard/sales/leads?new=1",
+    permitted: (v) => hasSubPrivilege(p(v), "sales", "lead_write") },
+];
+
+/** «sales permissions»: the sales module with at least one way to create sales work. */
+export function hasSalesMenu(viewer: Viewer): boolean {
+  return hasModuleAccess(p(viewer), "sales") && SALES_MENU.some((a) => a.id !== ORDER.id && a.permitted(viewer));
+}
+
+/**
+ * What «+ جديد» offers: for a sales user the sales menu (its permitted items) everywhere, followed by the
+ * current module's own actions it does not already hold; for anybody else the module's actions, as before.
+ * A quotation without the customers module keeps the old path (the deal picker of the quotation page).
+ */
+export function shellCreates(viewer: Viewer, moduleId: string | undefined): CreateAction[] {
+  const own = createActions(viewer, moduleId);
+  if (!hasSalesMenu(viewer)) return own;
+  const menu = SALES_MENU.filter((a) => a.permitted(viewer)).map((a) => (a.onCustomer && !onCustomer(viewer) ? { ...a, onCustomer: undefined } : a));
+  const ids = new Set(menu.map((a) => a.id));
+  return [...menu, ...own.filter((a) => !ids.has(a.id))];
+}
+
+/** The `?new=` address of an on-customer action on that customer's page (and an order with its customer). */
+export function customerActionHref(a: CreateAction, customerId: string): string {
+  if (a.onCustomer) return `/dashboard/customers/${encodeURIComponent(customerId)}?new=${a.onCustomer}`;
+  if (a.id === ORDER.id) return `${ORDER.href}&customerId=${encodeURIComponent(customerId)}`;
+  return a.href;
+}
+
+/** `/dashboard/customers/<id>` (and only that page) → the id. */
+export function customerOfPath(pathname: string): string | null {
+  const m = /^\/dashboard\/customers\/([^/?#]+)\/?$/.exec(pathname);
+  return m ? decodeURIComponent(m[1]) : null;
 }

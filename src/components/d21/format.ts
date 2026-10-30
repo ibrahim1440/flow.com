@@ -31,6 +31,20 @@ export function shortDate(v: string | Date | null | undefined, lang: "ar" | "en"
   return lang === "ar" ? `${d.getDate()} ${AR_MONTHS[d.getMonth()]}` : `${d.getDate()} ${EN_MONTHS[d.getMonth()]}`;
 }
 
+/** «10 أكتوبر 2026» — ONE date format for the batch-24 sales screens (council fix round 1, P0-11): day, month name, year. */
+export function longDate(v: string | Date | null | undefined, lang: "ar" | "en"): string {
+  const d = valid(v);
+  if (!d) return "—";
+  return lang === "ar" ? `${d.getDate()} ${AR_MONTHS[d.getMonth()]} ${d.getFullYear()}` : `${d.getDate()} ${EN_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+/** A quantity with no «.00»: up to 3 decimals, trailing zeros dropped, thousands separated (44 → «44», 1.5 → «1.5»). */
+export function qtyText(v: number | string | null | undefined): string {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return n.toLocaleString("en-US", { maximumFractionDigits: 3 });
+}
+
 /** «اليوم 14:00», «أمس 09:10», otherwise «الأحد 4 أكتوبر 12:00». */
 export function dueText(v: string | Date | null | undefined, lang: "ar" | "en"): string {
   const d = valid(v);

@@ -91,10 +91,23 @@ export async function requestStockSample(
 ): Promise<RequestOutcome> {
   const one = sampleOneUnitRefusal(input.units);
   if (one) throw one;
+  return db.$transaction((tx) => requestStockSampleIn(tx, input, actor), TX_OPTS);
+}
+
+/**
+ * The same request inside the caller's transaction — the customer page's «عيّنة» opens the deal (quick-deal) and
+ * records the request as ONE write (council fix round 2, item 3), so a cancelled dialog leaves nothing behind.
+ */
+export async function requestStockSampleIn(
+  tx: Prisma.TransactionClient,
+  input: { opportunityId: string; productSkuId: string; units: number; description: string | null; approvalNote?: string | null },
+  actor: SampleActor,
+): Promise<RequestOutcome> {
+  const one = sampleOneUnitRefusal(input.units);
+  if (one) throw one;
   const manager = approvesSamples(actor.permissions);
   const quantity = new Prisma.Decimal(input.units);
-
-  return db.$transaction(async (tx) => {
+  {
     // ── 1. The deal, locked and re-read ──
     const rows = await tx.$queryRaw<{ id: string; outcome: string; ownerId: string | null; customerId: string | null }[]>`
       SELECT "id", "outcome"::text AS "outcome", "ownerId", "customerId" FROM "Opportunity" WHERE "id" = ${input.opportunityId} FOR UPDATE`;
@@ -151,7 +164,7 @@ export async function requestStockSample(
       select: SAMPLE_SELECT,
     });
     return { replayed: false, sample: withState(created), priorSamples: prior };
-  }, TX_OPTS);
+  }
 }
 
 type LockedForDecision = {

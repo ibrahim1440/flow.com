@@ -7,6 +7,7 @@
 import Link from "next/link";
 import { OpsLoading } from "@/components/ops/ui";
 import { InvShell, KIND, Msg, money, useApi, useLang } from "./inv";
+import { usePhone } from "@/components/shell/page-context";
 
 type Row = {
   id: string; kind: string; family: string; customerName: string; orderId: string | null; orderNumber: number | null; createdByName: string | null; requestedByName: string | null;
@@ -17,12 +18,31 @@ export function RequestQueue() {
   const { L } = useLang();
   const q = useApi<{ items: Row[]; count: number }>("/api/sales/invoices/requests");
   const rows = q.data?.items ?? [];
+  // FOLLOWUPS sales UI bug 7: at 390 the seven columns squeezed into one-word lines — a phone reads one card per request.
+  const phone = usePhone();
   return (
     <InvShell title={L("طلبات الفواتير", "Invoice requests")} testId="invoice-requests"
       meta={<span className="acct-meta"><span>{L(`${rows.length} طلب`, `${rows.length} request(s)`)}</span><span aria-hidden="true">·</span><span>{L("الأقدم أولًا", "Oldest first")}</span><span aria-hidden="true">·</span><span>{L("أيام العمل بتوقيت الرياض", "Riyadh business days")}</span></span>}>
       <Msg error={q.error} />
       {!q.data && !q.error ? <OpsLoading /> : rows.length === 0 && !q.error ? (
         <p className="acct-hint" data-testid="requests-empty">{L("لا توجد طلبات فواتير بانتظارك.", "No invoice requests are waiting for you.")}</p>
+      ) : rows.length && phone ? (
+        <ul className="inv-req-cards" data-testid="requests-cards">
+          {rows.map((r) => (
+            <li key={r.id} data-testid={`request-row-${r.id}`} data-tone={r.tone}>
+              <Link href={`/dashboard/sales/invoices/${r.id}`} className="inv-req-card" data-testid="request-open">
+                <span className="inv-req-top"><b><bdi>{r.customerName}</bdi></b><span className="hr-num inv-req-amt"><bdi>{money(r.grandTotal)}</bdi> {L("ر.س", "SAR")}</span></span>
+                <span className="inv-sub">{L(KIND[r.kind]?.[r.family]?.[0] ?? r.kind, KIND[r.kind]?.[r.family]?.[1] ?? r.kind)}{r.orderNumber ? <> · {L("من الطلب", "from order")} <bdi dir="ltr" className="hr-num">#{r.orderNumber}</bdi></> : null}</span>
+                {r.requestNote ? <span className="inv-sub"><bdi>{r.requestNote}</bdi></span> : null}
+                <span className="inv-req-meta">
+                  <span className={`inv-age is-${r.tone}`} data-testid="request-age">{L(`${r.ageBusinessDays} يوم عمل`, `${r.ageBusinessDays} business day(s)`)}{r.tone === "red" ? L(" · متأخر", " · late") : r.tone === "amber" ? L(" · انتبه", " · due soon") : ""}</span>
+                  <span className={r.daysToDeadline <= 5 ? "inv-age is-red" : "inv-age"} data-testid="request-deadline">{r.pastDeadline ? L("تجاوز الموعد النظامي", "Past the legal limit") : L(`الموعد النظامي بعد ${r.daysToDeadline} يومًا`, `Legal limit in ${r.daysToDeadline} day(s)`)}</span>
+                </span>
+                <span className="inv-sub">{L("أنشأه", "Prepared by")} <bdi>{r.createdByName ?? "—"}</bdi></span>
+              </Link>
+            </li>
+          ))}
+        </ul>
       ) : rows.length ? (
         <div className="hr-tablewrap">
           <table className="hr-table is-dense" data-testid="requests-table">

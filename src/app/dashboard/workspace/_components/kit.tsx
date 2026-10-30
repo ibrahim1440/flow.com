@@ -84,7 +84,7 @@ export type QuoteDue = { id: string; quoteNumber: string; dueAt: string; validUn
 
 export const TYPE_LABEL: Record<string, [string, string]> = {
   TASK: ["مهمة", "Task"], FOLLOW_UP: ["متابعة عميل", "Follow-up"], QUOTE: ["عرض سعر", "Quotation"], APPROVAL: ["اعتماد", "Approval"], APPOINTMENT: ["موعد", "Appointment"], CRM: ["متابعة", "Follow-up"],
-  LEAVE: ["إجازة", "Leave"], ADVANCE: ["سلفة", "Advance"], CORRECTION: ["تصحيح", "Correction"], DISCOUNT: ["خصم", "Discount"], FINANCE: ["مالية", "Finance"], MARKETING: ["تسويق", "Marketing"],
+  LEAVE: ["إجازة", "Leave"], ADVANCE: ["سلفة", "Advance"], CORRECTION: ["تصحيح", "Correction"], DISCOUNT: ["خصم", "Discount"], SAMPLE: ["عيّنة", "Sample"], FINANCE: ["مالية", "Finance"], MARKETING: ["تسويق", "Marketing"],
   MEETING: ["اجتماع", "Meeting"], VISIT: ["زيارة", "Visit"], CALL: ["مكالمة", "Call"], OTHER: ["موعد", "Appointment"],
 };
 // The six a rep reaches for first, then the rest (services/sales/qualification.ts ACTIVITY_OUTCOMES).

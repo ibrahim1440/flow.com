@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "@/app/dashboard/user-context";
+import { isSalesPersona } from "@/lib/workspace/landing";
 import { PIN_LENGTH } from "@/lib/pin-policy";
 import { PASSWORD_MAX, PASSWORD_MIN } from "@/lib/password-policy";
 import { MfaEnrollment } from "@/components/auth/MfaEnrollment";
@@ -91,6 +92,17 @@ export default function ProfilePage() {
   const [preferredLanguage, setPreferredLanguage] = useState<"ar" | "en">(ar ? "ar" : "en");
   // Owner language decision 3: the language automation WhatsApp messages reach me in.
   const [waLang, setWaLang] = useState<"system" | "ar" | "en">("system");
+  // «صفحتي الرئيسية» (council fix round 1, P0-15): a sales persona picks «يومي» or the old home; saved at once.
+  const salesHome = !!user && isSalesPersona({ role: user.role, permissions: user.permissions });
+  const [classic, setClassic] = useState<boolean>(!!(user as { classicHome?: boolean } | null)?.classicHome);
+  const homeLocked = !!(user as { homeSetByAdmin?: boolean } | null)?.homeSetByAdmin;
+  const [homeMsg, setHomeMsg] = useState("");
+  async function pickHome(next: "my-day" | "classic") {
+    const r = await fetch("/api/profile", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ home: next }) });
+    if (r.ok) { setClassic(next === "classic"); setHomeMsg(L("حُفظت. تطبَّق من الصفحة القادمة.", "Saved. It applies from the next page.")); }
+    else if (r.status === 409) setHomeMsg(L("حددها المدير.", "Set by the administrator."));
+    else setHomeMsg(L("تعذّر الحفظ.", "Could not save."));
+  }
   const prefsLoaded = useRef(false);
   const [infoSaving, setInfoSaving] = useState(false);
   const [infoMsg, setInfoMsg] = useState<Msg>(null);
@@ -258,7 +270,10 @@ export default function ProfilePage() {
 
   const others = useMemo(() => (data?.sessions ?? []).filter((s) => !s.current).length, [data]);
   if (!user) return null;
-  const role = (ar ? ROLE_LABELS_AR[user.role] : ROLE_LABELS[user.role]) ?? user.role;
+  // A custom role reads as what the person does, as in the sidebar (council fix round 3): «المبيعات» / «موظف».
+  const role = user.role === "custom"
+    ? (isSalesPersona({ role: user.role, permissions: user.permissions }) ? L("المبيعات", "Sales") : L("موظف", "Staff"))
+    : (ar ? ROLE_LABELS_AR[user.role] : ROLE_LABELS[user.role]) ?? user.role;
   const initials = user.name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("");
   const msg = (m: Msg) => (m ? <Notice tone={m.ok ? "success" : "danger"}><span role={m.ok ? "status" : undefined}>{m.text}</span></Notice> : null);
   // Arabic number agreement: 1 «جلسة واحدة», 2 «جلستان», 3–10 «3 جلسات», 11+ «11 جلسة».
@@ -408,6 +423,23 @@ export default function ProfilePage() {
                   </span>
                   <span className="hr-caption">{L("لرسائل الأتمتة التي تصلك على واتساب", "For the automation messages you receive on WhatsApp")}</span>
                 </div>
+                {salesHome ? (
+                  <div className="hr-field" data-testid="pf-home">
+                    <span className="hr-label" id="pf-home-l">{L("صفحتي الرئيسية", "My home page")}</span>
+                    {homeLocked ? (
+                      // The administrator fixed this account's landing page (council fix round 2, item 11): read-only.
+                      <span className="hr-caption" data-testid="pf-home-locked">{L("حددها المدير", "Set by the administrator")}</span>
+                    ) : (
+                      <>
+                        <span className="ops-seg pf-seg" role="group" aria-labelledby="pf-home-l">
+                          <button type="button" aria-pressed={!classic} onClick={() => { void pickHome("my-day"); }} data-testid="pf-home-myday">{L("يومي", "My day")}</button>
+                          <button type="button" aria-pressed={classic} onClick={() => { void pickHome("classic"); }} data-testid="pf-home-classic">{L("القديمة (مساحة عملي)", "The old one (My workspace)")}</button>
+                        </span>
+                        <span className="hr-caption">{homeMsg || L("وين تفتح بعد الدخول، ووين يوديك «الرئيسية»", "Where you land after signing in, and where «Home» goes")}</span>
+                      </>
+                    )}
+                  </div>
+                ) : null}
                 {msg(infoMsg)}
                 <div className="pf-formacts">
                   <Btn type="submit" variant="primary" disabled={infoSaving}>{infoSaving ? t("saving") : t("save")}</Btn>

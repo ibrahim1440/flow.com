@@ -5,6 +5,7 @@
 import type { ReactNode } from "react";
 import { direction21Viewport } from "@/components/shell/viewport";
 import "@/components/d21/reference.css";
+import "../_components/b24-fixes.css";
 import "../../d21.css";
 import "../_components/perf.css";
 

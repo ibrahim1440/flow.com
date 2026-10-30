@@ -16,7 +16,7 @@ import { useUnsavedGuard } from "../../../_components/useUnsavedGuard";
 import { Ico } from "@/components/shell/icons";
 import { useD21Title, usePhone, useD21Phone } from "@/components/shell/page-context";
 import { splitTitle } from "@/components/d21/labels";
-import { shortDate } from "@/components/d21/format";
+import { longDate, shortDate } from "@/components/d21/format";
 import { DISCOUNT_MAX } from "@/lib/services/sales/discount-limits";
 import { useAccountantView } from "../../../accounting/_ui/qoyod-pages";
 import { useQuotesBase } from "../base";
@@ -389,7 +389,9 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   }
 
   const statusLabel = (s: string) => pick(QUOTE_STATUS_SPECS, s, lang);
-  const unitLabel = (u: string) => (UNIT_LABELS[u] ? (ar ? UNIT_LABELS[u].ar : UNIT_LABELS[u].en) : u);
+  // On screen the units read as everywhere else in batch 24 («كجم», not the printed «كغ»; council fix round 2, item 4).
+  const SCREEN_AR: Record<string, string> = { KG: "كجم", UNIT: "عبوة", GRAM: "جرام" };
+  const unitLabel = (u: string) => (UNIT_LABELS[u] ? (ar ? SCREEN_AR[u] ?? UNIT_LABELS[u].ar : UNIT_LABELS[u].en) : u);
   const pct = (v: string | number) => <bdi>{`${num(Number(v), lang)}%`}</bdi>;
   const dealSub = splitTitle(quote.opportunity.title, customerName).sub || (customerName ? "" : quote.opportunity.title);
   const revisionText = (n: number) => `${ar ? "المراجعة" : "Revision"} ${n}`;
@@ -410,7 +412,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   const hasDiscount = Number(fig.discount) > 0;
   const rates = Array.from(new Set((editable ? lines.map((l) => l.taxRatePercent) : quote.lines.map((l) => l.taxRatePercent)).map((r) => Number(r))));
   const vatLabel = <>{ar ? "ضريبة القيمة المضافة" : "VAT"}{rates.length === 1 && <> {pct(rates[0])}</>}</>;
-  const unit = quote.currency === "SAR" ? (ar ? "ر.س" : "SAR") : quote.currency;
+  const unit = quote.currency === "SAR" ? (ar ? "ريال" : "SAR") : quote.currency;
   const minus = (v: string) => (Number(v) > 0 ? `−${formatMoney(v)}` : formatMoney(v));
 
   // ── Notices ──
@@ -644,7 +646,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
           <tr>
             <th scope="col">{ar ? "المنتج" : "Product"}</th>
             <th scope="col" style={{ width: 72 }}>{ar ? "الكمية" : "Qty"}</th>
-            <th scope="col" style={{ width: 76 }}>{ar ? "الوحدة" : "Unit"}</th>
+            <th scope="col" style={{ width: 104 }}>{ar ? "الوحدة" : "Unit"}</th>
             <th scope="col" style={{ width: 96 }}>{ar ? "سعر الوحدة" : "Unit price"}</th>
             <th scope="col" style={{ width: 64 }}>{ar ? "خصم" : "Disc."}</th>
             <th scope="col" style={{ width: 64 }}>{ar ? "ضريبة" : "Tax"}</th>
@@ -658,7 +660,6 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
             const net = gross - (gross * (Number(l.discountPercent) || 0)) / 100;
             const lineTotal = net + (net * (Number(l.taxRatePercent) || 0)) / 100;
             const over = Number(l.discountPercent) > Number(threshold);
-            const sku = skus.find((s) => s.id === l.productSkuId);
             return (
               <tr key={i} data-testid={`line-${i}`}>
                 <td className="prod">
@@ -675,7 +676,6 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                       </option>
                     ))}
                   </Select>
-                  {sku && <span className="id">{sku.skuCode}</span>}
                   {!l.productSkuId && (
                     <input
                       aria-label={ar ? `وصف البند ${i + 1}` : `Description for line ${i + 1}`}
@@ -700,7 +700,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                     aria-label={ar ? `وحدة البند ${i + 1}` : `Unit for line ${i + 1}`}
                     value={l.unit}
                     onChange={(e) => setLine(i, { unit: e.target.value })}
-                    className="qi"
+                    className="qi unitsel"
                   >
                     <option value="KG">{unitLabel("KG")}</option>
                     <option value="UNIT">{unitLabel("UNIT")}</option>
@@ -788,7 +788,6 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
             <tr key={l.id} data-testid={`ro-line-${l.position}`}>
               <td className="prod">
                 <b><bdi>{lineName(l)}</bdi></b>
-                {l.productSku && <span className="id">{l.productSku.skuCode}</span>}
               </td>
               <td><bdi className="n">{num(Number(l.quantity), lang)}</bdi> {unitLabel(l.unit)}</td>
               <td><bdi className="n">{formatMoney(l.unitPrice)}</bdi></td>
@@ -831,7 +830,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
             <dt>{ar ? "الخصم" : "Discount"}</dt><dd><bdi className="n">{minus(fig.discount)}</bdi></dd>
           </>
         )}
-        <dt>{editable || hasDiscount ? (ar ? "الوعاء الخاضع للضريبة" : "Taxable base") : (ar ? "قبل الضريبة" : "Before VAT")}</dt>
+        <dt>{ar ? (editable || hasDiscount ? "المبلغ قبل الضريبة" : "قبل الضريبة") : "Before VAT"}</dt>
         <dd><bdi className="n">{formatMoney(taxableBase)}</bdi></dd>
         <dt>{vatLabel}</dt><dd><bdi className="n">{formatMoney(fig.tax)}</bdi></dd>
         <dt>{ar ? "الإجمالي" : "Total"}</dt>
@@ -866,8 +865,12 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
             value={validUntil}
             onChange={(e) => { setValidUntil(e.target.value); setDirty(true); }}
           />
-          <span id="q-valid-hint" className="q-note" style={{ display: "block", marginTop: 4 }}>
-            {ar ? "مطلوب قبل الإصدار." : "Required before the quotation can be issued."}
+          {/* The browser's date box may read mm/dd; the date is said here in words (council fix round 2, item 8),
+              and «مطلوب» only while it is still empty. */}
+          <span id="q-valid-hint" className="q-note" style={{ display: "block", marginTop: 4 }} data-testid="q-valid-text">
+            {validUntil
+              ? (ar ? `حتى ${longDate(`${validUntil}T00:00:00`, "ar")}` : `Until ${longDate(`${validUntil}T00:00:00`, "en")}`)
+              : (ar ? "مطلوب قبل الإصدار." : "Required before the quotation can be issued.")}
           </span>
         </dd>
       </dl>

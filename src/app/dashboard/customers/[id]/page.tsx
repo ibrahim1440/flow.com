@@ -2,15 +2,19 @@
 
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useI18n } from "@/lib/i18n/context";
 import { Ico } from "@/components/shell/icons";
-import { useD21Title, usePhone, useD21Phone } from "@/components/shell/page-context";
+import { useD21Title, usePhone, useD21Phone, useCreateRequest } from "@/components/shell/page-context";
+import { Bean, MessageCircle } from "lucide-react";
+import { contactKind, lastContact } from "@/lib/services/customers/facts";
+import { telHref, waNumber } from "@/lib/services/search/normalize";
+import { rememberRecent } from "@/components/shell/recent";
 import { HrRoot } from "@/components/hr/ui";
 import { ACTIVITY_LABELS, OUTCOME_LABELS, initials, splitTitle } from "@/components/d21/labels";
-import { currencyLabel, dayCount, dayUnit, daysFromToday, dueText, money2, relativeDays, shortDate, whole } from "@/components/d21/format";
+import { longDate, qtyText, dayCount, dayUnit, daysFromToday, dueText, money2, relativeDays, shortDate, whole } from "@/components/d21/format";
 import { api, pick, QUOTE_STATUS_SPECS, LEAD_SOURCE_LABELS } from "../../sales/_components/ui";
-import { ActivityDialog, ContactDialog, DetailsDialog, FileDialog, FILE_CATEGORY_LABELS, QuoteDialog, SEGMENT_LABELS } from "./dialogs";
+import { ActivityDialog, ContactDialog, DealPickDialog, DetailsDialog, FileDialog, FILE_CATEGORY_LABELS, SEGMENT_LABELS, type ActivityKind } from "./dialogs";
 import type { Account, Activity, AgingKey, Contact, CustomerFile, TimelineEntry } from "./types";
 import { CreditBadges, CreditCallout, HoldDialog, LiftDialog, badgesOf, fullDate } from "@/components/credit/credit-ui";
 import { orderProgress, progressText } from "@/lib/order-stage";
@@ -18,6 +22,10 @@ import { ORDER_STATUS_LABEL_KEYS } from "@/components/OrderLifecyclePanel";
 import { useUser } from "../../user-context";
 import { canViewInvoices } from "@/lib/services/invoicing/access";
 import { useAccountantView } from "../../accounting/_ui/qoyod-pages";
+import { ValidityDates, ValidityDialog, ValidityPill } from "./_components/contract-validity";
+import { hasValidity } from "@/lib/services/customers/contract-rules";
+import { ContractFact } from "./_components/contract-fact";
+import { SampleDialog } from "../../sales/_components/SampleDialog";
 import "../customers.css";
 import "./account.css";
 
@@ -73,7 +81,8 @@ const SAMPLE_STATUS: Record<string, { ar: string; en: string; tone?: string }> =
   FEEDBACK_RECEIVED: { ar: "وصل التقييم", en: "Feedback received", tone: "ok" }, CANCELLED: { ar: "ملغاة", en: "Cancelled", tone: "x" },
 };
 const QUOTE_TONE: Record<string, string> = { DRAFT: "", ISSUED: "in", ACCEPTED: "ok", REJECTED: "er", EXPIRED: "wa", SUPERSEDED: "x" };
-const UNIT: Record<string, { ar: string; en: string }> = { KG: { ar: "كغ", en: "kg" }, G: { ar: "غ", en: "g" }, PCS: { ar: "قطعة", en: "pcs" } };
+// FOLLOWUPS sales UI bug 3: a stock sample is counted in UNIT (and GRAM), which the map lacked — the raw code showed.
+const UNIT: Record<string, { ar: string; en: string }> = { KG: { ar: "كجم", en: "kg" }, G: { ar: "غ", en: "g" }, GRAM: { ar: "غ", en: "g" }, PCS: { ar: "قطعة", en: "pcs" }, UNIT: { ar: "عبوة", en: "pack" } };
 const AR_MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
 const EN_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -89,9 +98,13 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   const [data, setData] = useState<Account | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
-  const [tab, setTab] = useState<Tab>("overview");
-  const [dialog, setDialog] = useState<null | "activity" | "quote" | "details" | "file" | "hold" | "holdDirect" | "lift" | { contact: Contact | null }>(null);
+  const [notice, setNotice] = useState<{ text: string; ok: boolean; href?: string; link?: string } | null>(null);
+  // `?tab=files` (the contract notice links there, batch 24 WP-C) opens on the files tab.
+  const search = useSearchParams();
+  const [tab, setTab] = useState<Tab>(search?.get("tab") === "files" ? "files" : "overview");
+  type QuickPick = { purpose: "quote" | "sample"; deals: { id: string; title: string; stageAr: string; stageEn: string; amount: string | null }[] };
+  const [dialog, setDialog] = useState<null | { activity: ActivityKind } | { pick: QuickPick } | { sample: { dealId: string | null; sampled: string[]; manager: boolean } } | "details" | "file" | "hold" | "holdDirect" | "lift" | { contact: Contact | null }>(null);
+  const [quickBusy, setQuickBusy] = useState(false);
   const [more, setMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
@@ -99,6 +112,8 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   const noteRef = useRef<HTMLInputElement>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const reload = () => setReloadToken((t) => t + 1);
+  // «صلاحية العقد» (batch 24 WP-C): the file whose dates are being edited.
+  const [validityFile, setValidityFile] = useState<CustomerFile | null>(null);
   // Qoyod parity (accountant workspace only): Qoyod's five customer tiles — الرصيد الختامي · إجمالي المستحق · متأخرة ·
   // عدد جميع الفواتير · مجموع مبالغ كل الفواتير — from the AR statement and the issued sales invoices (read-only), with
   // one-click links to the invoices and the statement of account. Everyone else keeps this page as it was.
@@ -152,22 +167,44 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   const c = data?.customer;
   const name = c ? (ar ? c.nameAr || c.name : c.name) : "";
   useD21Title(name || undefined);
-  useD21Phone({ title: name, sub: c?.commercialRegNo ? `CR-${c.commercialRegNo}` : undefined, back: "/dashboard/customers", ownBar: true });
+  useD21Phone({ title: name, sub: c?.commercialRegNo ? `CR-${c.commercialRegNo}` : undefined, back: "/dashboard/customers", ownBar: true, replacesRepBar: true });
 
-  // «N» focuses the composer (bound to event.code so it works on an Arabic layout — Kbd 10:55).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (e.code !== "KeyN" || e.ctrlKey || e.metaKey || e.altKey || dialog) return;
-      if (t && (t.closest("input, textarea, select, [role=combobox], [data-hq-popup], [contenteditable=true]"))) return;
-      if (!noteRef.current) return;
-      e.preventDefault();
-      setTab("overview");
-      noteRef.current.focus();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [dialog]);
+  // Ctrl K «فتحتها مؤخرًا»: this customer, on this device (components/shell/recent.ts).
+  useEffect(() => { if (c) rememberRecent(viewer?.id, { kind: "customer", id: c.id, title: c.nameAr || c.name, titleEn: c.name, sub: c.city ?? null, href: `/dashboard/customers/${c.id}` }); }, [c, viewer?.id]);
+
+  // ── One tap «عرض سعر» / «عيّنة» (batch 24 WP-A §3): the deal is chosen for the rep (services/sales/quick-deal.ts). ──
+  // «عيّنة» opens the request in place (council fix round 1): the rep stays on the customer; the deal stays behind it.
+  const goWithDeal = useCallback(async (purpose: "quote" | "sample", dealId: string) => {
+    if (purpose === "quote") { router.push(`/dashboard/sales/quotes/new?opportunityId=${encodeURIComponent(dealId)}&from=customer`); return; }
+    const d = await api<{ sampledProductIds?: string[]; can?: { approveSample?: boolean } }>(`/api/sales/opportunities/${encodeURIComponent(dealId)}`);
+    setDialog({ sample: { dealId, sampled: d.ok ? d.data.sampledProductIds ?? [] : [], manager: d.ok ? !!d.data.can?.approveSample : false } });
+  }, [router]);
+  const held = !!data?.creditState?.hold;
+  const startQuick = useCallback(async (purpose: "quote" | "sample") => {
+    if (quickBusy) return;
+    if (purpose === "quote" && held) {
+      setNotice({ text: L("البيع موقوف لهذا العميل، فما يمكن إصدار عرض سعر الآن.", "Sales to this customer are on hold, so no quotation can be raised now."), ok: false });
+      return;
+    }
+    setQuickBusy(true);
+    // «عيّنة» asks first WITHOUT writing (`preview`): when no deal exists yet, the request opens it on «إرسال الطلب» —
+    // cancelling the dialog leaves nothing behind (council fix round 2, item 3).
+    const res = await api<{ kind: "use" | "created" | "pick" | "none" | "new"; opportunityId?: string; deals?: QuickPick["deals"] }>(`/api/customers/${id}/quick-deal`, { method: "POST", body: { purpose, preview: purpose === "sample" } });
+    setQuickBusy(false);
+    if (!res.ok) { setNotice({ text: res.data.error ?? L("تعذّر فتح الصفقة.", "Could not open the deal."), ok: false }); return; }
+    const r = res.data;
+    if (r.kind === "new" && purpose === "sample") setDialog({ sample: { dealId: null, sampled: [], manager: false } });
+    else if ((r.kind === "use" || r.kind === "created") && r.opportunityId) void goWithDeal(purpose, r.opportunityId);
+    else if (r.kind === "pick" && r.deals?.length) setDialog({ pick: { purpose, deals: r.deals } });
+    else setNotice({ text: L("ما عندك صفقة مفتوحة مع هذا العميل، وما عندك صلاحية تفتح وحدة. كلّم مديرك.", "You have no open deal with this customer and may not open one. Ask your manager."), ok: false });
+  }, [quickBusy, held, id, L, goWithDeal]);
+  // The «+ جديد» menu and Ctrl K open these on this page with the customer already chosen (?new=…).
+  const salesOn = !!data?.sections.sales;
+  useCreateRequest("activity", () => setDialog({ activity: "CALL" }), salesOn && !!data?.can.logActivity);
+  useCreateRequest("quote", () => { void startQuick("quote"); }, salesOn && !!data?.can.quote);
+  useCreateRequest("sample", () => { void startQuick("sample"); }, salesOn && !!data?.can.logActivity);
+
+  // «N» (and Q, S) are the shell's now (batch 24 WP-A): on this page they open the dialogs below through ?new=.
   useEffect(() => {
     if (!more) return;
     const close = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest("[data-acc-more]")) setMore(false); };
@@ -201,7 +238,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   }
 
   const { metrics: m, sections, can } = data;
-  const cur = currencyLabel("SAR", lang);
+  const cur = (lang === "ar" ? "ريال" : "SAR");
   const amountWithUnit = (v: string, big = false, two = false) => {
     const n = <span className={`n${big ? " acc-big" : ""}`}>{two ? money2(v) : whole(v)}</span>;
     return ar ? <>{n}<span className="unit">{cur}</span></> : <><span className="unit pre">{cur}</span>{n}</>;
@@ -254,14 +291,37 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   }
 
   const openDeals = (data.deals ?? []).filter((d) => d.outcome === "OPEN");
-  const logBtn = sections.sales && can.logActivity ? (
-    <button type="button" className="btn" data-testid="log-activity" onClick={() => setDialog("activity")}>
-      <Ico name="phone" small />{L("تسجيل نشاط", "Log activity")}
+  // ── The rep's action bar (batch 24 WP-A §3): 📞 اتصال · 💬 واتساب · 📝 سجّل نشاط · 🫘 عيّنة · 📄 عرض سعر (primary). ──
+  // The number dialled is the customer's own, else its first contact's.
+  const dialPhone = c.phone || c.contacts.find((x) => x.phone)?.phone || null;
+  const tel = telHref(dialPhone);
+  const wa = waNumber(dialPhone);
+  const mayLog = sections.sales && can.logActivity;
+  // اتصال: the phone dials AND the activity dialog opens on «مكالمة», ready for what was said.
+  const callBtn = mayLog && tel ? (
+    <a className="btn" href={tel} data-testid="act-call" onClick={() => setDialog({ activity: "CALL" })}>
+      <Ico name="phone" small />{L("اتصال", "Call")}
+    </a>
+  ) : null;
+  // واتساب: wa.me in a new tab, and the dialog on «واتساب».
+  const waBtn = mayLog && wa ? (
+    <a className="btn" href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" data-testid="act-whatsapp" onClick={() => setDialog({ activity: "WHATSAPP" })}>
+      <MessageCircle size={16} strokeWidth={1.5} aria-hidden />{L("واتساب", "WhatsApp")}
+    </a>
+  ) : null;
+  const logBtn = mayLog ? (
+    <button type="button" className="btn" data-testid="log-activity" onClick={() => setDialog({ activity: "CALL" })}>
+      <Ico name="note" small />{L("سجّل نشاط", "Log activity")}
+    </button>
+  ) : null;
+  const sampleBtn = mayLog ? (
+    <button type="button" className="btn" data-testid="act-sample" disabled={quickBusy} onClick={() => startQuick("sample")}>
+      <Bean size={16} strokeWidth={1.5} aria-hidden />{L("عيّنة", "Sample")}
     </button>
   ) : null;
   const quoteBtn = sections.sales && can.quote ? (
-    <button type="button" className="btn p" data-testid="new-quote" onClick={() => setDialog("quote")}>
-      <Ico name="plus" small />{L("عرض سعر", "Quotation")}
+    <button type="button" className="btn p" data-testid="new-quote" disabled={quickBusy} onClick={() => startQuick("quote")}>
+      <Ico name="quote" small />{L("عرض سعر", "Quotation")}
     </button>
   ) : null;
   const cs = data.creditState ?? null;
@@ -281,16 +341,24 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
 
   // ── Figures ──
   const sales = m.sales12m;
+  // THE monthly kilograms (last 90 days ÷ 3): the same figure as the tier and «يومي» (aggregates.monthlyKg).
+  const monthKg = m.kgPerMonth ?? null;
   const delta = sales?.changePercent;
   const unpricedNote = sections.sales && m.unpricedOrders != null && m.unpricedOrders > 0 ? (ar
     ? `المبيعات والرصيد محسوبة من عروض الأسعار المقبولة والدفعات المعتمدة؛ ${m.unpricedOrders} من طلبات العميل بلا عرض سعر ولا قيمة لها في النظام.`
     : `Sales and balance come from accepted quotations and approved payments; ${m.unpricedOrders} of the customer's orders have no quotation and carry no value in the system.`) : undefined;
+  // «مبيعات 12 شهرًا» comes from accepted quotations; with none and orders that carry no quotation, a «0» would be
+  // wrong next to «26 طلب» (council fix round 1, P0-9): the tile says why there is no figure instead.
+  const salesUnknown = !!sales && Number(sales.net) === 0 && (m.unpricedOrders ?? 0) > 0;
   const salesFig = (
     <div data-testid="metric-sales" title={unpricedNote}>
       <dt className="lbl">{L("مبيعات 12 شهرًا", "12-month sales")}</dt>
-      {sales ? <>
+      {sales && salesUnknown ? <>
+        <dd className="mid">—</dd>
+        <dd className="d" data-testid="metric-sales-note">{ar ? `طلباته (${m.unpricedOrders}) بدون عرض سعر، فما لها قيمة في النظام` : `His ${m.unpricedOrders} orders carry no quotation, so no value`}</dd>
+      </> : sales ? <>
         <dd className="mid n">{whole(sales.net)}</dd>
-        <dd className="d">{cur}{delta != null && <> · <span className={`delta ${delta >= 0 ? "up" : "down"}`}>{delta >= 0 ? "▲" : "▼"} <span className="n">{Math.abs(delta)}%</span></span></>}</dd>
+        <dd className="d">{cur} · {L("من العروض المقبولة", "from accepted quotations")}{delta != null && <> · <span className={`delta ${delta >= 0 ? "up" : "down"}`}>{delta >= 0 ? "▲" : "▼"} <span className="n">{Math.abs(delta)}%</span></span></>}</dd>
       </> : <><dd className="mid">—</dd><dd className="d">{noAccess(L("المبيعات", "sales"))}</dd></>}
     </div>
   );
@@ -315,18 +383,6 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   );
   // Whole days on the viewer's calendar (as every other date on the page), not the server's.
   const lastDays = m.lastOrder ? Math.max(0, -daysFromToday(m.lastOrder.createdAt)) : 0;
-  const lastFig = (
-    <div data-testid="metric-last-order">
-      <dt className="lbl">{L("آخر طلب", "Last order")}</dt>
-      {!sections.orders ? <><dd className="mid">—</dd><dd className="d">{noAccess(L("الطلبات", "orders"))}</dd></>
-        : m.lastOrder ? <>
-          <dd className="mid n">{lastDays === 0 ? <span className="acc-today">{L("اليوم", "Today")}</span> : <>{lastDays}<span className="unit">{dayUnit(lastDays, lang)}</span></>}</dd>
-          <dd className="d">{m.cadenceDays != null
-            ? (ar ? `يطلب كل ${dayCount(m.cadenceDays, lang)} تقريبًا` : `Orders about every ${dayCount(m.cadenceDays, lang)}`)
-            : <><bdi className="id">#{m.lastOrder.orderNumber}</bdi> · {shortDate(m.lastOrder.createdAt, lang)}</>}</dd>
-        </> : <><dd className="mid">—</dd><dd className="d">{L("لا طلبات بعد", "No orders yet")}</dd></>}
-    </div>
-  );
   const monthly = m.monthly;
   const complete = monthly ? monthly.filter((x) => !x.partial) : [];
   const lastMonth = complete[complete.length - 1];
@@ -348,10 +404,12 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
             })}
           </svg>
         </dd>
-        <dd className="d">{anyKg && lastMonth
-          ? (ar ? <><span className="n">{whole(lastMonth.kg)}</span> كغ في {monthName(lastMonth.month)}</> : <><span className="n">{whole(lastMonth.kg)}</span> kg in {monthName(lastMonth.month)}</>)
+        <dd className="d">{monthKg
+          ? (ar ? <>متوسط <span className="n">{whole(monthKg)}</span> كجم/شهر · آخر 3 شهور</> : <>Average <span className="n">{whole(monthKg)}</span> kg/month · last 3 months</>)
+          : anyKg && lastMonth
+          ? (ar ? <><span className="n">{whole(lastMonth.kg)}</span> كجم في {monthName(lastMonth.month)}</> : <><span className="n">{whole(lastMonth.kg)}</span> kg in {monthName(lastMonth.month)}</>)
           : running && running.kg > 0
-            ? (ar ? <><span className="n">{whole(running.kg)}</span> كغ في {monthName(running.month)} حتى الآن</> : <><span className="n">{whole(running.kg)}</span> kg in {monthName(running.month)} so far</>)
+            ? (ar ? <><span className="n">{whole(running.kg)}</span> كجم في {monthName(running.month)} حتى الآن</> : <><span className="n">{whole(running.kg)}</span> kg in {monthName(running.month)} so far</>)
             : L("لا طلبات في آخر 12 شهرًا", "No orders in the last 12 months")}</dd>
       </>}
     </div>
@@ -361,11 +419,43 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
     <div data-testid="metric-terms">
       <dt className="lbl">{L("شروط الدفع", "Payment terms")}</dt>
       <dd className="mid acc-terms">{c.paymentTermsDays != null ? <><span className="n">{c.paymentTermsDays}</span> {dayUnit(c.paymentTermsDays, lang) === "يوم" && c.paymentTermsDays !== 1 ? "يومًا" : dayUnit(c.paymentTermsDays, lang)}</> : notSet}</dd>
-      <dd className="d" data-testid="metric-credit" title={credit && credit.scope === "all" ? (ar ? `المستخدم ${whole(credit.used)} · المتاح ${whole(credit.available)} ر.س` : `Used ${whole(credit.used)} · available SAR ${whole(credit.available)}`) : undefined}>{c.creditLimit != null
-        ? (ar ? <>حد ائتمان <span className="n">{whole(c.creditLimit)}</span> ر.س</> : <>Credit limit SAR <span className="n">{whole(c.creditLimit)}</span></>)
+      <dd className="d" data-testid="metric-credit" title={credit && credit.scope === "all" ? (ar ? `المستخدم ${whole(credit.used)} · المتاح ${whole(credit.available)} ريال` : `Used ${whole(credit.used)} · available SAR ${whole(credit.available)}`) : undefined}>{c.creditLimit != null
+        ? (ar ? <>حد ائتمان <span className="n">{whole(c.creditLimit)}</span> ريال</> : <>Credit limit SAR <span className="n">{whole(c.creditLimit)}</span></>)
         : L("حد الائتمان غير محدد", "No credit limit set")}
         {credit?.over && <> · <span className="acc-warn" data-testid="credit-over">{L("متجاوز", "exceeded")}</span></>}</dd>
     </div>
+  );
+
+  // ── The facts row (batch 24 WP-A §3): آخر تواصل · يطلب عادةً · آخر طلب · عليه ──
+  const contact = lastContact(data.timeline.flatMap((e) => (e.kind === "activity" ? [e.activity] : [])));
+  const contactDays = contact?.completedAt ? Math.max(0, -daysFromToday(contact.completedAt)) : null;
+  const ago = (n: number) => (n === 0 ? L("اليوم", "today") : ar ? `قبل ${dayCount(n, lang)}` : `${dayCount(n, lang)} ago`);
+  // «عليه»: ONE figure everywhere (FOLLOWUPS bugs 1–2) — the receivables balance once invoiced, else the
+  // accepted quotations not yet paid, and the label says which.
+  const owed = bal ? (bal.ar?.outstanding ?? bal.outstanding) : null;
+  const owedLabel = bal?.ar ? L("عليه", "Owes") : L("عليه (من العروض المقبولة)", "Owes (accepted quotations)");
+  // The derived tier within the account owner's book (WP-B «يومي»: kg in the last 90 days), beside the name.
+  const tierPill = data.tier ? (
+    <span className={`acc-tier is-${data.tier.toLowerCase()}`} data-testid="account-tier" data-tier={data.tier}
+      title={L("حسب الكميات في آخر 90 يوم، مقارنة ببقية عملاء المندوب", "By kg in the last 90 days, within the rep's book")}>
+      {({ VIP: ["VIP", "VIP"], REGULAR: ["عادي", "Regular"], SMALL: ["صغير", "Small"], QUIET: ["بدون طلبات حديثة", "No recent orders"] } as const)[data.tier][ar ? 0 : 1]}
+    </span>
+  ) : null;
+  const facts = (
+    <dl className="acc-facts" data-testid="account-facts">
+      <div data-testid="fact-contact"><dt>{L("آخر تواصل", "Last contact")}</dt>
+        <dd>{!sections.sales ? "—" : contact && contactDays != null ? <>{ago(contactDays)} · {contactKind(contact, ar)}</> : L("ما فيه تواصل مسجّل", "No contact logged")}</dd></div>
+      <div data-testid="fact-rhythm"><dt>{L("يطلب عادةً", "Usually orders")}</dt>
+        <dd>{!sections.orders ? "—" : m.cadenceDays != null
+          ? <>{ar ? `كل ${dayCount(m.cadenceDays, lang)}` : `every ${dayCount(m.cadenceDays, lang)}`}{monthKg ? <> · <span className="n">{whole(monthKg)}</span> {L("كجم/شهر", "kg/month")}</> : null}</>
+          : monthKg ? <><span className="n">{whole(monthKg)}</span> {L("كجم/شهر", "kg/month")}</> : L("ما فيه طلبات كافية", "Not enough orders yet")}</dd></div>
+      <div data-testid="fact-last-order"><dt>{L("آخر طلب", "Last order")}</dt>
+        <dd>{!sections.orders ? "—" : m.lastOrder ? ago(lastDays) : L("ما طلب بعد", "No orders yet")}</dd></div>
+      <div data-testid="fact-owed"><dt>{owedLabel}</dt>
+        <dd className={owed != null && Number(owed) > 0 ? "warn" : undefined}>{owed == null ? "—" : ar ? <><bdi className="n">{whole(owed)}</bdi> ريال</> : <>SAR <bdi className="n">{whole(owed)}</bdi></>}</dd></div>
+      {/* WP-C's contract fact («العقد: ينتهي بعد X يوم»): a fifth fact only while a contract is in its notice window. */}
+      <ContractFact ar={ar} files={data.files ?? []} noticeDays={data.contractNoticeDays} />
+    </dl>
   );
 
   // ── Tabs ──
@@ -461,7 +551,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
       <div className="bh"><h2 className="bt">{L("الصفقة المفتوحة", "Open deal")}</h2></div>
       <p className="acc-muted" style={{ margin: "0 0 12px" }}>{data.sections.scope === "own" ? L("لا صفقة مفتوحة لك مع هذا العميل.", "You have no open deal with this customer.") : L("لا صفقة مفتوحة مع هذا العميل.", "No open deal with this customer.")}</p>
       {nextStepBand}
-      {quoteBtn && can.createDeal && <button type="button" className="btn sm" onClick={() => setDialog("quote")} data-testid="start-deal">{L("فتح صفقة وعرض سعر", "Open a deal and quote")}</button>}
+      {quoteBtn && can.createDeal && <button type="button" className="btn sm" onClick={() => startQuick("quote")} data-testid="start-deal">{L("فتح صفقة وعرض سعر", "Open a deal and quote")}</button>}
     </section>
   );
 
@@ -482,21 +572,21 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
           detail: [a.completedAt && a.outcome && a.outcome !== "NOTE_ONLY" ? lx(OUTCOME_LABELS[a.outcome]) : null, a.subject, a.body].filter(Boolean).join(" — "),
         };
       }
-      case "sample": return { title: <>{L("أُرسلت عيّنة", "Sample sent")} <span className="n">{Number(e.sample.quantity)}</span> {lx(UNIT[e.sample.unit], e.sample.unit)} · <bdi>{e.sample.name}</bdi></> };
+      case "sample": return { title: <>{L("أُرسلت عيّنة", "Sample sent")} <span className="n">{Number(e.sample.quantity)}</span> {lx(UNIT[e.sample.unit], e.sample.unit)} · <bdi>{(ar ? e.sample.nameAr : null) || e.sample.name}</bdi></> };
       case "quote_issued": return {
-        title: ar ? <>أُصدر العرض <bdi className="id">{e.quote.quoteNumber}</bdi> · المراجعة {e.quote.revision} بقيمة <span className="n">{money2(e.quote.grandTotal)}</span> ر.س</>
+        title: ar ? <>أُصدر العرض <bdi className="id">{e.quote.quoteNumber}</bdi> · المراجعة {e.quote.revision} بقيمة <span className="n">{money2(e.quote.grandTotal)}</span> ريال</>
           : <>Quotation <bdi className="id">{e.quote.quoteNumber}</bdi> issued · revision {e.quote.revision} for SAR <span className="n">{money2(e.quote.grandTotal)}</span></>,
         diff: e.stageMove ? `${L("المرحلة", "Stage")}: ${stageName(e.stageMove.from)} ${ar ? "←" : "→"} ${stageName(e.stageMove.to)}` : undefined,
       };
-      case "quote_accepted": return { title: ar ? <>قُبل العرض <bdi className="id">{e.quote.quoteNumber}</bdi> بقيمة <span className="n">{money2(e.quote.grandTotal)}</span> ر.س</> : <>Quotation <bdi className="id">{e.quote.quoteNumber}</bdi> accepted for SAR <span className="n">{money2(e.quote.grandTotal)}</span></> };
+      case "quote_accepted": return { title: ar ? <>قُبل العرض <bdi className="id">{e.quote.quoteNumber}</bdi> بقيمة <span className="n">{money2(e.quote.grandTotal)}</span> ريال</> : <>Quotation <bdi className="id">{e.quote.quoteNumber}</bdi> accepted for SAR <span className="n">{money2(e.quote.grandTotal)}</span></> };
       case "order": return {
-        title: ar ? <>أُنشئ الطلب <bdi className="id">#{e.order.orderNumber}</bdi> · <span className="n">{money2(e.order.totalKg)}</span> كغ{e.order.value && <> · <span className="n">{money2(e.order.value)}</span> ر.س</>}</>
-          : <>Order <bdi className="id">#{e.order.orderNumber}</bdi> created · <span className="n">{money2(e.order.totalKg)}</span> kg{e.order.value && <> · SAR <span className="n">{money2(e.order.value)}</span></>}</>,
+        title: ar ? <>أُنشئ الطلب <bdi className="id">#{e.order.orderNumber}</bdi> · <span className="n">{qtyText(e.order.totalKg)}</span> كجم{e.order.value && <> · <span className="n">{money2(e.order.value)}</span> ريال</>}</>
+          : <>Order <bdi className="id">#{e.order.orderNumber}</bdi> created · <span className="n">{qtyText(e.order.totalKg)}</span> kg{e.order.value && <> · SAR <span className="n">{money2(e.order.value)}</span></>}</>,
       };
       case "delivery": return {
         title: ar
-          ? <>سُلّم للطلب <bdi className="id">#{e.delivery.orderNumber}</bdi> · {e.delivery.units != null ? <><span className="n">{e.delivery.units}</span> وحدة</> : <><span className="n">{money2(e.delivery.kg)}</span> كغ</>} · <bdi>{e.delivery.item}</bdi>{e.delivery.type === "full" ? " · اكتمل السطر" : ""}</>
-          : <>Delivered for order <bdi className="id">#{e.delivery.orderNumber}</bdi> · {e.delivery.units != null ? <><span className="n">{e.delivery.units}</span> units</> : <><span className="n">{money2(e.delivery.kg)}</span> kg</>} · <bdi>{e.delivery.item}</bdi>{e.delivery.type === "full" ? " · line complete" : ""}</>,
+          ? <>سُلّم للطلب <bdi className="id">#{e.delivery.orderNumber}</bdi> · {e.delivery.units != null ? <><span className="n">{e.delivery.units}</span> وحدة</> : <><span className="n">{qtyText(e.delivery.kg)}</span> كجم</>} · <bdi>{e.delivery.item}</bdi>{e.delivery.type === "full" ? " · اكتمل السطر" : ""}</>
+          : <>Delivered for order <bdi className="id">#{e.delivery.orderNumber}</bdi> · {e.delivery.units != null ? <><span className="n">{e.delivery.units}</span> units</> : <><span className="n">{qtyText(e.delivery.kg)}</span> kg</>} · <bdi>{e.delivery.item}</bdi>{e.delivery.type === "full" ? " · line complete" : ""}</>,
         detail: e.delivery.lots.length ? `${L("اللوتات", "Lots")}: ${e.delivery.lots.join(ar ? "، " : ", ")}` : undefined,
       };
       case "credit": {
@@ -508,7 +598,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
         return { title: k.liftKind === "PAID" ? L("رُفع الإيقاف تلقائيًا: العميل ضمن الحد ولا متأخرات", "Hold lifted automatically: within the limit, nothing overdue") : L("رُفع الإيقاف تلقائيًا بانتهاء مدته", "Hold lifted automatically at its end") };
       }
       case "payment": return {
-        title: ar ? <>دفعة <span className="n">{money2(e.payment.amount)}</span> ر.س{e.payment.orderNumber != null && <> للطلب <bdi className="id">#{e.payment.orderNumber}</bdi></>} · {lx(METHOD[e.payment.method])}</>
+        title: ar ? <>دفعة <span className="n">{money2(e.payment.amount)}</span> ريال{e.payment.orderNumber != null && <> للطلب <bdi className="id">#{e.payment.orderNumber}</bdi></>} · {lx(METHOD[e.payment.method])}</>
           : <>Payment SAR <span className="n">{money2(e.payment.amount)}</span>{e.payment.orderNumber != null && <> for order <bdi className="id">#{e.payment.orderNumber}</bdi></>} · {lx(METHOD[e.payment.method])}</>,
       };
     }
@@ -551,10 +641,10 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
         <form className="acc-composer" onSubmit={saveNote} data-testid="composer">
           <Ico name="note" small />
           <input ref={noteRef} value={note} onChange={(e) => setNote(e.target.value)} maxLength={500}
-            placeholder={L("اكتب ملاحظة أو سجّل مكالمة…", "Write a note or log a call…")} aria-label={L("ملاحظة", "Note")} data-testid="composer-input" />
+            placeholder={L("اكتب ملاحظة سريعة…", "Write a quick note…")} aria-label={L("ملاحظة", "Note")} data-testid="composer-input" />
           {note.trim().length >= 2
             ? <button type="submit" className="btn sm p" disabled={busy} data-testid="composer-save">{L("حفظ", "Save")}</button>
-            : <span className="kbd" aria-hidden>N</span>}
+            : null}
         </form>
       )}
       {entries.length === 0
@@ -576,7 +666,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
         {can.edit && <button type="button" className="lk-inline" onClick={() => setDialog({ contact: null })} data-testid="add-contact">{L("إضافة", "Add")}</button>}
       </div>
       {c.contacts.length === 0 ? (
-        <p className="acc-muted" style={{ margin: 0 }}>{L("لا جهات اتصال مسجلة.", "No contacts recorded.")}{c.phone && <> {L("هاتف العميل:", "Customer phone:")} <bdi dir="ltr" className="n">{c.phone}</bdi></>}</p>
+        <p className="acc-muted" style={{ margin: 0 }}>{L("لا جهات اتصال مسجلة.", "No contacts recorded.")}{c.phone && <> {L("هاتف العميل:", "Customer phone:")} {telHref(c.phone) ? <a href={telHref(c.phone)!} dir="ltr" className="n">{c.phone}</a> : <bdi dir="ltr" className="n">{c.phone}</bdi>}</>}</p>
       ) : (
         <ul className="acc-contacts">
           {c.contacts.map((p) => (
@@ -599,7 +689,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
       {!m.usualItems ? <p className="acc-muted" style={{ margin: 0 }}>{noAccess(L("الطلبات", "orders"))}</p>
         : m.usualItems.length === 0 ? <p className="acc-muted" style={{ margin: 0 }}>{L("لا طلبات في آخر ستة أشهر.", "No orders in the last six months.")}</p>
         : <table className="t dense acc-usual"><tbody>
-            {m.usualItems.map((u) => <tr key={u.name}><td><bdi>{u.name}</bdi></td><td className="num">{ar ? <><span className="n">{u.kgPerMonth}</span> كغ/شهر</> : <><span className="n">{u.kgPerMonth}</span> kg / month</>}</td></tr>)}
+            {m.usualItems.map((u) => <tr key={u.name}><td><bdi>{(ar && u.nameAr) || u.name}</bdi></td><td className="num">{ar ? <><span className="n">{u.kgPerMonth}</span> كجم/شهر</> : <><span className="n">{u.kgPerMonth}</span> kg / month</>}</td></tr>)}
           </tbody></table>}
       {c.roastPreferences.length > 0 && (
         <div className="acc-profiles" data-testid="roast-profiles">
@@ -665,10 +755,10 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   };
   const ordersTab = !data.orders ? empty(L("لا تملك صلاحية الطلبات.", "No access to orders.")) : data.orders.length === 0 ? empty(L("لا طلبات لهذا العميل.", "No orders for this customer.")) : (
     <div className="acc-scroll"><table className="t" data-testid="orders-table">
-      <thead><tr><th>{L("الطلب", "Order")}</th><th>{L("التاريخ", "Date")}</th><th>{L("الحالة", "Status")}</th><th className="num">{L("الكمية (كغ)", "Quantity (kg)")}</th><th className="num">{L("البنود", "Lines")}</th><th>{L("الدفع", "Payment")}</th><th>{L("الفاتورة الضريبية", "VAT invoice")}</th></tr></thead>
+      <thead><tr><th>{L("الطلب", "Order")}</th><th>{L("التاريخ", "Date")}</th><th>{L("الحالة", "Status")}</th><th className="num">{L("الكمية (كجم)", "Quantity (kg)")}</th><th className="num">{L("البنود", "Lines")}</th><th>{L("الدفع", "Payment")}</th><th>{L("الفاتورة الضريبية", "VAT invoice")}</th></tr></thead>
       <tbody>{data.orders.map((o) => (
         <tr key={o.id}><td><Link href={`/dashboard/orders?order=${o.orderNumber}`}><bdi className="id">#{o.orderNumber}</bdi></Link></td><td>{shortDate(o.createdAt, lang)}</td><td>{orderStatus(o)}</td>
-          <td className="num">{money2(o.totalKg)}</td><td className="num">{o.itemCount}</td><td>{st(PAYMENT_STATUS[o.paymentStatus], o.paymentStatus)}</td><td>{st(VAT_STATUS[o.vatInvoiceStatus], o.vatInvoiceStatus)}</td></tr>
+          <td className="num">{qtyText(o.totalKg)}</td><td className="num">{o.itemCount}</td><td>{st(PAYMENT_STATUS[o.paymentStatus], o.paymentStatus)}</td><td>{st(VAT_STATUS[o.vatInvoiceStatus], o.vatInvoiceStatus)}</td></tr>
       ))}</tbody>
     </table></div>
   );
@@ -682,7 +772,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
       <dl className="metrics acc-metrics acc-stm-sum" data-testid="statement-totals">
         <div><dt className="lbl">{L("المستحق بالعروض", "Agreed (quotations)")}</dt><dd className="mid n">{money2(stm.totals.debit)}</dd><dd className="d">{cur} · {L("شامل الضريبة", "VAT included")}</dd></div>
         <div><dt className="lbl">{L("المدفوع المعتمد", "Approved payments")}</dt><dd className="mid n">{money2(stm.totals.credit)}</dd><dd className="d">{cur}</dd></div>
-        <div><dt className="lbl">{L("الرصيد المستحق", "Balance due")}</dt><dd className={`mid n${Number(stm.totals.outstanding) > 0 ? " acc-warn" : ""}`} data-testid="statement-outstanding">{money2(stm.totals.outstanding)}</dd>
+        <div><dt className="lbl">{L("المتبقي من العروض المقبولة", "Left to pay on accepted quotations")}</dt><dd className={`mid n${Number(stm.totals.outstanding) > 0 ? " acc-warn" : ""}`} data-testid="statement-outstanding">{money2(stm.totals.outstanding)}</dd>
           <dd className="d">{Number(stm.totals.unapplied) > 0 ? (ar ? <>ورصيد دائن <span className="n">{money2(stm.totals.unapplied)}</span> لم يُطبَّق</> : <>and SAR <span className="n">{money2(stm.totals.unapplied)}</span> unapplied credit</>) : cur}</dd></div>
         <div data-testid="statement-credit"><dt className="lbl">{L("حد الائتمان", "Credit limit")}</dt>
           {credit ? <><dd className="mid n">{money2(credit.limit)}</dd>
@@ -737,7 +827,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
       {issued && (<>
         <div className="lbl" style={{ margin: "0 0 6px" }}>{L("الفواتير والإشعارات المُصدرة", "Issued invoices and notes")}</div>
         {issued.items.length === 0 ? empty(L("لا فواتير مُصدرة.", "No issued invoices.")) : (
-          <div className="acc-scroll"><table className="t dense" data-testid="issued-invoices-table"><thead><tr><th>{L("المستند", "Document")}</th><th>{L("النوع", "Type")}</th><th>{L("تاريخ الإصدار", "Issued")}</th><th>{L("الاستحقاق", "Due")}</th><th className="num">{L("الإجمالي · ر.س", "Total · SAR")}</th><th className="num">{L("المتبقي · ر.س", "Open · SAR")}</th><th>{L("الطلب", "Order")}</th></tr></thead>
+          <div className="acc-scroll"><table className="t dense" data-testid="issued-invoices-table"><thead><tr><th>{L("المستند", "Document")}</th><th>{L("النوع", "Type")}</th><th>{L("تاريخ الإصدار", "Issued")}</th><th>{L("الاستحقاق", "Due")}</th><th className="num">{L("الإجمالي · ريال", "Total · SAR")}</th><th className="num">{L("المتبقي · ريال", "Open · SAR")}</th><th>{L("الطلب", "Order")}</th></tr></thead>
             <tbody>{issued.items.map((x) => <tr key={x.id} data-testid={`issued-invoice-${x.id}`}>
               <td><Link href={`/dashboard/sales/invoices/${x.id}`}><bdi className="id">{x.number ?? "—"}</bdi></Link></td>
               <td>{x.kind === "CREDIT_NOTE" ? L("إشعار دائن", "Credit note") : x.kind === "DEBIT_NOTE" ? L("إشعار مدين", "Debit note") : L("فاتورة", "Invoice")}</td>
@@ -784,7 +874,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   );
   const quotesTab = !data.quotes ? empty(L("لا تملك صلاحية المبيعات.", "No access to sales.")) : data.quotes.length === 0 ? empty(L("لا عروض أسعار.", "No quotations.")) : (
     <div className="acc-scroll"><table className="t" data-testid="quotes-table">
-      <thead><tr><th>{L("العرض", "Quotation")}</th><th>{L("الصفقة", "Deal")}</th><th>{L("الحالة", "Status")}</th><th className="num">{L("الإجمالي · ر.س", "Total · SAR")}</th><th>{L("صالح حتى", "Valid until")}</th><th>{L("أُصدر", "Issued")}</th></tr></thead>
+      <thead><tr><th>{L("العرض", "Quotation")}</th><th>{L("الصفقة", "Deal")}</th><th>{L("الحالة", "Status")}</th><th className="num">{L("الإجمالي · ريال", "Total · SAR")}</th><th>{L("صالح حتى", "Valid until")}</th><th>{L("أُصدر", "Issued")}</th></tr></thead>
       <tbody>{data.quotes.map((q) => (
         <tr key={q.id}><td><Link href={`/dashboard/sales/quotes/${q.id}`}><bdi className="id">{q.quoteNumber}</bdi></Link> <span className="sm">{L("م", "rev")} {q.revision}</span></td><td><bdi>{q.opportunity.title}</bdi></td>
           <td><span className={`st ${QUOTE_TONE[q.status] ?? ""}`}>{pick(QUOTE_STATUS_SPECS, q.status, lang)}</span></td><td className="num">{money2(q.grandTotal)}</td>
@@ -796,7 +886,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
     <div className="acc-scroll"><table className="t" data-testid="samples-table">
       <thead><tr><th>{L("العيّنة", "Sample")}</th><th>{L("الصفقة", "Deal")}</th><th className="num">{L("الكمية", "Quantity")}</th><th>{L("الحالة", "Status")}</th><th>{L("أُرسلت", "Sent")}</th><th className="num">{L("التقييم", "Score")}</th></tr></thead>
       <tbody>{data.samples.map((s) => (
-        <tr key={s.id}><td className="who"><bdi>{s.productSku?.name ?? s.productSku?.skuCode ?? s.description ?? "—"}</bdi></td><td><Link href={`/dashboard/sales/deals/${s.opportunity.id}`}><bdi>{s.opportunity.title}</bdi></Link></td>
+        <tr key={s.id}><td className="who"><bdi>{(ar ? s.productSku?.nameAr : null) || s.productSku?.name || s.productSku?.skuCode || s.description || "—"}</bdi></td><td><Link href={`/dashboard/sales/deals/${s.opportunity.id}`}><bdi>{s.opportunity.title}</bdi></Link></td>
           <td className="num">{Number(s.quantity)} {lx(UNIT[s.unit], s.unit)}</td><td>{st(SAMPLE_STATUS[s.status], s.status)}</td><td>{s.sentAt ? shortDate(s.sentAt, lang) : "—"}</td><td className="num">{s.feedbackScore != null ? `${s.feedbackScore}/5` : "—"}</td></tr>
       ))}</tbody>
     </table></div>
@@ -808,18 +898,49 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
         <span className="sub">{ar ? `عقود، سجل تجاري، شهادة ضريبية، اتفاقيات أسعار · PDF أو JPEG أو PNG حتى ${Math.round((data.fileLimits?.direct ? 20971520 : data.fileLimits?.maxBytes ?? 5242880) / 1048576)} م.ب` : `Contracts, commercial register, VAT certificate, price agreements · PDF, JPEG or PNG up to ${Math.round((data.fileLimits?.direct ? 20971520 : data.fileLimits?.maxBytes ?? 5242880) / 1048576)} MB`}</span>
         {can.manageFiles && <button type="button" className="btn sm p acc-bh-act" onClick={() => setDialog("file")} data-testid="upload-file"><Ico name="plus" small />{L("رفع ملف", "Upload a file")}</button>}
       </div>
-      {files.length === 0 ? empty(can.manageFiles ? L("لا ملفات على ملف العميل بعد. ارفع العقد أو السجل التجاري أو الشهادة الضريبية.", "No files yet. Upload the contract, the commercial register or the VAT certificate.") : L("لا ملفات على ملف العميل بعد.", "No files on the customer file yet.")) : (
+      {files.length === 0 ? empty(can.manageFiles ? L("لا ملفات على ملف العميل بعد. ارفع العقد أو السجل التجاري أو الشهادة الضريبية.", "No files yet. Upload the contract, the commercial register or the VAT certificate.") : L("لا ملفات على ملف العميل بعد.", "No files on the customer file yet.")) : phone ? (
+        // The phone (390): one card per file, so the validity (ساري / ينتهي خلال X يوم / منتهي) is never cut off.
+        <ul className="acc-file-cards" data-testid="files-cards">
+          {files.map((f) => (
+            <li key={f.id} data-testid={`file-${f.id}`}>
+              <div className="acc-file-top">
+                <a href={`/api/customers/${id}/files/${f.id}`} download={f.fileName} data-testid={`file-download-${f.id}`}><bdi>{f.title}</bdi></a>
+                <span className="acc-muted sm">{lx(FILE_CATEGORY_LABELS[f.category], f.category)}</span>
+              </div>
+              {hasValidity(f.category) && (f.validFrom || f.validUntil)
+                ? <div className="acc-file-validity" data-testid={`file-validity-cell-${f.id}`}><ValidityPill ar={ar} file={f} files={files} noticeDays={data.contractNoticeDays} /><ValidityDates ar={ar} file={f} /></div>
+                : null}
+              <div className="acc-file-sub">
+                <span>{fileSize(f.sizeBytes, ar)}</span>
+                {f.uploadedBy?.name ? <span><bdi>{f.uploadedBy.name}</bdi></span> : null}
+                <span>{longDate(f.createdAt, lang)}</span>
+              </div>
+              <div className="acc-file-act">
+                <a className="btn sm" href={`/api/customers/${id}/files/${f.id}`} download={f.fileName}>{L("تنزيل", "Download")}</a>
+                {can.editFileDates && hasValidity(f.category) && <button type="button" className="btn sm" onClick={() => setValidityFile(f)} data-testid={`file-dates-${f.id}`}>{f.validUntil || f.validFrom ? L("تعديل التواريخ", "Edit dates") : L("إضافة التواريخ", "Add dates")}</button>}
+                {can.manageFiles && <button type="button" className="btn sm" disabled={busy} onClick={() => deleteFile(f)} data-testid={`file-delete-${f.id}`}>{L("حذف", "Remove")}</button>}
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
         <div className="acc-scroll"><table className="t" data-testid="files-table">
-          <thead><tr><th>{L("الملف", "File")}</th><th>{L("التصنيف", "Category")}</th><th className="num">{L("الحجم", "Size")}</th><th>{L("رفعه", "Uploaded by")}</th><th>{L("التاريخ", "Date")}</th><th aria-label={L("إجراءات", "Actions")} /></tr></thead>
+          <thead><tr><th>{L("الملف", "File")}</th><th>{L("التصنيف", "Category")}</th><th>{L("الصلاحية", "Validity")}</th><th className="num">{L("الحجم", "Size")}</th><th>{L("رفعه", "Uploaded by")}</th><th>{L("التاريخ", "Date")}</th><th aria-label={L("إجراءات", "Actions")} /></tr></thead>
           <tbody>{files.map((f) => (
             <tr key={f.id} data-testid={`file-${f.id}`}>
               <td className="who"><a href={`/api/customers/${id}/files/${f.id}`} download={f.fileName} data-testid={`file-download-${f.id}`}><bdi>{f.title}</bdi></a><div className="acc-muted sm" dir="auto">{f.fileName}</div></td>
               <td>{lx(FILE_CATEGORY_LABELS[f.category], f.category)}</td>
+              <td data-testid={`file-validity-cell-${f.id}`}>
+                {hasValidity(f.category) && (f.validFrom || f.validUntil)
+                  ? <><ValidityPill ar={ar} file={f} files={files} noticeDays={data.contractNoticeDays} /><ValidityDates ar={ar} file={f} /></>
+                  : <span className="acc-muted">—</span>}
+              </td>
               <td className="num">{fileSize(f.sizeBytes, ar)}</td>
               <td>{f.uploadedBy?.name ?? "—"}</td>
-              <td>{shortDate(f.createdAt, lang)}</td>
+              <td>{longDate(f.createdAt, lang)}</td>
               <td className="acc-file-act">
                 <a className="btn sm" href={`/api/customers/${id}/files/${f.id}`} download={f.fileName}>{L("تنزيل", "Download")}</a>
+                {can.editFileDates && hasValidity(f.category) && <button type="button" className="btn sm" onClick={() => setValidityFile(f)} data-testid={`file-dates-${f.id}`}>{f.validUntil || f.validFrom ? L("تعديل التواريخ", "Edit dates") : L("إضافة التواريخ", "Add dates")}</button>}
                 {can.manageFiles && <button type="button" className="btn sm" disabled={busy} onClick={() => deleteFile(f)} data-testid={`file-delete-${f.id}`}>{L("حذف", "Remove")}</button>}
               </td>
             </tr>
@@ -832,21 +953,36 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
 
   const noticeEl = notice ? (
     <p className={`notice ${notice.ok ? "ok" : "er"}`} role={notice.ok ? "status" : "alert"} data-testid="account-notice" style={{ marginBottom: 16 }}>
-      {notice.text}<button type="button" onClick={() => setNotice(null)} aria-label={L("إغلاق", "Dismiss")}>×</button>
+      {notice.text}{notice.href ? <> · <Link href={notice.href} data-testid="account-notice-link">{notice.link}</Link></> : null}<button type="button" onClick={() => setNotice(null)} aria-label={L("إغلاق", "Dismiss")}>×</button>
     </p>
   ) : null;
 
   const dialogs = (
     <>
-      {dialog === "activity" && <ActivityDialog ar={ar} customerId={id} deals={openDeals} defaultDealId={null}
+      {dialog && typeof dialog === "object" && "activity" in dialog && <ActivityDialog ar={ar} customerId={id} customerName={name} deals={openDeals} defaultDealId={null} initialKind={dialog.activity}
         onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("سُجّل النشاط.", "Activity logged."), ok: true }); reload(); }} />}
-      {dialog === "quote" && <QuoteDialog ar={ar} customer={c} openDeals={openDeals} canCreateDeal={can.createDeal} credit={m.credit} creditState={cs} onClose={() => setDialog(null)} />}
+      {dialog && typeof dialog === "object" && "pick" in dialog && <DealPickDialog ar={ar} purpose={dialog.pick.purpose} deals={dialog.pick.deals}
+        onClose={() => setDialog(null)} onPick={(dealId) => { const purpose = dialog.pick.purpose; setDialog(null); void goWithDeal(purpose, dealId); }} />}
+      {dialog && typeof dialog === "object" && "sample" in dialog && <SampleDialog ar={ar} opportunityId={dialog.sample.dealId} customerId={id} sampledProductIds={dialog.sample.sampled} manager={dialog.sample.manager}
+        onClose={() => setDialog(null)}
+        onDone={(_requested, replayed, approval, openedDealId) => {
+          const dealId = openedDealId ?? dialog.sample.dealId ?? "";
+          setDialog(null);
+          setNotice({
+            text: replayed ? L("هذا الطلب مسجّل من قبل.", "This request was already recorded.")
+              : approval === "PENDING" ? L("تم طلب العيّنة — بانتظار موافقة المدير.", "Sample requested — awaiting the manager's approval.")
+              : L("تم طلب العيّنة", "Sample requested"),
+            ok: true, href: `/dashboard/sales/deals/${encodeURIComponent(dealId)}`, link: L("عرض الصفقة", "Open the deal"),
+          });
+          reload();
+        }} />}
       {(dialog === "hold" || dialog === "holdDirect") && cs && <HoldDialog ar={ar} customerId={id} customerName={name} c={cs} startAt={dialog === "holdDirect" && !cs.warning.any && !cs.grace ? "hold" : "ask"} onClose={() => setDialog(null)}
         onDone={(what) => { setDialog(null); setNotice({ text: what === "grace" ? L("سُجّلت أيام السماح.", "Grace days recorded.") : L("أُوقف البيع لهذا العميل.", "Sales to this customer are on hold."), ok: true }); reload(); }} />}
       {dialog === "lift" && cs && <LiftDialog ar={ar} customerId={id} customerName={name} c={cs} onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("رُفع الإيقاف.", "Hold lifted."), ok: true }); reload(); }} />}
-      {dialog === "file" && <FileDialog ar={ar} customerId={id} maxBytes={data.fileLimits?.maxBytes} direct={data.fileLimits?.direct} onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("رُفع الملف.", "File uploaded."), ok: true }); setTab("files"); reload(); }} />}
+      {dialog === "file" && <FileDialog ar={ar} customerId={id} maxBytes={data.fileLimits?.maxBytes} direct={data.fileLimits?.direct} canDates={can.editFileDates ?? false} onClose={() => setDialog(null)} onDone={(warning) => { setDialog(null); setNotice(warning ? { text: warning, ok: false } : { text: L("رُفع الملف.", "File uploaded."), ok: true }); setTab("files"); reload(); }} />}
+      {validityFile && <ValidityDialog ar={ar} customerId={id} file={validityFile} onClose={() => setValidityFile(null)} onDone={() => { setValidityFile(null); setNotice({ text: L("حُفظت تواريخ العقد.", "Contract dates saved."), ok: true }); reload(); }} />}
       {dialog === "details" && <DetailsDialog ar={ar} customer={c} canOwner={can.editOwner ?? false} canCredit={can.editCreditTerms ?? false} onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("حُفظت البيانات.", "Saved."), ok: true }); reload(); }} />}
-      {dialog && typeof dialog === "object" && <ContactDialog ar={ar} customerId={id} contact={dialog.contact} onClose={() => setDialog(null)} onDone={() => { setDialog(null); reload(); }} />}
+      {dialog && typeof dialog === "object" && "contact" in dialog && <ContactDialog ar={ar} customerId={id} contact={dialog.contact} onClose={() => setDialog(null)} onDone={() => { setDialog(null); reload(); }} />}
     </>
   );
 
@@ -859,12 +995,12 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
       <HrRoot>
         <div className="pg acc acc-phone" data-testid="customer-account">
           {noticeEl}
-          {subline && <p className="acc-subline">{subline}</p>}
+          {(subline || tierPill) && <p className="acc-subline">{tierPill}{tierPill && subline ? " " : null}{subline}{dialPhone ? <> · {tel ? <a href={tel} className="acc-tel n" dir="ltr" data-testid="account-phone">{dialPhone}</a> : <bdi className="n" dir="ltr">{dialPhone}</bdi>}</> : null}</p>}
           {creditBand}
+          {facts}
           <dl className="phrows" data-testid="account-metrics">
-            <div><dt className="lbl">{L("الرصيد المستحق", "Balance due")}</dt><dd className={bal && Number(bal.outstanding) > 0 ? "acc-warn" : undefined}>{bal ? amountWithUnit(bal.outstanding, false, true) : "—"}</dd></div>
-            <div><dt className="lbl">{L("مبيعات 12 شهرًا", "12-month sales")}</dt><dd>{sales ? amountWithUnit(sales.net) : "—"}</dd></div>
-            <div><dt className="lbl">{L("آخر طلب", "Last order")}</dt><dd>{m.lastOrder ? <><bdi className="id">#{m.lastOrder.orderNumber}</bdi> · {ar ? `قبل ${dayCount(lastDays, lang)}` : `${dayCount(lastDays, lang)} ago`}</> : "—"}</dd></div>
+            <div><dt className="lbl">{bal?.ar ? L("الرصيد المستحق", "Balance due") : L("عروض مقبولة لم تُفوتر", "Accepted, not invoiced")}</dt><dd className={owed != null && Number(owed) > 0 ? "acc-warn" : undefined} data-testid="phone-balance">{owed != null ? amountWithUnit(owed) : "—"}</dd></div>
+            <div><dt className="lbl">{L("مبيعات 12 شهرًا", "12-month sales")}</dt><dd>{sales && !salesUnknown ? amountWithUnit(sales.net) : "—"}</dd></div>
           </dl>
           {sections.sales && (
             <section data-testid="open-deal" className="acc-ph-deal">
@@ -880,15 +1016,25 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
                   </div>
                 </Link>
               ) : <p className="acc-muted">{L("لا صفقة مفتوحة.", "No open deal.")}</p>}
+              {quoteBtn && sampleBtn ? <div style={{ marginTop: 10 }}>{sampleBtn}</div> : null}
             </section>
           )}
           {contacts}
           {tabBar}
           {tab === "overview" ? <>{activityBlock}<div style={{ marginTop: 24 }}>{usual}{details}</div></> : tabBody}
-          <div className="sticky-act" data-acc-more>
-            {logBtn && <div className="grow" style={{ flex: 1, display: "flex" }}><button type="button" className="btn p" style={{ flex: 1, justifyContent: "center" }} data-testid="log-activity" onClick={() => setDialog("activity")}>{L("تسجيل نشاط", "Log activity")}</button></div>}
-            {quoteBtn && <button type="button" className="btn" data-testid="new-quote" onClick={() => setDialog("quote")}>{L("عرض سعر", "Quotation")}</button>}
-          </div>
+          {mayLog || quoteBtn ? (
+            <div className="sticky-act acc-quickbar" data-acc-more data-testid="account-quickbar">
+              {mayLog ? (tel ? <a className="btn" href={tel} aria-label={L("اتصال", "Call")} data-testid="act-call" onClick={() => setDialog({ activity: "CALL" })}><Ico name="phone" /></a>
+                : <button type="button" className="btn" disabled aria-label={L("لا يوجد رقم جوال", "No phone number")}><Ico name="phone" /></button>) : <span />}
+              {mayLog ? (wa ? <a className="btn" href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" aria-label={L("واتساب", "WhatsApp")} data-testid="act-whatsapp" onClick={() => setDialog({ activity: "WHATSAPP" })}><MessageCircle size={18} strokeWidth={1.5} aria-hidden /></a>
+                : <button type="button" className="btn" disabled aria-label={L("لا يوجد رقم واتساب", "No WhatsApp number")}><MessageCircle size={18} strokeWidth={1.5} aria-hidden /></button>) : <span />}
+              {mayLog ? <button type="button" className="btn" aria-label={L("سجّل نشاط", "Log activity")} data-testid="log-activity" onClick={() => setDialog({ activity: "CALL" })}><Ico name="note" /></button> : <span />}
+              {/* «عيّنة» on the one bar too (seat 5 r2): a quotation keeps the wide primary slot. */}
+              {quoteBtn && mayLog ? <button type="button" className="btn" aria-label={L("عيّنة", "Sample")} data-testid="act-sample" disabled={quickBusy} onClick={() => startQuick("sample")}><Bean size={18} strokeWidth={1.5} aria-hidden /></button> : <span />}
+              {quoteBtn ? <button type="button" className="btn p" data-testid="new-quote" disabled={quickBusy} onClick={() => startQuick("quote")}><Ico name="quote" small />{L("عرض سعر", "Quotation")}</button>
+                : mayLog ? <button type="button" className="btn p" data-testid="act-sample" disabled={quickBusy} onClick={() => startQuick("sample")}><Bean size={16} strokeWidth={1.5} aria-hidden />{L("عيّنة", "Sample")}</button> : <span />}
+            </div>
+          ) : null}
           {dialogs}
         </div>
       </HrRoot>
@@ -901,14 +1047,18 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
         {noticeEl}
         <div className="ph" style={{ alignItems: "flex-start" }}>
           <div style={{ minWidth: 0 }}>
-            <h1 data-testid="account-name">{name}{creditBadges ? <span className="acc-credit-badges" data-testid="account-credit-badges">{creditBadges}</span> : null}</h1>
+            <h1 data-testid="account-name">{name}{tierPill}{creditBadges ? <span className="acc-credit-badges" data-testid="account-credit-badges">{creditBadges}</span> : null}</h1>
             <div className="meta">
               {metaParts.map((t, i) => <span key={i} className="acc-meta-item">{i > 0 && <i aria-hidden />}<span>{t}</span></span>)}
+              {dialPhone && <span className="acc-meta-item"><i aria-hidden />{tel ? <a href={tel} className="acc-tel n" dir="ltr" data-testid="account-phone" onClick={() => { if (mayLog) setDialog({ activity: "CALL" }); }}>{dialPhone}</a> : <bdi className="n" dir="ltr">{dialPhone}</bdi>}</span>}
               {c.commercialRegNo && <span className="acc-meta-item">{metaParts.length > 0 && <i aria-hidden />}<span className="id" data-testid="account-cr">CR-{c.commercialRegNo}</span></span>}
             </div>
           </div>
-          <div className="act">
+          <div className="act acc-actbar" data-testid="account-actions">
+            {callBtn}
+            {waBtn}
             {logBtn}
+            {sampleBtn}
             {quoteBtn}
             {moreItems.length > 0 && (
               <div style={{ position: "relative" }} data-acc-more>
@@ -920,6 +1070,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
         </div>
 
         {creditBand}
+        {facts}
         {qoyod ? (
           <>
             <dl className="metrics acc-metrics" data-testid="account-ar-tiles">
@@ -940,7 +1091,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
           </>
         ) : null}
         <dl className="metrics acc-metrics" data-testid="account-metrics">
-          {salesFig}{balFig}{lastFig}{qtyFig}{termsFig}
+          {salesFig}{balFig}{qtyFig}{termsFig}
         </dl>
         {tabBar}
 

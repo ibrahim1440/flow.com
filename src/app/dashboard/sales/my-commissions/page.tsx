@@ -119,6 +119,15 @@ export default function MyCommissionsPage() {
   // Which accruals have their arithmetic open. Per-row rather than one global switch: a reader
   // checking one disputed figure should not have to unfold every other row to reach it.
   const [openCalc, setOpenCalc] = useState<Record<string, boolean>>({});
+  // The plain summary on top (council fix round 1, P0-12): the same figures as «يومي» — target, collected, remaining,
+  // accrued and the ESTIMATE — for this month only.
+  const [day, setDay] = useState<{ target: string | null; achieved: string; remaining: string | null; accrued: string | null; estimate: string | null; commissionVisible: boolean } | null>(null);
+  useEffect(() => {
+    let off = false;
+    api<{ target: { target: string | null; achieved: string; remaining: string | null; accrued: string | null; estimate: string | null; commissionVisible: boolean } }>("/api/sales/my-day")
+      .then((r) => { if (!off && r.ok && r.data.target) setDay(r.data.target); });
+    return () => { off = true; };
+  }, []);
 
   /**
    * Loads the selected period. Inlined in the effect so the first `await` precedes every state
@@ -145,7 +154,8 @@ export default function MyCommissionsPage() {
 
   /** A bare amount — no currency — for the places the design writes a running sum. */
   const bare = (v: string) => formatMoney(v);
-  const ccyText = (ccy = "SAR") => (ar ? (ccy === "SAR" ? "ر.س" : ccy) : ccy);
+  const ccyText = (ccy = "SAR") => (ar ? (ccy === "SAR" ? "ريال" : ccy) : ccy);
+  const whole = (v: string | null | undefined) => (v == null ? "—" : Math.round(Number(v)).toLocaleString("en-US"));
   const money = (v: string, ccy = "SAR") => `${bare(v)} ${ccyText(ccy)}`;
   const pct = (v: string) => `${Number(v).toFixed(6).replace(/0+$/, "").replace(/\.$/, "")}%`;
 
@@ -184,8 +194,29 @@ export default function MyCommissionsPage() {
       {data?.sandbox && <PerfSandbox notice={data.notice} ar={ar} />}
       <PerfNotice kind="error" ar={ar} onDismiss={() => setError("")}>{error}</PerfNotice>
 
-      {loading ? <PerfLoading ar={ar} /> : !data ? null : (
-        <>
+      {/* ── In plain words, first (council fix round 1, P0-12) ── */}
+      {day && month === initialMonth ? (
+        <section className="perf-card" data-testid="mc-summary" style={{ display: "grid", gap: 12, marginBottom: 20 }}>
+          <Metrics items={[
+            { label: ar ? "هدف الشهر" : "This month's target", testId: "mc-target", value: <span className="n">{day.target === null ? "—" : whole(day.target)}</span>, note: ar ? "ريال، من التحصيل" : "SAR, collections" },
+            { label: ar ? "حصّلت" : "Collected", testId: "mc-collected", value: <span className="n">{whole(day.achieved)}</span>, note: ar ? "ريال، بدون الضريبة" : "SAR, before VAT" },
+            { label: ar ? "باقي" : "Remaining", testId: "mc-remaining", value: <span className="n">{day.remaining === null ? "—" : whole(day.remaining)}</span>, note: ar ? "ريال توصل الهدف" : "SAR to the target" },
+            ...(day.commissionVisible ? [
+              { label: ar ? "عمولتك المستحقة" : "Your accrued commission", testId: "mc-accrued", value: <span className="n">{whole(day.accrued ?? "0")}</span>, note: ar ? "ريال، على اللي حصّلته" : "SAR, on what you collected", tone: "action" as const },
+              { label: ar ? "المتوقعة لو وصلت الهدف" : "If you reach the target", testId: "mc-estimate", value: <span className="n">{whole(day.estimate)}</span>, note: ar ? "ريال · تقدير" : "SAR · estimate" },
+            ] : []),
+          ]} />
+          <p className="sm" style={{ margin: 0, fontSize: 13, color: "var(--text-muted)" }} data-testid="mc-when">
+            {ar ? "متى تنصرف؟ بعد ما تعتمدها المالية، وتظهر هنا «صُرفت» مع المبلغ اللي انصرف." : "When is it paid? After finance approves it; it then shows here as «Paid» with the amount."}
+          </p>
+        </section>
+      ) : null}
+
+      {loading ? <PerfLoading ar={ar} /> : !data ? null : (<>
+          {/* ── «خطتي»: the plan, this month's estimate and the computed months (plan builder) ── */}
+          {data.plan && <MyPlan ar={ar} data={{ plan: data.plan, builder: data.builder ?? null, history: data.history ?? [], fixedPay: data.fixedPay ?? null }} />}
+        <details data-testid="mc-details" open={!day || month !== initialMonth}>
+          <summary style={{ cursor: "pointer", fontWeight: 600, margin: "0 0 14px" }}>{ar ? "التفاصيل" : "Details"}</summary>
           {/* ── What the reader came for, and the statement that produced it ──────── */}
           <div style={{ display: "flex", alignItems: "flex-start", gap: "20px 40px", flexWrap: "wrap", margin: "4px 0 22px" }}>
             <div>
@@ -228,8 +259,6 @@ export default function MyCommissionsPage() {
             </div>
           </div>
 
-          {/* ── «خطتي»: the plan, this month's estimate and the computed months (plan builder) ── */}
-          {data.plan && <MyPlan ar={ar} data={{ plan: data.plan, builder: data.builder ?? null, history: data.history ?? [], fixedPay: data.fixedPay ?? null }} />}
 
           {/* ── «أهدافي»: the month's target, achieved against it and what remains ── */}
           {data.progress && data.progress.target !== null && (
@@ -287,7 +316,7 @@ export default function MyCommissionsPage() {
                             <span className="sm" style={{ color: "var(--text-muted)", fontSize: 12.5 }}>
                               <bdi>{a.collectionEvent.customer?.name ?? (ar ? "بدون عميل" : "No customer")}</bdi>
                               {" · "}
-                              <span dir="ltr" title={planName} style={{ unicodeBidi: "isolate" }}>{a.planVersion.plan.code} v{a.planVersion.version}</span>
+                              <span title={planName}><bdi>{planName}</bdi></span>
                             </span>
                           </div>
 
@@ -424,8 +453,8 @@ export default function MyCommissionsPage() {
               </span>
             </PerfNote>
           </div>
-        </>
-      )}
+        </details>
+      </>)}
     </div>
   );
 }

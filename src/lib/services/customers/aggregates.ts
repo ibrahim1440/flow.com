@@ -37,7 +37,8 @@ export type OrderRow = {
   orderNumber: number;
   createdAt: Date;
   status: string;
-  items: { quantityKg: number; name: string }[];
+  /** `name` is the line's name (English where the catalogue has one); `nameAr` its Arabic name, when known. */
+  items: { quantityKg: number; name: string; nameAr?: string | null }[];
 };
 
 /** "YYYY-MM" of the Riyadh month containing `at`. */
@@ -111,25 +112,65 @@ export function orderRhythm(orders: OrderRow[], now: Date): {
 }
 
 /**
+ * The MEDIAN gap, in whole days, between consecutive business orders of the last 365 days — next to the mean of
+ * `orderRhythm` (which it does not change). One emergency order in between halves a gap and drags the mean; the median
+ * keeps the customer's usual rhythm. Same minimum as the mean: three orders (two gaps), else null. Used by «يومي» for
+ * «متوقع يطلب خلال 7 أيام» (services/sales/my-day).
+ */
+export function medianGapDays(orders: OrderRow[], now: Date): number | null {
+  const since = now.getTime() - 365 * DAY;
+  const t = orders
+    .filter((o) => isBusinessOrder(o.status) && o.createdAt.getTime() >= since)
+    .map((o) => o.createdAt.getTime())
+    .sort((a, b) => a - b);
+  if (t.length < 3) return null;
+  const gaps = t.slice(1).map((x, i) => (x - t[i]) / DAY).sort((a, b) => a - b);
+  const mid = Math.floor(gaps.length / 2);
+  const m = gaps.length % 2 ? gaps[mid] : (gaps[mid - 1] + gaps[mid]) / 2;
+  return Math.max(1, Math.round(m));
+}
+
+/**
  * «الأصناف المعتادة»: what the customer usually takes, in kilograms per month.
  * Σ quantityKg per item name over the business orders of the last 180 days, divided by six
  * (months), rounded to a whole kilogram; the top five by quantity. The item name is the SKU's
  * name, else the coffee product's, else the line's own bean name — the label the order shows.
  */
+/**
+ * THE monthly kilograms of a customer (batch 24 council fix round 1, P0-9): kg ordered in the last 90 days ÷ 3. One
+ * figure everywhere — the customer page's facts row, the tier («يومي», the tier pill, Ctrl K) and «يومي»'s lists.
+ */
+export const MONTHLY_KG_WINDOW_DAYS = 90;
+export function kgPerMonthOf(kg90: number): number {
+  return Math.round(((Number.isFinite(kg90) ? kg90 : 0) / 3) * 10) / 10;
+}
+export function monthlyKg(orders: OrderRow[], now: Date): number {
+  const since = now.getTime() - MONTHLY_KG_WINDOW_DAYS * DAY;
+  let kg = 0;
+  for (const o of orders) {
+    const t = o.createdAt.getTime();
+    if (!isBusinessOrder(o.status) || t < since || t > now.getTime()) continue;
+    for (const i of o.items) if (Number.isFinite(i.quantityKg)) kg += i.quantityKg;
+  }
+  return kgPerMonthOf(kg);
+}
+
 export const USUAL_ITEMS_WINDOW_DAYS = 180;
-export function usualItems(orders: OrderRow[], now: Date, limit = 5): { name: string; kgPerMonth: number }[] {
+export function usualItems(orders: OrderRow[], now: Date, limit = 5): { name: string; nameAr: string | null; kgPerMonth: number }[] {
   const since = now.getTime() - USUAL_ITEMS_WINDOW_DAYS * DAY;
-  const sums = new Map<string, number>();
+  const sums = new Map<string, { kg: number; nameAr: string | null }>();
   for (const o of orders) {
     if (!isBusinessOrder(o.status) || o.createdAt.getTime() < since) continue;
     for (const i of o.items) {
       const name = i.name.trim();
       if (!name || !Number.isFinite(i.quantityKg)) continue;
-      sums.set(name, (sums.get(name) ?? 0) + i.quantityKg);
+      const cur = sums.get(name) ?? { kg: 0, nameAr: i.nameAr?.trim() || null };
+      cur.kg += i.quantityKg;
+      sums.set(name, cur);
     }
   }
   return [...sums.entries()]
-    .map(([name, kg]) => ({ name, kgPerMonth: Math.round(kg / (USUAL_ITEMS_WINDOW_DAYS / 30)) }))
+    .map(([name, v]) => ({ name, nameAr: v.nameAr, kgPerMonth: Math.round(v.kg / (USUAL_ITEMS_WINDOW_DAYS / 30)) }))
     .filter((x) => x.kgPerMonth > 0)
     .sort((a, b) => b.kgPerMonth - a.kgPerMonth || a.name.localeCompare(b.name))
     .slice(0, limit);

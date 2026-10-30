@@ -77,6 +77,11 @@ export type PhoneHeader = {
   action?: { href: string; label: string; icon: "plus" };
   /** The page draws its own sticky action bar, so the shell leaves out the tab bar. */
   ownBar?: boolean;
+  /**
+   * The page's action bar replaces the sales rep's bar too (the customer page, council fix round 2 item 5): ONE bar at
+   * the bottom of the phone, never the rep's tabs with the customer's actions stacked on them.
+   */
+  replacesRepBar?: boolean;
 };
 
 export const PhoneContext = createContext<(h: PhoneHeader | null) => void>(() => {});

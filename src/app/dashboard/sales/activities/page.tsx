@@ -46,9 +46,11 @@ const TYPE_LABELS: Record<string, { en: string; ar: string }> = {
   NOTE: { en: "Note", ar: "ملاحظة" },
   TASK: { en: "Task", ar: "مهمة" },
   SAMPLE_FOLLOW_UP: { en: "Sample follow-up", ar: "متابعة عيّنة" },
+  WHATSAPP: { en: "WhatsApp", ar: "واتساب" },
+  EMAIL: { en: "Email", ar: "بريد" },
 };
 const TYPE_ICON: Record<string, D21IconName> = {
-  CALL: "phone", VISIT: "users", MEETING: "cal", NOTE: "note", TASK: "check", SAMPLE_FOLLOW_UP: "flask",
+  CALL: "phone", VISIT: "users", MEETING: "cal", NOTE: "note", TASK: "check", SAMPLE_FOLLOW_UP: "flask", WHATSAPP: "phone", EMAIL: "note",
 };
 const OUTCOME_LABELS: Record<string, { en: string; ar: string }> = {
   NO_ANSWER: { en: "No answer", ar: "لا رد" },

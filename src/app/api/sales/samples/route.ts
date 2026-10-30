@@ -7,7 +7,10 @@ import { parseFiniteDecimal } from "@/lib/services/commissions/engine";
 import {
   SAMPLE_STATUSES, isStockSample, requestKeyRefusal, sampleApprovalState, sampleOneUnitRefusal, sampleUnitRefusal, wholeUnits,
 } from "@/lib/services/sales/sample-rules";
-import { requestStockSample } from "@/lib/services/sales/sample-request";
+import { requestStockSampleIn } from "@/lib/services/sales/sample-request";
+import { hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
+import { customerInScope } from "@/lib/services/sales/customer-access";
+import { actsForAccountOwner, resolveQuickDeal } from "@/lib/services/sales/quick-deal";
 
 /**
  * Sample shipments.
@@ -113,9 +116,16 @@ export async function POST(request: Request) {
   }
   const b = (body ?? {}) as Record<string, unknown>;
 
-  const opportunityId = typeof b.opportunityId === "string" ? b.opportunityId : "";
-  if (!opportunityId) {
+  // From the customer page (council fix round 2, item 3): `customerId` instead of a deal — the deal is chosen or opened
+  // HERE, with the request, in one transaction (quick-deal), so opening and cancelling the dialog writes nothing.
+  const opportunityIdIn = typeof b.opportunityId === "string" ? b.opportunityId : "";
+  const customerId = !opportunityIdIn && typeof b.customerId === "string" && b.customerId ? b.customerId : "";
+  if (!opportunityIdIn && !customerId) {
     return NextResponse.json({ error: "A sample belongs to a deal." }, { status: 400 });
+  }
+  if (customerId) {
+    if (!hasModuleAccess(user.permissions, "customers")) return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+    if (!(await customerInScope(user, customerId))) return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
   const productSkuId = typeof b.productSkuId === "string" && b.productSkuId ? b.productSkuId : null;
@@ -185,30 +195,32 @@ export async function POST(request: Request) {
       }
     }
 
-    // ── A stock sample: the request, the one-per-product rule and the replay window, in one transaction ──
-    if (fromStock && productSkuId) {
-      const r = await requestStockSample(
-        {
-          opportunityId, productSkuId, units, description: description || null,
-          approvalNote: typeof b.approvalNote === "string" ? b.approvalNote : null,
-        },
-        { id: user.id, permissions: user.permissions },
-      );
-      const pending = r.sample.approval === "PENDING";
-      return NextResponse.json(
-        {
-          sample: r.sample, replayed: r.replayed, priorSamples: r.priorSamples,
-          notice: pending ? APPROVAL_NOTICE : REQUEST_NOTICE, noticeAr: pending ? APPROVAL_NOTICE_AR : REQUEST_NOTICE_AR,
-        },
-        { status: r.replayed ? 200 : 201 },
-      );
-    }
-
-    // ── A record-only sample: as it always was ──
-    // The sample and its follow-up are one write: a sample recorded as sent with no task behind it is the failure
-    // the task exists to prevent, so the two commit together or not at all.
+    // ── One transaction: the deal (from the customer page: chosen or opened now), then the request ──
     const SELECT = { id: true, status: true, quantity: true, unit: true, sentAt: true, fromStock: true } as const;
     const outcome = await prisma.$transaction(async (tx) => {
+      let opportunityId = opportunityIdIn;
+      if (customerId) {
+        const q = await resolveQuickDeal(tx, {
+          id: user.id, canOpenDeal: hasSubPrivilege(user.permissions, "sales", "lead_convert"), teamView: actsForAccountOwner(user),
+        }, customerId, "sample");
+        if (q.kind === "forbidden") throw { _appCode: 403, code: "NOT_ACCOUNT_OWNER", message: "هذا العميل له مندوب آخر — اطلب من مديرك أو من مندوبه.", errorEn: "This customer belongs to another rep." };
+        if (q.kind === "none") throw { _appCode: 403, code: "NO_DEAL", message: "ما عندك صفقة مفتوحة مع هذا العميل، وما عندك صلاحية تفتح وحدة.", errorEn: "You have no open deal with this customer and may not open one." };
+        if (q.kind !== "use" && q.kind !== "created") throw { _appCode: 409, code: "PICK_DEAL", message: "لهذا العميل أكثر من صفقة مفتوحة — اختر الصفقة.", errorEn: "This customer has several open deals: pick one." };
+        opportunityId = q.opportunityId;
+      }
+
+      // ── A stock sample: the request, the one-per-product rule and the replay window ──
+      if (fromStock && productSkuId) {
+        const r = await requestStockSampleIn(tx, {
+          opportunityId, productSkuId, units, description: description || null,
+          approvalNote: typeof b.approvalNote === "string" ? b.approvalNote : null,
+        }, { id: user.id, permissions: user.permissions });
+        return { kind: "stock" as const, r, opportunityId };
+      }
+
+      // ── A record-only sample: as it always was ──
+      // The sample and its follow-up are one write: a sample recorded as sent with no task behind it is the failure
+      // the task exists to prevent, so the two commit together or not at all.
       const deal = await tx.opportunity.findUnique({ where: { id: opportunityId }, select: { outcome: true, ownerId: true } });
       if (!deal || (!seesAllSales(user.permissions) && deal.ownerId !== user.id)) return { kind: "notFound" as const };
       if (deal.outcome !== "OPEN") return { kind: "closed" as const, outcome: deal.outcome };
@@ -241,9 +253,20 @@ export async function POST(request: Request) {
           },
         });
       }
-      return { kind: "created" as const, sample: created };
+      return { kind: "created" as const, sample: created, opportunityId };
     }, TX_OPTS);
 
+    if (outcome.kind === "stock") {
+      const r = outcome.r;
+      const pending = r.sample.approval === "PENDING";
+      return NextResponse.json(
+        {
+          sample: r.sample, replayed: r.replayed, priorSamples: r.priorSamples, opportunityId: outcome.opportunityId,
+          notice: pending ? APPROVAL_NOTICE : REQUEST_NOTICE, noticeAr: pending ? APPROVAL_NOTICE_AR : REQUEST_NOTICE_AR,
+        },
+        { status: r.replayed ? 200 : 201 },
+      );
+    }
     if (outcome.kind === "notFound") return NextResponse.json({ error: "Deal not found." }, { status: 404 });
     if (outcome.kind === "closed") {
       const deal = outcome;
@@ -252,7 +275,7 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
-    return NextResponse.json({ sample: outcome.sample, notice: STOCK_NOTICE }, { status: 201 });
+    return NextResponse.json({ sample: outcome.sample, opportunityId: outcome.opportunityId, notice: STOCK_NOTICE }, { status: 201 });
   } catch (err) {
     return handleDomainError(err);
   }

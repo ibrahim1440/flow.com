@@ -191,6 +191,48 @@ export const EVENTS: NotificationEventDef[] = [
     }),
   },
   {
+    // «صلاحية العقد» (batch 24 WP-C, 20261206100000_customer_contract_validity): a contract or price agreement on the
+    // customer file entered its notice window. Once per contract per end date (dedupe key = file + end date).
+    key: "sales.contract_expiring", category: "sales", severity: "warning",
+    label: { ar: "عقد عميلك قرب ينتهي", en: "Your customer's contract is ending soon" },
+    recipients: [{ person: "customerOwner" }], requires: [MOD("customers"), MOD("sales")],
+    trigger: "contractNoticeRun (lib/services/customers/contracts.ts), daily: GET /api/cron/contract-notices",
+    render: (f) => {
+      const n = Number(f.daysLeft ?? 0);
+      const kindAr = f.category === "PRICE_AGREEMENT" ? "اتفاقية أسعار" : "عقد";
+      const kindEn = f.category === "PRICE_AGREEMENT" ? "price agreement" : "contract";
+      return {
+        severity: n <= 7 ? "warning" : "info",
+        titleAr: n <= 0 ? `${kindAr} ${s(f.customerName)} ينتهي اليوم` : `${kindAr} ${s(f.customerName)} ينتهي بعد ${n} يوم`,
+        titleEn: n <= 0 ? `The ${kindEn} of ${sEn(f, "customerName")} ends today` : `The ${kindEn} of ${sEn(f, "customerName")} ends in ${n} day(s)`,
+        bodyAr: `${s(f.title)} · ينتهي في ${s(f.endsOn)}. كلّم العميل عن التجديد وارفع النسخة الجديدة في ملفه.`,
+        bodyEn: `${s(f.title)} · ends on ${s(f.endsOn)}. Talk to the customer about renewing and upload the new copy to their file.`,
+        link: f.customerId ? `/dashboard/customers/${enc(s(f.customerId))}?tab=files` : "/dashboard/customers",
+      };
+    },
+  },
+  {
+    // The same notice for a customer with NO account owner: nobody's «يومي» shows it, so the sales managers are told
+    // (council fix round 1, P0-14). Same dedupe key as above (file + end date): once per contract per window.
+    key: "sales.contract_expiring_unassigned", category: "sales", severity: "warning",
+    label: { ar: "عقد عميل بدون مندوب قرب ينتهي", en: "A contract of a customer with no rep is ending soon" },
+    recipients: [{ perm: [sales("lead_assign")] }], requires: [MOD("customers"), MOD("sales")],
+    trigger: "contractNoticeRun (lib/services/customers/contracts.ts), daily: GET /api/cron/contract-notices",
+    render: (f) => {
+      const n = Number(f.daysLeft ?? 0);
+      const kindAr = f.category === "PRICE_AGREEMENT" ? "اتفاقية أسعار" : "عقد";
+      const kindEn = f.category === "PRICE_AGREEMENT" ? "price agreement" : "contract";
+      return {
+        severity: n <= 7 ? "warning" : "info",
+        titleAr: n <= 0 ? `${kindAr} ${s(f.customerName)} (بدون مندوب) ينتهي اليوم` : `${kindAr} ${s(f.customerName)} (بدون مندوب) ينتهي بعد ${n} يوم`,
+        titleEn: n <= 0 ? `The ${kindEn} of ${sEn(f, "customerName")} (no rep) ends today` : `The ${kindEn} of ${sEn(f, "customerName")} (no rep) ends in ${n} day(s)`,
+        bodyAr: `${s(f.title)} · ينتهي في ${s(f.endsOn)}. العميل ما له مندوب: عيّن له مندوبًا يتابع التجديد.`,
+        bodyEn: `${s(f.title)} · ends on ${s(f.endsOn)}. The customer has no rep: assign one to follow up the renewal.`,
+        link: f.customerId ? `/dashboard/customers/${enc(s(f.customerId))}?tab=files` : "/dashboard/customers",
+      };
+    },
+  },
+  {
     key: "sales.customer_hold", category: "sales", severity: "warning",
     label: { ar: "إيقاف البيع لعميلك أو مهلة أو رفع الإيقاف", en: "Your customer held / given grace / hold lifted" },
     recipients: [{ person: "customerOwner" }, { perm: [{ module: "customers", sub: "sales_hold" }] }],

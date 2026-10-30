@@ -12,6 +12,9 @@ import { pinLookup, pinVerifierInput, requirePinLookupSecret } from "@/lib/pin-l
 import { pinSetThrottle, pinUnavailable, isPinLookupConflict } from "@/lib/pin-set-guard";
 import { refreshSessionCookie, setFreshSession } from "@/lib/session-cookie";
 import { asMsgLang } from "@/lib/automation/employee-lang";
+import { homeChoice, isSalesPersona, landingSetByAdmin } from "@/lib/workspace/landing";
+import { writeSettingsAudit } from "@/lib/services/settings/audit";
+import { readSessionEmployee } from "@/lib/auth/session-employee";
 
 // GET — fetch current user's profile details (phone, language, WhatsApp message language)
 export async function GET() {
@@ -36,7 +39,7 @@ export async function PATCH(request: Request) {
     if (error) return error;
 
     const body = await request.json();
-    const { phoneNumber, preferredLanguage, whatsappLanguage } = body;
+    const { phoneNumber, preferredLanguage, whatsappLanguage, home } = body;
 
     const update: Record<string, unknown> = {};
     if (phoneNumber !== undefined) update.phoneNumber = phoneNumber || null;
@@ -49,14 +52,40 @@ export async function PATCH(request: Request) {
       else return NextResponse.json({ error: "لغة رسائل واتساب غير صالحة.", errorEn: "whatsappLanguage must be ar, en or system.", code: "INVALID_LANGUAGE" }, { status: 400 });
     }
 
+    // «صفحتي الرئيسية» (council fix round 1 P0-15, round 2 item 11): a sales persona picks «يومي» or the old home — only
+    // these two values, in its OWN column (homePreference): `defaultRoute` is the administrator's, never written here.
+    // When the administrator fixed the landing page the choice is read-only (409 «حددها المدير»). Audited.
+    let homeAudit: { before: string; after: string } | null = null;
+    if (home === "my-day" || home === "classic") {
+      const me = await readSessionEmployee<{ role: string; permissions: unknown; defaultRoute: string }>(prisma as never, user.id, { role: true, permissions: true, defaultRoute: true });
+      if (!me || !isSalesPersona({ role: me.role, permissions: parsePermissions(me.permissions as string) })) {
+        return NextResponse.json({ error: "اختيار الصفحة الرئيسية لمندوبي المبيعات.", errorEn: "Only a sales account picks this home." }, { status: 400 });
+      }
+      if (landingSetByAdmin(me.defaultRoute)) {
+        return NextResponse.json({ error: "صفحتك الرئيسية حددها المدير.", errorEn: "Your home page was set by the administrator.", code: "HOME_SET_BY_ADMIN" }, { status: 409 });
+      }
+      const before = homeChoice(me.defaultRoute, me.homePreference);
+      update.homePreference = home;
+      if (before !== home) homeAudit = { before, after: home };
+    }
     if (Object.keys(update).length === 0) {
       return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
     }
 
-    const updated = await prisma.employee.update({
-      where: { id: user.id },
-      data: update,
-      select: { id: true, name: true, role: true, permissions: true, preferredLanguage: true },
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.employee.update({
+        where: { id: user.id },
+        data: update,
+        select: { id: true, name: true, role: true, permissions: true, preferredLanguage: true },
+      });
+      if (homeAudit) {
+        await writeSettingsAudit(tx, {
+          section: "organisation", action: "SETTINGS_UPDATED", entityType: "Employee", entityId: user.id,
+          changed: ["homePreference"], before: { homePreference: homeAudit.before }, after: { homePreference: homeAudit.after },
+          reason: "profile.home", actor: { id: user.id, name: user.name },
+        });
+      }
+      return row;
     });
 
     // Re-sign the CURRENT session's token so the language takes effect on the next page load

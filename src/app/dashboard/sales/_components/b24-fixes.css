@@ -1,0 +1,26 @@
+/* Batch 24 WP-A — the sales UI bugs of the 30 Oct tour (FOLLOWUPS «Sales UI tour»). Tokens only. */
+
+/* Bug 6: the deal page at 390 — each sample is a card; its status and its decisions (approve / decline, mark
+   sent, cancel, record the result) are never cut off. */
+.d21 .deal-smp-cards { list-style: none; margin: 0 0 32px; padding: 0; display: grid; gap: 10px }
+.d21 .deal-smp-cards > li { border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px; display: grid; gap: 6px; background: var(--surface) }
+.d21 .deal-smp-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px }
+.d21 .deal-smp-top b { font-weight: 600; overflow-wrap: anywhere; min-width: 0 }
+.d21 .deal-smp-top .st { flex: none; white-space: nowrap }
+.d21 .deal-smp-sub { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; color: var(--text-muted) }
+.d21 .deal-smp-act { display: flex; flex-wrap: wrap; gap: 8px }
+.d21 .deal-smp-act .btn { min-height: 40px }
+
+/* Bug 8: the pipeline board at 1440 — up to five stages fit side by side instead of the fourth being cut;
+   more than that still scroll sideways. */
+@media (min-width: 1280px) { .d21 .board-wrap { --col-min: 196px } }
+
+/* Bug 9: the sales settings' stage table — the row buttons («تعديل», «إخفاء») keep their room. */
+/* The tour's cut came from the long stage codes (SAMPLE_EVALUATION): the code wraps and the selects stay narrow. */
+.d21 [data-testid="stages-table"] { width: 100% }
+.d21 [data-testid="stages-table"] td.id { white-space: normal; overflow-wrap: anywhere; word-break: break-word; max-width: 130px; font-size: 12px }
+.d21 [data-testid="stages-table"] td:last-child { width: 1%; white-space: nowrap }
+.d21 [data-testid="stages-table"] select { max-width: 180px }
+
+/* Bug 10: the deal page's stage track — long names wrap inside their own step. */
+.d21 .track b { white-space: normal; overflow-wrap: anywhere; line-height: 1.35 }

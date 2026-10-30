@@ -42,3 +42,12 @@
   .inv .inv-hide-m { display: none; }
   .inv .inv-lines { display: block; overflow-x: auto; }
 }
+
+/* Batch 24 WP-A (FOLLOWUPS sales UI bug 7): «طلبات الفواتير» at 390 — one card per request. */
+.inv-req-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px }
+.inv-req-card { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--hr-border-subtle, var(--border-subtle)); border-radius: 8px; color: inherit; text-decoration: none; background: var(--hr-surface, var(--surface)) }
+.inv-req-card:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }
+.inv-req-top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline }
+.inv-req-top b { font-weight: 600; min-width: 0; overflow-wrap: anywhere }
+.inv-req-amt { flex: none; font-weight: 600 }
+.inv-req-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px }

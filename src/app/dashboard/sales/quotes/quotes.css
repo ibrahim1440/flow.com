@@ -140,3 +140,5 @@
 .d21 .q-notes-ro { margin: 0; white-space: pre-wrap; font-size: 13.5px; line-height: 22px; color: var(--text-primary) }
 .d21 .q-list-ph .act { flex-wrap: nowrap; align-self: flex-start }
 .d21 .t.quotes td:nth-child(2) { min-width: 210px }
+/* The unit is never cut to «ك…» (council fix round 2, item 4): «كجم» / «عبوة» / «جرام» always fit beside the chevron. */
+.d21 .t.q-lines.ed .qi.unitsel { min-width: 88px }

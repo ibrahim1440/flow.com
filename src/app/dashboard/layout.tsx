@@ -1,5 +1,6 @@
 "use client";
 
+import { clearRecent } from "@/components/shell/recent";
 import { useState, useEffect, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { routeAllowed, type Viewer } from "@/lib/nav/registry";
@@ -12,7 +13,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { StepUpProvider } from "@/components/auth/StepUp";
 import { ShellLoading, MfaRequiredScreen, PasswordChangeRequiredScreen } from "@/components/shell/ShellStates";
 import { SESSION_EXPIRED_LOGIN } from "@/lib/session-expired";
-import { DesktopRecommendedNotice } from "@/components/shell/DesktopRecommendedNotice";
+import { DesktopRecommendedNotice, showsDesktopNotice } from "@/components/shell/DesktopRecommendedNotice";
 
 /**
  * The menu lives in one registry — see `@/lib/nav/registry`. Sidebar, rail, tab bar,
@@ -43,6 +44,7 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
   const allowed = routeAllowed(viewer, pathname);
 
   async function handleLogout() {
+    clearRecent(); // Ctrl K «فتحتها مؤخرًا» never outlives the session (council fix round 1)
     await fetch("/api/auth/me", { method: "DELETE" });
     router.push("/login");
   }
@@ -58,7 +60,7 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
       deniedBody={t("accessDeniedBody")}
       homeLabel={t("dashboard")}
     >
-      <DesktopRecommendedNotice lang={lang} />
+      {showsDesktopNotice(viewer, pathname) ? <DesktopRecommendedNotice lang={lang} /> : null}
       {children}
     </AppShell>
   );

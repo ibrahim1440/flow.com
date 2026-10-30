@@ -6,6 +6,8 @@ export const ACTIVITY_LABELS: Record<string, { en: string; ar: string }> = {
   NOTE: { en: "Note", ar: "ملاحظة" },
   TASK: { en: "Task", ar: "مهمة" },
   SAMPLE_FOLLOW_UP: { en: "Sample follow-up", ar: "متابعة عينة" },
+  WHATSAPP: { en: "WhatsApp", ar: "واتساب" },
+  EMAIL: { en: "Email", ar: "بريد" },
 };
 
 /** «ماذا حدث؟» — the outcome list of the activity dialog (the deal page keeps its own copy). */

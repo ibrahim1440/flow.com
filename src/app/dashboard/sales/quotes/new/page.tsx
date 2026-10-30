@@ -21,6 +21,8 @@ export default function NewQuotePage() {
   const lang = useLang();
   const ar = lang === "ar";
   const opportunityId = search.get("opportunityId");
+  // From the customer page: reopen my empty draft of the deal, or prefill the usual items (POST from: "customer").
+  const fromCustomer = search.get("from") === "customer";
   const { base } = useQuotesBase();
 
   const [createError, setCreateError] = useState("");
@@ -51,7 +53,7 @@ export default function NewQuotePage() {
       const validUntil = new Date(Date.now() + 30 * 86400_000).toISOString().slice(0, 10);
       const res = await api<{ quote: { id: string } }>("/api/sales/quotes", {
         method: "POST",
-        body: { opportunityId, validUntil, lines: [] },
+        body: { opportunityId, validUntil, lines: [], ...(fromCustomer ? { from: "customer" } : {}) },
       });
       if (cancelled) return;
       if (res.ok && res.data.quote) {
@@ -64,7 +66,7 @@ export default function NewQuotePage() {
     return () => {
       cancelled = true;
     };
-  }, [opportunityId, router, ar, base]);
+  }, [opportunityId, router, ar, base, fromCustomer]);
 
   if (error) {
     return (

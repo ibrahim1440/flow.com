@@ -54,7 +54,7 @@ export type Quote = {
 export type Sample = {
   id: string; description: string | null; quantity: string; unit: string; status: string; sentAt: string | null;
   feedbackScore: number | null; createdAt: string;
-  productSku: { name: string | null; skuCode: string } | null; opportunity: { id: string; title: string };
+  productSku: { name: string | null; nameAr?: string | null; skuCode: string } | null; opportunity: { id: string; title: string };
 };
 
 export type Order = {
@@ -68,6 +68,8 @@ export type Order = {
 export type CustomerFile = {
   id: string; category: string; title: string; fileName: string; mimeType: string; sizeBytes: number; sha256: string; createdAt: string;
   uploadedBy: { id: string; name: string } | null;
+  /** «صلاحية العقد» (batch 24 WP-C): contracts and price agreements only; date-only ISO strings. */
+  validFrom?: string | null; validUntil?: string | null; renewalNoticeDays?: number | null;
 };
 
 /** «كشف الحساب»: derived from accepted quotations and approved collections — not an accounting ledger. */
@@ -97,7 +99,7 @@ export type Collection = {
 
 export type TimelineEntry = { key: string; at: string; kind: string } & (
   | { kind: "activity"; activity: Activity }
-  | { kind: "sample"; sample: { id: string; name: string | null; quantity: string; unit: string; deal: { id: string; title: string } } }
+  | { kind: "sample"; sample: { id: string; name: string | null; nameAr?: string | null; quantity: string; unit: string; deal: { id: string; title: string } } }
   | { kind: "quote_issued" | "quote_accepted"; quote: { id: string; quoteNumber: string; revision: number; grandTotal: string; currency: string }; stageMove?: { from: string; to: string } | null }
   | { kind: "order"; order: { id: string; orderNumber: number; totalKg: number; status: string; value: string | null } }
   | { kind: "payment"; payment: { id: string; amount: string; currency: string; method: string; orderNumber: number | null } }
@@ -123,8 +125,10 @@ export type Account = {
     } | null;
     lastOrder: { id: string; orderNumber: number; createdAt: string; daysAgo: number } | null;
     cadenceDays: number | null;
+    /** THE monthly kilograms: last 90 days ÷ 3 (aggregates.monthlyKg), the tier's and «يومي»'s figure. */
+    kgPerMonth?: number | null;
     monthly: { month: string; kg: number; partial?: true }[] | null;
-    usualItems: { name: string; kgPerMonth: number }[] | null;
+    usualItems: { name: string; nameAr: string | null; kgPerMonth: number }[] | null;
     unpricedOrders: number | null;
     /** The credit limit against the balance; null without a limit or without the sales section. */
     credit: Credit | null;
@@ -137,6 +141,10 @@ export type Account = {
   files: CustomerFile[];
   /** `direct`: files over 4 MB upload from the browser straight to the private Blob store (up to 20 MB). */
   fileLimits?: { maxBytes: number; direct?: boolean };
+  /** The company's contract notice period in days (batch 24 WP-C); a file's own value wins. */
+  contractNoticeDays?: number;
+  /** The derived tier within the account owner's book (WP-B «يومي»); null without an owner or without sales access. */
+  tier?: "VIP" | "REGULAR" | "SMALL" | "QUIET" | null;
   openDeal: OpenDeal | null;
   nextStep: Activity | null;
   openDeals: number;
@@ -147,6 +155,6 @@ export type Account = {
   orders: Order[] | null;
   collections: Collection[] | null;
   timeline: TimelineEntry[];
-  can: { edit: boolean; manageProfiles: boolean; manageFiles: boolean; logActivity: boolean; quote: boolean; createDeal: boolean; editOwner?: boolean; editCreditTerms?: boolean };
+  can: { edit: boolean; manageProfiles: boolean; manageFiles: boolean; logActivity: boolean; quote: boolean; createDeal: boolean; editOwner?: boolean; editCreditTerms?: boolean; editFileDates?: boolean };
   now: string;
 };

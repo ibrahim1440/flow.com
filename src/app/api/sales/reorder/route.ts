@@ -16,11 +16,13 @@ export async function GET(request: Request) {
   const { user, error } = await requireModule("customers");
   if (error) return error;
   try {
+    // The scope is the session's: a rep reads their own book whatever `ownerId` says; a team-view caller
+    // (the sales manager, the admin) reads one owner's or — explicitly — everyone's.
     const team = seesTeamReports(user.permissions, user.role);
     const asked = new URL(request.url).searchParams.get("ownerId");
-    const ownerId = team ? asked || null : user.id;
+    const scope = team ? (asked ? { ownerId: asked } : { scope: "all" as const }) : { ownerId: user.id };
     const [rows, config] = await Promise.all([
-      reorderSuggestions(prisma, { ownerId, limit: 200 }),
+      reorderSuggestions(prisma, { ...scope, limit: 200 }),
       prisma.systemConfig.findUnique({ where: { id: "singleton" }, select: { reorderLateFactor: true, reorderInactiveFactor: true } }),
     ]);
     return NextResponse.json({ scope: team ? "team" : "own", factors: factorsFrom(config), rows });

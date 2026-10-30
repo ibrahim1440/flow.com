@@ -49,7 +49,6 @@ export function MyPlan({ ar, data }: { ar: boolean; data: MyPlanPayload }) {
     <section className="cb-sec" data-testid="my-plan" style={{ margin: "0 0 24px" }}>
       <div className="cb-sec-h">
         <h3>{ar ? "خطتي" : "My plan"}</h3>
-        <span className="perf-code">{p.code} v{p.version}</span>
         <b style={{ fontWeight: 500 }}>{ar ? (p.nameAr ?? p.name) : p.name}</b>
         <span className="cb-hint">{ar ? "منذ" : "since"} {formatDay(p.assignedFrom)}</span>
       </div>
@@ -105,7 +104,7 @@ export function MyPlan({ ar, data }: { ar: boolean; data: MyPlanPayload }) {
             <tbody>{data.history.map((h) => (
               <tr key={h.periodStart}>
                 <td className="n">{new Date(new Date(h.periodStart).getTime() + 3 * 3600_000).toISOString().slice(0, 7)}</td>
-                <td><span dir="ltr">{h.planVersion.plan.code} v{h.planVersion.version}</span></td>
+                <td>{ar ? `النسخة ${h.planVersion.version}` : `Version ${h.planVersion.version}`}</td>
                 <td className="num n">{pc(h.achievementPercent)}</td>
                 <td className="num n">{m(h.clientCommission)}</td><td className="num n">{m(h.targetBonus)}</td><td className="num n">{m(h.overTargetIncentive)}</td>
                 <td className="num n"><b>{m(h.totalVariable)}</b></td>

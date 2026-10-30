@@ -168,19 +168,23 @@ async function sampleItems(actor: WsActor): Promise<ApprovalItem[]> {
     orderBy: { createdAt: "asc" }, take: 200,
     select: {
       id: true, quantity: true, createdAt: true, createdById: true,
-      productSku: { select: { skuCode: true, name: true } },
-      opportunity: { select: { id: true, title: true, customer: { select: { name: true } }, owner: { select: { name: true } } } },
+      productSku: { select: { skuCode: true, name: true, nameAr: true } },
+      opportunity: { select: { id: true, title: true, customer: { select: { name: true, nameAr: true } }, owner: { select: { name: true } } } },
     },
   });
   const creators = new Map((await prisma.employee.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.createdById).filter((x): x is string => !!x))] } }, select: { id: true, name: true } })).map((p) => [p.id, p.name]));
   return rows.map((r) => {
+    // FOLLOWUPS sales UI bug 4: the Arabic screen names the product (and the customer) in Arabic.
     const product = r.productSku?.name ?? r.productSku?.skuCode ?? "—";
+    const productAr = r.productSku?.nameAr ?? product;
     return {
       key: `SAMPLE:${r.id}`, type: "SAMPLE" as const, id: r.id,
-      title: `عيّنة ثانية · ${product}`, titleEn: `Second sample · ${product}`,
-      requester: r.createdById ? creators.get(r.createdById) ?? null : null, subject: r.opportunity.customer?.name ?? r.opportunity.title,
+      title: `عيّنة ثانية · ${productAr}`, titleEn: `Second sample · ${product}`,
+      requester: r.createdById ? creators.get(r.createdById) ?? null : null,
+      subject: r.opportunity.customer?.nameAr ?? r.opportunity.customer?.name ?? r.opportunity.title,
+      subjectEn: r.opportunity.customer?.name ?? r.opportunity.title,
       createdAt: iso(r.createdAt),
-      facts: { customer: r.opportunity.customer?.name ?? null, deal: r.opportunity.title, dealOwner: r.opportunity.owner?.name ?? null, product, units: Number(r.quantity) },
+      facts: { customer: r.opportunity.customer?.name ?? null, customerAr: r.opportunity.customer?.nameAr ?? null, deal: r.opportunity.title, dealOwner: r.opportunity.owner?.name ?? null, product, productAr, units: Number(r.quantity) },
       warnings: [{ ar: "سبق إرسال عيّنة من هذا المحصول لهذا العميل.", en: "This customer has already had a sample of this product." }],
       decide: { url: `/api/sales/samples/${encodeURIComponent(r.id)}/approval`, rejectNeedsReason: true as const },
       openUrl: `/dashboard/sales/deals/${encodeURIComponent(r.opportunity.id)}`,

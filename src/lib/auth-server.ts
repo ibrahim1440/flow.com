@@ -11,6 +11,8 @@ import { stockChangeRefusal, stockAuthSnapshot } from "./auth/stock-change";
 import { isBcryptHash } from "./auth/secret";
 import { isSimpleMode, simpleModePermissions } from "./simple-mode";
 import { stationDelegate } from "./auth/station-delegate";
+import { homeChoice, landingSetByAdmin } from "./workspace/landing";
+import { readSessionEmployee } from "./auth/session-employee";
 
 /**
  * The verified claims of the session cookie — WHO is calling and which session (id, sid, cv,
@@ -63,6 +65,8 @@ export type SessionUser = UserPayload & {
   mfaEnrollmentRequired: boolean;
   /** An administrator issued a temporary password: the account may only set its own (UR-03e / UR-04). */
   passwordChangeRequired: boolean;
+  /** «صفحتي الرئيسية» (council fix round 2): the person's home choice, and whether the admin fixed the landing page. */
+  home?: { choice: "my-day" | "classic"; setByAdmin: boolean };
 };
 
 export async function getUserWithPermissions(): Promise<SessionUser | null> {
@@ -77,22 +81,21 @@ export async function getUserWithPermissions(): Promise<SessionUser | null> {
   // A station session is never an ERP session (checkSession refuses scope STATION as well).
   if (user.scope === "STATION") return null;
 
-  let employee = await prisma.employee.findUnique({
-    where: { id: user.id },
-    select: {
-      active: true, name: true, role: true, permissions: true, username: true, pin: true, password: true, passwordMustChange: true,
-      // An exception past its expiry stops applying at once (Figma UR-09, owner §9.2): settled here,
-      // before this request is judged, so no session keeps an expired grant.
-      permissionOverrides: { where: { endedAt: null, expiresAt: { lte: new Date() } }, select: { id: true }, take: 1 },
-    },
+  // «صفحتي الرئيسية» (council fix round 2, item 11) is read with the row the session already loads — no extra query — and
+  // a database without its column (deploy order, council fix round 3 MED-2) falls back instead of failing every sign-in.
+  type Row = { active: boolean; name: string; role: string; permissions: unknown; username: string | null; pin: string | null; password: string | null;
+    passwordMustChange: boolean; defaultRoute: string; permissionOverrides: { id: string }[] };
+  const BASE = { active: true, name: true, role: true, permissions: true, username: true, pin: true, password: true, passwordMustChange: true, defaultRoute: true } as const;
+  let employee = await readSessionEmployee<Row>(prisma as never, user.id, {
+    ...BASE,
+    // An exception past its expiry stops applying at once (Figma UR-09, owner §9.2): settled here,
+    // before this request is judged, so no session keeps an expired grant.
+    permissionOverrides: { where: { endedAt: null, expiresAt: { lte: new Date() } }, select: { id: true }, take: 1 },
   });
   if (employee && employee.permissionOverrides.length) {
     const { settleExpiredOverrides } = await import("./users/overrides");
     await settleExpiredOverrides(user.id);
-    employee = await prisma.employee.findUnique({
-      where: { id: user.id },
-      select: { active: true, name: true, role: true, permissions: true, username: true, pin: true, password: true, passwordMustChange: true, permissionOverrides: { where: { id: "-" }, select: { id: true } } },
-    });
+    employee = await readSessionEmployee<Row>(prisma as never, user.id, { ...BASE, permissionOverrides: { where: { id: "-" }, select: { id: true } } });
   }
 
   // Deleted, or deactivated since the token was issued. Both resolve as not authenticated
@@ -129,7 +132,8 @@ export async function getUserWithPermissions(): Promise<SessionUser | null> {
     id: user.id, name: employee.name, role: employee.role, permissions, preferredLanguage: user.preferredLanguage, cv: user.cv, sid: user.sid,
     ...(user.iat !== undefined ? { iat: user.iat } : {}), ...(user.exp !== undefined ? { exp: user.exp } : {}),
   };
-  return { ...identity, authTime: session.authTime, sessionId: session.id, sessionMethod: session.method, sessionMfa: session.mfa, authFactor: session.authFactor, privileged, mfaEnrollmentRequired, passwordChangeRequired: employee.passwordMustChange };
+  const home = { choice: homeChoice(employee.defaultRoute, employee.homePreference), setByAdmin: landingSetByAdmin(employee.defaultRoute) };
+  return { ...identity, authTime: session.authTime, sessionId: session.id, sessionMethod: session.method, sessionMfa: session.mfa, authFactor: session.authFactor, privileged, mfaEnrollmentRequired, passwordChangeRequired: employee.passwordMustChange, home };
 }
 
 // DEF-08/09: the English `error` is unchanged; `errorAr` is added when the message is known.

@@ -25,6 +25,9 @@ model Employee {
   role              String // admin, inventory, roasting, qc, dispatch, custom
   permissions       String         @default("{}")
   defaultRoute      String         @default("/dashboard")
+  /// «صفحتي الرئيسية» (20261206110000_sales_call_await_home): the sales person's own home — "my-day" | "classic";
+  /// NULL = «يومي». Never written over `defaultRoute`, which the administrator owns.
+  homePreference    String?
   active            Boolean        @default(true)
   phoneNumber       String?
   preferredLanguage String         @default("ar") // "ar" | "en"
@@ -79,6 +82,7 @@ model Employee {
   // and its per-category e-mail choices.
   notifications           Notification[]           @relation("NotificationRecipient")
   notificationPreferences NotificationPreference[] @relation("NotificationPreferenceOwner")
+  salesCallSnoozes        SalesCallSnooze[]        @relation("SalesCallSnoozeOwner")
   /// Direct browser-to-Blob uploads this account started (additive, 20261029100000_blob_client_upload).
   customerFileUploads     CustomerFileUpload[]     @relation("CustomerFileUploadRequester")
   // Credit hold (additive, 20261028100000_credit_hold).
@@ -314,6 +318,7 @@ model Customer {
   /// learned from the business orders (customers/aggregates.ts orderRhythm).
   reorderIntervalDays         Int?
 
+  salesCallSnoozes SalesCallSnooze[]
   @@index([accountOwnerId])
 }
 
@@ -423,6 +428,14 @@ model CustomerFile {
   uploadedById String?
   uploadedBy   Employee? @relation("CustomerFileUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
   createdAt    DateTime  @default(now())
+
+  // ─── «صلاحية العقد» (additive, 20261206100000_customer_contract_validity) ──────────────────
+  /// «يبدأ من» / «ينتهي في» (calendar dates, Asia/Riyadh) — CONTRACT and PRICE_AGREEMENT only (CHECK),
+  /// validUntil ≥ validFrom (CHECK). Partial index on validUntil WHERE NOT NULL (migration only).
+  validFrom         DateTime? @db.Date
+  validUntil        DateTime? @db.Date
+  /// Days before validUntil the account owner is told (1–365, CHECK); NULL = SystemConfig.contractRenewalNoticeDays (45).
+  renewalNoticeDays Int?
 
   @@index([customerId, createdAt])
 }
@@ -598,6 +611,8 @@ model OrderItem {
   @@index([deliveryStatus])
   @@index([productionStatus, deliveryStatus])
   @@index([productSkuId])
+  /// «يومي» (20261206090000_sales_myday): the lines of a set of orders.
+  @@index([orderId])
 }
 
 model RoastingBatch {
@@ -1112,6 +1127,41 @@ model SystemConfig {
   reorderLateFactor     Decimal? @db.Decimal(4, 2)
   /// … and «منقطع» after its interval × this factor (1–10, above the late one); NULL = 2.5.
   reorderInactiveFactor Decimal? @db.Decimal(4, 2)
+
+  // ─── «يومي» (additive, 20261206090000_sales_myday) ─────────────────────────────────────────
+  /// Tiers are DERIVED per rep from the rep's own book by kg ordered in the last 90 days (never stored):
+  /// VIP = the top `tierVipTopPct` % of the rep's customers AND ≥ `tierVipMinKgMonth` kg/month; «صغير» <
+  /// `tierSmallMaxKgMonth` kg/month; a book under 8 customers uses the two floors only. Admin-edited, audited.
+  tierVipTopPct       Decimal @default(20) @db.Decimal(5, 2)
+  tierVipMinKgMonth   Decimal @default(40) @db.Decimal(10, 2)
+  tierSmallMaxKgMonth Decimal @default(10) @db.Decimal(10, 2)
+  /// «ينمو»: the last 3 full months up ≥ `growthMinPct` % and ≥ `growthMinKgMonth` kg/month on the 3 before.
+  growthMinPct        Decimal @default(20) @db.Decimal(5, 2)
+  growthMinKgMonth    Decimal @default(10) @db.Decimal(10, 2)
+  /// «ما تواصلت»: days without a contact after which a customer of that tier is on the call list.
+  contactDaysVip      Int     @default(14)
+  contactDaysRegular  Int     @default(30)
+  contactDaysSmall    Int     @default(60)
+  contactDaysNew      Int     @default(7)
+  // ─── «صلاحية العقد» (additive, 20261206100000_customer_contract_validity) ──────────────────
+  /// Days before a contract's end date that its account owner is told (1–365); NULL = 45.
+  contractRenewalNoticeDays Int?
+  // ─── «كلّمته — بانتظار الطلب» (additive, 20261206110000_sales_call_await_home) ────────────────
+  /// Days a LATE customer the rep just contacted stays on the call list as «awaiting the order» (1–30); NULL = 3.
+  callAwaitDays Int?
+}
+
+/// «أجّل لبكرة» (20261206090000_sales_myday): a rep set a customer of the call list aside until `until`.
+/// A per-person convenience, never a business record.
+model SalesCallSnooze {
+  employeeId String
+  employee   Employee @relation("SalesCallSnoozeOwner", fields: [employeeId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  until      DateTime
+  createdAt  DateTime @default(now())
+
+  @@id([employeeId, customerId])
 }
 
 /// Settings › Production & roasting › Roasters (Figma 377:2, ROASTERS.md §4; RM1–RM5). Machine
@@ -3438,6 +3488,10 @@ enum ActivityType {
   NOTE
   TASK
   SAMPLE_FOLLOW_UP
+  /// «واتساب» (additive, 20261206090000_sales_myday): a WhatsApp conversation, recorded — nothing is sent.
+  WHATSAPP
+  /// «بريد» (additive, 20261206090000_sales_myday): an email, recorded — nothing is sent.
+  EMAIL
 }
 
 /// WHAT HAPPENED in a recorded interaction, as distinct from what KIND it was.
@@ -3500,6 +3554,8 @@ model Activity {
   @@index([opportunityId])
   /// Customer account timeline (additive, migration 20261019120000_customer_account).
   @@index([customerId])
+  /// «آخر تواصل» per customer (20261206090000_sales_myday).
+  @@index([customerId, completedAt])
 }
 
 enum QuoteStatus {

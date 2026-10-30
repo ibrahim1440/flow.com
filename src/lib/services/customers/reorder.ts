@@ -69,19 +69,37 @@ export type ReorderSuggestion = ReorderStatus & {
 };
 
 /**
+ * Who the list is for (batch 24 WP-A scope hardening): ONE account owner's book (`ownerId`), or — only when
+ * the caller says so in words — every account (`scope: "all"`, a team-view caller: the sales manager or the
+ * admin; the route decides who may). A null / empty owner is refused instead of silently reading the whole
+ * book: «a rep with no customers gets an EMPTY result, never the whole book».
+ */
+export type ReorderScope = { ownerId: string; scope?: undefined } | { scope: "all"; ownerId?: undefined };
+
+export class ReorderScopeError extends Error {
+  constructor() { super("reorderSuggestions needs an ownerId, or { scope: 'all' } from a team-view caller."); this.name = "ReorderScopeError"; }
+}
+
+/**
  * The customers that need a call, most overdue first. `ownerId` narrows to one account owner's book
- * (a rep's «مساحة عملي»); null reads every account (a manager's list — the caller decides who may).
+ * (a rep's «مساحة عملي», «يومي»); `{ scope: "all" }` reads every account (a manager's list).
  * Only DUE / LATE / INACTIVE come back.
  */
-export async function reorderSuggestions(db: Db, opts: { ownerId: string | null; now?: Date; limit?: number }): Promise<ReorderSuggestion[]> {
+export async function reorderSuggestions(db: Db, opts: ReorderScope & { now?: Date; limit?: number; everyCustomer?: boolean }): Promise<ReorderSuggestion[]> {
+  const all = (opts as { scope?: unknown }).scope === "all";
+  const owner = (opts as { ownerId?: unknown }).ownerId;
+  if (!all && (typeof owner !== "string" || owner.length === 0)) throw new ReorderScopeError();
   const now = opts.now ?? new Date();
   const since = new Date(now.getTime() - 400 * DAY);
   const [config, customers] = await Promise.all([
     db.systemConfig.findUnique({ where: { id: "singleton" }, select: { reorderLateFactor: true, reorderInactiveFactor: true } }),
     db.customer.findMany({
-      where: { ...(opts.ownerId ? { accountOwnerId: opts.ownerId } : {}), orders: { some: {} } },
+      where: { ...(all ? {} : { accountOwnerId: owner as string }), orders: { some: {} } },
       select: { id: true, name: true, nameAr: true, accountOwnerId: true, reorderIntervalDays: true },
-      take: 2000,
+      // Deterministic, and uncapped for the team overview (`everyCustomer`, council fix round 1): a cap without an order
+      // dropped an arbitrary set of customers from «طلبات متأخرة».
+      orderBy: { id: "asc" },
+      ...(opts.everyCustomer ? {} : { take: 2000 }),
     }),
   ]);
   if (!customers.length) return [];

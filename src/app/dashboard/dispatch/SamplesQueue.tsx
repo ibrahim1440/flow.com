@@ -14,7 +14,7 @@ import { localizeApiError } from "@/lib/i18n/api-errors";
 
 export type SampleRequest = {
   id: string; status: "REQUESTED" | "PREPARING"; units: number; description: string | null; requestedAt: string;
-  sku: { id: string; skuCode: string; name: string | null; pack: string } | null;
+  sku: { id: string; skuCode: string; name: string | null; nameAr?: string | null; pack: string } | null;
   customer: { name: string; nameAr: string | null } | null;
   rep: string | null;
   freeUnits: number;
@@ -29,7 +29,12 @@ export function SamplesQueue({ rows, canIssue, onChanged }: { rows: SampleReques
   const [error, setError] = useState("");
   const [done, setDone] = useState<Issued | null>(null);
 
-  const nameOf = (r: SampleRequest) => (r.sku ? `${r.sku.name ?? r.sku.skuCode}${r.sku.name?.includes(r.sku.pack) ? "" : ` ${r.sku.pack}`}` : r.description ?? "—");
+  // FOLLOWUPS sales UI bug 4: the product's Arabic name on the Arabic screen.
+  const nameOf = (r: SampleRequest) => {
+    if (!r.sku) return r.description ?? "—";
+    const nm = (lang === "ar" ? r.sku.nameAr || r.sku.name : r.sku.name) ?? r.sku.skuCode;
+    return `${nm}${nm.includes(r.sku.pack) ? "" : ` ${r.sku.pack}`}`;
+  };
 
   async function act(r: SampleRequest, action: "prepare" | "issue") {
     if (busyId) return;

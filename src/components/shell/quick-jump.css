@@ -1,0 +1,31 @@
+/* Batch 24 WP-A: Ctrl K record search, «لأي عميل؟» and the shortcuts sheet. Tokens only (direction-2.1.css). */
+.d21-pal-title { padding: 14px 20px 0; font-weight: 600; font-size: 15px; color: var(--text-primary); }
+.d21-pal-busy { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border-subtle); border-top-color: var(--action-primary); animation: d21-spin .8s linear infinite; flex: none; }
+@keyframes d21-spin { to { transform: rotate(360deg); } }
+.d21-pal .d21-pal-st { font-style: normal; font-weight: 400; font-size: 11.5px; color: var(--text-muted); margin-inline-start: 8px; padding: 1px 6px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--border-subtle); }
+.d21-pal .d21-pal-hint { flex: none; color: var(--text-muted); font-size: 11.5px; }
+.d21-pal li.d21-pal-act a { height: 40px; padding-inline-start: 34px; }
+.d21-pal li.d21-pal-act a > .d21-kbd { margin-inline-start: auto; }
+.d21-keys-note { margin: 4px 20px 8px; color: var(--text-muted); font-size: 13px; }
+.d21-keys-list { margin: 0; padding: 4px 20px 12px; display: grid; gap: 8px; }
+.d21-keys-list > div { display: grid; grid-template-columns: 72px 1fr; align-items: center; gap: 12px; }
+.d21-keys-list dt { margin: 0; }
+.d21-keys-list dt .d21-kbd { margin: 0; display: inline-block; }
+.d21-keys-list dd { margin: 0; font-size: 14px; color: var(--text-primary); }
+.d21-new-menu-key { margin-inline-start: auto; }
+.d21-menu .d21-menu-sep { height: 1px; background: var(--border-subtle); margin: 4px 0; }
+.d21-menu a .d21-kbd, .d21-menu button .d21-kbd { margin-inline-start: auto; }
+.d21-menu a.d21-menu-item, .d21-menu button.d21-menu-item { display: flex; align-items: center; gap: 12px; }
+@media (prefers-reduced-motion: reduce) { .d21-pal-busy { animation: none; } }
+.d21-menu .d21-menu-note { margin: 4px 10px 2px; font-size: 11.5px; color: var(--text-muted); }
+.d21-menu[data-testid="d21-new-menu"] { min-width: 240px; }
+.d21-pal li a > span.d21-kbd { flex: none; min-width: 0; line-height: 1; }
+.d21-new .d21-menu .d21-kbd { margin: 0; margin-inline-start: auto; }
+.d21-menu .d21-menu-item > span:first-child { flex: 1; text-align: start; }
+@media (max-width: 767.98px) { .d21-menu .d21-menu-item .d21-kbd { display: none; } }
+.d21-pal .d21-pal-tier.is-vip { color: var(--brand-signature); box-shadow: inset 0 0 0 1px var(--brand-signature); font-weight: 600; }
+
+/* No keyboard hints on a touch screen or the phone (council fix round 2, item 6). */
+@media (hover: none) and (pointer: coarse), (max-width: 767.98px) {
+  .d21-pal .d21-pal-foot, .d21-pal .d21-pal-hint, .d21-pal .d21-kbd { display: none; }
+}

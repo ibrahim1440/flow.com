@@ -3,15 +3,15 @@
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select } from "@/components/ui/Select";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Dialog, Field } from "@/components/hr/ui";
 import { api } from "../../sales/_components/ui";
-import { ACTIVITY_LABELS, OUTCOME_LABELS } from "@/components/d21/labels";
+import { OUTCOME_LABELS } from "@/components/d21/labels";
 import { ACTIVITY_OUTCOMES } from "@/lib/services/sales/qualification";
-import type { Contact, Credit, Customer, Deal } from "./types";
-import { CreditNoticeBody, type CreditState } from "@/components/credit/credit-ui";
+import type { Contact, Customer, Deal } from "./types";
 import { DIRECT_UPLOAD_MAX_BYTES, pickUploadPath } from "@/lib/services/customers/direct-upload-rules";
 import { directUpload } from "./direct-upload-client";
+import { ValidityFields, draftProblem, saveValidity, type DateDraft } from "./_components/contract-validity";
+import { hasValidity } from "@/lib/services/customers/contract-rules";
 
 /**
  * The account page's forms, in the HR kit dialog the customers list already uses. Each sends
@@ -41,7 +41,7 @@ export const FILE_CATEGORY_LABELS: Record<string, { ar: string; en: string }> = 
 };
 
 /** «رفع ملف» — one multipart POST to /api/customers/[id]/files, which re-checks everything. */
-export function FileDialog({ ar, customerId, maxBytes = 5 * 1024 * 1024, direct = false, onClose, onDone }: { ar: boolean; customerId: string; maxBytes?: number; direct?: boolean; onClose: () => void; onDone: () => void }) {
+export function FileDialog({ ar, customerId, maxBytes = 5 * 1024 * 1024, direct = false, canDates = false, onClose, onDone }: { ar: boolean; customerId: string; maxBytes?: number; direct?: boolean; canDates?: boolean; onClose: () => void; onDone: (warning?: string) => void }) {
   const L = (a: string, e: string) => (ar ? a : e);
   // feat/blob-client-upload: ≤ 4 MB through the app's route (with its database fallback); above it,
   // up to 20 MB, straight from the browser to the private Blob store (pickUploadPath).
@@ -54,9 +54,20 @@ export function FileDialog({ ar, customerId, maxBytes = 5 * 1024 * 1024, direct 
   const [err, setErr] = useState("");
   const [canRetry, setCanRetry] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
+  // «صلاحية العقد» (batch 24 WP-C): optional start / end dates for a contract or price agreement, set on the new
+  // file right after the upload (PATCH …/files/[fileId]; the account owner or a sales manager only).
+  const [dates, setDates] = useState<DateDraft>({ validFrom: "", validUntil: "" });
+  const withDates = canDates && hasValidity(category) && !!(dates.validFrom || dates.validUntil);
+  const finish = async (fileId: string | undefined) => {
+    if (!withDates || !fileId) { onDone(); return; }
+    const problem = await saveValidity(ar, customerId, fileId, dates);
+    onDone(problem ? L(`رُفع الملف، لكن ما انحفظت التواريخ: ${problem}`, `The file was uploaded, but the dates were not saved: ${problem}`) : undefined);
+  };
   async function save(e?: React.FormEvent) {
     e?.preventDefault();
     if (!file || busy) return;
+    const dp = withDates ? draftProblem(ar, dates) : "";
+    if (dp) { setErr(dp); return; }
     const path = pickUploadPath(file.size, { maxBytes, direct });
     if (path === "too-large") { setCanRetry(false); setErr(L(`الحد الأقصى لحجم الملف ${mb} ميغابايت.`, `Files are limited to ${mb} MB.`)); return; }
     setBusy(true); setErr(""); setCanRetry(false);
@@ -64,7 +75,7 @@ export function FileDialog({ ar, customerId, maxBytes = 5 * 1024 * 1024, direct 
       setProgress(0);
       const r = await directUpload({ customerId, file, category, title: title.trim(), onProgress: (p) => setProgress(Math.max(0, Math.min(100, Math.round(p)))) });
       setBusy(false);
-      if (r.ok) { setProgress(100); onDone(); return; }
+      if (r.ok) { setProgress(100); await finish(r.id); return; }
       setProgress(null);
       setCanRetry(r.retry);
       setErr(errorOf(r.message, ar, L("تعذّر رفع الملف.", "Could not upload the file.")));
@@ -75,7 +86,7 @@ export function FileDialog({ ar, customerId, maxBytes = 5 * 1024 * 1024, direct 
     const res = await fetch(`/api/customers/${customerId}/files`, { method: "POST", body: fd }).catch(() => null);
     setBusy(false);
     if (!res) { setCanRetry(true); setErr(L("تعذّر الاتصال.", "Could not connect.")); return; }
-    if (res.ok) { onDone(); return; }
+    if (res.ok) { const row = (await res.json().catch(() => null)) as { id?: string } | null; await finish(row?.id); return; }
     const data = await res.json().catch(() => null);
     // A 413 with no JSON is the hosting platform's own request-size limit, before the app saw the file.
     if (!data && res.status === 413) { setErr(L("الملف أكبر مما يقبله الخادم في طلب واحد. جرّب ملفًا أصغر.", "The file is larger than the server accepts in one request. Try a smaller file.")); return; }
@@ -113,6 +124,7 @@ export function FileDialog({ ar, customerId, maxBytes = 5 * 1024 * 1024, direct 
         <Field label={L("العنوان", "Title")} help={L("اختياري؛ يُستخدم اسم الملف إن تُرك فارغًا.", "Optional; the file name is used when empty.")}>
           <input className="hr-input" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} data-testid="file-title" />
         </Field>
+        {canDates && hasValidity(category) && <ValidityFields ar={ar} value={dates} onChange={(v) => { setDates(v); setErr(""); }} disabled={busy} />}
       </form>
     </Dialog>
   );
@@ -122,35 +134,67 @@ function Err({ text }: { text: string }) {
   return text ? <p className="hr-err is-wide" role="alert" data-testid="dialog-error" style={{ gridColumn: "1 / -1" }}>{text}</p> : null;
 }
 
-// ── «تسجيل نشاط» ─────────────────────────────────────────────────────────────────────────
-export function ActivityDialog({ ar, customerId, deals, defaultDealId, onClose, onDone }: {
-  ar: boolean; customerId: string; deals: Pick<Deal, "id" | "title">[]; defaultDealId?: string | null;
-  onClose: () => void; onDone: () => void;
+// ── «سجّل نشاط» ──────────────────────────────────────────────────────────────────────────
+/**
+ * The kinds a rep picks with one tap (batch 24 WP-A: the dialog's layout is WP-A's). «واتساب» and «بريد» are their
+ * own activity types (WHATSAPP / EMAIL, 20261206090000_sales_myday): recorded here, never sent from the system.
+ */
+export type ActivityKind = "CALL" | "WHATSAPP" | "EMAIL" | "VISIT" | "MEETING" | "NOTE" | "TASK" | "SAMPLE_FOLLOW_UP";
+const KINDS: { id: ActivityKind; ar: string; en: string }[] = [
+  { id: "CALL", ar: "مكالمة", en: "Call" },
+  { id: "WHATSAPP", ar: "واتساب", en: "WhatsApp" },
+  { id: "EMAIL", ar: "بريد", en: "Email" },
+  { id: "VISIT", ar: "زيارة", en: "Visit" },
+  { id: "MEETING", ar: "اجتماع", en: "Meeting" },
+  { id: "NOTE", ar: "ملاحظة", en: "Note" },
+  { id: "TASK", ar: "مهمة", en: "Task" },
+  { id: "SAMPLE_FOLLOW_UP", ar: "متابعة عيّنة", en: "Sample follow-up" },
+];
+/** The outcomes a rep reaches for first, as one-tap chips; the rest stay in «نتيجة أخرى». */
+const QUICK_OUTCOMES = ["INTERESTED", "NO_ANSWER", "LEFT_MESSAGE", "FOLLOW_UP_REQUIRED", "NOT_INTERESTED"] as const;
+
+/**
+ * THE activity dialog (council fix round 1, P0-10): the customer page, «يومي» (✓, 📞, swipe right) and «＋ نشاط» all open
+ * this one. `customerId` null = a deal with no customer (from «يومي»): it posts to the deal (POST /api/sales/activities).
+ * A WhatsApp or an email starts at «تُركت رسالة» — nothing says the customer answered until the rep says so.
+ */
+export function ActivityDialog({ ar, customerId, customerName, deals, defaultDealId, initialKind = "CALL", onClose, onDone }: {
+  ar: boolean; customerId: string | null; customerName?: string; deals: Pick<Deal, "id" | "title">[]; defaultDealId?: string | null;
+  initialKind?: ActivityKind; onClose: () => void; onDone: () => void;
 }) {
   const L = (a: string, e: string) => (ar ? a : e);
-  const [type, setType] = useState("CALL");
-  const [outcome, setOutcome] = useState("NOTE_ONLY");
+  const [kind, setKind] = useState<ActivityKind>(initialKind);
+  const firstOutcome = (k: ActivityKind) => (k === "NOTE" ? "NOTE_ONLY" : k === "WHATSAPP" || k === "EMAIL" ? "LEFT_MESSAGE" : "INTERESTED");
+  const [outcome, setOutcome] = useState(firstOutcome(initialKind));
+  const [more, setMore] = useState(false);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [dueAt, setDueAt] = useState("");
-  const [completed, setCompleted] = useState(true);
+  const [later, setLater] = useState(false);
   const [dealId, setDealId] = useState(defaultDealId ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const isTask = type === "TASK";
-  const ready = subject.trim().length >= 2 && (!isTask || !!dueAt);
+  const isTask = kind === "TASK";
+  const isNote = kind === "NOTE";
+  const kindWord = (k: ActivityKind) => { const x = KINDS.find((i) => i.id === k)!; return ar ? x.ar : x.en; };
+  // The subject is optional for the rep: an empty one becomes «مكالمة — مقهى السدرة».
+  const autoSubject = `${kindWord(kind)}${customerName ? ` — ${customerName}` : ""}`;
+  const ready = (!isTask || !!dueAt) && (subject.trim().length >= 2 || autoSubject.length >= 2) && (!isNote || subject.trim().length >= 2);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!ready || busy) return;
     setBusy(true); setErr("");
-    const res = await api(`/api/customers/${customerId}/activities`, {
+    const typed = subject.trim() || autoSubject;
+    const res = await api(customerId ? `/api/customers/${customerId}/activities` : `/api/sales/activities`, {
       method: "POST",
       body: {
-        type, subject, body, opportunityId: dealId || null,
-        outcome: isTask ? undefined : outcome,
+        type: kind,
+        subject: typed,
+        body, opportunityId: dealId || null,
+        outcome: isTask ? undefined : isNote ? "NOTE_ONLY" : outcome,
         dueAt: dueAt ? new Date(dueAt).toISOString() : null,
-        completed: isTask ? false : completed,
+        completed: isTask ? false : !later,
       },
     });
     setBusy(false);
@@ -158,131 +202,101 @@ export function ActivityDialog({ ar, customerId, deals, defaultDealId, onClose, 
   }
 
   return (
-    <Dialog open title={L("تسجيل نشاط", "Log activity")} onClose={onClose} testId="activity-dialog"
+    <Dialog open title={L("سجّل نشاط", "Log activity")} sub={customerName} onClose={onClose} testId="activity-dialog"
       actions={<>
         <button type="submit" form="acc-activity" className="hr-btn is-primary" disabled={!ready || busy} data-testid="save-activity">{busy ? L("جارٍ الحفظ…", "Saving…") : L("حفظ", "Save")}</button>
         <button type="button" className="hr-btn" onClick={onClose}>{L("إلغاء", "Cancel")}</button>
       </>}>
       <form id="acc-activity" className="hr-form" onSubmit={save}>
         <Err text={err} />
-        <Field label={L("النوع", "Type")}>
-          <Select className="hr-select" value={type} onChange={(e) => setType(e.target.value)} data-testid="activity-type">
-            {Object.keys(ACTIVITY_LABELS).map((k) => <option key={k} value={k}>{ar ? ACTIVITY_LABELS[k].ar : ACTIVITY_LABELS[k].en}</option>)}
-          </Select>
+        <div className="is-wide" style={{ gridColumn: "1 / -1" }}>
+          <div className="hr-label" id="act-kind-l">{L("وش سويت؟", "What did you do?")}</div>
+          <div className="acc-chips" role="radiogroup" aria-labelledby="act-kind-l" data-testid="activity-type">
+            {KINDS.map((k) => (
+              <button key={k.id} type="button" role="radio" aria-checked={kind === k.id} className={`acc-chip${kind === k.id ? " on" : ""}`}
+                data-testid={`activity-kind-${k.id}`} data-value={k.id}
+                onClick={() => { setKind(k.id); setOutcome(firstOutcome(k.id)); }}>
+                {ar ? k.ar : k.en}
+              </button>
+            ))}
+          </div>
+        </div>
+        {!isTask && !isNote ? (
+          <div className="is-wide" style={{ gridColumn: "1 / -1" }}>
+            <div className="hr-label" id="act-out-l">{L("وش صار؟", "What happened?")}</div>
+            <div className="acc-chips" role="radiogroup" aria-labelledby="act-out-l" data-testid="activity-outcome">
+              {QUICK_OUTCOMES.map((o) => (
+                <button key={o} type="button" role="radio" aria-checked={outcome === o} className={`acc-chip${outcome === o ? " on" : ""}`}
+                  data-testid={`activity-outcome-${o}`} onClick={() => setOutcome(o)}>{ar ? OUTCOME_LABELS[o].ar : OUTCOME_LABELS[o].en}</button>
+              ))}
+              <Select className="hr-select acc-chip-select" value={(QUICK_OUTCOMES as readonly string[]).includes(outcome) ? "" : outcome}
+                onChange={(e) => { if (e.target.value) setOutcome(e.target.value); }} aria-label={L("نتيجة أخرى", "Another outcome")}>
+                <option value="">{L("نتيجة أخرى…", "Another outcome…")}</option>
+                {ACTIVITY_OUTCOMES.filter((o) => !(QUICK_OUTCOMES as readonly string[]).includes(o) && o !== "NOTE_ONLY").map((o) => <option key={o} value={o}>{ar ? OUTCOME_LABELS[o].ar : OUTCOME_LABELS[o].en}</option>)}
+              </Select>
+            </div>
+          </div>
+        ) : null}
+        <Field label={isNote ? `${L("الملاحظة", "Note")} *` : L("ملاحظة قصيرة (اختياري)", "Short note (optional)")} wide>
+          <input className="hr-input" value={subject} onChange={(e) => setSubject(e.target.value)} maxLength={500} data-testid="activity-subject"
+            placeholder={isNote ? "" : L("مثلًا: يبغون كولومبي للشتاء", "e.g. they want a Colombian for winter")} autoFocus />
         </Field>
-        {!isTask ? (
-          <Field label={L("ماذا حدث؟", "What happened?")}>
-            <Select className="hr-select" value={outcome} onChange={(e) => setOutcome(e.target.value)}>
-              {ACTIVITY_OUTCOMES.map((o) => <option key={o} value={o}>{ar ? OUTCOME_LABELS[o].ar : OUTCOME_LABELS[o].en}</option>)}
+        {deals.length > 0 ? (
+          <Field label={L("الصفقة", "Deal")} help={L("اختياري", "Optional")}>
+            <Select className="hr-select" value={dealId} onChange={(e) => setDealId(e.target.value)} data-testid="activity-deal">
+              <option value="">{L("العميل فقط", "The customer only")}</option>
+              {deals.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
             </Select>
           </Field>
-        ) : <span />}
-        <Field label={`${L("الموضوع", "Subject")} *`} wide>
-          <input className="hr-input" value={subject} onChange={(e) => setSubject(e.target.value)} maxLength={500} data-testid="activity-subject" />
-        </Field>
-        <Field label={L("التفاصيل", "Details")} wide>
-          <textarea className="hr-textarea" rows={3} value={body} onChange={(e) => setBody(e.target.value)} />
-        </Field>
-        <Field label={L("الصفقة", "Deal")} help={L("اختياري: يُسجَّل على العميل وحده إن لم تُختر صفقة.", "Optional: without a deal it is recorded on the customer itself.")}>
-          <Select className="hr-select" value={dealId} onChange={(e) => setDealId(e.target.value)} data-testid="activity-deal">
-            <option value="">{L("العميل فقط", "The customer only")}</option>
-            {deals.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
-          </Select>
-        </Field>
-        <Field label={`${L("موعد الاستحقاق", "Due")}${isTask ? " *" : ""}`} help={isTask ? L("المهمة بلا موعد لا تظهر في المتأخرات أبدًا.", "A task with no due date never appears as overdue.") : undefined}>
-          <input className="hr-input" type="datetime-local" value={dueAt} onChange={(e) => setDueAt(e.target.value)} dir="ltr" />
-        </Field>
-        {!isTask && (
-          <label className="cu-check is-wide">
-            <input type="checkbox" checked={completed} onChange={(e) => setCompleted(e.target.checked)} />
-            {L("حدث بالفعل", "This already happened")}
+        ) : null}
+        {!isTask ? (
+          <label className="cu-check is-wide" style={{ gridColumn: "1 / -1" }}>
+            <input type="checkbox" checked={later} onChange={(e) => setLater(e.target.checked)} data-testid="activity-later" />
+            {L("ما صار بعد — أبغى أذكّر نفسي", "Not done yet — remind me")}
           </label>
-        )}
+        ) : null}
+        {isTask || later ? (
+          <Field label={`${L("متى؟", "When?")}${isTask ? " *" : ""}`} help={isTask ? L("المهمة بلا موعد ما تظهر في المتأخرات.", "A task with no date never shows as overdue.") : undefined}>
+            <input className="hr-input" type="datetime-local" value={dueAt} onChange={(e) => setDueAt(e.target.value)} dir="ltr" data-testid="activity-due" />
+          </Field>
+        ) : null}
+        {!isNote && !more && !body ? (
+          <button type="button" className="hr-btn is-wide" style={{ gridColumn: "1 / -1", justifySelf: "start" }} onClick={() => setMore(true)} data-testid="activity-more">{L("+ أضف تفاصيل", "+ Add details")}</button>
+        ) : null}
+        {!isNote && (more || body) ? (
+          <Field label={L("تفاصيل أكثر", "More details")} wide>
+            <textarea className="hr-textarea" rows={2} value={body} onChange={(e) => setBody(e.target.value)} />
+          </Field>
+        ) : null}
         <p className="hr-help is-wide" style={{ gridColumn: "1 / -1", margin: 0 }}>
-          {L("هذا تسجيل لما حدث. لا يُرسل بريدًا ولا رسالة.", "This records that contact happened. It does not send an email or a message.")}
+          {L("هذا تسجيل لما صار. ما يرسل رسالة ولا بريد.", "This records what happened. It does not send a message or an email.")}
         </p>
       </form>
     </Dialog>
   );
 }
 
-// ── «عرض سعر»: a quotation belongs to a deal — pick an open one or open a new one ─────────
-export function QuoteDialog({ ar, customer, openDeals, canCreateDeal, credit, creditState, onClose }: {
-  ar: boolean; customer: Pick<Customer, "id" | "name" | "nameAr">; openDeals: Pick<Deal, "id" | "title" | "stage" | "amount">[];
-  canCreateDeal: boolean; credit?: Credit | null; creditState?: CreditState | null; onClose: () => void;
+/** Several open deals of yours with this customer: which one? One tap, the most recent first. */
+export function DealPickDialog({ ar, purpose, deals, onClose, onPick }: {
+  ar: boolean; purpose: "quote" | "sample";
+  deals: { id: string; title: string; stageAr: string; stageEn: string; amount: string | null }[];
+  onClose: () => void; onPick: (id: string) => void;
 }) {
-  // «إيقاف البيع»: shown before submitting, and the action disabled (the server refuses 409 CUSTOMER_SALES_HOLD regardless).
-  const held = !!creditState?.hold;
   const L = (a: string, e: string) => (ar ? a : e);
-  const router = useRouter();
-  const [choice, setChoice] = useState<string>(openDeals[0]?.id ?? (canCreateDeal ? "new" : ""));
-  const [title, setTitle] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-
-  async function go(e: React.FormEvent) {
-    e.preventDefault();
-    if (!choice || busy) return;
-    setErr("");
-    let dealId = choice;
-    if (choice === "new") {
-      setBusy(true);
-      const res = await api<{ opportunityId: string }>(`/api/customers/${customer.id}/deals`, { method: "POST", body: { title: title.trim() || undefined } });
-      setBusy(false);
-      if (!res.ok) { setErr(errorOf(res.data as never, ar, L("تعذّر فتح الصفقة.", "Could not open the deal."))); return; }
-      dealId = res.data.opportunityId;
-    }
-    // The existing quotation flow: it raises a draft on the deal and opens its editor.
-    router.push(`/dashboard/sales/quotes/new?opportunityId=${encodeURIComponent(dealId)}`);
-  }
-
-  const nothing = openDeals.length === 0 && !canCreateDeal;
   return (
-    <Dialog open title={L("عرض سعر جديد", "New quotation")} sub={ar ? customer.nameAr ?? customer.name : customer.name} onClose={onClose} testId="quote-dialog"
-      actions={<>
-        <button type="submit" form="acc-quote" className="hr-btn is-primary" disabled={!choice || busy || nothing || held} data-testid="quote-continue">{busy ? L("جارٍ…", "Working…") : L("متابعة", "Continue")}</button>
-        <button type="button" className="hr-btn" onClick={onClose}>{L("إلغاء", "Cancel")}</button>
-      </>}>
-      <form id="acc-quote" className="hr-form" onSubmit={go}>
-        <Err text={err} />
-        <p className="hr-help is-wide" style={{ gridColumn: "1 / -1", margin: 0 }}>
-          {L("عرض السعر يُنشأ من صفقة. اختر صفقة مفتوحة لهذا العميل أو افتح صفقة جديدة.", "A quotation is raised from a deal. Choose an open deal of this customer or open a new one.")}
-        </p>
-        {/* feat/credit-hold: the customer's warning (non-blocking) or its hold (blocking). */}
-        {creditState ? <CreditNoticeBody c={creditState} ar={ar} testId="quote-credit" /> : null}
-        {/* The credit limit is a warning, never a block (no owner rule refuses a quotation over it). */}
-        {!creditState && credit?.over && (
-          <p className="hr-err is-wide" role="note" style={{ gridColumn: "1 / -1", margin: 0 }} data-testid="quote-credit-warning">
-            {ar
-              ? `تنبيه: الرصيد المستحق ${fmtMoney(credit.used)} ر.س يتجاوز حد الائتمان ${fmtMoney(credit.limit)} ر.س. يمكنك المتابعة؛ القرار لك.`
-              : `Note: the balance due SAR ${fmtMoney(credit.used)} is above the credit limit SAR ${fmtMoney(credit.limit)}. You may continue; it is your call.`}
-          </p>
-        )}
-        {nothing && (
-          <p className="hr-err is-wide" style={{ gridColumn: "1 / -1" }} data-testid="quote-no-deal">
-            {L("لا توجد صفقة مفتوحة يمكنك تسعيرها، ولا تملك صلاحية فتح صفقة (تحويل العملاء المحتملين).", "There is no open deal you can quote, and you may not open one (the lead-conversion permission).")}
-          </p>
-        )}
-        <div className="is-wide" style={{ gridColumn: "1 / -1", display: "grid", gap: 8 }} role="radiogroup" aria-label={L("الصفقة", "Deal")}>
-          {openDeals.map((d) => (
-            <label key={d.id} className="cu-check" style={{ alignItems: "flex-start" }}>
-              <input type="radio" name="deal" value={d.id} checked={choice === d.id} onChange={() => setChoice(d.id)} data-testid={`quote-deal-${d.id}`} />
-              <span><b style={{ fontWeight: 500 }}>{d.title}</b><br /><span className="hr-help">{ar ? d.stage.nameAr : d.stage.nameEn}</span></span>
-            </label>
-          ))}
-          {canCreateDeal && (
-            <label className="cu-check">
-              <input type="radio" name="deal" value="new" checked={choice === "new"} onChange={() => setChoice("new")} data-testid="quote-deal-new" />
-              {L("صفقة جديدة لهذا العميل", "A new deal for this customer")}
-            </label>
-          )}
-        </div>
-        {choice === "new" && (
-          <Field label={L("اسم الصفقة", "Deal name")} wide help={L("تبدأ في مرحلة التأهيل وتكون أنت مالكها.", "It starts in the Qualification stage, owned by you.")}>
-            <input className="hr-input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={ar ? customer.nameAr ?? customer.name : customer.name} maxLength={200} data-testid="quote-deal-title" />
-          </Field>
-        )}
-      </form>
+    <Dialog open title={purpose === "quote" ? L("عرض السعر على أي صفقة؟", "Which deal is the quotation for?") : L("العيّنة على أي صفقة؟", "Which deal is the sample for?")}
+      sub={L("عندك أكثر من صفقة مفتوحة مع هذا العميل", "You have more than one open deal with this customer")} onClose={onClose} testId="deal-pick-dialog"
+      actions={<button type="button" className="hr-btn" onClick={onClose}>{L("إلغاء", "Cancel")}</button>}>
+      <ul className="acc-pick" role="list">
+        {deals.map((d, i) => (
+          <li key={d.id}>
+            <button type="button" className={`acc-pick-row${i === 0 ? " first" : ""}`} onClick={() => onPick(d.id)} data-testid={`deal-pick-${d.id}`} autoFocus={i === 0}>
+              <b><bdi>{d.title}</bdi></b>
+              <small>{ar ? d.stageAr : d.stageEn}{d.amount && Number(d.amount) > 0 ? <> · <bdi className="n">{fmtMoney(d.amount)}</bdi> {L("ريال", "SAR")}</> : null}</small>
+            </button>
+          </li>
+        ))}
+      </ul>
     </Dialog>
   );
 }
@@ -364,7 +378,7 @@ export function DetailsDialog({ ar, customer, canOwner, canCredit, onClose, onDo
         <Field label={L("شروط الدفع (أيام)", "Payment terms (days)")}>
           <input className="hr-input" dir="ltr" inputMode="numeric" value={f.paymentTermsDays} onChange={set("paymentTermsDays")} disabled={!canCredit} data-testid="details-terms" />
         </Field>
-        <Field label={L("حد الائتمان (ر.س)", "Credit limit (SAR)")} help={L("تجاوزه يظهر تحذيرًا أحمر؛ إيقاف البيع قرار يدوي.", "Going over it shows a red warning; holding sales is a manual decision.")}>
+        <Field label={L("حد الائتمان (ريال)", "Credit limit (SAR)")} help={L("تجاوزه يظهر تحذيرًا أحمر؛ إيقاف البيع قرار يدوي.", "Going over it shows a red warning; holding sales is a manual decision.")}>
           <input className="hr-input" dir="ltr" inputMode="decimal" value={f.creditLimit} onChange={set("creditLimit")} disabled={!canCredit} data-testid="details-credit" />
         </Field>
         <Field label={L("مدة الإيقاف الافتراضية (أيام)", "Default hold duration (days)")} help={L("تقترحها نافذة «إيقاف البيع»؛ فارغة = 14 يومًا.", "Proposed by the «Hold sales» dialog; empty = 14 days.")}>

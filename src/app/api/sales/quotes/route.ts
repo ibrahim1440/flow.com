@@ -1,4 +1,5 @@
 import { NextResponse } from "@/lib/api-response";
+import { lockDealForQuote, prefillLines, reusableDraft } from "@/lib/services/sales/quote-prefill";
 import { assertSalesAllowed } from "@/lib/services/customers/credit-db";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireQuoteView, requireQuoteWrite, dealNotOpen } from "@/lib/services/sales/quote-guard";
@@ -7,7 +8,7 @@ import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege, hasModuleAccess } from "@/lib/auth-shared";
 
 import {
-  nextQuoteNumber, saveQuoteLines, parseLineInputs, QUOTE_CURRENCY,
+  nextQuoteNumber, saveQuoteLines, parseLineInputs, validateLines, QUOTE_CURRENCY, type SkuFacts,
 } from "@/lib/services/sales/quotes";
 import { readQuoteSettings, discountThreshold } from "@/lib/services/sales/quote-settings";
 import { Decimal } from "@/lib/services/commissions/engine";
@@ -259,11 +260,34 @@ export async function POST(request: Request) {
       );
     }
 
-    const lines = parseLineInputs(rawLines);
+    // From the customer page («عرض سعر», council fix round 1 P0-7, round 2 item 2): reopen my latest DRAFT of this deal
+    // (lines or not) instead of a second number — under a lock on the deal row, so two fast taps make one draft — and
+    // start a new draft with the customer's usual items at the last issued prices.
+    const fromCustomer = b.from === "customer";
+    let lines = parseLineInputs(rawLines);
 
     const result = await prisma.$transaction(async (tx) => {
       // «إيقاف البيع» (feat/credit-hold): no new quotation while the customer's sales are on hold.
       await assertSalesAllowed(tx, deal.customerId);
+      if (fromCustomer) {
+        await lockDealForQuote(tx, opportunityId);
+        const reuse = await reusableDraft(tx, opportunityId, user.id);
+        if (reuse && reuse.lineCount > 0) return { quote: reuse.quote, priced: null, needsDiscountApproval: false, reused: true };
+        if (rawLines.length === 0) {
+          // A prefill that the line rules would refuse (an inactive SKU, a fraction of a bag) is dropped: the draft opens empty.
+          const pre = parseLineInputs(await prefillLines(tx, deal.customerId));
+          const ids = pre.map((l) => l.productSkuId).filter((x): x is string => !!x);
+          const skuRows = ids.length ? await tx.productSKU.findMany({ where: { id: { in: ids } }, select: { id: true, isActive: true, unitOfMeasure: true, skuCode: true } }) : [];
+          if (pre.length && validateLines(pre, new Map(skuRows.map((r) => [r.id, r as SkuFacts]))).length === 0) lines = pre;
+        }
+        if (reuse) {
+          if (lines.length > 0) {
+            const saved = await saveQuoteLines(tx, { quoteId: reuse.quote.id, lines, threshold: await discountThreshold(tx), actorId: user.id });
+            return { quote: reuse.quote, priced: saved.priced, needsDiscountApproval: saved.needsDiscountApproval, reused: true };
+          }
+          return { quote: reuse.quote, priced: null, needsDiscountApproval: false, reused: true };
+        }
+      }
       const quoteNumber = await nextQuoteNumber(tx, new Date());
       const created = await tx.quote.create({
         data: {
@@ -281,9 +305,9 @@ export async function POST(request: Request) {
 
       if (lines.length > 0) {
         const saved = await saveQuoteLines(tx, { quoteId: created.id, lines, threshold: await discountThreshold(tx), actorId: user.id });
-        return { quote: created, priced: saved.priced, needsDiscountApproval: saved.needsDiscountApproval };
+        return { quote: created, priced: saved.priced, needsDiscountApproval: saved.needsDiscountApproval, reused: false };
       }
-      return { quote: created, priced: null, needsDiscountApproval: false };
+      return { quote: created, priced: null, needsDiscountApproval: false, reused: false };
     }, TX_OPTS);
 
     return NextResponse.json(
@@ -299,8 +323,9 @@ export async function POST(request: Request) {
             }
           : null,
         needsDiscountApproval: result.needsDiscountApproval,
+        reused: result.reused,
       },
-      { status: 201 },
+      { status: result.reused ? 200 : 201 },
     );
   } catch (err) {
     return handleDomainError(err);

@@ -14,9 +14,11 @@ export async function GET() {
     return NextResponse.json(hadToken ? { error: "Not authenticated", code: "SESSION_ENDED" } : { error: "Not authenticated" }, { status: 401 });
   }
   // The session id stays in the httpOnly cookie; the page only needs what the session allows.
-  const { sessionId, cv, sid, ...rest } = user as typeof user & { cv?: string; sid?: string };
+  const { sessionId, cv, sid, home, ...rest } = user as typeof user & { cv?: string; sid?: string };
   void cv; void sid;
-  const response = NextResponse.json({ user: rest });
+  // «صفحتي الرئيسية» (council fix round 2, item 11): read with the session's own employee row (getUserWithPermissions),
+  // no extra query here. `homeSetByAdmin`: the administrator fixed the landing page — the choice is read-only.
+  const response = NextResponse.json({ user: { ...rest, classicHome: home?.choice === "classic" && !home.setByAdmin, homeSetByAdmin: !!home?.setByAdmin } });
   // A legacy (pre-v2) token — issued before the slim session cookie, carrying the whole
   // permission map — is accepted until it expires, and re-issued here in the slim form: the same
   // session row, so the same deadlines, MFA state and step-up time; nothing about the session

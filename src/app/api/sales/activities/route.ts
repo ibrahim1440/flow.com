@@ -5,7 +5,7 @@ import { handleDomainError } from "@/lib/api-error";
 import { seesAllSales } from "@/lib/services/sales/scope";
 import { parseActivity, logLeadOrDealActivity } from "@/lib/services/sales/activity-log";
 
-const TYPES = ["CALL", "VISIT", "MEETING", "NOTE", "TASK", "SAMPLE_FOLLOW_UP"];
+const TYPES = ["CALL", "VISIT", "MEETING", "NOTE", "TASK", "SAMPLE_FOLLOW_UP", "WHATSAPP", "EMAIL"];
 
 /**
  * GET /api/sales/activities — the follow-up list.

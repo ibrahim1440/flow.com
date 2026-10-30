@@ -15,6 +15,8 @@ import { Dialog, Field, HrRoot } from "@/components/hr/ui";
 import { CreditBadges } from "@/components/credit/credit-ui";
 import { useAccountantView } from "../accounting/_ui/qoyod-pages";
 import { canViewInvoices } from "@/lib/services/invoicing/access";
+import { customersScopedToOwner } from "@/lib/services/sales/scope";
+import { isSalesPersona } from "@/lib/workspace/landing";
 import "./customers.css";
 
 /**
@@ -71,6 +73,32 @@ export default function CustomersPage() {
   const user = useUser();
   const canManage = hasSubPrivilege(user?.permissions ?? {}, "customers", "manage");
   useD21Phone({ title: ar ? "العملاء" : "Customers" });
+  // «عملائي» (batch 24): a rep scoped to their book opens on the customers they are the account owner of — the same
+  // definition Ctrl K searches — and can switch to everything they may serve (their deals' and orders' customers and
+  // the ones nobody owns). The server decides visibility; `?owner=me` only narrows it.
+  const scopedRep = user ? customersScopedToOwner(user) : false;
+  // The last tab is remembered per person on this device (council fix round 1, P0-16) — a convenience, never data.
+  const viewKey = user ? `hq.customersView.v1.${user.id}` : null;
+  const [viewPick, setViewPickState] = useState<"mine" | "book" | null>(() => {
+    if (!viewKey || typeof window === "undefined") return null;
+    try { const v = window.localStorage.getItem(viewKey); return v === "mine" || v === "book" ? v : null; } catch { return null; }
+  });
+  const setViewPick = (v: "mine" | "book") => { setViewPickState(v); try { if (viewKey) window.localStorage.setItem(viewKey, v); } catch { /* private window */ } };
+  const view = viewPick ?? (scopedRep ? "mine" : "book");
+  // A sales person (council fix round 3, seat 5): no roast-profile column (a roastery's word, not a rep's), and a
+  // «متأخرين» chip — the customers whose reorder status is LATE, the same status «يومي» and «متابعة إعادة الشراء» use.
+  const salesView = !!user && isSalesPersona(user);
+  const [lateIds, setLateIds] = useState<Set<string> | null>(null);
+  const [lateOnly, setLateOnly] = useState(false);
+  useEffect(() => {
+    if (!salesView) return;
+    let off = false;
+    fetch("/api/sales/reorder").then((r) => (r.ok ? r.json() : null)).then((j: { rows: { customerId: string; state: string }[] } | null) => {
+      if (!off && j) setLateIds(new Set(j.rows.filter((x) => x.state === "LATE").map((x) => x.customerId)));
+    }).catch(() => undefined);
+    return () => { off = true; };
+  }, [salesView]);
+  const listUrl = view === "mine" ? "/api/customers?owner=me" : "/api/customers";
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   // feat/credit-hold: the red badges («متجاوز حد الائتمان», «متأخر السداد …», «البيع موقوف», «مهلة سماح حتى …»).
@@ -123,7 +151,7 @@ export default function CustomersPage() {
     setTimeout(() => setToast(null), 3000);
   }
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); }, [listUrl]);
 
   // ?open=<id>[&tab=profiles]: the account page's «مسارات التحميص» opens this preview, where the
   // roast profiles are managed. Applied once, by the first load of the list.
@@ -135,7 +163,7 @@ export default function CustomersPage() {
   async function loadData() {
     setLoading(true);
     const [custRes, beanRes] = await Promise.all([
-      fetch("/api/customers"),
+      fetch(listUrl),
       fetch("/api/green-beans"),
     ]);
     if (custRes.ok) {
@@ -272,7 +300,7 @@ export default function CustomersPage() {
     if (!res.ok) { const d = await res.json(); showToast(localizeApiError(d) || t("error"), "err"); return; }
     showToast(t("roastPrefSaved"));
     setShowProfileForm(false);
-    const updated = await fetch("/api/customers").then((r) => r.json()) as Customer[];
+    const updated = await fetch(listUrl).then((r) => r.json()) as Customer[];
     setCustomers(updated);
     refreshSelected(selected.id, updated);
   }
@@ -282,7 +310,7 @@ export default function CustomersPage() {
     const res = await fetch(`/api/customers/${selected.id}/preferences/${pref.id}`, { method: "DELETE" });
     if (!res.ok) { const d = await res.json(); showToast(localizeApiError(d) || t("error"), "err"); return; }
     showToast(t("roastPrefDeleted"));
-    const updated = await fetch("/api/customers").then((r) => r.json()) as Customer[];
+    const updated = await fetch(listUrl).then((r) => r.json()) as Customer[];
     setCustomers(updated);
     refreshSelected(selected.id, updated);
   }
@@ -290,14 +318,15 @@ export default function CustomersPage() {
   // ── Filtering ──────────────────────────────────────────────────────────────
   const filteredCustomers = useMemo(() => {
     const q = search.toLowerCase();
-    if (!q) return customers;
-    return customers.filter((c) =>
+    const base = lateOnly && lateIds ? customers.filter((c) => lateIds.has(c.id)) : customers;
+    if (!q) return base;
+    return base.filter((c) =>
       c.name.toLowerCase().includes(q) ||
       (c.nameAr && c.nameAr.includes(q)) ||
       (c.phone && c.phone.includes(q)) ||
       (c.email && c.email.toLowerCase().includes(q))
     );
-  }, [customers, search]);
+  }, [customers, search, lateOnly, lateIds]);
 
   // Beans not yet assigned a profile for this customer
   const availableBeans = useMemo(() => {
@@ -352,11 +381,38 @@ export default function CustomersPage() {
     </label>
   );
 
+  // «عملائي» / «كل المتاح لي» — only for a rep scoped to their own book (see `view` above).
+  const viewTabs = scopedRep ? (
+    <div className="seg cu-view" role="group" aria-label={L("أي عملاء؟", "Which customers?")} data-testid="customers-view">
+      <button type="button" className={view === "mine" ? "on" : undefined} aria-pressed={view === "mine"} onClick={() => { setViewPick("mine"); setSelected(null); }} data-testid="customers-view-mine">
+        {L("عملائي", "My customers")}
+      </button>
+      <button type="button" className={view === "book" ? "on" : undefined} aria-pressed={view === "book"} onClick={() => { setViewPick("book"); setSelected(null); }} data-testid="customers-view-book"
+        title={L("عملاؤك، وعملاء صفقاتك وطلباتك، والعملاء اللي ما لهم مسؤول", "Your customers, your deals' and orders' customers, and the ones nobody owns")}>
+        {L("كل المتاح لي", "All I can serve")}
+      </button>
+    </div>
+  ) : null;
+
+  const lateCount = lateIds ? customers.filter((c) => lateIds.has(c.id)).length : 0;
+  const lateChip = salesView && lateIds ? (
+    <button type="button" className={`btn sm${lateOnly ? " p" : ""}`} aria-pressed={lateOnly} onClick={() => setLateOnly((v) => !v)} data-testid="customers-filter-late"
+      title={L("العملاء اللي تأخروا عن موعد طلبهم المعتاد", "Customers past their usual reorder time")}>
+      {L("متأخرين", "Late")} <span className="n">({lateCount})</span>
+    </button>
+  ) : null;
+
   const empty = filteredCustomers.length === 0 ? (
-    search ? (
+    !search && !lateOnly && !loading && view === "mine" && scopedRep ? (
+      <div data-testid="customers-empty-mine" style={{ padding: "48px 0", textAlign: "center" }}>
+        <p style={{ fontWeight: 500 }}>{L("ما عندك عملاء معيّنين باسمك بعد.", "No customers are assigned to you yet.")}</p>
+        <p className="lbl" style={{ fontWeight: 400 }}>{L("اطلب من المدير يعيّنك مسؤولًا عن عملائك، أو شوف «كل المتاح لي».", "Ask your manager to assign your customers to you, or open «All I can serve».")}</p>
+        <button type="button" className="btn" style={{ marginTop: 12 }} onClick={() => setViewPick("book")}>{L("كل المتاح لي", "All I can serve")}</button>
+      </div>
+    ) : search || lateOnly ? (
       <div data-testid="customers-no-results" style={{ padding: "48px 0", textAlign: "center" }}>
-        <p>{L("لا نتائج تطابق البحث.", "No customers match this search.")}</p>
-        <button type="button" className="btn" style={{ marginTop: 12 }} onClick={() => setSearch("")}>{L("مسح البحث", "Clear search")}</button>
+        <p>{search ? L("لا نتائج تطابق البحث.", "No customers match this search.") : L("ما عندك عملاء متأخرين 👌", "No late customers.")}</p>
+        <button type="button" className="btn" style={{ marginTop: 12 }} onClick={() => { setSearch(""); setLateOnly(false); }}>{search ? L("مسح البحث", "Clear search") : L("عرض الكل", "Show all")}</button>
       </div>
     ) : (
       <div data-testid="customers-empty" style={{ padding: "48px 0", textAlign: "center" }}>
@@ -497,6 +553,7 @@ export default function CustomersPage() {
           {phone ? (
             <>
               <div style={{ marginBottom: 10 }}><SectionPages className="cu-ctx" /></div>
+              {viewTabs || lateChip ? <div style={{ marginBottom: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>{viewTabs}{lateChip}</div> : null}
               <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>{searchBox}{addButton}</div>
               {empty ?? (
                 <div data-testid="customers-table">
@@ -508,7 +565,7 @@ export default function CustomersPage() {
                       <span className="sm cu-orders">{num(c._count.orders)} {L("طلب", c._count.orders === 1 ? "order" : "orders")}</span>
                       <div className="r2">
                         <span style={{ flex: 1, minWidth: 0 }}>{c.phone ? <bdi dir="ltr" className="n">{c.phone}</bdi> : (otherName(c) ?? "—")}</span>
-                        {c._count.roastPreferences > 0 && <span>{num(c._count.roastPreferences)} {t("customerProfilesLabel")}</span>}
+                        {!salesView && c._count.roastPreferences > 0 && <span>{num(c._count.roastPreferences)} {t("customerProfilesLabel")}</span>}
                         {c.whatsappOptOut && <span className="flag wa">{L("بلا واتساب", "No WhatsApp")}</span>}
                       </div>
                       {badges[c.id] && <div className="r2" data-testid={`customer-credit-${c.id}`}><CreditBadges ar={ar} s={badges[c.id]} compact /></div>}
@@ -525,8 +582,7 @@ export default function CustomersPage() {
                   <h1>{t("customers")}</h1>
                   <div className="meta">
                     <span data-testid="customers-total">{num(customers.length)} {L("عميل", customers.length === 1 ? "customer" : "customers")}</span>
-                    <i />
-                    <span>{num(withProfiles)} {L("بمسارات تحميص", "with roast profiles")}</span>
+                    {!salesView && <><i /><span>{num(withProfiles)} {L("بمسارات تحميص", "with roast profiles")}</span></>}
                     {optedOut > 0 && <><i /><span>{num(optedOut)} {L("بلا رسائل واتساب", "opted out of WhatsApp")}</span></>}
                   </div>
                 </div>
@@ -536,6 +592,8 @@ export default function CustomersPage() {
                 </div>
               </div>
               <div className="tool" style={{ marginBottom: 8 }}>
+                {viewTabs}
+                {lateChip}
                 {searchBox}
                 <span className="sp" />
                 <span className="sort-note">{L("بالاسم", "By name")}</span>
@@ -553,7 +611,7 @@ export default function CustomersPage() {
                           <th scope="col" className="num">{L("الرصيد", "Balance")}</th>
                           <th scope="col" className="num">{L("متأخرة", "Overdue")}</th>
                         </> : <>
-                        <th scope="col">{t("roastProfiles")}</th>
+                        {!salesView && <th scope="col">{t("roastProfiles")}</th>}
                         <th scope="col" className="xl">{L("واتساب", "WhatsApp")}</th>
                         </>}
                         <th scope="col"><span className="sr-only">{L("الإجراء", "Action")}</span></th>
@@ -576,7 +634,7 @@ export default function CustomersPage() {
                             <td className="num" data-testid={`customer-balance-${c.id}`}><Link href={`/dashboard/sales/receivables/${c.id}`}><bdi className="n">{arByCustomer ? fmt2(arByCustomer[c.id]?.balance) : "…"}</bdi></Link></td>
                             <td className="num">{arByCustomer && Number(arByCustomer[c.id]?.overdue ?? 0) > 0 ? <bdi className="n" style={{ color: "var(--action-danger)" }}>{fmt2(arByCustomer[c.id]?.overdue)}</bdi> : <span className="sm">{arByCustomer ? "0.00" : "…"}</span>}</td>
                           </> : <>
-                          <td>{c._count.roastPreferences > 0 ? <span>{num(c._count.roastPreferences)} {t("customerProfilesLabel")}</span> : <span className="sm">—</span>}</td>
+                          {!salesView && <td>{c._count.roastPreferences > 0 ? <span>{num(c._count.roastPreferences)} {t("customerProfilesLabel")}</span> : <span className="sm">—</span>}</td>}
                           <td className="xl">{c.whatsappOptOut ? <span className="st wa">{L("لا يرغب", "Opted out")}</span> : <span className="sm">{L("يستلم", "On")}</span>}</td>
                           </>}
                           <td style={{ textAlign: "end" }}>

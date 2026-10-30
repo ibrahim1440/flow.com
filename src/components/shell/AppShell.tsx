@@ -16,12 +16,13 @@ import { LanguageToggle } from "./LanguageToggle";
 import "./alerts-bell.css";
 import { BrandMark } from "@/components/brand/BrandMark";
 import { Ico, type D21IconName } from "./icons";
-import { createActions } from "./creates";
+import { customerActionHref, customerOfPath, shellCreates, type CreateAction } from "./creates";
+import { QuickJump, ShortcutsSheet, useTrap, type PalPage } from "./QuickJump";
 import { CrumbsContext, PhoneContext, SectionPagesContext, TitleContext, type Crumb, type PhoneHeader, type SectionPages } from "./page-context";
 import "./direction-2.1.css";
 import { accountantEligible, accountantModeFor, accountantTree, activeAccountantItem, quickCreates, workspaceKey } from "@/lib/nav/accountant";
 import { AccountantMore, AccountantNav, WorkspaceSwitch } from "./AccountantNav";
-import { ACCOUNTANT_HOME, FULL_HOME, WorkspaceModeContext } from "./workspace-mode";
+import { ACCOUNTANT_HOME, FULL_HOME, WorkspaceModeContext, homeFor } from "./workspace-mode";
 
 /**
  * The Direction 2.1 application shell — one shell for every migrated route.
@@ -127,7 +128,7 @@ function sidebarGroups(tree: NavNode[], lang: string, active: ReturnType<typeof 
   const groups = new Map<string, Group>();
   const into = (gid: string, item: Item) => {
     let g = groups.get(gid);
-    if (!g) { g = { id: gid, label: groupText(gid, lang), items: [] }; groups.set(gid, g); }
+    if (!g) { g = { id: gid, label: groupText(gid, lang, viewer), items: [] }; groups.set(gid, g); }
     g.items.push(item);
   };
   for (const n of tree) {
@@ -174,7 +175,7 @@ function destinations(tree: NavNode[], lang: string, viewer: Viewer): Dest[] {
     out.push({
       id: n.id, href: n.href, text: text(n, lang, viewer),
       context: parent ? text(parent, lang, viewer) : null,
-      group, groupLabel: group ? groupText(group, lang) : null, node: n, ctx: parent ?? mod,
+      group, groupLabel: group ? groupText(group, lang, viewer) : null, node: n, ctx: parent ?? mod,
     });
   };
   const walk = (nodes: NavNode[], group: string | null, parent: NavNode | null, mod: NavNode | null) => {
@@ -222,7 +223,11 @@ export function AppShell({
   const eligible = accountantEligible(viewer);
   const [savedMode, setSavedMode] = useState<string | null>(() => (typeof window === "undefined" ? null : readWorkspace(user.id)));
   const acctMode = accountantModeFor(viewer, savedMode);
-  const wsHome = acctMode ? ACCOUNTANT_HOME : FULL_HOME;
+  // b24-integrate (WP-B «يومي»): a sales persona's «الرئيسية» (sidebar home, the denied page, the phone Home tab) is «يومي».
+  const wsHome = acctMode ? ACCOUNTANT_HOME : (user as { classicHome?: boolean }).classicHome ? FULL_HOME : homeFor(viewer);
+  // The sales rep's phone bar (batch 24 council fix round 1, P0-4): for a sales persona («يومي» is home) the SAME bar on
+  // every sales page — يومي · عملائي · ＋ · صفقاتي · هدفي — whatever the page; a page's own action bar sits above it.
+  const repBar = !acctMode && wsHome === "/dashboard/my-day" && /^\/dashboard\/(my-day|customers|sales|orders|profile)(\/|$)/.test(pathname);
   const [search, setSearch] = useState("");
   const acctTree = useMemo(() => (acctMode ? accountantTree(viewer, lang) : []), [acctMode, viewer, lang]);
   const acctActive = useMemo(() => (acctMode ? activeAccountantItem(acctTree, pathname, search) : null), [acctMode, acctTree, pathname, search]);
@@ -254,6 +259,8 @@ export function AppShell({
   // What the page says about itself.
   const [title, setTitle] = useState<string | null>(null);
   const [phoneHeader, setPhoneHeader] = useState<PhoneHeader | null>(null);
+  // One bar only (council fix round 2, item 5): a page whose action bar replaces the rep's bar (the customer page).
+  const repTabs = repBar && !phoneHeader?.replacesRepBar;
   const setTitleStable = useCallback((t: string | null) => setTitle(t), []);
   const [extraCrumbs, setExtraCrumbs] = useState<Crumb[] | null>(null);
   const setCrumbsStable = useCallback((c: Crumb[] | null) => setExtraCrumbs(c), []);
@@ -301,6 +308,9 @@ export function AppShell({
   } : null, [showSeg, pages, ar, lang, active.leaf, viewer]);
 
   const [palette, setPalette] = useState(false);
+  // Batch 24 WP-A: «لأي عميل؟» for a «+ جديد» item done on a customer, and the «?» shortcuts sheet.
+  const [pickFor, setPickFor] = useState<CreateAction | null>(null);
+  const [keysOpen, setKeysOpen] = useState(false);
   const [more, setMore] = useState(false);
   const [menu, setMenu] = useState(false);
   // Which «جديد» menu is open: the top bar's (desktop and rail) or the phone «+»'s. One at a time.
@@ -313,10 +323,10 @@ export function AppShell({
   const openPalette = () => { returnTo.current = document.activeElement as HTMLElement | null; setPalette(true); };
   const openMore = () => { returnTo.current = moreRef.current; setMore(true); };
   useEffect(() => {
-    if (palette || more || !returnTo.current) return;
+    if (palette || more || pickFor || keysOpen || !returnTo.current) return;
     returnTo.current.focus();
     returnTo.current = null;
-  }, [palette, more]);
+  }, [palette, more, pickFor, keysOpen]);
 
   // «جديد» offers the create actions of the module you are in (owner decision A-3): several →
   // a menu, exactly one → the control opens it directly, none → no control.
@@ -328,14 +338,24 @@ export function AppShell({
   const moduleId = active.group?.id ?? active.leaf?.shell?.creates;
   // In the accountant workspace «جديد» is «الإنشاء السريع»: every «+» of the accountant tree (the rail and the phone
   // have no sidebar menu for it). The same entries, the same permissions — see `quickCreates`.
-  const acctQuick = useMemo(() => {
+  const acctQuick = useMemo((): CreateAction[] => {
     if (!acctMode) return [];
     const en = quickCreates(viewer, "en");
     return quickCreates(viewer, "ar").map((c, i) => ({ id: c.id, labelAr: c.label, labelEn: en[i]?.label ?? c.label, href: c.href, permitted: () => true }));
   }, [acctMode, viewer]);
-  const creates = useMemo(() => (!allowed ? [] : acctMode ? acctQuick : createActions(viewer, moduleId)), [viewer, moduleId, allowed, acctMode, acctQuick]);
-  const single = creates.length === 1 ? creates[0] : null;
+  // Batch 24 WP-A: a sales user gets the sales menu (N Q S O C L) on every page (`shellCreates`).
+  const creates = useMemo(() => (!allowed ? [] : acctMode ? acctQuick : shellCreates(viewer, moduleId)), [viewer, moduleId, allowed, acctMode, acctQuick]);
+  // On a customer page the on-customer items act on that customer; elsewhere they ask «لأي عميل؟» first.
+  const pageCustomer = customerOfPath(pathname);
+  const runCreate = useCallback((a: CreateAction) => {
+    setCreate(null);
+    if (pageCustomer && (a.onCustomer || a.id === "orders.order.new")) { router.push(customerActionHref(a, pageCustomer)); return; }
+    if (a.onCustomer) { returnTo.current = document.activeElement as HTMLElement | null; setPickFor(a); return; }
+    router.push(a.href);
+  }, [pageCustomer, router]);
+  const single = creates.length === 1 && !creates[0].onCustomer ? creates[0] : null;
   const singleHref = single?.href ?? null;
+  const lettered = creates.some((c) => c.key);
 
   // Ctrl/⌘ K opens the quick jump from anywhere, as the approved sidebar advertises; a bare
   // «C» opens «جديد» (reference top bar), never while typing or while a dialog is open.
@@ -349,14 +369,21 @@ export function AppShell({
       if (e.key === "Escape") { setMenu(false); setCreate(null); return; }
       const t = e.target as HTMLElement | null;
       const typing = !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
-      if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "c" && !document.querySelector("[role=dialog]")) {
+      if (typing || e.ctrlKey || e.metaKey || e.altKey || document.querySelector("[role=dialog]")) return;
+      // «?» — the shortcuts sheet (batch 24 WP-A).
+      if (e.key === "?" && lettered) { e.preventDefault(); returnTo.current = document.activeElement as HTMLElement | null; setKeysOpen(true); return; }
+      // The sales menu's letters (N Q S O C L), on the physical key so an Arabic layout works too.
+      const letter = /^Key[A-Z]$/.test(e.code) ? e.code.slice(3) : e.key.toUpperCase();
+      const hitKey = lettered ? creates.find((c) => c.key === letter) : undefined;
+      if (hitKey) { e.preventDefault(); runCreate(hitKey); return; }
+      if (letter === "C") {
         if (singleHref) router.push(singleHref);
         else if (creates.length > 0) { const at = window.matchMedia("(max-width: 767.98px)").matches ? "fab" : "top"; setCreate((v) => (v ? null : at)); }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [creates.length, singleHref, router]);
+  }, [creates, singleHref, router, lettered, runCreate]);
   // The two small menus close on a click anywhere else.
   useEffect(() => {
     if (!menu && !create) return;
@@ -378,10 +405,18 @@ export function AppShell({
   }, []);
   // A page change closes the overlays.
   const [seenPath, setSeenPath] = useState(pathname);
-  if (seenPath !== pathname) { setSeenPath(pathname); setMore(false); setPalette(false); setMenu(false); setCreate(null); }
+  if (seenPath !== pathname) { setSeenPath(pathname); setMore(false); setPalette(false); setMenu(false); setCreate(null); setPickFor(null); setKeysOpen(false); }
 
-  const { top, groups, menu: menuItems } = useMemo(() => sidebarGroups(tree, lang, lit, viewer), [tree, lang, lit, viewer]);
-  const roleLabel = (ar ? ROLE_LABELS_AR[user.role] : ROLE_LABELS[user.role]) || user.role;
+  const { top: allTop, groups, menu: menuItems } = useMemo(() => sidebarGroups(tree, lang, lit, viewer), [tree, lang, lit, viewer]);
+  // The sales rep's sidebar (approved mockup; council fix round 1, P0-17): «يومي» replaces «مساحة عملي» and «لوحة
+  // التشغيل» (the roasting floor's figures) for a sales persona. Both stay reachable (Ctrl K, the URL, the guard is
+  // unchanged); «خدماتي» stays (his own leave and payslips), and «الطلبات» stays under «المبيعات» (he raises orders).
+  const top = useMemo(() => (!acctMode && wsHome === "/dashboard/my-day" ? allTop.filter((it) => it.node.id !== "workspace" && it.node.id !== "dashboard") : allTop), [allTop, acctMode, wsHome]);
+  // A custom role reads as what the person does, not «دور مخصص» (an admin's word; council fix round 2, item 8):
+  // «المبيعات» for a sales persona, else «موظف».
+  const roleLabel = user.role === "custom"
+    ? (homeFor(viewer) === "/dashboard/my-day" ? (ar ? "المبيعات" : "Sales") : (ar ? "موظف" : "Staff"))
+    : (ar ? ROLE_LABELS_AR[user.role] : ROLE_LABELS[user.role]) || user.role;
   // «مساحة عملي»: overdue + due today + waiting for my decision, refreshed on navigation and every 2 min.
   const wsBadge = useWorkspaceBadge(tree.some((n) => n.id === "workspace"), pathname);
 
@@ -437,6 +472,8 @@ export function AppShell({
   const meNode = tree.find((n) => n.id === "me");
   const wsNode = tree.find((n) => n.id === "workspace");
   const dests = useMemo(() => destinations(tree, lang, viewer), [tree, lang, viewer]);
+  const palPages: PalPage[] = useMemo(() => dests.map((d) => ({ id: d.id, href: d.href, text: d.text, context: d.context, group: d.group, groupLabel: d.groupLabel, icon: <NodeIcon node={d.node} fallback={d.ctx ?? undefined} /> })), [dests]);
+  const quickActions = useMemo(() => creates.filter((c) => c.onCustomer), [creates]);
   // The phone header keeps naming the section on a list page with a Segmented control (reference
   // crm-390: «الصفقات» over the pipeline); otherwise it names the last crumb.
   const sectionCrumbs = showSeg && leafIsPage && !title && active.leaf?.href && pathname === active.leaf.href ? crumbs.slice(0, -1) : null;
@@ -444,10 +481,23 @@ export function AppShell({
   const phoneTitle = phoneHeader?.title ?? title ?? lastCrumb;
 
   const createMenu = (dir: "down" | "up") => (
-    <div className={`d21-menu ${dir}`} role="menu">
-      {creates.map((c) => (
-        <Link key={c.id} role="menuitem" href={c.href} data-testid={`d21-new-${c.id}`} onClick={() => setCreate(null)}>{ar ? c.labelAr : c.labelEn}</Link>
+    <div className={`d21-menu ${dir}`} role="menu" data-testid="d21-new-menu">
+      {creates.map((c, i) => (
+        <span key={c.id} style={{ display: "contents" }}>
+          {/* The sales menu's people («عميل جديد», «عميل محتمل») sit apart from the work (mockup «+ جديد»). */}
+          {i > 0 && c.id === "customers.customer.new" ? <div className="d21-menu-sep" role="separator" /> : null}
+          {c.onCustomer || (pageCustomer && c.id === "orders.order.new") ? (
+            <button type="button" role="menuitem" className="d21-menu-item" data-testid={`d21-new-${c.id}`} onClick={() => runCreate(c)}>
+              <span>{ar ? c.labelAr : c.labelEn}</span>{c.key ? <span className="d21-kbd" aria-hidden>{c.key}</span> : null}
+            </button>
+          ) : (
+            <Link role="menuitem" className="d21-menu-item" href={c.href} data-testid={`d21-new-${c.id}`} onClick={() => setCreate(null)}>
+              <span>{ar ? c.labelAr : c.labelEn}</span>{c.key ? <span className="d21-kbd" aria-hidden>{c.key}</span> : null}
+            </Link>
+          )}
+        </span>
       ))}
+      {pageCustomer && creates.some((c) => c.onCustomer) ? <p className="d21-menu-note">{ar ? "على هذا العميل" : "For this customer"}</p> : null}
     </div>
   );
 
@@ -457,12 +507,12 @@ export function AppShell({
     <PhoneContext value={setPhoneStable}>
     <SectionPagesContext value={sectionPages}>
     <WorkspaceModeContext value={workspaceMode}>
-    <div className="d21" lang={lang} dir={ar ? "rtl" : "ltr"} data-shell="d21">
+    <div className="d21" lang={lang} dir={ar ? "rtl" : "ltr"} data-shell="d21" data-repbar={repTabs ? "true" : undefined}>
       {/* IBM Plex, self-hosted (public/fonts): the same faces, files and unicode-range subsets
           Google Fonts served, so nothing is fetched from a third party. */}
       <link rel="stylesheet" precedence="default" href="/fonts/ibm-plex.css" />
       <a className="d21-skip" href="#d21-content">{ar ? "تجاوز إلى المحتوى" : "Skip to content"}</a>
-      <div className="d21-app" inert={palette || more}>
+      <div className="d21-app" inert={palette || more || !!pickFor || keysOpen}>
         <aside className="d21-side" aria-label={ar ? "القائمة الجانبية" : "Sidebar"}>
           <div className="d21-brandbar">
             <span className="d21-mark"><BrandMark /></span>
@@ -546,8 +596,10 @@ export function AppShell({
           {!phoneHeader?.back ? <NotificationsBell lang={ar ? "ar" : "en"} phone /> : null}
           {phoneHeader?.action ? (
             <Link href={phoneHeader.action.href} className="d21-ib" aria-label={phoneHeader.action.label} data-testid="ph-action"><Ico name={phoneHeader.action.icon} /></Link>
-          ) : !phoneHeader?.back ? (
-            <button type="button" className="d21-ib" onClick={openPalette} aria-haspopup="dialog" aria-label={ar ? "بحث أو انتقال" : "Search or jump"}><Ico name="search" /></button>
+          ) : null}
+          {/* Search from every page, a record page included (council fix round 1, P0-4). */}
+          {!phoneHeader?.action || repBar ? (
+            <button type="button" className="d21-ib" onClick={openPalette} aria-haspopup="dialog" aria-label={ar ? "بحث أو انتقال" : "Search or jump"} data-testid="ph-search"><Ico name="search" /></button>
           ) : null}
         </header>
 
@@ -578,12 +630,12 @@ export function AppShell({
                   </Link>
                   <span className="d21-kbd" aria-hidden>C</span>
                 </div>
-              ) : creates.length > 1 ? (
+              ) : creates.length > 0 ? (
                 <div className="d21-new" data-d21-new>
                   <button type="button" className="d21-btn g sm" aria-haspopup="menu" aria-expanded={create === "top"} data-testid="d21-new" onClick={() => setCreate((v) => (v === "top" ? null : "top"))}>
                     <Ico name="plus" small />{ar ? "جديد" : "New"}
                   </button>
-                  <span className="d21-kbd" aria-hidden>C</span>
+                  {!lettered ? <span className="d21-kbd" aria-hidden>C</span> : null}
                   {create === "top" ? createMenu("down") : null}
                 </div>
               ) : null}
@@ -603,7 +655,20 @@ export function AppShell({
         {/* The bottom tab bar (reference MobileTabBar): الرئيسية · the inbox (none exists in
             the ERP, so the current module) · «+» only when there is something to create · خدماتي
             · المزيد. A page with its own sticky action bar takes its place. */}
-        {!phoneHeader?.ownBar ? (
+        {repTabs ? (
+          <nav className="d21-tabbar md-tabbar" aria-label={ar ? "التنقل السريع" : "Quick navigation"} data-testid="md-tabbar">
+            <Link href="/dashboard/my-day" aria-current={pathname === "/dashboard/my-day" ? "page" : undefined}><Ico name="home" />{ar ? "يومي" : "My day"}</Link>
+            <Link href="/dashboard/customers" aria-current={pathname.startsWith("/dashboard/customers") ? "page" : undefined}><Ico name="users" />{ar ? "عملائي" : "Customers"}</Link>
+            {creates.length > 0 ? (
+              <div className="d21-fab-slot" data-d21-new>
+                <button type="button" className="d21-fab" aria-haspopup="menu" aria-expanded={create === "fab"} aria-label={ar ? "جديد" : "New"} data-testid="d21-fab" onClick={() => setCreate((v) => (v === "fab" ? null : "fab"))}><Ico name="plus" /></button>
+                {create === "fab" ? createMenu("up") : null}
+              </div>
+            ) : <span />}
+            <Link href="/dashboard/sales/pipeline" aria-current={pathname.startsWith("/dashboard/sales/pipeline") || pathname.startsWith("/dashboard/sales/deals") ? "page" : undefined}><Ico name="deal" />{ar ? "صفقاتي" : "Deals"}</Link>
+            <Link href="/dashboard/sales/my-commissions" aria-current={pathname.startsWith("/dashboard/sales/my-commissions") ? "page" : undefined}><Ico name="wallet" />{ar ? "هدفي" : "Target"}</Link>
+          </nav>
+        ) : !phoneHeader?.ownBar ? (
           <nav className="d21-tabbar" aria-label={ar ? "التنقل السريع" : "Quick navigation"}>
             <Link href={wsHome} aria-current={pathname === wsHome ? "page" : undefined}><Ico name="home" />{ar ? "الرئيسية" : "Home"}</Link>
             {acctMode ? (acctActive && acctActive.item && acctActive.item.href ? <Link href={acctActive.item.href} aria-current="true" data-testid="tab-group"><Ico name={acctActive.group.icon} />{acctActive.group.label}</Link> : null)
@@ -616,7 +681,7 @@ export function AppShell({
               <div className="d21-fab-slot" data-d21-new>
                 <Link href={single.href} className="d21-fab" aria-label={ar ? `جديد: ${single.labelAr}` : `New: ${single.labelEn}`} data-testid="d21-fab"><Ico name="plus" /></Link>
               </div>
-            ) : creates.length > 1 ? (
+            ) : creates.length > 0 ? (
               <div className="d21-fab-slot" data-d21-new>
                 <button type="button" className="d21-fab" aria-haspopup="menu" aria-expanded={create === "fab"} aria-label={ar ? "جديد" : "New"} data-testid="d21-fab" onClick={() => setCreate((v) => (v === "fab" ? null : "fab"))}><Ico name="plus" /></button>
                 {create === "fab" ? createMenu("up") : null}
@@ -628,7 +693,9 @@ export function AppShell({
         ) : null}
       </div>
 
-      {palette ? <QuickJump lang={lang} dests={dests} onClose={() => setPalette(false)} /> : null}
+      {palette ? <QuickJump lang={lang} userId={user.id} pages={palPages} actions={quickActions} onClose={() => setPalette(false)} /> : null}
+      {pickFor ? <QuickJump lang={lang} userId={user.id} pages={[]} actions={[]} pick={pickFor} onClose={() => setPickFor(null)} /> : null}
+      {keysOpen ? <ShortcutsSheet lang={lang} creates={creates} onClose={() => setKeysOpen(false)} /> : null}
       {more ? (
         <MoreSheet lang={lang} onClose={() => setMore(false)}>
           <div className="d21-more-me">
@@ -682,93 +749,6 @@ export function AppShell({
     </PhoneContext>
     </CrumbsContext>
     </TitleContext>
-  );
-}
-
-/** Focus trap shared by both overlays: Tab cycles inside, Escape closes. */
-function useTrap(onClose: () => void) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  const close = useRef(onClose);
-  useEffect(() => { close.current = onClose; });
-  useEffect(() => {
-    const el = ref.current;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { e.preventDefault(); close.current(); return; }
-      if (e.key !== "Tab" || !el) return;
-      const f = Array.from(el.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),input,[tabindex]:not([tabindex="-1"])'));
-      if (f.length === 0) return;
-      const first = f[0], last = f[f.length - 1];
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, []);
-  return ref;
-}
-
-/** Ctrl K: every destination the viewer may open (reference `palette-1440`). Navigation only — records are not searched. */
-function QuickJump({ lang, dests, onClose }: { lang: string; dests: Dest[]; onClose: () => void }) {
-  const ar = lang === "ar";
-  const router = useRouter();
-  const ref = useTrap(onClose);
-  const [q, setQ] = useState("");
-  const [sel, setSel] = useState(0);
-  const query = q.trim();
-  const hit = (s: string | null) => !!s && (s.includes(query) || s.toLowerCase().includes(query.toLowerCase()));
-  const list = query ? dests.filter((d) => hit(d.text) || hit(d.context) || hit(d.groupLabel)) : dests;
-  // The list keeps the sidebar's groups: a heading wherever the group changes.
-  const blocks: { key: string; label: string | null; items: { d: Dest; i: number }[] }[] = [];
-  list.forEach((d, i) => {
-    const last = blocks[blocks.length - 1];
-    if (last && last.key === (d.group ?? "top")) last.items.push({ d, i });
-    else blocks.push({ key: d.group ?? "top", label: d.groupLabel, items: [{ d, i }] });
-  });
-  const cur = Math.min(sel, Math.max(0, list.length - 1));
-  const go = (d: Dest | undefined) => { if (d) { router.push(d.href); onClose(); } };
-  return (
-    <>
-      <div className="d21-scrim" onClick={onClose} />
-      <div ref={ref} className="d21-pal" role="dialog" aria-modal="true" aria-label={ar ? "بحث أو انتقال" : "Search or jump"}>
-        <div className="d21-pal-in">
-          <Ico name="search" />
-          <input
-            autoFocus
-            role="combobox"
-            aria-expanded="true"
-            aria-controls="d21-pal-list"
-            aria-activedescendant={list[cur] ? `d21-pal-${list[cur].id}` : undefined}
-            aria-label={ar ? "اكتب اسم الصفحة" : "Type a page name"}
-            placeholder={ar ? "اكتب اسم الصفحة…" : "Type a page name…"}
-            value={q}
-            onChange={(e) => { setQ(e.target.value); setSel(0); }}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowDown") { e.preventDefault(); setSel(Math.min(cur + 1, list.length - 1)); }
-              else if (e.key === "ArrowUp") { e.preventDefault(); setSel(Math.max(cur - 1, 0)); }
-              else if (e.key === "Enter") { e.preventDefault(); go(list[cur]); }
-            }}
-          />
-          <span className="d21-kbd" aria-hidden>Esc</span>
-        </div>
-        {list.length === 0 ? <p className="empty" role="status">{ar ? "لا توجد صفحة بهذا الاسم ضمن صلاحياتك." : "No page with that name in your access."}</p> : (
-          <div id="d21-pal-list" role="listbox" aria-label={ar ? "الصفحات" : "Pages"} className="d21-pal-list">
-            {blocks.map((b) => (
-              <ul key={b.key} role="group" aria-label={b.label ?? (ar ? "عام" : "General")} data-testid={`palgroup-${b.key}`}>
-                {b.label ? <li role="presentation" className="d21-pal-grp" aria-hidden>{b.label}</li> : null}
-                {b.items.map(({ d, i }) => (
-                  <li key={d.id} role="option" id={`d21-pal-${d.id}`} aria-selected={i === cur}>
-                    <a href={d.href} tabIndex={-1} data-active={i === cur} onMouseEnter={() => setSel(i)} onClick={(e) => { e.preventDefault(); go(d); }}>
-                      <NodeIcon node={d.node} fallback={d.ctx ?? undefined} /><span><b>{d.text}</b>{d.context ? <small>{d.context}</small> : null}</span>
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            ))}
-          </div>
-        )}
-        <div className="d21-pal-foot" aria-hidden><span>↑↓ {ar ? "للتنقل" : "to move"}</span><span>Enter {ar ? "للفتح" : "to open"}</span><span>Esc {ar ? "للإغلاق" : "to close"}</span></div>
-      </div>
-    </>
   );
 }
 

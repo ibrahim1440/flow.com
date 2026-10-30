@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { hasModuleAccess, type Permissions } from "@/lib/auth-shared";
 
 /**
  * Phase 1 is desktop-first (owner decision, 18 Oct 2026): phone and tablet use is
@@ -12,6 +13,18 @@ import { useEffect, useState } from "react";
  * may be unavailable (private window, blocked site data), in which case it simply shows again.
  */
 const KEY = "hq.desktopNotice.dismissed";
+
+/**
+ * Batch 24 WP-A (owner, «شيل الشريط»): the sales rep works from the phone — the customer page, the call
+ * list and «يومي» are built and tested at 390 — so the line is not shown on the sales screens (sales,
+ * customers, «يومي») nor to a sales role (the sales module, not the administrator). It stays for the other screens (production,
+ * inventory, accounting, HR…), whose phone layouts are still not certified: that is what it was for.
+ */
+const SALES_ROUTES = ["/dashboard/sales", "/dashboard/customers", "/dashboard/my-day"];
+export function showsDesktopNotice(viewer: { role?: string | null; permissions: Permissions | Record<string, unknown> }, pathname: string): boolean {
+  if (viewer.role !== "admin" && hasModuleAccess(viewer.permissions as Permissions, "sales")) return false;
+  return !SALES_ROUTES.some((r) => pathname === r || pathname.startsWith(`${r}/`));
+}
 const NARROW = "(max-width: 1279px)";
 
 export function DesktopRecommendedNotice({ lang }: { lang: string }) {

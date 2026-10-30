@@ -4,6 +4,7 @@
 // «الصفحة الرئيسية» links to the workspace home, and the glossary (`@/lib/nav/glossary`) applies its Qoyod wording
 // only while `accountant` is true. Presentation only: it never decides what anybody may open.
 import { createContext, useContext } from "react";
+import { isSalesPersona, MY_DAY_ROUTE } from "@/lib/workspace/landing";
 
 export type WorkspaceMode = {
   /** The accountant workspace sidebar is drawn (the viewer holds the accounting module and has not switched to the full menu). */
@@ -19,4 +20,12 @@ export const WorkspaceModeContext = createContext<WorkspaceMode>({ accountant: f
 
 export function useWorkspaceMode(): WorkspaceMode {
   return useContext(WorkspaceModeContext);
+}
+
+/**
+ * The full-menu home for this viewer (batch 24 WP-B): «يومي» for a sales persona (`isSalesPersona`), the dashboard for
+ * everybody else. The accountant workspace keeps ACCOUNTANT_HOME (decided by the shell before this is asked).
+ */
+export function homeFor(viewer: { role?: string | null; permissions: Parameters<typeof isSalesPersona>[0]["permissions"] }): string {
+  return isSalesPersona(viewer) ? MY_DAY_ROUTE : FULL_HOME;
 }
