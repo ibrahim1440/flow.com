@@ -309,6 +309,11 @@ model Customer {
   workTasks                   WorkTask[]        @relation("WorkTaskCustomer")
   workAppointments            WorkAppointment[] @relation("WorkAppointmentCustomer")
 
+  // ─── «متابعة إعادة الشراء» (additive, 20261204120000_reorder_rhythm) ───────────────────────
+  /// The agreed reorder interval in days (1–365), when the order history does not show it. NULL =
+  /// learned from the business orders (customers/aggregates.ts orderRhythm).
+  reorderIntervalDays         Int?
+
   @@index([accountOwnerId])
 }
 
@@ -1033,6 +1038,12 @@ model SystemConfig {
   /// Saudi IBAN, stored normalised: «SA» + 22 digits, no spaces (validated by the API).
   sellerIban                   String?
 
+  // ─── Pipeline qualification (additive, migration 20261204100000_pipeline_qualification) ──
+  /// «الحد الأدنى للتأهيل»: true (default) — a qualifying activity turns a lead into a deal only
+  /// when its business type, need and agreed next step are known; false — the legacy rule (any
+  /// qualifying outcome converts). Edited with the quotation settings (PUT /api/settings/quotation).
+  salesRequireQualificationMinimum Boolean @default(true)
+
   // ─── Settings sections (additive, migration 20261022110000_settings_sections) ─────────
   /// Settings › Inventory: green coffee below this many kg is flagged «مخزون منخفض» on the
   /// inventory screen. NULL = not set by the owner: the built-in 20 kg applies, exactly as
@@ -1095,6 +1106,12 @@ model SystemConfig {
   /// built-in line (src/lib/login-tagline.ts). CHECK 1–120 characters after trimming.
   loginTaglineAr String?
   loginTaglineEn String?
+
+  // ─── «متابعة إعادة الشراء» (additive, 20261204120000_reorder_rhythm) ───────────────────────
+  /// A customer is «متأخر» after its interval × this factor (1–5); NULL = 1.3.
+  reorderLateFactor     Decimal? @db.Decimal(4, 2)
+  /// … and «منقطع» after its interval × this factor (1–10, above the late one); NULL = 2.5.
+  reorderInactiveFactor Decimal? @db.Decimal(4, 2)
 }
 
 /// Settings › Production & roasting › Roasters (Figma 377:2, ROASTERS.md §4; RM1–RM5). Machine
@@ -1429,6 +1446,7 @@ enum SourceDocType {
   OPENING_BALANCE // the stock a new green bean / packaging material is created with (IN)
   RECEIVING // a packaging-material delivery received under inventory › receive (IN, audited)
   STOCK_TRANSFER // phase 3: a transfer between two locations (an OUT and an IN, same transfer id)
+  SAMPLE // 20261204090000_sample_inventory: finished units issued as a sales sample (OUT; sourceDocId = SampleShipment.id)
 }
 
 model InventoryMovement {
@@ -3117,6 +3135,14 @@ model Lead {
 
   notes String?
 
+  /// What qualification needs to know (additive, 20261204100000_pipeline_qualification; all
+  /// nullable). Written from the activity form's `qualification` payload and copied onto the
+  /// deal when the lead converts — see services/sales/qualification.ts.
+  businessType      String?
+  needSummary       String?
+  expectedMonthlyKg Decimal? @db.Decimal(12, 3)
+  agreedNextStep    String?
+
   /// Normalised duplicate-detection keys. Written by the service, never by a client.
   /// Deliberately NOT unique: two genuine contacts can share a company, and merging
   /// on name similarity alone is how real customers get destroyed.
@@ -3181,6 +3207,23 @@ model LeadConversion {
 enum PipelineStagePurpose {
   QUALIFICATION
   QUOTATION
+  /// «تجربة وتقييم العينات» (additive, 20261204100000_pipeline_qualification): moving a deal
+  /// forward past this stage with no sample on it needs a documented skip reason.
+  SAMPLE_EVALUATION
+  /// «التفاوض والاعتماد» (additive, 20261204100000_pipeline_qualification). Read by the deal
+  /// page's primary action only; no automation moves a deal here.
+  NEGOTIATION
+}
+
+/// Why a deal was lost, as a code a report can count (additive, 20261204100000_pipeline_qualification).
+/// Optional and alongside the free-text `lostReason`, never instead of it: the text stays required.
+enum LostReasonCode {
+  PRICE
+  QUALITY
+  COMPETITOR
+  NO_NEED
+  NO_RESPONSE
+  OTHER
 }
 
 model PipelineStage {
@@ -3227,7 +3270,18 @@ model Opportunity {
   outcome    OpportunityOutcome @default(OPEN)
   /// Required by the service whenever outcome becomes LOST.
   lostReason String?
+  /// The coded reason beside the text (additive, 20261204100000_pipeline_qualification). Optional.
+  lostReasonCode LostReasonCode?
   closedAt   DateTime?
+
+  /// «تحليل الاحتياج» — a detail of the Qualified Opportunity stage, not a stage of its own
+  /// (additive, 20261204100000_pipeline_qualification; all nullable). Copied from the lead on
+  /// conversion and edited on the deal page (PATCH /api/sales/opportunities/[id]/needs).
+  /// businessType: one of the Customer.segment codes (WHOLESALE | RETAIL | CAFE | DISTRIBUTOR | OTHER).
+  businessType      String?
+  needSummary       String?
+  expectedMonthlyKg Decimal? @db.Decimal(12, 3)
+  agreedNextStep    String?
 
   /// Expected value. Currency is explicit so a future multi-currency policy has
   /// somewhere to land; the commission engine refuses anything but SAR today.
@@ -3303,6 +3357,8 @@ model OpportunityStageEvent {
 }
 
 enum SampleStatus {
+  /// 20261204090000_sample_inventory: requested by the rep from the deal, waiting for dispatch. Moves no stock.
+  REQUESTED
   PREPARING
   SENT
   FEEDBACK_RECEIVED
@@ -3311,9 +3367,14 @@ enum SampleStatus {
 
 /// Sample tracking. Records what was promised and what came back.
 ///
-/// Deliberately does NOT move stock: the roastery has a packaging and inventory
-/// path with its own guards, and a CRM screen must not become a second way to
-/// decrement a shelf.
+/// Two kinds (20261204090000_sample_inventory, docs/sales/SAMPLES_INVENTORY.md):
+///   · a STOCK sample (`fromStock`: a SKU in whole units) — the rep only REQUESTS it; the dispatch
+///     department issues it (services/sales/sample-issue.ts), which is the one moment finished units
+///     leave the shelf: an InventoryMovement OUT · FINISHED_GOODS · SAMPLE per lot, at issue time, once.
+///     The CRM screen still never decrements a shelf — dispatch does, through the same lot guards
+///     (lock order, free units only, QC holds) as a delivery.
+///   · a RECORD-ONLY sample (free text, KG / GRAM, and every row from before the migration) —
+///     unchanged: a follow-up record that moves no stock.
 model SampleShipment {
   id            String      @id @default(cuid())
   opportunityId String
@@ -3335,7 +3396,39 @@ model SampleShipment {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  // ── Issue from stock (20261204090000_sample_inventory) ──
+  /// A stock sample: a SKU in whole units ("unit" = UNIT, integral "quantity"), issued by dispatch. False on every
+  /// row from before the migration and on record-only samples (CHECK "SampleShipment_from_stock_shape").
+  fromStock   Boolean   @default(false)
+  /// When dispatch issued it (the stock left) and who did; set once, with the movements (CHECK "SampleShipment_issued").
+  issuedAt    DateTime?
+  issuedById  String?
+  /// The InventoryMovement rows of the issue (one per lot; also findable by sourceDocType SAMPLE + sourceDocId = id).
+  movementIds String[]  @default([])
+  /// The lots drawn: [{ lotId, batchNumber, units, kg, movementId }].
+  issueLots   Json?
+  /// The cost of the issued units, SAR: exactly the value the issue moved out of the lots' cost holders (onSampleIssue,
+  /// as the delivery COGS computes it) and posted Dr SAMPLES_EXPENSE / Cr INVENTORY_PACKED once accounting is live.
+  /// Management reporting only: never returned by a sales endpoint. Null for a record-only sample or when no lot drawn
+  /// had any cost on record (docs/sales/SAMPLES_INVENTORY.md §4).
+  costValue   Decimal?  @db.Decimal(18, 2)
+
+  // ── One sample of each product per customer (20261205090000_sample_approval) ──
+  /// A second (or later) sample of the same coffee product (ProductSKU.productId) for the same customer: it waits for
+  /// a sales manager (lead_assign / admin) and dispatch neither sees nor issues it until approved (CHECK
+  /// "SampleShipment_approval_before_issue"). False on every row before the migration and on every first sample.
+  approvalRequired Boolean   @default(false)
+  /// The approval, recorded on the request: who, when (a manager's own request records the manager at creation).
+  approvedById     String?
+  approvedAt       DateTime?
+  /// The decline: who, when — a declined request is CANCELLED with it, so it never counts and is never issued.
+  declinedById     String?
+  declinedAt       DateTime?
+  /// The manager's note; required for a decline (CHECK "SampleShipment_approval_shape").
+  approvalNote     String?
+
   @@index([opportunityId, status])
+  @@index([fromStock, status])
 }
 
 enum ActivityType {

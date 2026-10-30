@@ -6,7 +6,8 @@ import { Ico } from "@/components/shell/icons";
 import { usePhone } from "@/components/shell/page-context";
 import { ACTIVITY_LABELS, OUTCOME_LABELS } from "@/components/d21/labels";
 import { dayCount, daysFromToday } from "@/components/d21/format";
-import { ACTIVITY_OUTCOMES } from "@/lib/services/sales/qualification";
+import { ACTIVITY_OUTCOMES, qualifies } from "@/lib/services/sales/qualification";
+import { EMPTY_QUALIFICATION, QualificationFields, missingText, qualificationPayload, type QualificationDraft } from "../_components/QualificationFields";
 import type { Target } from "@/lib/services/sales/activity-targets";
 
 /**
@@ -339,11 +340,24 @@ function StepTwo({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const isTask = type === "TASK";
+  // A qualifying outcome on a lead converts it only with the qualification minimum known
+  // (services/sales/needs.ts). The fields are offered with the outcome; if the server still reports
+  // something missing, the same form asks for it and completes that activity (…/leads/[id]/qualify).
+  const asksQualification = target.kind !== "deal" && !isTask && qualifies(outcome);
+  const [qual, setQual] = useState<QualificationDraft>(EMPTY_QUALIFICATION);
+  const [pending, setPending] = useState<{ activityId: string; missing: string[] } | null>(null);
 
   async function save() {
     if (busy) return;
     setBusy(true); setErr("");
-    const res = await api("/api/sales/activities", {
+    if (pending) {
+      const done = await api(`/api/sales/leads/${target.id}/qualify`, { method: "POST", body: { activityId: pending.activityId, qualification: qualificationPayload(qual) } }).catch(() => null);
+      setBusy(false);
+      if (done?.ok) { onDone(target); return; }
+      setErr(done?.data?.error ?? (ar ? "تعذّر الحفظ. حاول مرة أخرى." : "Could not save. Try again."));
+      return;
+    }
+    const res = await api<{ activity?: { id: string }; qualification?: { converted?: boolean; missing?: string[] } | null }>("/api/sales/activities", {
       method: "POST",
       body: {
         type, subject, body,
@@ -351,9 +365,15 @@ function StepTwo({
         outcome: isTask ? undefined : outcome,
         dueAt: dueAt || null,
         completed: isTask ? false : completed,
+        ...(asksQualification && qualificationPayload(qual) ? { qualification: qualificationPayload(qual) } : {}),
       },
     }).catch(() => null);
     setBusy(false);
+    const q = res?.ok ? res.data.qualification : null;
+    if (res?.ok && q && q.converted === false && q.missing?.length && res.data.activity?.id) {
+      setPending({ activityId: res.data.activity.id, missing: q.missing });
+      return;
+    }
     if (res?.ok) { onDone(target); return; }
     // The server's refusals are English strings; the dialog says what they mean in its own
     // language. 404 is «not yours (any more)» — the record was reassigned since the list loaded.
@@ -393,6 +413,10 @@ function StepTwo({
               </Field>
             )}
           </div>
+          {pending && <Alert kind="info">{ar ? "سُجّل النشاط. " : "Activity logged. "}{missingText(pending.missing, ar)}</Alert>}
+          {(asksQualification || pending) && (
+            <QualificationFields ar={ar} value={qual} onChange={setQual} missing={pending?.missing} idPrefix="pk-qual" />
+          )}
           <Field id="pk-subject" label={ar ? "الموضوع" : "Subject"} required>
             <TextInput id="pk-subject" value={subject} onChange={setSubject} />
           </Field>
@@ -422,7 +446,7 @@ function StepTwo({
       <div className="d63-acts">
         {!phone && <button type="button" className="btn" onClick={onCancel} data-testid="picker-cancel">{ar ? "إلغاء" : "Cancel"}</button>}
         <button type="button" className="btn p" disabled={!canSave} aria-busy={busy || undefined} onClick={save} data-testid="picker-save">
-          {busy ? (ar ? "جارٍ الحفظ…" : "Saving…") : ar ? "حفظ" : "Save"}
+          {busy ? (ar ? "جارٍ الحفظ…" : "Saving…") : pending ? (ar ? "تحويل إلى فرصة" : "Make it an opportunity") : ar ? "حفظ" : "Save"}
         </button>
       </div>
     </>

@@ -4,6 +4,7 @@ import { requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { hasModuleAccess } from "@/lib/auth-shared";
 import { parseActivity, logCustomerActivity } from "@/lib/services/sales/activity-log";
+import { customerInScope } from "@/lib/services/sales/customer-access";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -31,6 +32,8 @@ export async function POST(request: Request, { params }: Params) {
     return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
   }
   const { id } = await params;
+  // A scoped sales rep writes only on the customers in their own book (services/sales/scope.ts).
+  if (!(await customerInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 }); }
@@ -39,7 +42,17 @@ export async function POST(request: Request, { params }: Params) {
   try {
     // Same rules as POST /api/sales/activities — lib/services/sales/activity-log.ts.
     const a = parseActivity(b, { maxSubject: 500 });
-    const result = await prisma.$transaction((tx) => logCustomerActivity(tx, { id: user.id, permissions: user.permissions }, id, a), TX_OPTS);
+    // `next` (optional): the follow-up the result calls for, written in the same transaction as the
+    // result — «تسجيل اتصال» on a customer due to reorder records the call and its next step at once.
+    const nb = b.next && typeof b.next === "object" ? (b.next as Record<string, unknown>) : null;
+    const next = nb ? parseActivity({ type: typeof nb.channel === "string" ? nb.channel : "CALL", subject: typeof nb.subject === "string" && nb.subject.trim() ? nb.subject : a.subject, dueAt: nb.dueAt }, { maxSubject: 500 }) : null;
+    if (next && !next.dueAt) throw { _appCode: 400, message: "The next step needs a date." };
+    const result = await prisma.$transaction(async (tx) => {
+      const writer = { id: user.id, permissions: user.permissions };
+      const logged = await logCustomerActivity(tx, writer, id, a);
+      const planned = next ? await logCustomerActivity(tx, writer, id, next) : null;
+      return { ...logged, nextActivityId: planned?.activity.id ?? null };
+    }, TX_OPTS);
     return NextResponse.json(result, { status: 201 });
   } catch (err) {
     return handleDomainError(err);

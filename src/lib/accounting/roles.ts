@@ -68,6 +68,11 @@ export const ACCOUNT_ROLES: RoleDef[] = [
   // «بيع أصل ثابت» (20261128090000_fa_sale_invoice): the sales-invoice line of an asset sale credits it (instead of revenue);
   // the register's disposal debits it. Its balance is the issued sale lines not yet matched by a disposal (the close check).
   { key: "FA_DISPOSAL_CLEARING", ar: "تسوية بيع الأصول الثابتة", en: "Fixed-asset sale clearing", group: "fixedAssets", phase: "A3", types: ["LIABILITY"], seedCode: "2195" },
+  // «العيّنات من المخزون» (docs/sales/SAMPLES_INVENTORY.md §4): a free sample issued from finished goods leaves the packed
+  // inventory at its cost — Dr SAMPLES_EXPENSE (item = SKU, party = the deal's customer) / Cr INVENTORY_PACKED
+  // (inventory-events.ts onSampleIssue). A selling (promotional) expense: deliberately neither COGS (nothing was sold)
+  // nor WASTAGE (nothing was spoiled).
+  { key: "SAMPLES_EXPENSE", ar: "عيّنات ترويجية مجانية", en: "Free promotional samples", group: "other", phase: "A3", types: ["EXPENSE"], seedCode: "6410" },
   { key: "BANK_FEES", ar: "رسوم البنوك ونقاط البيع", en: "Bank & POS fees", group: "other", phase: "A2", types: ["EXPENSE"], seedCode: "6310" },
   { key: "DELIVERY_APP_COMMISSION", ar: "عمولات تطبيقات التوصيل", en: "Delivery-app commissions", group: "other", phase: "A2", types: ["EXPENSE"], seedCode: "6300" },
   { key: "ROUNDING", ar: "فروقات التقريب", en: "Rounding differences", group: "other", phase: "A1", types: ["EXPENSE"], seedCode: "6900", requiredForActivation: true },

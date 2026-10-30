@@ -12,6 +12,7 @@ import { deliveryShipments } from "@/lib/print/delivery-note";
 import { useI18n } from "@/lib/i18n/context";
 import { LocationSelect, useLocations } from "../inventory/_parts/locations";
 import { pickerLocations } from "@/lib/inventory/locations";
+import { SamplesQueue, type SampleRequest } from "./SamplesQueue";
 
 // ─── Dispatch without lots (production simplification, Phase D item 7) ───────────────────────
 //
@@ -83,7 +84,12 @@ export default function DispatchPage() {
 
   const [ready, setReady] = useState<ReadyOrder[]>([]);
   const [deliveries, setDeliveries] = useState<DeliveryRow[]>([]);
-  const [tab, setTab] = useState<"ready" | "history">("ready");
+  // «عيّنات للصرف» (docs/sales/SAMPLES_INVENTORY.md): the stock samples reps requested, waiting for this department.
+  const [samples, setSamples] = useState<SampleRequest[]>([]);
+  // A link from elsewhere may open the queue directly (/dashboard/dispatch?tab=samples). The tabs render only after
+  // the client has loaded, so reading the URL here cannot disagree with the server's markup.
+  const [tab, setTab] = useState<"ready" | "samples" | "history">(() =>
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "samples" ? "samples" : "ready");
   const [search, setSearch] = useState("");
   const [readySearch, setReadySearch] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -111,12 +117,13 @@ export default function DispatchPage() {
   useEffect(() => { loadData(); }, [site]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadData() {
-    const [readyRes, delRes] = await Promise.all([fetch(`/api/deliveries/ready${site ? `?location=${encodeURIComponent(site)}` : ""}`), fetch("/api/deliveries")]);
+    const [readyRes, delRes, smpRes] = await Promise.all([fetch(`/api/deliveries/ready${site ? `?location=${encodeURIComponent(site)}` : ""}`), fetch("/api/deliveries"), fetch("/api/deliveries/samples")]);
     const take = async (r: Response) => (r.ok ? r.json() : (await r.text(), null));
-    const [readyJ, delJ] = await Promise.all([readyRes, delRes].map(take));
-    setLoadError(readyJ === null || delJ === null);
+    const [readyJ, delJ, smpJ] = await Promise.all([readyRes, delRes, smpRes].map(take));
+    setLoadError(readyJ === null || delJ === null || smpJ === null);
     if (readyJ) setReady(readyJ.orders);
     if (delJ) setDeliveries(delJ);
+    if (smpJ) setSamples(smpJ.samples ?? []);
     setLoaded(true);
   }
 
@@ -295,10 +302,14 @@ export default function DispatchPage() {
           onChange={setTab}
           items={[
             { key: "ready", label: t("readyForDelivery"), count: ready.length },
+            { key: "samples", label: L("عيّنات للصرف", "Samples to issue"), count: samples.length },
             { key: "history", label: t("deliveryHistory"), count: deliveries.length },
           ]}
         />
       ) : null}
+
+      {/* ── Samples to issue: requested by the reps, issued from finished stock here ── */}
+      {loaded && tab === "samples" ? <SamplesQueue rows={samples} canIssue={canDeliver} onChanged={loadData} /> : null}
 
       {/* ── Ready to deliver: one card per order ── */}
       {loaded && tab === "ready" ? <section className="hr-stack" style={{ gap: 12 }} aria-label={t("readyForDelivery")}>

@@ -11,6 +11,8 @@ import { deliveryLotsFor } from "@/lib/services/delivery-lots";
 import { autoPrepareOrder } from "@/lib/services/orders/preparation";
 import { orderPipelines } from "@/lib/services/orders/pipeline";
 import { parseBranchId } from "@/lib/accounting/locations";
+import { orderVisibilityWhere } from "@/lib/services/sales/scope";
+import { customerInScope } from "@/lib/services/sales/customer-access";
 
 export async function GET(request: Request) {
   // Production and Dispatch workers need to read orders to see what to roast / deliver
@@ -24,7 +26,9 @@ export async function GET(request: Request) {
   const status = searchParams.get("status");
   const customerId = searchParams.get("customerId");
 
-  const where: Record<string, unknown> = {};
+  // A scoped sales rep lists the orders of their own book only; production, dispatch, order
+  // approval and preparation keep the whole queue (services/sales/scope.ts — worksWholeOrderQueue).
+  const where: Record<string, unknown> = { ...orderVisibilityWhere(user) };
   if (customerId) where.customerId = customerId;
   if (status) {
     const statusList = status.split(",");
@@ -95,6 +99,10 @@ export async function POST(request: Request) {
     }
     if (!Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: "An order must have at least one line." }, { status: 400 });
+    }
+    // A scoped sales rep orders only for a customer in their own book.
+    if (!(await customerInScope(user, body.customerId))) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
     // No stock gate here, deliberately (section 7).

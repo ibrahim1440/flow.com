@@ -34,7 +34,10 @@ import {
  *                 no lead. The cohort rate of the sales reports.
  *  quotes         issued = quotations of the person's deals with `issuedAt` in the month (every
  *                 issued revision counts); accepted = those with `acceptedAt` in the month,
- *                 acceptedValue = Σ grandTotal of the accepted ones.
+ *                 acceptedValue = Σ (grandTotal − taxTotal) of the accepted ones: excluding VAT,
+ *                 the basis of every other value on this screen (collected net, won/lost, the
+ *                 pipeline) and of the customer file's 12-month sales (customers/aggregates.ts).
+ *                 It used to add the VAT-inclusive total next to net figures.
  *  commission     The ledger's accrued figure for the month — Σ ACCRUAL + Σ REVERSAL entries
  *                 with that `periodStart` — the same `accrued` the commission statement shows.
  *                 Shown only to whoever may read it (view_own for oneself, view_team for others).
@@ -231,7 +234,7 @@ export async function performanceSummary(db: Db, opts: {
         OR: [{ issuedAt: { gte: start, lt: end } }, { acceptedAt: { gte: start, lt: end } }],
         ...(ownerId ? { opportunity: { ownerId } } : {}),
       },
-      select: { issuedAt: true, acceptedAt: true, grandTotal: true, opportunity: { select: { ownerId: true } } },
+      select: { status: true, issuedAt: true, acceptedAt: true, grandTotal: true, taxTotal: true, opportunity: { select: { ownerId: true } } },
     }),
     opts.commission === "none"
       ? Promise.resolve([] as { employeeId: string; type: string; _sum: { amount: Decimal | null } }[])
@@ -300,7 +303,7 @@ export async function performanceSummary(db: Db, opts: {
     const w = won.filter(is), l = lost.filter(is), o = open.filter(is), ld = leads.filter(is);
     const q = quotes.filter((x) => id === null || x.opportunity.ownerId === id);
     const issued = q.filter((x) => x.issuedAt && x.issuedAt >= start && x.issuedAt < end);
-    const accepted = q.filter((x) => x.acceptedAt && x.acceptedAt >= start && x.acceptedAt < end);
+    const accepted = q.filter((x) => x.status === "ACCEPTED" && x.acceptedAt && x.acceptedAt >= start && x.acceptedAt < end);
     const tg = targets.filter((t) => id === null || t.employeeId === id);
     const net = id === null ? [...byEmployee.values()].reduce((a, b) => a.plus(b), ZERO) : (byEmployee.get(id) ?? ZERO);
     const target = tg.length ? tg.reduce((a, t) => a.plus(t.targetAmount), ZERO) : null;
@@ -316,7 +319,7 @@ export async function performanceSummary(db: Db, opts: {
       openCount: o.length, openValue: sum(o),
       leadsCreated: ld.length, leadsConverted: converted, conversionPercent: percent(converted, ld.length),
       quotesIssued: issued.length, quotesAccepted: accepted.length,
-      acceptedValue: money(accepted.reduce((a, x) => a.plus(x.grandTotal), ZERO)),
+      acceptedValue: money(accepted.reduce((a, x) => a.plus(new Decimal(x.grandTotal.toString()).minus(x.taxTotal.toString())), ZERO)),
       commissionAccrued: commissionFor(id),
     };
   };

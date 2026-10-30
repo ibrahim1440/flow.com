@@ -11,6 +11,9 @@
 //   ★ 5410 abnormal roast loss (normal loss is absorbed into roasted cost; only loss above standard is expensed);
 //   ★ 2195 fixed-asset sale clearing (the FA_DISPOSAL_CLEARING role: a sale line «بيع أصل ثابت» credits it, the disposal clears it);
 //   ★ 2152 deferred revenue – subscriptions & prepaid orders (the DEFERRED_REVENUE role of «قوالب التأجيل»);
+//   ★ 6410 free promotional samples (the SAMPLES_EXPENSE role: a sample issued from stock, at its cost). In the 6400
+//     marketing block but a sibling under 6000, like 5410 beside 5400: 6400 is itself a posting account, and an account
+//     with a child is a header that refuses lines (ledger_line_guard / ledger_account_guard);
 //   ★ branch cash accounts are generic (1111 main branch, 1112 roastery) — the owner renames / adds branches.
 // Control accounts (AR, AP, inventory, VAT, GRNI, payroll and commission liabilities) refuse MANUAL journals:
 // they are fed by their sub-ledgers through the posting engine. Everything here is editable after seeding.
@@ -119,6 +122,7 @@ const ROWS: T[] = [
   ["6300", "عمولات تطبيقات التوصيل", "Delivery-app commissions", X, D, "6000", true],
   ["6310", "رسوم البنوك ونقاط البيع", "Bank & POS fees", X, D, "6000", true],
   ["6400", "التسويق والإعلان", "Marketing & advertising", X, D, "6000", true],
+  ["6410", "عيّنات ترويجية مجانية", "Free promotional samples", X, D, "6000", true],
   ["6500", "الاشتراكات والبرمجيات", "Software & subscriptions", X, D, "6000", true],
   ["6600", "الإهلاك", "Depreciation", X, D, "6000", true],
   ["6610", "إهلاك حق الاستخدام", "Right-of-use depreciation", X, D, "6000", true],

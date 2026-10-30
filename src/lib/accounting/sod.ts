@@ -64,7 +64,7 @@ export const FA_SOD_SOURCES = ["FIXED_ASSET", "FA_ADDITION", "FA_DISPOSAL"] as c
 const FA_SOD_SOURCES_DETAIL: Record<(typeof FA_SOD_SOURCES)[number], string> = { FIXED_ASSET: "asset activated by its preparer", FA_ADDITION: "addition entered and posted by one person", FA_DISPOSAL: "disposal entered and posted by one person" };
 
 export type SodException = {
-  kind: "JOURNAL_SELF_APPROVED" | "JOURNAL_APPROVER_POSTED" | "NOTE_SELF_ISSUED" | "AP_SELF_POSTED" | "FA_SELF_POSTED" | "PERIOD_REOPENED" | "RECURRING_SELF_AUTHORISED" | "STANDING_SELF_AUTHORISED" | "BUDGET_SELF_APPROVED" | "RECEIPT_SELF_CONFIRMED";
+  kind: "JOURNAL_SELF_APPROVED" | "JOURNAL_APPROVER_POSTED" | "NOTE_SELF_ISSUED" | "AP_SELF_POSTED" | "FA_SELF_POSTED" | "PERIOD_REOPENED" | "RECURRING_SELF_AUTHORISED" | "STANDING_SELF_AUTHORISED" | "BUDGET_SELF_APPROVED" | "RECEIPT_SELF_CONFIRMED" | "RECEIPT_SELF_REVERSED";
   at: string; day: string; ref: string; amount: string | null; actorId: string | null; detail: string; href: string;
 };
 
@@ -76,7 +76,7 @@ export type SodException = {
 export async function sodExceptions(from: Date, to: Date): Promise<{ from: string; to: string; rows: SodException[]; counts: Record<string, number> }> {
   const end = new Date(to.getTime() + 86_400_000 - 1 + 3 * 3600_000);
   const start = new Date(from.getTime() - 3 * 3600_000);
-  const [journals, notes, ap, reopens, standing, fa, budgets, receipts] = await Promise.all([
+  const [journals, notes, ap, reopens, standing, fa, budgets, receipts, reversedReceipts] = await Promise.all([
     prisma.journalEntry.findMany({
       where: { type: { in: ["MANUAL", "ADJUSTMENT"] }, approvedAt: { gte: start, lte: end }, OR: [{ sodBypass: true }, { status: { in: ["POSTED", "REVERSED"] } }] },
       select: { id: true, entryNo: true, postingYear: true, postingSeq: true, entryDate: true, sodBypass: true, createdBy: true, submittedBy: true, approvedBy: true, approvedAt: true, postedBy: true, postedAt: true, totalDebit: true, status: true, sourceType: true },
@@ -98,7 +98,10 @@ export async function sodExceptions(from: Date, to: Date): Promise<{ from: strin
     prisma.glBudget.findMany({ where: { sodBypass: true, approvedAt: { gte: start, lte: end } }, select: { id: true, name: true, fiscalYear: true, revisionNo: true, approvedAt: true, approvedBy: true, createdBy: true } }),
     // «سند قبض» (BATCH22 WP-D): a receipt for an invoice with no deal confirmed by the accountant who recorded it (the
     // setting allowed it; SalesCollection_four_eyes_check requires the flag).
-    prisma.salesCollection.findMany({ where: { sodBypass: true, decidedAt: { gte: start, lte: end } }, select: { id: true, receiptNumber: true, decidedAt: true, decidedById: true, amountGross: true } }),
+    prisma.salesCollection.findMany({ where: { sodBypass: true, decidedAt: { gte: start, lte: end } }, select: { id: true, receiptNumber: true, decidedAt: true, decidedById: true, submittedById: true, amountGross: true } }),
+    // The same exception on the way back (council gate S6a): an accountant's receipt reversed by the accountant who
+    // recorded it, while no other confirmer existed (collections.ts reverseCollection) — read from the row itself.
+    prisma.salesCollection.findMany({ where: { source: "ACCOUNTANT", status: "REVERSED", reversedAt: { gte: start, lte: end } }, select: { id: true, receiptNumber: true, reversedAt: true, reversedById: true, submittedById: true, amountGross: true } }),
   ]);
   const rows: SodException[] = [];
   const day = (d: Date) => dayText(new Date(d.getTime() + 3 * 3600_000));
@@ -129,7 +132,12 @@ export async function sodExceptions(from: Date, to: Date): Promise<{ from: strin
     }
   }
   for (const g of budgets) rows.push({ kind: "BUDGET_SELF_APPROVED", at: g.approvedAt!.toISOString(), day: day(g.approvedAt!), ref: `${g.name} ${g.fiscalYear} r${g.revisionNo}`, amount: null, actorId: g.approvedBy, detail: g.approvedBy === g.createdBy ? "preparer approved" : "last editor approved", href: `/dashboard/accounting/budgets/${g.id}` });
-  for (const c of receipts) rows.push({ kind: "RECEIPT_SELF_CONFIRMED", at: c.decidedAt!.toISOString(), day: day(c.decidedAt!), ref: c.receiptNumber ?? c.id, amount: c.amountGross.toFixed(2), actorId: c.decidedById, detail: "receipt recorded and confirmed by one person", href: `/dashboard/accounting/receipts?id=${c.id}` });
+  for (const c of reversedReceipts) {
+    if (c.reversedById !== c.submittedById) continue;
+    rows.push({ kind: "RECEIPT_SELF_REVERSED", at: c.reversedAt!.toISOString(), day: day(c.reversedAt!), ref: c.receiptNumber ?? c.id, amount: c.amountGross.toFixed(2), actorId: c.reversedById, detail: "receipt recorded and reversed by one person", href: `/dashboard/accounting/receipts?id=${c.id}` });
+  }
+  // A receipt confirmed by a second person keeps no exception, even when its recorder later reversed it alone.
+  for (const c of receipts.filter((r) => r.decidedById === r.submittedById)) rows.push({ kind: "RECEIPT_SELF_CONFIRMED", at: c.decidedAt!.toISOString(), day: day(c.decidedAt!), ref: c.receiptNumber ?? c.id, amount: c.amountGross.toFixed(2), actorId: c.decidedById, detail: "receipt recorded and confirmed by one person", href: `/dashboard/accounting/receipts?id=${c.id}` });
   rows.sort((a, b) => a.at.localeCompare(b.at));
   const counts: Record<string, number> = {};
   for (const r of rows) counts[r.kind] = (counts[r.kind] ?? 0) + 1;

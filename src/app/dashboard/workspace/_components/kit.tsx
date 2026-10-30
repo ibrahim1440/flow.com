@@ -50,7 +50,7 @@ export type Task = {
   roles: string[]; actions: string[];
 };
 export type ApprovalItem = {
-  key: string; type: "LEAVE" | "ADVANCE" | "DISCOUNT" | "FINANCE" | "MARKETING"; id: string; title: string; titleEn?: string; requester: string | null; subject: string | null; subjectEn?: string | null; createdAt: string;
+  key: string; type: "LEAVE" | "ADVANCE" | "DISCOUNT" | "SAMPLE" | "FINANCE" | "MARKETING"; id: string; title: string; titleEn?: string; requester: string | null; subject: string | null; subjectEn?: string | null; createdAt: string;
   facts: Record<string, unknown>; warnings: { ar: string; en: string }[];
   decide: { url: string; rejectNeedsReason: true; expected?: Record<string, string>; stepUp?: boolean };
   openUrl: string; notice?: { ar: string; en: string };
@@ -68,19 +68,30 @@ export type Appointment = {
   remindBeforeMinutes: number | null; version: number; organizer: Person; customer: Person | null; lead: { id: string; companyName: string } | null; opportunity: { id: string; title: string } | null;
   participants: { employeeId: string; employee: { name: string } }[]; past: boolean; actions: string[];
 };
-export type CrmDue = { id: string; type: string; subject: string; dueAt: string; record: string | null; openUrl: string };
+export type CrmDue = {
+  id: string; type: string; subject: string; dueAt: string; leadId: string | null; record: string | null; recordEn: string | null; deal: string | null; openUrl: string;
+  action: { ar: string; en: string }; canRecord: boolean;
+};
+/** An account due / late / gone quiet against its reorder rhythm (views.ts reorderDue). */
+export type ReorderDue = {
+  customerId: string; name: string; nameEn: string; state: "DUE" | "LATE" | "INACTIVE"; daysSince: number; intervalDays: number;
+  intervalSource: "AGREED" | "HISTORY"; usualItems: string[]; canRecord: boolean; openUrl: string;
+};
+/** An issued quotation waiting for the customer's answer (views.ts quotesToFollow). */
+export type QuoteDue = { id: string; quoteNumber: string; dueAt: string; validUntil: string | null; record: string | null; recordEn: string | null; deal: string | null; openUrl: string };
 
 // ── Words ──────────────────────────────────────────────────────────────────────────────
 
 export const TYPE_LABEL: Record<string, [string, string]> = {
-  TASK: ["مهمة", "Task"], FOLLOW_UP: ["متابعة عميل", "Follow-up"], APPROVAL: ["اعتماد", "Approval"], APPOINTMENT: ["موعد", "Appointment"], CRM: ["متابعة", "Follow-up"],
+  TASK: ["مهمة", "Task"], FOLLOW_UP: ["متابعة عميل", "Follow-up"], QUOTE: ["عرض سعر", "Quotation"], APPROVAL: ["اعتماد", "Approval"], APPOINTMENT: ["موعد", "Appointment"], CRM: ["متابعة", "Follow-up"],
   LEAVE: ["إجازة", "Leave"], ADVANCE: ["سلفة", "Advance"], CORRECTION: ["تصحيح", "Correction"], DISCOUNT: ["خصم", "Discount"], FINANCE: ["مالية", "Finance"], MARKETING: ["تسويق", "Marketing"],
   MEETING: ["اجتماع", "Meeting"], VISIT: ["زيارة", "Visit"], CALL: ["مكالمة", "Call"], OTHER: ["موعد", "Appointment"],
 };
+// The six a rep reaches for first, then the rest (services/sales/qualification.ts ACTIVITY_OUTCOMES).
 export const OUTCOMES: [string, string, string][] = [
-  ["NO_ANSWER", "لم يرد", "No answer"], ["LEFT_MESSAGE", "تُركت رسالة", "Left a message"], ["INTERESTED", "مهتم", "Interested"],
-  ["MEETING_COMPLETED", "تم الاجتماع", "Meeting held"], ["VISIT_COMPLETED", "تمت الزيارة", "Visit done"], ["FOLLOW_UP_REQUIRED", "يحتاج متابعة", "Needs follow-up"],
-  ["NOT_INTERESTED", "غير مهتم", "Not interested"],
+  ["INTERESTED", "مهتم", "Interested"], ["NO_ANSWER", "لم يرد", "No answer"], ["FOLLOW_UP_REQUIRED", "يحتاج متابعة", "Needs follow-up"],
+  ["MEETING_SCHEDULED", "تم الاتفاق على اجتماع", "Meeting agreed"], ["VISIT_COMPLETED", "تمت الزيارة", "Visit done"], ["NOT_INTERESTED", "غير مهتم", "Not interested"],
+  ["LEFT_MESSAGE", "تُركت رسالة", "Left a message"], ["VISIT_SCHEDULED", "تم الاتفاق على زيارة", "Visit agreed"], ["MEETING_COMPLETED", "تم الاجتماع", "Meeting held"],
 ];
 
 export function useLang() {

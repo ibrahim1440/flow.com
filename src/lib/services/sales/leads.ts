@@ -1,4 +1,6 @@
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
+import { resolveLostReason, type LostReasonCode } from "./needs";
+import { sampleSkipRequired, sampleSkipReasonText, SAMPLE_SKIP_REFUSAL } from "./stages";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -166,6 +168,8 @@ export async function convertLead(
     select: {
       companyName: true, companyNameAr: true, contactName: true,
       phone: true, email: true, address: true, ownerId: true,
+      // The needs analysis gathered on the lead travels with it (20261204100000_pipeline_qualification).
+      businessType: true, needSummary: true, expectedMonthlyKg: true, agreedNextStep: true,
     },
   });
 
@@ -179,6 +183,9 @@ export async function convertLead(
         phone: full.phone,
         email: full.email,
         address: full.address,
+        // The lead's owner is responsible for the new account («المسؤول»): without it the customer
+        // sat in nobody's book, so invoice scope and the account page could not attribute it.
+        accountOwnerId: full.ownerId,
       },
       select: { id: true },
     });
@@ -199,6 +206,10 @@ export async function convertLead(
       amount: input.amount ?? undefined,
       expectedCloseAt: input.expectedCloseAt ?? null,
       ownerId: full.ownerId,
+      businessType: full.businessType,
+      needSummary: full.needSummary,
+      expectedMonthlyKg: full.expectedMonthlyKg,
+      agreedNextStep: full.agreedNextStep,
     },
     select: { id: true },
   });
@@ -249,10 +260,18 @@ export async function transitionOpportunity(
     toStageId?: string | null;
     toOutcome?: "OPEN" | "WON" | "LOST" | null;
     lostReason?: string | null;
+    /** Optional coded loss reason (LOST_REASON_CODES); the text stays required unless a code other than OTHER is given. */
+    lostReasonCode?: string | null;
+    /**
+     * Why the samples are being skipped. Required (409 SAMPLE_SKIP_REASON_REQUIRED without it) when
+     * the move goes forward past the Sample Evaluation stage and the deal has no sample; stored on
+     * the stage event's reason (`sampleSkipReasonText`). Ignored on every other move.
+     */
+    skipReason?: string | null;
     actorId: string;
     canReopen: boolean;
   },
-): Promise<{ stageId: string; outcome: string; fromStageId: string; fromOutcome: string }> {
+): Promise<{ stageId: string; outcome: string; fromStageId: string; fromOutcome: string; samplesSkipped: boolean }> {
   const locked = await tx.$queryRaw<{ id: string; stageId: string; outcome: string; customerId: string | null }[]>`
     SELECT "id", "stageId", "outcome"::text AS outcome, "customerId"
       FROM "Opportunity"
@@ -281,8 +300,42 @@ export async function transitionOpportunity(
     }
   }
 
-  if (input.toOutcome === "LOST" && !(input.lostReason ?? "").trim()) {
-    throw { _appCode: 400, message: "Marking a deal lost needs a reason." };
+  // A loss needs a reason: typed text, or a code other than OTHER (whose label then becomes the
+  // text, so every reader of `lostReason` keeps working). An unknown code is refused.
+  let lost: { reason: string; code: LostReasonCode | null } | null = null;
+  if (input.toOutcome === "LOST") {
+    const r = resolveLostReason({ lostReason: input.lostReason, lostReasonCode: input.lostReasonCode });
+    if (!r.ok) throw { _appCode: 400, message: r.error, errorAr: r.errorAr };
+    lost = { reason: r.reason, code: r.code };
+  }
+
+  // Sample Evaluation may be skipped, but not silently (owner decision, docs/sales/PIPELINE_STAGES.md):
+  // a forward move past it on a deal with no sample needs the reason the customer does not need one.
+  let skipText: string | null = null;
+  if (input.toStageId && input.toStageId !== opp.stageId) {
+    const sampleStage = await tx.pipelineStage.findFirst({
+      where: { purpose: "SAMPLE_EVALUATION", isActive: true },
+      select: { position: true },
+    });
+    if (sampleStage) {
+      const ends = await tx.pipelineStage.findMany({
+        where: { id: { in: [opp.stageId, input.toStageId] } },
+        select: { id: true, position: true },
+      });
+      const from = ends.find((s) => s.id === opp.stageId);
+      const to = ends.find((s) => s.id === input.toStageId);
+      const sampleCount = await tx.sampleShipment.count({
+        where: { opportunityId: input.opportunityId, status: { not: "CANCELLED" } },
+      });
+      if (from && to && sampleSkipRequired({
+        fromPosition: from.position, toPosition: to.position,
+        samplePosition: sampleStage.position, sampleCount,
+      })) {
+        const why = (input.skipReason ?? "").trim();
+        if (why.length < 2) throw { ...SAMPLE_SKIP_REFUSAL };
+        skipText = sampleSkipReasonText(why);
+      }
+    }
   }
 
   if (input.toOutcome === "WON") {
@@ -313,7 +366,8 @@ export async function transitionOpportunity(
     data: {
       stageId: nextStageId,
       outcome: nextOutcome,
-      lostReason: nextOutcome === "LOST" ? (input.lostReason ?? "").trim() : null,
+      lostReason: nextOutcome === "LOST" ? (lost?.reason ?? null) : null,
+      lostReasonCode: nextOutcome === "LOST" ? (lost?.code ?? null) : null,
       closedAt: closing ? new Date() : nextOutcome === "OPEN" ? null : undefined,
     },
   });
@@ -325,11 +379,12 @@ export async function transitionOpportunity(
       toStageId: nextStageId,
       fromOutcome: opp.outcome as "OPEN" | "WON" | "LOST",
       toOutcome: nextOutcome,
-      reason: input.lostReason?.trim() || null,
+      // The why of this move: the skip, the loss, or both (" · " — `parseSampleSkip` reads the first part).
+      reason: [skipText, lost?.reason].filter(Boolean).join(" · ") || null,
       actorId: input.actorId,
     },
   });
   // The route raises "sales.deal_stage_changed" from these (services/sales/deal-events.ts): this
   // module is also imported by client screens for its constants, so it must not import the outbox.
-  return { stageId: nextStageId, outcome: nextOutcome, fromStageId: opp.stageId, fromOutcome: opp.outcome };
+  return { stageId: nextStageId, outcome: nextOutcome, fromStageId: opp.stageId, fromOutcome: opp.outcome, samplesSkipped: !!skipText };
 }

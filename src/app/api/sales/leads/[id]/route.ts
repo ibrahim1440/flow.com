@@ -25,6 +25,8 @@ export async function GET(_request: Request, { params }: Params) {
         id: true, companyName: true, companyNameAr: true, contactName: true,
         phone: true, email: true, city: true, address: true, source: true, sourceNote: true,
         status: true, notes: true, nextFollowUpAt: true, createdAt: true, updatedAt: true,
+        // The qualification answers gathered so far (20261204100000_pipeline_qualification).
+        businessType: true, needSummary: true, expectedMonthlyKg: true, agreedNextStep: true,
         owner: { select: { id: true, name: true } },
         conversion: {
           select: {

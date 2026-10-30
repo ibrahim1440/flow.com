@@ -2,6 +2,7 @@
 import { prisma } from "@/lib/db";
 import type { Permissions } from "@/lib/auth-shared";
 import { seesAllInvoices } from "./access";
+import { ownedCustomerWhere } from "@/lib/services/sales/scope";
 import { Decimal, inclusiveDifference, m2, type TaxCategory } from "./pricing";
 import type { LoadedDocument } from "./service";
 
@@ -10,7 +11,8 @@ type Viewer = { id: string; permissions: Permissions };
 /** null = every customer; otherwise the ids of the customers whose account the viewer owns. */
 export async function scopedCustomerIds(user: Viewer): Promise<string[] | null> {
   if (seesAllInvoices(user.permissions)) return null;
-  const rows = await prisma.customer.findMany({ where: { accountOwnerId: user.id }, select: { id: true } });
+  // The rep's book, the one predicate (services/sales/scope.ts, council gate S4).
+  const rows = await prisma.customer.findMany({ where: ownedCustomerWhere(user.id), select: { id: true } });
   return rows.map((r) => r.id);
 }
 

@@ -102,6 +102,7 @@ const SOD_KIND: Record<string, [string, string]> = {
   NOTE_SELF_ISSUED: ["إشعار أصدره مُعدّه", "Note issued by its preparer"],
   BUDGET_SELF_APPROVED: ["موازنة اعتمدها مُعدّها", "Budget approved by its preparer"],
   RECEIPT_SELF_CONFIRMED: ["سند قبض سجّله وأكّده شخص واحد", "Receipt recorded and confirmed by one person"],
+  RECEIPT_SELF_REVERSED: ["سند قبض سجّله وعكسه شخص واحد", "Receipt recorded and reversed by one person"],
   AP_SELF_POSTED: ["فاتورة مورد رحّلها مُعدّها", "Supplier invoice posted by its preparer"],
   FA_SELF_POSTED: ["مستند أصل ثابت رحّله مُعدّه", "Fixed-asset document posted by its preparer"],
   PERIOD_REOPENED: ["إعادة فتح فترة مقفلة", "Closed period reopened"],

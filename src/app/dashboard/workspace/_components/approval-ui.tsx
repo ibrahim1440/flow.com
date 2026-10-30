@@ -43,6 +43,11 @@ function Facts({ item }: { item: ApprovalItem }) {
     rows.push([L("قبل الخصم", "Before discount"), <span key="s" className="hr-num">{money(f.subtotal)} {n(f.currency)}</span>]);
     rows.push([L("قيمة الخصم", "Discount"), <span key="x" className="hr-num">{money(f.discountTotal)} {n(f.currency)}</span>]);
     rows.push([L("الإجمالي مع الضريبة", "Total incl. VAT"), <b key="g" className="hr-num">{money(f.grandTotal)} {n(f.currency)}</b>]);
+  } else if (item.type === "SAMPLE") {
+    // A customer's second sample of a coffee product («للعميل من كل محصول عيّنة واحدة»).
+    rows.push([L("العميل", "Customer"), n(f.customer)]);
+    rows.push([L("الصفقة", "Deal"), `${n(f.deal)}${f.dealOwner ? ` · ${f.dealOwner}` : ""}`]);
+    rows.push([L("المحصول", "Product"), <span key="p"><bdi>{n(f.product)}</bdi> · <span className="hr-num">{n(f.units)}</span> {L("عبوة", "unit")}</span>]);
   } else {
     if (item.subject) rows.push([L("الموضوع", "Subject"), n(item.subject)]);
     if (f.action) rows.push([L("الإجراء", "Action"), n(f.action)]);

@@ -6,6 +6,7 @@ import { hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
 import { seesAllSales } from "@/lib/services/sales/scope";
 import { creditView } from "@/lib/services/customers/credit-db";
 import { checkCreditStandingLater } from "@/lib/notifications/credit-watch";
+import { customerInScope } from "@/lib/services/sales/customer-access";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -23,6 +24,8 @@ export async function GET(_req: Request, { params }: Params) {
   const { user, error } = await requireAnyModule("customers", "orders", "sales");
   if (error) return error;
   const { id } = await params;
+  // A scoped sales rep reaches only the customers in their own book (services/sales/scope.ts) — 404 otherwise.
+  if (!(await customerInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const p = user.permissions;
   try {
     const view = await prisma.$transaction((tx) => creditView(tx, id, {

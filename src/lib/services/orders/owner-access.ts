@@ -24,8 +24,8 @@
  * The lifecycle barriers (a cancel with live reservations or deliveries, the completion gate, the
  * from-status rules) are unchanged and apply after this decision, to everybody.
  */
-import { canEdit, hasModuleAccess, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
-import { seesAllSales } from "@/lib/services/sales/scope";
+import { canEdit, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
+import { isScopedSalesRep } from "@/lib/services/sales/scope";
 
 export type OrderAccessUser = { id: string; role: string; permissions: Permissions };
 export type OrderAccessSubject = {
@@ -42,15 +42,16 @@ export const STATUS_REFUSAL_NOT_ALLOWED = "Only the order owner, an orders manag
 export const OWNER_CHANGE_REFUSAL = "Only an orders manager or an admin can change the order owner.";
 export const SCOPE_REFUSAL = "This order belongs to another rep's customer.";
 
-/** A sales rep who sees only their own customers: the sales module without lead_assign. */
-export function isScopedSalesRep(permissions: Permissions): boolean {
-  return hasModuleAccess(permissions, "sales") && !seesAllSales(permissions);
-}
+/**
+ * A sales rep who sees only their own customers — one predicate for the whole system (council gate S4):
+ * services/sales/scope.ts. Re-exported here under the name the order matrix has always used.
+ */
+export { isScopedSalesRep } from "@/lib/services/sales/scope";
 
 /** The manager / admin rows of the matrix (shared by the status actions and the owner change). */
 function managerAccess(user: OrderAccessUser, order: OrderAccessSubject, refusal: string): OrderAccessDecision {
   if (hasSubPrivilege(user.permissions, "orders", "manage_status")) {
-    if (isScopedSalesRep(user.permissions) && (order.customerAccountOwnerId ?? null) !== user.id) {
+    if (isScopedSalesRep(user.permissions, user.role) && (order.customerAccountOwnerId ?? null) !== user.id) {
       return { ok: false, status: 403, message: SCOPE_REFUSAL };
     }
     return { ok: true, as: "manager" };

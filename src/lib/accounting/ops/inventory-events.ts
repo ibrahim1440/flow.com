@@ -333,6 +333,51 @@ export async function onDelivery(tx: Tx, a: { deliveryId: string; lines: { lotId
   return postAndResolve(tx, ids, { source: src, memo: `تكلفة بضاعة مسلّمة · طلب ${d?.orderItem.order.orderNumber ?? ""}`, createdBy: a.actor, lines, defaultBranchId: d?.orderItem.order.branchId ?? null });
 }
 
+// ─── Samples: a free sample issued from stock ────────────────────────────────────────────────────
+
+/**
+ * A sales sample issued from finished goods (services/sales/sample-issue.ts, docs/sales/SAMPLES_INVENTORY.md §4):
+ * each lot drawn is issued at its cost EXACTLY as onDelivery issues it — the units' share of the holder's quantity at
+ * the moving average, the whole remaining value when the lot is emptied (so nothing strands on an empty lot and
+ * nothing leaks into the next delivery's COGS) — and the entry is Dr SAMPLES_EXPENSE (item = SKU, party = the deal's
+ * customer) / Cr INVENTORY_PACKED. `inventory · SAMPLE · <sampleId> · ISSUED`, one cost movement per lot (lineKey =
+ * lot id), so a replay of the same issue returns the movements it already wrote and posts nothing twice. Never COGS
+ * (nothing was sold) and never WASTAGE (nothing was spoiled). Before activation / go-live the holders still move and
+ * the entry is skipped (postAndResolve → SKIPPED), as for every other event here. The caller calls
+ * flushPostings(tx) last. Returns the value that left the holders — what the sample records as its cost.
+ */
+export async function onSampleIssue(tx: Tx, a: {
+  sampleId: string; skuId: string; productId?: string | null; customerId: string | null; label: string;
+  lines: { lotId: string; kg: number; units: number; unitsBefore: number; emptied: boolean; movementId?: string | null }[];
+  actor: string;
+  /** «الموقع»: the branch of the site the sample left from (its StockLocation's finBranchId), as a delivery's COGS
+   *  carries its order's branch (release gate N4). Null = «غير محدد». */
+  branchId?: string | null;
+}): Promise<{ value: Decimal; lots: Map<string, Decimal>; status: OpsStatus }> {
+  const lots = new Map<string, Decimal>();
+  if (!a.lines.length) return { value: ZERO, lots, status: "none" };
+  const src: Src = { module: "inventory", type: "SAMPLE", id: a.sampleId, event: "ISSUED" };
+  const holders = await lockHolders(tx, a.lines.map((l) => ({ kind: "FG_LOT" as CostKind, entityId: l.lotId })));
+  const item = skuDim(a.skuId, a.productId);
+  const ids: string[] = [];
+  const lines = [];
+  let value = ZERO;
+  for (const l of a.lines) {
+    const h = holders.get(`FG_LOT:${l.lotId}`) as HolderRow;
+    // The same quantity rule as onDelivery: a unit-tracked lot by the share of its units, else by kilograms.
+    const q = l.units > 0 && l.unitsBefore > 0 ? kg(h.qty.times(l.units).dividedBy(l.unitsBefore)) : kg(l.kg);
+    const out = await costOut(tx, { holder: h, src, kind: "ISSUE", lineKey: l.lotId, qty: q, closeOut: l.emptied, actor: a.actor, inventoryMovementId: l.movementId ?? null, reason: "عيّنة مبيعات مجانية" });
+    ids.push(out.id);
+    lots.set(l.lotId, out.value);
+    value = value.plus(out.value);
+    lines.push(side(h.role, out.value.negated(), item));
+  }
+  lines.push(side("SAMPLES_EXPENSE", value, { ...(item ?? {}), ...(a.customerId ? { party: { type: "CUSTOMER" as const, id: a.customerId } } : {}) }));
+  const r = await postAndResolve(tx, ids, { source: src, memo: `عيّنة مجانية من المخزون · ${a.label}`.slice(0, 480), createdBy: a.actor, lines, defaultBranchId: a.branchId ?? null });
+  return { value, lots, status: r.status };
+}
+type OpsStatus = Awaited<ReturnType<typeof postAndResolve>>["status"];
+
 /**
  * The hook for a delivery return / cancellation (no such flow exists yet): the COGS entry is reversed and each lot
  * receives back exactly what was issued (same values) — `inventory · DELIVERY · COGS.REVERSED`.

@@ -1,6 +1,7 @@
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 import { convertLead } from "./leads";
 import { requireStageFor } from "./stages";
+import { mergeNeeds, qualificationMissing, type NeedsFields, type QualificationField } from "./needs";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -22,6 +23,16 @@ type Tx = PrismaNS.TransactionClient;
  * The outcome is a stored enum the server reads. Inferring qualification from free text
  * would make the pipeline depend on how somebody phrased a note, in a system where notes
  * are written in Arabic, English and both at once.
+ *
+ * ── Engagement is necessary, not sufficient (20261204100000_pipeline_qualification) ──
+ * The approved pipeline starts at «فرصة مؤهلة», and "the customer said they were interested"
+ * is not yet a qualified opportunity: nobody can quote, sample or forecast a deal whose business
+ * type, need and next step are unknown. So, with SystemConfig.salesRequireQualificationMinimum
+ * on (the default), a qualifying outcome converts only when the lead's business type, need and
+ * agreed next step are known — from the lead itself or from the activity's `qualification`
+ * payload. When they are not, the activity is still logged, the lead becomes CONTACTED, and the
+ * result names what is missing so the form can ask for it there and then. The monthly volume is
+ * recorded when given and never required. Turning the setting off restores the old rule exactly.
  */
 
 export type ActivityOutcomeValue =
@@ -83,14 +94,40 @@ const REASON: Record<string, string> = {
   VISIT_COMPLETED: "Automatic: a customer visit was held",
 };
 
-export type QualificationResult = {
-  opportunityId: string;
-  customerId: string;
-  /** True when this call found the deal rather than making it. */
-  replayed: boolean;
-  /** True when a deal already existed and was simply linked to, not advanced. */
-  alreadyInPipeline: boolean;
-};
+export type QualificationResult =
+  | {
+      /** The lead is in the pipeline (converted now, or already). */
+      converted: true;
+      opportunityId: string;
+      customerId: string;
+      /** True when this call found the deal rather than making it. */
+      replayed: boolean;
+      /** True when a deal already existed and was simply linked to, not advanced. */
+      alreadyInPipeline: boolean;
+    }
+  | {
+      /**
+       * The customer engaged, but the qualification minimum is not known yet: the activity is
+       * logged, the lead is CONTACTED, and `missing` names what the form should ask for inline
+       * (in the order to ask it). Sending the activity again with `qualification` completes it.
+       */
+      converted: false;
+      missing: QualificationField[];
+      opportunityId: null;
+      leadStatus: string;
+    };
+
+/**
+ * Whether a qualifying outcome needs the minimum before it converts
+ * (SystemConfig.salesRequireQualificationMinimum; default on, a missing settings row reads as on).
+ */
+export async function requiresQualificationMinimum(tx: Tx): Promise<boolean> {
+  const row = await tx.systemConfig.findUnique({
+    where: { id: "singleton" },
+    select: { salesRequireQualificationMinimum: true },
+  });
+  return row?.salesRequireQualificationMinimum ?? true;
+}
 
 /**
  * Take the lead's row lock BEFORE writing anything that references the lead.
@@ -131,6 +168,10 @@ export async function lockLeadForAutomation(tx: Tx, leadId: string): Promise<boo
  *
  * Returns `null` when the outcome does not qualify — the caller has written a perfectly
  * good activity and nothing further should happen.
+ *
+ * `qualification` is what the activity form supplied (`parseQualificationInput`): only answered
+ * fields, never blanks. Whatever it carries is saved on the lead first, converted or not, so an
+ * answer given on a call that did not complete the minimum is not asked for twice.
  */
 export async function qualifyLeadFromActivity(
   tx: Tx,
@@ -139,6 +180,7 @@ export async function qualifyLeadFromActivity(
     activityId: string;
     outcome: string | null | undefined;
     actorId: string;
+    qualification?: Partial<NeedsFields> | null;
   },
 ): Promise<QualificationResult | null> {
   if (!qualifies(input.outcome)) return null;
@@ -147,6 +189,14 @@ export async function qualifyLeadFromActivity(
     where: { leadId: input.leadId },
     select: { customerId: true, opportunityId: true },
   });
+
+  // Answers given on this activity are kept on the lead, whatever happens next. On a lead that
+  // already converted they stop there: the deal's needs are edited on the deal, where a later
+  // answer must not silently overwrite what the deal page shows.
+  const supplied = input.qualification && Object.keys(input.qualification).length > 0 ? input.qualification : null;
+  if (supplied) {
+    await tx.lead.update({ where: { id: input.leadId }, data: supplied });
+  }
 
   if (existing) {
     // The lead is already in the pipeline. Attach the activity to the deal so the
@@ -160,7 +210,28 @@ export async function qualifyLeadFromActivity(
       where: { id: input.activityId },
       data: { opportunityId: existing.opportunityId, customerId: existing.customerId },
     });
-    return { ...existing, replayed: true, alreadyInPipeline: true };
+    return { converted: true, ...existing, replayed: true, alreadyInPipeline: true };
+  }
+
+  // The minimum: what the lead holds (now including this activity's answers). `convertLead`
+  // copies the same four columns onto the deal it creates, so the deal starts with them.
+  if (await requiresQualificationMinimum(tx)) {
+    const lead = await tx.lead.findUniqueOrThrow({
+      where: { id: input.leadId },
+      select: { status: true, businessType: true, needSummary: true, expectedMonthlyKg: true, agreedNextStep: true },
+    });
+    const missing = qualificationMissing(mergeNeeds(lead as Partial<NeedsFields>, null));
+    if (missing.length > 0) {
+      // Engaged but not qualified: the lead is "contacted" — the existing status that means a
+      // conversation is under way. Only a NEW lead moves; a QUALIFIED one (set by hand) or an
+      // UNQUALIFIED one (a decision somebody made) is not overruled by a dropdown.
+      let leadStatus = lead.status as string;
+      if (lead.status === "NEW") {
+        await tx.lead.update({ where: { id: input.leadId }, data: { status: "CONTACTED" } });
+        leadStatus = "CONTACTED";
+      }
+      return { converted: false, missing, opportunityId: null, leadStatus };
+    }
   }
 
   // Where a newly-qualified lead lands, resolved from configuration rather than guessed.
@@ -195,6 +266,7 @@ export async function qualifyLeadFromActivity(
   }
 
   return {
+    converted: true,
     opportunityId: conversion.opportunityId,
     customerId: conversion.customerId,
     replayed: conversion.replayed,

@@ -20,6 +20,7 @@ import {
   type RequestedLine,
   type LiveLine,
 } from "@/lib/services/order-edit";
+import { orderInScope, customerInScope } from "@/lib/services/sales/customer-access";
 
 /**
  * Structurally edit an existing order.
@@ -36,6 +37,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   if (error) return error;
 
   const { id } = await params;
+  // A scoped sales rep acts only on the orders of their own book (services/sales/scope.ts) — 404 otherwise.
+  if (!(await orderInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   let body: Record<string, unknown>;
   try { body = (await request.json()) as Record<string, unknown>; } catch { body = {}; }
 
@@ -47,6 +50,10 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   // writable from here.
   const orderData: Record<string, unknown> = {};
   if (body.customerId !== undefined)        orderData.customerId        = body.customerId;
+  // Moving the order to a customer outside the rep's book is refused the same way as reading one.
+  if (typeof body.customerId === "string" && !(await customerInScope(user, body.customerId))) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   if (body.quotationNumber !== undefined)   orderData.quotationNumber   = body.quotationNumber ?? null;
   if (body.quotationSentDate !== undefined) {
     orderData.quotationSentDate = body.quotationSentDate
@@ -284,10 +291,12 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
  * cancelled, never erased. Deletion is for the order raised by mistake five minutes ago.
  */
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { error } = await requireSub("orders", "delete");
+  const { user, error } = await requireSub("orders", "delete");
   if (error) return error;
 
   const { id } = await params;
+  // A scoped sales rep acts only on the orders of their own book (services/sales/scope.ts) — 404 otherwise.
+  if (!(await orderInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   try {
     await prisma.$transaction(async (tx) => {

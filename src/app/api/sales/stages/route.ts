@@ -4,6 +4,7 @@ import { requireModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { seesAllSales } from "@/lib/services/sales/scope";
+import { STAGE_PURPOSES } from "@/lib/services/sales/stages";
 
 /**
  * Pipeline stages — the columns of the board, as configuration rather than as a constant
@@ -18,7 +19,8 @@ import { seesAllSales } from "@/lib/services/sales/scope";
  * deployment are historical (`UAT_QUALIFY`, `UAT_PROPOSAL`), so neither can be matched
  * against without guessing. See `services/sales/stages.ts`.
  */
-const STAGE_PURPOSES = ["QUALIFICATION", "QUOTATION"] as const;
+// One list, in pipeline order, owned by the service (SAMPLE_EVALUATION and NEGOTIATION added by
+// 20261204100000_pipeline_qualification). Still at most one stage per purpose.
 type StagePurposeValue = (typeof STAGE_PURPOSES)[number];
 
 /**

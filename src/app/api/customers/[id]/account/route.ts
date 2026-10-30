@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { canEdit, hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
-import { seesAllSales, collectionWhere, managesNewClientExclusion, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
+import { seesAllSales, collectionWhere, managesNewClientExclusion, NOT_FOUND_MESSAGE, orderVisibilityWhere } from "@/lib/services/sales/scope";
 import {
   Decimal, acceptedDocumentPerDeal, creditPosition, monthlyQuantities, orderRhythm, outstandingBalance,
   salesLast12Months, statementOfAccount, usualItems, type OrderRow,
@@ -12,8 +12,11 @@ import { deliveryLotsFor } from "@/lib/services/delivery-lots";
 import { orderPipelines } from "@/lib/services/orders/pipeline";
 import { CUSTOMER_FILE_SELECT, uploadLimit } from "@/lib/services/customers/files";
 import { directUploadOffered } from "@/lib/services/customers/direct-upload";
-import { isScopedSalesRep } from "@/lib/services/orders/owner-access";
 import { creditLog, creditView } from "@/lib/services/customers/credit-db";
+import { customerInScope } from "@/lib/services/sales/customer-access";
+import { mayChangeAccountOwner, mayChangeCreditTerms } from "@/lib/services/customers/account-guard";
+import { canViewInvoices } from "@/lib/services/invoicing/access";
+import { arBalanceOwed } from "@/lib/services/customers/balance";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -43,6 +46,8 @@ export async function GET(_request: Request, { params }: Params) {
   const { user, error } = await requireModule("customers");
   if (error) return error;
   const { id } = await params;
+  // A scoped sales rep reaches only the customers in their own book (services/sales/scope.ts) — 404 otherwise.
+  if (!(await customerInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const p = user.permissions;
   const sales = hasModuleAccess(p, "sales");
   const orders = hasModuleAccess(p, "orders");
@@ -72,7 +77,9 @@ export async function GET(_request: Request, { params }: Params) {
     // ── Orders (orders module) ──────────────────────────────────────────────────────────
     const orderRows = orders
       ? await prisma.order.findMany({
-          where: { customerId: id },
+          // A scoped rep sees the orders of this customer that are theirs to see (services/sales/scope.ts) —
+          // on an unassigned customer, not another rep's order.
+          where: { customerId: id, ...orderVisibilityWhere(user) },
           orderBy: { createdAt: "desc" },
           take: 500,
           select: {
@@ -214,8 +221,15 @@ export async function GET(_request: Request, { params }: Params) {
       );
       salesFigure = { net: s.net.toFixed(2), previousNet: s.previousNet.toFixed(2), changePercent: s.changePercent, documents: s.documents, currency: "SAR" };
       const last = approved[0];
+      // Council gate S5: the balance OWED is the receivables ledger's (issued invoices and debit notes less
+      // applied receipts and credit notes — invoicing/ar.ts), shown to whoever may read the customer's
+      // invoices once the customer has an issued one. The figure above (accepted quotations less approved
+      // collections) is what is accepted but not yet invoiced or paid: «عروض مقبولة لم تُفوتر».
+      const arFigure = await arBalanceOwed(prisma, id, canViewInvoices(p), now);
       balance = {
         outstanding: b.outstanding.toFixed(2), documents: b.documents, openDocuments: b.openDocuments, currency: "SAR",
+        basis: "ACCEPTED_NOT_INVOICED" as const,
+        ar: arFigure ? { outstanding: arFigure.toFixed(2), basis: "RECEIVABLES" as const } : null,
         lastPayment: last ? { amount: last.amountGross.toFixed(2), collectedAt: last.collectedAt, method: last.paymentMethod, orderNumber: last.order?.orderNumber ?? null } : null,
       };
 
@@ -401,11 +415,15 @@ export async function GET(_request: Request, { params }: Params) {
       can: {
         edit: canEdit(p, "customers"),
         manageProfiles: hasSubPrivilege(p, "customers", "manage"),
-        // The file routes' own rule: a scoped sales rep changes files only on a customer they own.
-        manageFiles: canEdit(p, "customers") && (!isScopedSalesRep(p) || customer.accountOwner?.id === user.id),
+        // The file routes' own rule (direct-upload.ts editableCustomer): the customer is in the viewer's book,
+        // which this route has already established for a scoped rep.
+        manageFiles: canEdit(p, "customers"),
         logActivity: hasSubPrivilege(p, "sales", "lead_write"),
         quote: hasSubPrivilege(p, "sales", "quote_write"),
         createDeal: hasSubPrivilege(p, "sales", "lead_convert"),
+        // Council gate B2: the account owner and the credit terms have their own duties (account-guard.ts).
+        editOwner: canEdit(p, "customers") && mayChangeAccountOwner(user),
+        editCreditTerms: canEdit(p, "customers") && mayChangeCreditTerms(user),
       },
       now,
     });

@@ -1,7 +1,7 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
-import { handlePrismaError } from "@/lib/api-error";
+import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { transitionOpportunity } from "@/lib/services/sales/leads";
 import { emitDealMoved } from "@/lib/services/sales/deal-events";
@@ -87,20 +87,22 @@ export async function POST(request: Request, { params }: Params) {
         toStageId,
         toOutcome,
         lostReason: typeof b.lostReason === "string" ? b.lostReason : null,
+        // Optional coded reason (PRICE, QUALITY, COMPETITOR, NO_NEED, NO_RESPONSE, OTHER).
+        lostReasonCode: typeof b.lostReasonCode === "string" ? b.lostReasonCode : null,
+        // Why the samples are skipped — required only past Sample Evaluation with no sample.
+        skipReason: typeof b.skipReason === "string" ? b.skipReason : null,
         actorId: user.id,
         canReopen: hasSubPrivilege(user.permissions, "sales", "deal_reopen"),
       });
       // «إشعارات الحالات»: the move, in its own transaction (no-op when no rule listens).
       await emitDealMoved(tx, { opportunityId: id, fromStageId: moved.fromStageId, toStageId: moved.stageId, fromOutcome: moved.fromOutcome, toOutcome: moved.outcome, actorId: user.id });
-      return { stageId: moved.stageId, outcome: moved.outcome };
+      return { stageId: moved.stageId, outcome: moved.outcome, samplesSkipped: moved.samplesSkipped };
     }, TX_OPTS);
 
     return NextResponse.json(result);
   } catch (err) {
-    if (err && typeof err === "object" && "_appCode" in err) {
-      const e = err as { _appCode: number; message: string };
-      return NextResponse.json({ error: e.message }, { status: e._appCode });
-    }
-    return handlePrismaError(err);
+    // The shared mapper keeps a refusal's `code` (SAMPLE_SKIP_REASON_REQUIRED opens the skip
+    // dialog on the deal page) and its Arabic; plain refusals read exactly as before.
+    return handleDomainError(err);
   }
 }

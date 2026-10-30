@@ -115,6 +115,10 @@ export type Account = {
     sales12m: { net: string; previousNet: string; changePercent: number | null; documents: number; currency: string } | null;
     balance: {
       outstanding: string; documents: number; openDocuments: number; currency: string;
+      /** «عروض مقبولة لم تُفوتر»: `outstanding` is accepted quotations less approved collections. */
+      basis?: "ACCEPTED_NOT_INVOICED";
+      /** The balance owed from the receivables ledger, once the customer has an issued invoice. */
+      ar?: { outstanding: string; basis: "RECEIVABLES" } | null;
       lastPayment: { amount: string; collectedAt: string; method: string; orderNumber: number | null } | null;
     } | null;
     lastOrder: { id: string; orderNumber: number; createdAt: string; daysAgo: number } | null;
@@ -143,6 +147,6 @@ export type Account = {
   orders: Order[] | null;
   collections: Collection[] | null;
   timeline: TimelineEntry[];
-  can: { edit: boolean; manageProfiles: boolean; manageFiles: boolean; logActivity: boolean; quote: boolean; createDeal: boolean };
+  can: { edit: boolean; manageProfiles: boolean; manageFiles: boolean; logActivity: boolean; quote: boolean; createDeal: boolean; editOwner?: boolean; editCreditTerms?: boolean };
   now: string;
 };

@@ -12,7 +12,8 @@ import { projectedCommissionFor } from "@/lib/services/commissions/accrual";
 import { collectionScope, collectionWhere, seesAllSales } from "@/lib/services/sales/scope";
 import { canViewInvoices } from "@/lib/services/invoicing/access";
 import { branchWhere, parseBranchFilter } from "@/lib/accounting/locations";
-import { receiptAbilities } from "@/lib/services/sales/receipts";
+import { receiptAbilities, decisionKey } from "@/lib/services/sales/receipts";
+import { receiptSelfConfirmAllowed } from "@/lib/services/sales/receipt-four-eyes";
 
 /**
  * Sales collections — the list, and recording a new one.
@@ -96,13 +97,24 @@ export async function GET(request: Request) {
 
     // Per row, because the answer is per row: the same Finance user may approve one
     // collection and be refused the next because they recorded it themselves.
+    //
+    // The privilege is the row's own (decisionKey: a Sales collection is reversed by
+    // commissions › collection_reverse only, an accountant's receipt by receipts_confirm), and an
+    // accountant's own receipt is decidable by its recorder only while no other confirmer exists
+    // (receipt-four-eyes.ts) — the service's rules, so the button never offers what the API refuses.
+    const soleConfirmer = rows.some((r) => r.source === "ACCOUNTANT" && r.submittedBy?.id === user.id)
+      ? await receiptSelfConfirmAllowed(prisma, user.id)
+      : false;
     const decisions: Record<string, ReturnType<typeof collectionDecisionAbility>> = {};
     for (const r of rows) {
+      const selfException = r.source === "ACCOUNTANT" && soleConfirmer;
       decisions[r.id] = collectionDecisionAbility({
         status: r.status,
-        submittedById: r.submittedBy?.id ?? "",
+        submittedById: selfException ? "" : r.submittedBy?.id ?? "",
         actorId: user.id,
-        canVerify, canReject, canReverse,
+        canVerify: decisionKey(user.permissions, "approve", r.source) !== null,
+        canReject: decisionKey(user.permissions, "reject", r.source) !== null,
+        canReverse: decisionKey(user.permissions, "reverse", r.source) !== null,
       });
     }
 

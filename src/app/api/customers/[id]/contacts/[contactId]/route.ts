@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { parseContact } from "@/lib/services/customers/fields";
+import { customerInScope } from "@/lib/services/sales/customer-access";
 
 type Params = { params: Promise<{ id: string; contactId: string }> };
 
@@ -14,9 +15,11 @@ const SELECT = { id: true, name: true, role: true, phone: true, email: true, pos
  * a contact id from another customer reads as 404, never as somebody else's record.
  */
 export async function PUT(request: Request, { params }: Params) {
-  const { error } = await requireEdit("customers");
+  const { user, error } = await requireEdit("customers");
   if (error) return error;
   const { id, contactId } = await params;
+  // A scoped sales rep reaches only the customers in their own book (services/sales/scope.ts) — 404 otherwise.
+  if (!(await customerInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 }); }
   const b = (body ?? {}) as Record<string, unknown>;
@@ -45,9 +48,11 @@ export async function PUT(request: Request, { params }: Params) {
 
 /** DELETE /api/customers/[id]/contacts/[contactId] — remove a contact. */
 export async function DELETE(_req: Request, { params }: Params) {
-  const { error } = await requireEdit("customers");
+  const { user, error } = await requireEdit("customers");
   if (error) return error;
   const { id, contactId } = await params;
+  // A scoped sales rep reaches only the customers in their own book (services/sales/scope.ts) — 404 otherwise.
+  if (!(await customerInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   try {
     const gone = await prisma.customerContact.deleteMany({ where: { id: contactId, customerId: id } });
     if (gone.count === 0) return NextResponse.json({ error: "Not found" }, { status: 404 });

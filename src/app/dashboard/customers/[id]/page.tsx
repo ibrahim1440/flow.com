@@ -68,6 +68,7 @@ const METHOD: Record<string, { ar: string; en: string }> = {
   POS_CARD: { ar: "بطاقة (نقاط بيع)", en: "card (POS)" }, OTHER: { ar: "أخرى", en: "other" },
 };
 const SAMPLE_STATUS: Record<string, { ar: string; en: string; tone?: string }> = {
+  REQUESTED: { ar: "مطلوبة · بانتظار الشحن", en: "Requested · awaiting dispatch" },
   PREPARING: { ar: "قيد التحضير", en: "Preparing" }, SENT: { ar: "أُرسلت", en: "Sent", tone: "in" },
   FEEDBACK_RECEIVED: { ar: "وصل التقييم", en: "Feedback received", tone: "ok" }, CANCELLED: { ar: "ملغاة", en: "Cancelled", tone: "x" },
 };
@@ -118,6 +119,23 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
     }).catch(() => undefined);
     return () => { off = true; };
   }, [qoyod, id]);
+
+  // The issued invoices and notes themselves (I-46): every document the receivables balance counts — with or without a
+  // deal or an order, manual ones included — for a viewer who may read invoices. Same API (and scope) as the invoices list.
+  const readsInvoices = !!viewer && canViewInvoices(viewer.permissions);
+  type IssuedDoc = { id: string; kind: string; number: string | null; issueDate: string | null; dueDate: string | null; grandTotal: string; open: string | null; overdue: boolean; orderNumber: number | null };
+  const [issued, setIssued] = useState<{ items: IssuedDoc[]; more: boolean } | null>(null);
+  useEffect(() => {
+    if (!readsInvoices) return;
+    let off = false;
+    const q = (tab: string) => fetch(`/api/sales/invoices?customerId=${encodeURIComponent(id)}&status=ISSUED&take=200&skip=0${tab}`).then((r) => (r.ok ? r.json() : null));
+    Promise.all([q(""), q("&tab=notes")]).then(([inv, notes]: ({ items: IssuedDoc[]; total: number } | null)[]) => {
+      if (off || !inv || !notes) return;
+      const items = [...inv.items, ...notes.items].sort((a, b) => (b.issueDate ?? "").localeCompare(a.issueDate ?? ""));
+      setIssued({ items, more: inv.total > inv.items.length || notes.total > notes.items.length });
+    }).catch(() => undefined);
+    return () => { off = true; };
+  }, [readsInvoices, id, reloadToken]);
 
   useEffect(() => {
     let cancelled = false;
@@ -279,9 +297,12 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   const bal = m.balance;
   const balFig = (
     <div data-testid="metric-balance">
-      <dt className="lbl">{L("الرصيد المستحق", "Balance due")}</dt>
+      {/* The balance owed is the receivables ledger's once the customer is invoiced; until then the tile
+          says what it is: accepted quotations not yet invoiced or paid (council gate S5). */}
+      <dt className="lbl">{bal?.ar ? L("الرصيد المستحق", "Balance due") : L("عروض مقبولة لم تُفوتر", "Accepted, not invoiced")}</dt>
       {bal ? <>
-        <dd className={`mid n${Number(bal.outstanding) > 0 ? " acc-warn" : ""}`}>{whole(bal.outstanding)}</dd>
+        <dd className={`mid n${Number(bal.ar?.outstanding ?? bal.outstanding) > 0 ? " acc-warn" : ""}`}>{whole(bal.ar?.outstanding ?? bal.outstanding)}</dd>
+        {bal.ar ? <dd className="d">{L("عروض مقبولة لم تُفوتر: ", "Accepted, not invoiced: ")}<span className="n">{whole(bal.outstanding)}</span></dd> : null}
         <dd className="d">{bal.lastPayment
           ? (bal.lastPayment.orderNumber != null
             ? (ar ? <>الطلب <bdi className="id">#{bal.lastPayment.orderNumber}</bdi> · بعد دفعة <span className="n">{whole(bal.lastPayment.amount)}</span></>
@@ -353,7 +374,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   const tabs: { id: Tab; text: string; n?: number | null; disabled?: string }[] = [
     { id: "overview", text: L("نظرة عامة", "Overview") },
     { id: "orders", text: L("الطلبات", "Orders"), n: data.orders?.length, disabled: sections.orders ? undefined : L("يتطلب صلاحية الطلبات", "Needs the orders permission") },
-    { id: "invoices", text: L("الفواتير", "Invoices"), n: sections.orders ? invoiced : null, disabled: sections.orders || sections.sales ? undefined : L("يتطلب صلاحية الطلبات أو المبيعات", "Needs the orders or sales permission") },
+    { id: "invoices", text: L("الفواتير", "Invoices"), n: issued?.items.length ? issued.items.length : sections.orders ? invoiced : null, disabled: sections.orders || sections.sales ? undefined : L("يتطلب صلاحية الطلبات أو المبيعات", "Needs the orders or sales permission") },
     { id: "deals", text: L("الصفقات", "Deals"), n: data.deals?.length, disabled: sections.sales ? undefined : L("يتطلب صلاحية المبيعات", "Needs the sales permission") },
     { id: "quotes", text: L("عروض الأسعار", "Quotations"), n: data.quotes?.length, disabled: sections.sales ? undefined : L("يتطلب صلاحية المبيعات", "Needs the sales permission") },
     { id: "samples", text: L("العينات", "Samples"), n: data.samples?.length, disabled: sections.sales ? undefined : L("يتطلب صلاحية المبيعات", "Needs the sales permission") },
@@ -713,10 +734,26 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   );
   const invoicesTab = (
     <div data-testid="invoices-tab">
-      <p className="callout acc-info" data-testid="invoices-note">
-        {L("لا يوجد في النظام نظام فواتير بعد: الفواتير الضريبية تُصدر خارجه. يُعرض هنا ما سُجّل منها لكل طلب، والدفعات المسجّلة على صفقات العميل.",
-          "The system has no invoicing yet: VAT invoices are issued outside it. Shown here is what is recorded of them per order, and the payments recorded against the customer's deals.")}
-      </p>
+      {issued && (<>
+        <div className="lbl" style={{ margin: "0 0 6px" }}>{L("الفواتير والإشعارات المُصدرة", "Issued invoices and notes")}</div>
+        {issued.items.length === 0 ? empty(L("لا فواتير مُصدرة.", "No issued invoices.")) : (
+          <div className="acc-scroll"><table className="t dense" data-testid="issued-invoices-table"><thead><tr><th>{L("المستند", "Document")}</th><th>{L("النوع", "Type")}</th><th>{L("تاريخ الإصدار", "Issued")}</th><th>{L("الاستحقاق", "Due")}</th><th className="num">{L("الإجمالي · ر.س", "Total · SAR")}</th><th className="num">{L("المتبقي · ر.س", "Open · SAR")}</th><th>{L("الطلب", "Order")}</th></tr></thead>
+            <tbody>{issued.items.map((x) => <tr key={x.id} data-testid={`issued-invoice-${x.id}`}>
+              <td><Link href={`/dashboard/sales/invoices/${x.id}`}><bdi className="id">{x.number ?? "—"}</bdi></Link></td>
+              <td>{x.kind === "CREDIT_NOTE" ? L("إشعار دائن", "Credit note") : x.kind === "DEBIT_NOTE" ? L("إشعار مدين", "Debit note") : L("فاتورة", "Invoice")}</td>
+              <td>{x.issueDate ? shortDate(x.issueDate, lang) : "—"}</td>
+              <td>{x.dueDate ? <span className={x.overdue ? "acc-warn" : undefined}>{shortDate(x.dueDate, lang)}</span> : "—"}</td>
+              <td className="num">{money2(x.grandTotal)}</td><td className="num">{x.open === null ? "—" : money2(x.open)}</td>
+              <td>{x.orderNumber ? <bdi className="id">#{x.orderNumber}</bdi> : "—"}</td></tr>)}</tbody></table></div>
+        )}
+        {issued.more && <p className="acc-note" style={{ margin: "6px 0 0" }}>{L("أول 200 مستند من كل نوع — القائمة الكاملة في ", "First 200 of each — the full list is in ")}<Link href={`/dashboard/sales/invoices?customerId=${encodeURIComponent(id)}`}>{L("فواتير العميل", "the customer's invoices")}</Link>.</p>}
+      </>)}
+      {!issued?.items.length && (
+        <p className="callout acc-info" data-testid="invoices-note" style={issued ? { marginTop: 10 } : undefined}>
+          {L("يُعرض هنا ما سُجّل من الفواتير الضريبية الصادرة خارج النظام لكل طلب، والدفعات المسجّلة على صفقات العميل.",
+            "Shown here is what is recorded per order of VAT invoices issued outside the system, and the payments recorded against the customer's deals.")}
+        </p>
+      )}
       {unpricedNote && <p className="acc-note" style={{ margin: "10px 0 0" }} data-testid="unpriced-note">{unpricedNote}</p>}
       {statementBlock}
       {data.orders && (<>
@@ -808,7 +845,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
         onDone={(what) => { setDialog(null); setNotice({ text: what === "grace" ? L("سُجّلت أيام السماح.", "Grace days recorded.") : L("أُوقف البيع لهذا العميل.", "Sales to this customer are on hold."), ok: true }); reload(); }} />}
       {dialog === "lift" && cs && <LiftDialog ar={ar} customerId={id} customerName={name} c={cs} onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("رُفع الإيقاف.", "Hold lifted."), ok: true }); reload(); }} />}
       {dialog === "file" && <FileDialog ar={ar} customerId={id} maxBytes={data.fileLimits?.maxBytes} direct={data.fileLimits?.direct} onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("رُفع الملف.", "File uploaded."), ok: true }); setTab("files"); reload(); }} />}
-      {dialog === "details" && <DetailsDialog ar={ar} customer={c} onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("حُفظت البيانات.", "Saved."), ok: true }); reload(); }} />}
+      {dialog === "details" && <DetailsDialog ar={ar} customer={c} canOwner={can.editOwner ?? false} canCredit={can.editCreditTerms ?? false} onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("حُفظت البيانات.", "Saved."), ok: true }); reload(); }} />}
       {dialog && typeof dialog === "object" && <ContactDialog ar={ar} customerId={id} contact={dialog.contact} onClose={() => setDialog(null)} onDone={() => { setDialog(null); reload(); }} />}
     </>
   );

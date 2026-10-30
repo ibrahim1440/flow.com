@@ -29,9 +29,19 @@ export type QuoteSettings = {
   /** True when the built-in value is in force (nothing stored). */
   thresholdIsDefault: boolean;
   seller: Seller;
+  /**
+   * «الحد الأدنى للتأهيل» (20261204100000_pipeline_qualification, SystemConfig.salesRequireQualificationMinimum):
+   * a qualifying activity converts a lead only when its business type, need and agreed next step are
+   * known. Default true; false restores the legacy rule. Kept with the quotation settings because it is
+   * the same owner, the same gate (admin, step-up) and the same audit trail — see services/sales/qualification.ts.
+   */
+  requireQualificationMinimum: boolean;
 };
 
-type ConfigRow = { quoteDiscountApprovalPercent: { toString(): string } | null } & Partial<Record<SellerField, string | null>>;
+type ConfigRow = {
+  quoteDiscountApprovalPercent: { toString(): string } | null;
+  salesRequireQualificationMinimum?: boolean | null;
+} & Partial<Record<SellerField, string | null>>;
 type Db = { systemConfig: { findUnique(args: { where: { id: string } }): Promise<unknown> } };
 
 export const EMPTY_SELLER: Seller = Object.fromEntries(SELLER_FIELDS.map((k) => [k, null])) as Seller;
@@ -47,6 +57,8 @@ export function settingsFromRow(row: ConfigRow | null | undefined): QuoteSetting
     effectiveThresholdPercent: storedText === null ? String(DISCOUNT_APPROVAL_THRESHOLD) : trimZeros(storedText),
     thresholdIsDefault: storedText === null,
     seller,
+    // A missing row (or column, before the migration) reads as the default: on.
+    requireQualificationMinimum: row?.salesRequireQualificationMinimum ?? true,
   };
 }
 
@@ -69,6 +81,7 @@ export async function discountThreshold(db: Db): Promise<Decimal> {
 type Problem = { ok: false; error: string; errorAr: string };
 export type SettingsPatch = {
   quoteDiscountApprovalPercent?: Decimal | null;
+  salesRequireQualificationMinimum?: boolean;
 } & Partial<Record<SellerField, string | null>>;
 
 const MAX_LEN: Record<SellerField, number> = {
@@ -117,6 +130,18 @@ export function parseSettingsPatch(b: Record<string, unknown>): { ok: true; data
       }
       data.quoteDiscountApprovalPercent = d;
     }
+  }
+  // A switch, not a nullable setting: true or false, nothing else (an unknown value is refused
+  // rather than read as "off", which would quietly restore the legacy conversion rule).
+  if ("requireQualificationMinimum" in b) {
+    if (typeof b.requireQualificationMinimum !== "boolean") {
+      return {
+        ok: false,
+        error: "requireQualificationMinimum is true or false.",
+        errorAr: "قيمة «الحد الأدنى للتأهيل» إما مفعّلة أو غير مفعّلة.",
+      };
+    }
+    data.salesRequireQualificationMinimum = b.requireQualificationMinimum;
   }
   for (const k of SELLER_FIELDS) {
     if (!(k in b)) continue;

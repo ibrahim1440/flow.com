@@ -9,7 +9,9 @@ import { Dialog, HrApiError } from "@/components/hr/ui";
 import { dueLabel } from "@/lib/workspace/format";
 import { PRIORITY_LABEL, PRIORITIES } from "@/lib/workspace/rules";
 import { toRiyadhLocal, parseRiyadhLocal } from "@/lib/workspace/time";
-import { DueText, OUTCOMES, StatusChip, TypeChip, recordOf, useLang, useNow, useWs, wsFetch, type Task } from "./kit";
+import { DueText, OUTCOMES, StatusChip, TypeChip, recordOf, useLang, useNow, useWs, wsFetch, type CrmDue, type ReorderDue, type Task } from "./kit";
+import { suggestNextStep } from "@/lib/services/sales/follow-through";
+import { EMPTY_QUALIFICATION, QualificationFields, missingText, qualificationPayload, type QualificationDraft } from "../../sales/_components/QualificationFields";
 
 type Detail = {
   task: Task;
@@ -233,25 +235,105 @@ function ReasonDialog({ kind, onClose, onSubmit, busy }: { kind: "hold" | "cance
 }
 
 export function ResultDialog({ task, onClose, onDone }: { task: Task; onClose: () => void; onDone: (m: string) => void }) {
+  return (
+    <RecordResultDialog sub={recordOf(task) ?? undefined} defaultChannel={task.channel ?? "CALL"} leadId={task.leadId} onClose={onClose} onDone={onDone}
+      submit={(r) => wsFetch(`/api/workspace/tasks/${task.id}/result`, { json: { version: task.version, outcome: r.outcome, note: r.note, ...(r.next ? { next: { dueAt: r.next.dueAt, channel: r.next.channel } } : {}) } })} />
+  );
+}
+
+/** «تسجيل النتيجة» on a planned CRM follow-up (a call, a visit, a sample's evaluation) — the same dialog. */
+export function CrmResultDialog({ crm, onClose, onDone }: { crm: CrmDue; onClose: () => void; onDone: (m: string) => void }) {
+  return (
+    <RecordResultDialog sub={[crm.record, crm.subject].filter(Boolean).join(" · ")} defaultChannel={["VISIT", "MEETING"].includes(crm.type) ? crm.type : "CALL"} leadId={crm.leadId} onClose={onClose} onDone={onDone}
+      submit={(r) => wsFetch(`/api/sales/activities/${crm.id}/result`, { json: { outcome: r.outcome, note: r.note, ...(r.next ? { next: { dueAt: r.next.dueAt, channel: r.next.channel } } : {}) } })} />
+  );
+}
+
+/** «yyyy-mm-ddT10:00» Riyadh, n days from now — the proposed time of a next step. */
+function tenOClockIn(days: number): string {
+  return toRiyadhLocal(new Date(Date.now() + days * 86_400_000)).slice(0, 11) + "10:00";
+}
+
+/** «تسجيل اتصال» with a customer due to reorder: the call and its next step, one request (customer activities). */
+export function ReorderCallDialog({ item, onClose, onDone }: { item: ReorderDue; onClose: () => void; onDone: (m: string) => void }) {
   const L = useL();
+  const subject = L(`اتصال إعادة طلب · ${item.name}`, `Reorder call · ${item.nameEn}`);
+  return (
+    <RecordResultDialog sub={item.name} defaultChannel="CALL" onClose={onClose} onDone={onDone}
+      submit={(r) => wsFetch(`/api/customers/${item.customerId}/activities`, { json: { type: "CALL", subject, body: r.note, outcome: r.outcome, completed: true, ...(r.next ? { next: { dueAt: r.next.dueAt, channel: r.next.channel } } : {}) } })} />
+  );
+}
+
+type ResultInput = { outcome: string; note: string; next: { dueAt: string; channel: string } | null };
+
+/**
+ * One tap for what happened, then — when the outcome calls for one — the next step already proposed
+ * (services/sales/follow-through.ts suggestNextStep: «لم يرد» → call again tomorrow, «تم الاتفاق على
+ * اجتماع» → the meeting in two days …). The rep confirms or changes it; nothing longer is asked.
+ */
+type ResultResponse = { activityId?: string | null; qualification?: { converted?: boolean; missing?: string[] } | null };
+
+function RecordResultDialog({ sub, defaultChannel, leadId, submit, onClose, onDone }: {
+  sub?: string; defaultChannel: string; leadId?: string | null; submit: (r: ResultInput) => Promise<unknown>; onClose: () => void; onDone: (m: string) => void;
+}) {
+  const L = useL();
+  const lang = useLang();
+  // A qualifying outcome on a lead converts only with the minimum known (services/sales/needs.ts):
+  // when the server says what is missing, the same dialog asks for it and completes that activity.
+  const [qualify, setQualify] = useState<{ activityId: string; missing: string[]; saved: string } | null>(null);
+  const [draft, setDraft] = useState<QualificationDraft>(EMPTY_QUALIFICATION);
   const [outcome, setOutcome] = useState("");
   const [note, setNote] = useState("");
   const [next, setNext] = useState(false);
   const [nextAt, setNextAt] = useState(() => toRiyadhLocal(new Date(Date.now() + 2 * 86_400_000)).slice(0, 11) + "10:00");
-  const [channel, setChannel] = useState(task.channel ?? "CALL");
+  const [channel, setChannel] = useState(defaultChannel);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const choose = (v: string) => {
+    setOutcome(v);
+    const s = suggestNextStep(v);
+    setNext(!!s);
+    if (s) {
+      setChannel(s.channel);
+      setNextAt(tenOClockIn(s.inDays));
+    }
+  };
   const save = async () => {
     setBusy(true); setErr(null);
     try {
       const at = parseRiyadhLocal(nextAt);
       if (next && !at) throw new Error(L("موعد الخطوة التالية غير صالح.", "The next step's time is not valid."));
-      await wsFetch(`/api/workspace/tasks/${task.id}/result`, { json: { version: task.version, outcome, note, ...(next ? { next: { dueAt: at!.toISOString(), channel } } : {}) } });
-      onDone(next ? L("سُجلت النتيجة في سجل العميل وأُنشئت الخطوة التالية.", "Result saved to the customer timeline; next step created.") : L("سُجلت النتيجة في سجل العميل.", "Result saved to the customer timeline."));
+      const res = (await submit({ outcome, note, next: next ? { dueAt: at!.toISOString(), channel } : null })) as ResultResponse | null;
+      const saved = next ? L("سُجلت النتيجة في سجل العميل وأُنشئت الخطوة التالية.", "Result saved to the customer timeline; next step created.") : L("سُجلت النتيجة في سجل العميل.", "Result saved to the customer timeline.");
+      if (leadId && res?.activityId && res.qualification && res.qualification.converted === false && res.qualification.missing?.length) {
+        setQualify({ activityId: res.activityId, missing: res.qualification.missing, saved });
+        return;
+      }
+      onDone(saved);
     } catch (e) { setErr(messageOf(e, L)); } finally { setBusy(false); }
   };
+  const saveQualification = async () => {
+    if (!qualify || !leadId) return;
+    setBusy(true); setErr(null);
+    try {
+      await wsFetch(`/api/sales/leads/${leadId}/qualify`, { json: { activityId: qualify.activityId, qualification: qualificationPayload(draft) } });
+      onDone(L("سُجلت النتيجة وتحوّل العميل المحتمل إلى فرصة مؤهلة.", "Result saved; the lead is now a qualified opportunity."));
+    } catch (e) { setErr(messageOf(e, L)); } finally { setBusy(false); }
+  };
+  if (qualify) {
+    return (
+      <Dialog open title={L("استكمال التأهيل", "Complete the qualification")} sub={sub} onClose={() => onDone(qualify.saved)} testId="qualify-dialog" actions={<>
+        <Btn onClick={() => onDone(qualify.saved)}>{L("لاحقًا", "Later")}</Btn>
+        <Btn variant="primary" busy={busy} onClick={() => void saveQualification()} data-testid="qualify-save">{L("تحويل إلى فرصة", "Make it an opportunity")}</Btn>
+      </>}>
+        <Notice tone="info">{qualify.saved} {missingText(qualify.missing, lang === "ar")}</Notice>
+        {err ? <Notice tone="danger">{err}</Notice> : null}
+        <QualificationFields ar={lang === "ar"} value={draft} onChange={setDraft} missing={qualify.missing} idPrefix="ws-qual" />
+      </Dialog>
+    );
+  }
   return (
-    <Dialog open title={L("تسجيل النتيجة", "Record the result")} sub={recordOf(task) ?? undefined} onClose={onClose} testId="result-dialog" actions={<>
+    <Dialog open title={L("تسجيل النتيجة", "Record the result")} sub={sub} onClose={onClose} testId="result-dialog" actions={<>
       <Btn onClick={onClose}>{L("تراجع", "Back")}</Btn>
       <Btn variant="primary" busy={busy} disabled={!outcome} onClick={() => void save()} data-testid="result-save">{L("حفظ النتيجة", "Save result")}</Btn>
     </>}>
@@ -259,10 +341,10 @@ export function ResultDialog({ task, onClose, onDone }: { task: Task; onClose: (
       <fieldset className="ws-choices">
         <legend className="hr-label">{L("ماذا حدث؟", "What happened?")}</legend>
         {OUTCOMES.map(([v, a, e]) => (
-          <label key={v} className={`ws-choice${outcome === v ? " is-on" : ""}`}><input type="radio" name="outcome" value={v} checked={outcome === v} onChange={() => setOutcome(v)} /> {L(a, e)}</label>
+          <label key={v} className={`ws-choice${outcome === v ? " is-on" : ""}`}><input type="radio" name="outcome" value={v} checked={outcome === v} onChange={() => choose(v)} /> {L(a, e)}</label>
         ))}
       </fieldset>
-      <Field label={L("ملاحظة (تظهر في سجل العميل)", "Note (shown on the customer timeline)")}><textarea className="hr-input" rows={3} value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} /></Field>
+      <Field label={L("ملاحظة (اختيارية، تظهر في سجل العميل)", "Note (optional, shown on the customer timeline)")}><textarea className="hr-input" rows={2} value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} /></Field>
       <label className="ws-check-line"><input type="checkbox" checked={next} onChange={(e) => setNext(e.target.checked)} /> {L("تحديد الخطوة التالية", "Set the next step")}</label>
       {next ? (
         <div className="ws-row2">

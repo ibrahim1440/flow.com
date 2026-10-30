@@ -13,24 +13,99 @@ import { myApprovalCount, myApprovals } from "./approvals";
 import { appointmentsBetween } from "./appointments";
 import { listOccasions, canSeeOccasions } from "./occasions";
 import { leaveTypeName } from "@/lib/i18n/hr";
+import { reorderSuggestions } from "@/lib/services/customers/reorder";
 
 const DAY = 86_400_000;
 
-/** Open CRM follow-ups owned by the person (read through; they complete in the CRM). */
+/** The action a CRM row asks for, by the planned activity's type («الإجراء المطلوب»). */
+const CRM_ACTION: Record<string, { ar: string; en: string }> = {
+  CALL: { ar: "اتصال", en: "Call" }, VISIT: { ar: "زيارة", en: "Visit" }, MEETING: { ar: "اجتماع", en: "Meeting" },
+  TASK: { ar: "متابعة", en: "Follow up" }, NOTE: { ar: "متابعة", en: "Follow up" },
+  SAMPLE_FOLLOW_UP: { ar: "متابعة تقييم العينة", en: "Follow up the sample evaluation" },
+};
+
+/**
+ * Open CRM follow-ups owned by the person. A follow-up a workspace FOLLOW_UP task already covers (the
+ * same lead or deal, open, the person's own) is not shown a second time: the task is the row, and
+ * recording its result fulfils the CRM one (services/sales/follow-through.ts). A sample's evaluation
+ * reminder is its own promise and is always shown.
+ */
 async function crmFollowUps(actor: WsActor, until: Date) {
   if (!hasModuleAccess(actor.permissions, "sales") && !hasModuleAccess(actor.permissions, "customers")) return [];
-  const rows = await prisma.activity.findMany({
-    where: { ownerId: actor.id, completedAt: null, dueAt: { not: null, lte: until } },
-    select: {
-      id: true, type: true, subject: true, dueAt: true, leadId: true, opportunityId: true, customerId: true,
-      lead: { select: { companyName: true } }, opportunity: { select: { title: true } }, customer: { select: { name: true } },
-    },
-    orderBy: { dueAt: "asc" }, take: 100,
+  const [rows, covering] = await Promise.all([
+    prisma.activity.findMany({
+      where: { ownerId: actor.id, completedAt: null, dueAt: { not: null, lte: until } },
+      select: {
+        id: true, type: true, subject: true, dueAt: true, leadId: true, opportunityId: true, customerId: true,
+        lead: { select: { companyName: true } }, opportunity: { select: { title: true, customer: { select: { name: true, nameAr: true } } } }, customer: { select: { name: true, nameAr: true } },
+      },
+      orderBy: { dueAt: "asc" }, take: 100,
+    }),
+    prisma.workTask.findMany({
+      where: { assigneeId: actor.id, kind: "FOLLOW_UP", status: { in: OPEN_STATUSES }, OR: [{ leadId: { not: null } }, { opportunityId: { not: null } }] },
+      select: { leadId: true, opportunityId: true }, take: 500,
+    }),
+  ]);
+  const coveredLeads = new Set(covering.map((t) => t.leadId).filter(Boolean));
+  const coveredDeals = new Set(covering.map((t) => t.opportunityId).filter(Boolean));
+  return rows
+    .filter((a) => a.type === "SAMPLE_FOLLOW_UP" || !((a.leadId && coveredLeads.has(a.leadId)) || (a.opportunityId && coveredDeals.has(a.opportunityId))))
+    .map((a) => ({
+      id: a.id, type: a.type, subject: a.subject, dueAt: a.dueAt!.toISOString(), leadId: a.leadId,
+      // The customer's Arabic name when it has one (the screen is Arabic-first), the English one beside it.
+      record: a.customer?.nameAr ?? a.customer?.name ?? a.opportunity?.customer?.nameAr ?? a.opportunity?.customer?.name ?? a.opportunity?.title ?? a.lead?.companyName ?? null,
+      recordEn: a.customer?.name ?? a.opportunity?.customer?.name ?? a.opportunity?.title ?? a.lead?.companyName ?? null,
+      deal: a.opportunity?.title ?? null,
+      action: CRM_ACTION[a.type] ?? CRM_ACTION.TASK,
+      // Recorded in place (POST /api/sales/activities/[id]/result) when the person may log activities.
+      canRecord: hasSubPrivilege(actor.permissions, "sales", "lead_write"),
+      openUrl: a.leadId ? `/dashboard/sales/leads/${a.leadId}` : a.opportunityId ? `/dashboard/sales/deals/${a.opportunityId}` : a.customerId ? `/dashboard/customers/${a.customerId}` : "/dashboard/sales/activities",
+    }));
+}
+
+/** Days an issued quotation waits for the customer's answer before it asks for a follow-up. */
+const QUOTE_FOLLOW_UP_DAYS = 3;
+
+/**
+ * Issued quotations of the person's deals still waiting for the customer's answer, due for a follow-up
+ * three days after issue, or two days before they lapse when that is sooner («عروض تحتاج متابعة»).
+ * Read-only rows: the action opens the quotation, where accept / reject / revise already live.
+ */
+async function quotesToFollow(actor: WsActor, until: Date) {
+  if (!hasModuleAccess(actor.permissions, "sales")) return [];
+  const rows = await prisma.quote.findMany({
+    where: { status: "ISSUED", opportunity: { ownerId: actor.id, outcome: "OPEN" } },
+    select: { id: true, quoteNumber: true, issuedAt: true, validUntil: true, opportunity: { select: { title: true, customer: { select: { name: true, nameAr: true } } } } },
+    orderBy: { issuedAt: "asc" }, take: 50,
   });
-  return rows.map((a) => ({
-    id: a.id, type: a.type, subject: a.subject, dueAt: a.dueAt!.toISOString(),
-    record: a.customer?.name ?? a.opportunity?.title ?? a.lead?.companyName ?? null,
-    openUrl: a.leadId ? `/dashboard/sales/leads/${a.leadId}` : a.opportunityId ? `/dashboard/sales/deals/${a.opportunityId}` : a.customerId ? `/dashboard/customers/${a.customerId}` : "/dashboard/sales/activities",
+  return rows.flatMap((q) => {
+    const issued = q.issuedAt ?? new Date();
+    const byAge = issued.getTime() + QUOTE_FOLLOW_UP_DAYS * DAY;
+    const byExpiry = q.validUntil ? q.validUntil.getTime() - 2 * DAY : Infinity;
+    const due = new Date(Math.min(byAge, byExpiry));
+    if (due > until) return [];
+    return [{
+      id: q.id, quoteNumber: q.quoteNumber, dueAt: due.toISOString(), validUntil: q.validUntil?.toISOString() ?? null,
+      record: q.opportunity.customer?.nameAr ?? q.opportunity.customer?.name ?? q.opportunity.title,
+      recordEn: q.opportunity.customer?.name ?? q.opportunity.title, deal: q.opportunity.title,
+      openUrl: `/dashboard/sales/quotes/${q.id}`,
+    }];
+  });
+}
+
+/**
+ * «عملاء يحتاجون اتصالاً»: the accounts the person is responsible for that are due, late or gone quiet
+ * against their own reorder rhythm (services/customers/reorder.ts). Suggestions, not deadlines — they
+ * are listed apart and never counted as overdue work.
+ */
+async function reorderDue(actor: WsActor, now: Date) {
+  if (!hasModuleAccess(actor.permissions, "customers")) return [];
+  const rows = await reorderSuggestions(prisma, { ownerId: actor.id, now, limit: 15 });
+  return rows.map((r) => ({
+    customerId: r.customerId, name: r.nameAr ?? r.name, nameEn: r.name, state: r.state, daysSince: r.daysSince,
+    intervalDays: r.intervalDays, intervalSource: r.intervalSource, usualItems: r.usualItems,
+    canRecord: hasSubPrivilege(actor.permissions, "sales", "lead_write"),
+    openUrl: `/dashboard/customers/${r.customerId}`,
   }));
 }
 
@@ -38,16 +113,19 @@ export async function today(actor: WsActor, now = new Date()) {
   const dayStart = startOfRiyadhDay(now);
   const dayEnd = new Date(dayStart.getTime() + DAY);
   const weekEnd = new Date(dayStart.getTime() + 8 * DAY);
-  const [tasks, review, approvals, appts, crm] = await Promise.all([
+  const [tasks, review, approvals, appts, crm, quotes, reorder] = await Promise.all([
     listTasks(actor, { scope: "mine", status: "open", limit: 200 }, now),
     listTasks(actor, { scope: "review", status: "open", limit: 50 }, now),
     myApprovals(actor),
     appointmentsBetween(actor, [actor.id], now < dayStart ? now : dayStart, weekEnd, now),
     crmFollowUps(actor, weekEnd),
+    quotesToFollow(actor, weekEnd),
+    reorderDue(actor, now),
   ]);
   const open = tasks.items;
-  const overdue = open.filter((t) => t.overdue).length + crm.filter((a) => new Date(a.dueAt) < now).length;
-  const dueToday = open.filter((t) => !t.overdue && t.dueAt < dayEnd).length + crm.filter((a) => new Date(a.dueAt) >= now && new Date(a.dueAt) < dayEnd).length;
+  const crmLike = [...crm, ...quotes];
+  const overdue = open.filter((t) => t.overdue).length + crmLike.filter((a) => new Date(a.dueAt) < now).length;
+  const dueToday = open.filter((t) => !t.overdue && t.dueAt < dayEnd).length + crmLike.filter((a) => new Date(a.dueAt) >= now && new Date(a.dueAt) < dayEnd).length;
   const todays = appts.filter((a) => a.status === "SCHEDULED" && a.startAt < dayEnd && a.endAt > dayStart);
   const next = appts.find((a) => a.status === "SCHEDULED" && a.endAt > now) ?? null;
   return {
@@ -60,6 +138,8 @@ export async function today(actor: WsActor, now = new Date()) {
     approvals: approvals.items.slice(0, 20),
     approvalsUnavailable: approvals.unavailable,
     crm,
+    quotes,
+    reorder,
     schedule: todays,
     upcoming: appts.filter((a) => a.status === "SCHEDULED" && a.startAt >= dayEnd).slice(0, 10),
   };
@@ -68,12 +148,17 @@ export async function today(actor: WsActor, now = new Date()) {
 /** The count the sidebar badge shows: overdue + due today + waiting for my decision. */
 export async function badge(actor: WsActor, now = new Date()) {
   const dayEnd = new Date(startOfRiyadhDay(now).getTime() + DAY);
-  const [tasks, approvals, ctx] = await Promise.all([
+  const [tasks, approvals, ctx, crm, quotes] = await Promise.all([
     prisma.workTask.count({ where: { assigneeId: actor.id, status: { in: OPEN_STATUSES }, dueAt: { lt: dayEnd } } }),
     myApprovalCount(actor),
     teamCtx(prisma, actor),
+    // The CRM follow-ups and quotation follow-ups due by tonight, as «اليوم» counts them — the badge
+    // and the counters agree.
+    crmFollowUps(actor, dayEnd),
+    quotesToFollow(actor, dayEnd),
   ]);
-  return { count: tasks + approvals, tasks, approvals, hasTeam: ctx.teamView || ctx.directReports.size > 0 };
+  const crmDue = crm.length + quotes.length;
+  return { count: tasks + approvals + crmDue, tasks, approvals, crm: crmDue, hasTeam: ctx.teamView || ctx.directReports.size > 0 };
 }
 
 export type CalendarLayer = "mine" | "tasks" | "team" | "occasions" | "leave";

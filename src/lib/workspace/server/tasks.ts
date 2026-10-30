@@ -14,6 +14,7 @@ import {
 } from "./context";
 import { planTaskReminders, snoozeTask } from "./reminders";
 import { getSettings } from "./settings";
+import { syncLeadNextFollowUp } from "@/lib/services/sales/follow-through";
 
 type Tx = PrismaNS.TransactionClient;
 type Body = Record<string, unknown>;
@@ -578,6 +579,8 @@ export async function recordResult(actor: WsActor, id: string, b: Body, now = ne
       await event(tx, n.id, actor.id, "CREATED", { previousFollowUp: id, dueAt: nextDue.dueAt.toISOString() });
       await planTaskReminders(tx, n.id, now);
     }
+    // The task just closed and the next one (if any) opened: the lead's next follow-up follows them.
+    if (t.leadId) await syncLeadNextFollowUp(tx, t.leadId);
     return { task: present((await load(tx, id))!, actor, ctx, now), activityId: logged.activity.id, nextTaskId, qualification: "qualification" in logged ? logged.qualification : null };
   });
 }

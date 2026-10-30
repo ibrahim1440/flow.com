@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireEdit, requireModule } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { parseContact } from "@/lib/services/customers/fields";
+import { customerInScope } from "@/lib/services/sales/customer-access";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -16,9 +17,11 @@ const SELECT = { id: true, name: true, role: true, phone: true, email: true, pos
  * /api/customers/[id].
  */
 export async function GET(_req: Request, { params }: Params) {
-  const { error } = await requireModule("customers");
+  const { user, error } = await requireModule("customers");
   if (error) return error;
   const { id } = await params;
+  // A scoped sales rep reaches only the customers in their own book (services/sales/scope.ts) — 404 otherwise.
+  if (!(await customerInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const customer = await prisma.customer.findUnique({ where: { id }, select: { id: true } });
   if (!customer) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const contacts = await prisma.customerContact.findMany({
@@ -29,9 +32,11 @@ export async function GET(_req: Request, { params }: Params) {
 
 /** POST /api/customers/[id]/contacts — add a contact at the end of the list. */
 export async function POST(request: Request, { params }: Params) {
-  const { error } = await requireEdit("customers");
+  const { user, error } = await requireEdit("customers");
   if (error) return error;
   const { id } = await params;
+  // A scoped sales rep reaches only the customers in their own book (services/sales/scope.ts) — 404 otherwise.
+  if (!(await customerInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 }); }
   const parsed = parseContact((body ?? {}) as Record<string, unknown>);

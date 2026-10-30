@@ -57,6 +57,16 @@ const EMPTY_LEAD_FORM = {
   email: "", city: "", source: "REFERRAL", nextFollowUpAt: "", notes: "",
 };
 
+/**
+ * «وسيلة التواصل»: one box for the primary way to reach the person — a mobile number or an e-mail,
+ * told apart by the «@». The short form asks for three things only (company, person, how to reach
+ * them); everything else waits under «تفاصيل إضافية».
+ */
+function splitReach(v: string): { phone: string; email: string } {
+  const t = v.trim();
+  return t.includes("@") ? { phone: "", email: t } : { phone: t, email: "" };
+}
+
 // Status labels and colours now come from the shared map in `_components/ui`, so this screen
 // and every other one render a stored value identically. The local copy this replaced painted
 // UNQUALIFIED red, which reads as an error; disqualifying a lead is ordinary work, not a fault.
@@ -253,16 +263,14 @@ export default function LeadsPage() {
   }
 
   function openForm() {
-    setForm({
-      companyName: "", companyNameAr: "", contactName: "", phone: "",
-      email: "", city: "", source: "REFERRAL", nextFollowUpAt: "", notes: "",
-    });
+    setForm({ ...EMPTY_LEAD_FORM });
     setDuplicates([]);
     setFormError("");
     setShowForm(true);
   }
 
-  const formValid = form.companyName.trim().length >= 2 && form.contactName.trim().length >= 2;
+  const formValid = form.companyName.trim().length >= 2 && form.contactName.trim().length >= 2
+    && (form.phone.trim().length >= 5 || form.email.includes("@"));
 
   async function submit(acknowledgeDuplicate: boolean) {
     if (!formValid || saving) return;
@@ -291,7 +299,12 @@ export default function LeadsPage() {
         return;
       }
       closeForm();
-      setSuccess(lang === "ar" ? "تم إنشاء العميل المحتمل." : "Lead created.");
+      // A name-only resemblance does not stop the save; it is said once, so the rep can look.
+      const weak = Array.isArray(data.weakDuplicates) ? (data.weakDuplicates as { companyName: string }[]) : [];
+      setSuccess(
+        (lang === "ar" ? "تم إنشاء العميل المحتمل." : "Lead created.")
+        + (weak.length ? (lang === "ar" ? ` يوجد اسم مشابه: ${weak.slice(0, 2).map((w) => w.companyName).join("، ")}.` : ` A similar name exists: ${weak.slice(0, 2).map((w) => w.companyName).join(", ")}.`) : ""),
+      );
       load();
     } finally {
       setSaving(false);
@@ -720,19 +733,23 @@ export default function LeadsPage() {
                   className="w-full"
                 />
               </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <label className="block space-y-1.5" data-ui="field">
-                  <span className="block text-[13px] font-medium text-oo-text-primary">{ar ? "الهاتف" : "Phone"}</span>
-                  <input
-                    dir="ltr"
-                    inputMode="tel"
-                    aria-label={ar ? "الهاتف" : "Phone"}
-                    data-ui="input"
-                    value={form.phone}
-                    onChange={(e) => { setForm({ ...form, phone: e.target.value }); setDuplicates([]); }}
-                    className="w-full text-start"
-                  />
-                </label>
+              <label className="block space-y-1.5" data-ui="field">
+                <span className="block text-[13px] font-medium text-oo-text-primary">{ar ? "وسيلة التواصل (جوال أو بريد)" : "How to reach them (mobile or e-mail)"} <span aria-hidden className="text-oo-status-rejected">*</span></span>
+                <input
+                  dir="ltr"
+                  inputMode="email"
+                  aria-label={ar ? "وسيلة التواصل" : "How to reach them"}
+                  aria-required="true"
+                  data-ui="input"
+                  data-testid="lead-reach"
+                  value={form.phone || form.email}
+                  onChange={(e) => { setForm({ ...form, ...splitReach(e.target.value) }); setDuplicates([]); }}
+                  className="w-full text-start"
+                />
+              </label>
+              <details className="rounded-[9px] border border-oo-border-default px-3 py-2" data-testid="lead-more">
+                <summary className="cursor-pointer text-[13px] font-medium text-oo-text-secondary">{ar ? "تفاصيل إضافية (اختياري)" : "More details (optional)"}</summary>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3">
                 <label className="block space-y-1.5" data-ui="field">
                   <span className="block text-[13px] font-medium text-oo-text-primary">{t("leadCity")}</span>
                   <input
@@ -772,9 +789,22 @@ export default function LeadsPage() {
                     className="w-full"
                   />
                 </label>
-              </div>
+                  <label className="block space-y-1.5 sm:col-span-2" data-ui="field">
+                    <span className="block text-[13px] font-medium text-oo-text-primary">{ar ? "ملاحظات" : "Notes"}</span>
+                    <textarea
+                      aria-label={ar ? "ملاحظات" : "Notes"}
+                      data-ui="input"
+                      rows={2}
+                      maxLength={2000}
+                      value={form.notes}
+                      onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                      className="w-full"
+                    />
+                  </label>
+                </div>
+              </details>
               <p className="text-[12px] text-oo-text-muted">
-                {ar ? "الحقول المعلّمة بـ * مطلوبة: حرفان على الأقل." : "Fields marked * are required: at least two characters."}
+                {ar ? "الحقول المعلّمة بـ * مطلوبة. المسؤول ومصدر الإدخال يُعبَّآن تلقائياً." : "Fields marked * are required. The owner and the entry source are filled in for you."}
               </p>
 
               {duplicates.length > 0 && (

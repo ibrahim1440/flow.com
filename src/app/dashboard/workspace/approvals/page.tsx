@@ -8,7 +8,7 @@ import { TypeChip, approvalTitle, WsPage, WsShell, useLang, useNow, useSelection
 import { DecisionPane } from "../_components/approval-ui";
 
 type Inbox = { items: ApprovalItem[]; counts: Record<string, number>; total: number; unavailable: string[] };
-const TYPES: [string, string, string][] = [["", "الكل", "All"], ["LEAVE", "إجازات", "Leave"], ["ADVANCE", "سلف", "Advances"], ["DISCOUNT", "خصومات", "Discounts"], ["FINANCE", "مالية", "Finance"], ["MARKETING", "تسويق", "Marketing"]];
+const TYPES: [string, string, string][] = [["", "الكل", "All"], ["LEAVE", "إجازات", "Leave"], ["ADVANCE", "سلف", "Advances"], ["DISCOUNT", "خصومات", "Discounts"], ["SAMPLE", "عيّنات", "Samples"],["FINANCE", "مالية", "Finance"], ["MARKETING", "تسويق", "Marketing"]];
 
 export default function ApprovalsPage() {
   const L = useL();

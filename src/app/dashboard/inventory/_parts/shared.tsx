@@ -34,6 +34,7 @@ export const SRC_LABELS: Record<string, [string, string]> = {
   OPENING_BALANCE: ["رصيد افتتاحي (استلام)", "Opening balance (receipt)"],
   RECEIVING: ["استلام توريد", "Receiving"],
   STOCK_TRANSFER: ["تحويل بين المواقع", "Transfer between locations"],
+  SAMPLE: ["عيّنة مبيعات", "Sales sample"],
 };
 
 export const CAT_LABELS: Record<string, [string, string]> = {

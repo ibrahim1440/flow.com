@@ -6,8 +6,8 @@ import Link from "next/link";
 import { Fragment, useMemo, useState } from "react";
 import { Btn, Notice, OpsBanner, OpsEmpty, OpsError, OpsLoading, useL } from "@/components/ops/ui";
 import { dayOf, dueLabel, greeting, overdueBy, timeOf, ago } from "@/lib/workspace/format";
-import { DueText, PriorityMark, TypeChip, approvalTitle, WsPage, WsShell, recordOf, useLang, useNow, useSelection, useWs, type ApprovalItem, type Appointment, type CrmDue, type Task } from "./_components/kit";
-import { CreateTaskDialog, TaskPane } from "./_components/task-ui";
+import { DueText, PriorityMark, TypeChip, approvalTitle, WsPage, WsShell, recordOf, useLang, useNow, useSelection, useWs, type ApprovalItem, type Appointment, type CrmDue, type QuoteDue, type ReorderDue, type Task } from "./_components/kit";
+import { CreateTaskDialog, CrmResultDialog, ReorderCallDialog, TaskPane } from "./_components/task-ui";
 import { useUser } from "../user-context";
 import { DecisionPane } from "./_components/approval-ui";
 import { AppointmentDialog } from "./_components/calendar-ui";
@@ -17,13 +17,14 @@ type Today = {
   now: string; day: string;
   counts: { overdue: number; dueToday: number; approvals: number; review: number };
   nextAppointment: { id: string; title: string; kind: string; startAt: string; endAt: string; location: string | null } | null;
-  tasks: Task[]; review: Task[]; approvals: ApprovalItem[]; approvalsUnavailable: string[]; crm: CrmDue[];
+  tasks: Task[]; review: Task[]; approvals: ApprovalItem[]; approvalsUnavailable: string[]; crm: CrmDue[]; quotes?: QuoteDue[]; reorder?: ReorderDue[];
   schedule: Appointment[]; upcoming: Appointment[];
 };
 type Row =
   | { kind: "task"; key: string; group: string; at: string; task: Task }
   | { kind: "approval"; key: string; group: string; at: string; item: ApprovalItem }
   | { kind: "crm"; key: string; group: string; at: string; crm: CrmDue }
+  | { kind: "quote"; key: string; group: string; at: string; quote: QuoteDue }
   | { kind: "appt"; key: string; group: string; at: string; appt: Appointment };
 
 const ACTION: Record<string, [string, string]> = { start: ["بدء المهمة", "Start"], resume: ["استئناف", "Resume"], complete: ["إكمال", "Complete"], record_result: ["تسجيل النتيجة", "Record result"], approve_review: ["مراجعة الإنجاز", "Review"] };
@@ -41,6 +42,8 @@ export default function TodayPage() {
   const [filter, setFilter] = useState<"" | "overdue" | "today" | "approvals">("");
   const [toast, setToast] = useState<string | null>(null);
   const [showLater, setShowLater] = useState(false);
+  const [crmResult, setCrmResult] = useState<CrmDue | null>(null);
+  const [reorderCall, setReorderCall] = useState<ReorderDue | null>(null);
 
   const rows = useMemo<Row[]>(() => {
     if (!data) return [];
@@ -55,8 +58,16 @@ export default function TodayPage() {
       const today = dueLabel(c.dueAt, lang, now).startsWith(lang === "ar" ? "اليوم" : "Today");
       out.push({ kind: "crm", key: `c:${c.id}`, group: late ? "overdue" : today ? "today" : "later", at: c.dueAt, crm: c });
     }
+    for (const q of data.quotes ?? []) {
+      const late = new Date(q.dueAt) < now;
+      const today = dueLabel(q.dueAt, lang, now).startsWith(lang === "ar" ? "اليوم" : "Today");
+      out.push({ kind: "quote", key: `q:${q.id}`, group: late ? "overdue" : today ? "today" : "later", at: q.dueAt, quote: q });
+    }
     for (const a of data.schedule) if (new Date(a.endAt) > now) out.push({ kind: "appt", key: `p:${a.id}`, group: "today", at: a.startAt, appt: a });
-    return out.sort((x, y) => x.at.localeCompare(y.at));
+    // Within a group: what is urgent first (an URGENT / HIGH task before a NORMAL one), then the
+    // longest-waiting — not the order things were created in.
+    const weight = (r: Row) => (r.kind === "task" ? ({ URGENT: 0, HIGH: 1 } as Record<string, number>)[r.task.priority] ?? 2 : 2);
+    return out.sort((x, y) => weight(x) - weight(y) || x.at.localeCompare(y.at));
   }, [data, now, lang]);
 
   const groups: { key: string; title: string }[] = [
@@ -112,16 +123,33 @@ export default function TodayPage() {
       );
     }
     if (r.kind === "crm") {
+      // Customer · the action asked for · when, and the action itself as the button (recorded in place).
       const c = r.crm;
       const late = new Date(c.dueAt) < now;
       return (
         <li key={r.key} className="ws-row">
-          <TypeChip type="CRM" />
+          <TypeChip type={c.type === "SAMPLE_FOLLOW_UP" ? "CRM" : ["CALL", "VISIT", "MEETING"].includes(c.type) ? c.type : "CRM"} />
           <Link className="ws-row-main" href={c.openUrl}>
-            <span className="ws-row-title">{c.subject}</span>
-            <span className="ws-row-meta">{c.record ? <span>{c.record}</span> : null}<span className={`ws-due${late ? " is-overdue" : ""}`}>{late ? overdueBy(c.dueAt, lang, now) : dueLabel(c.dueAt, lang, now)}</span></span>
+            <span className="ws-row-title">{(lang === "ar" ? c.record : c.recordEn ?? c.record) ?? c.subject}</span>
+            <span className="ws-row-meta"><span>{L(c.action.ar, c.action.en)}</span>{c.record && c.subject !== c.record ? <span>{c.subject}</span> : null}<span className={`ws-due${late ? " is-overdue" : ""}`}>{late ? overdueBy(c.dueAt, lang, now) : dueLabel(c.dueAt, lang, now)}</span></span>
           </Link>
-          <Link className="hr-btn is-sm" href={c.openUrl}>{L("فتح في المبيعات", "Open in Sales")}</Link>
+          {c.canRecord
+            ? <Btn size="sm" onClick={() => setCrmResult(c)} data-testid={`crm-result-${c.id}`}>{L("تسجيل النتيجة", "Record result")}</Btn>
+            : <Link className="hr-btn is-sm" href={c.openUrl}>{L("فتح في المبيعات", "Open in Sales")}</Link>}
+        </li>
+      );
+    }
+    if (r.kind === "quote") {
+      const q = r.quote;
+      const late = new Date(q.dueAt) < now;
+      return (
+        <li key={r.key} className="ws-row">
+          <TypeChip type="QUOTE" />
+          <Link className="ws-row-main" href={q.openUrl}>
+            <span className="ws-row-title">{(lang === "ar" ? q.record : q.recordEn ?? q.record) ?? q.deal}</span>
+            <span className="ws-row-meta"><span>{L("متابعة رد العميل على العرض", "Follow up the customer's answer")} {q.quoteNumber}</span>{q.validUntil ? <span>{L("صالح حتى", "valid until")} {dayOf(new Date(q.validUntil), lang, now)}</span> : null}<span className={`ws-due${late ? " is-overdue" : ""}`}>{late ? overdueBy(q.dueAt, lang, now) : dueLabel(q.dueAt, lang, now)}</span></span>
+          </Link>
+          <Link className="hr-btn is-sm" href={q.openUrl}>{L("متابعة العرض", "Follow up")}</Link>
         </li>
       );
     }
@@ -185,6 +213,7 @@ export default function TodayPage() {
                     {showLater ? <ul className="ws-rows">{later.map(rowView)}</ul> : null}
                   </div>
                 ) : null}
+                {data.reorder?.length && !filter ? <ReorderList items={data.reorder} onCall={setReorderCall} /> : null}
               </section>
 
               <div className="ws-side">
@@ -203,8 +232,49 @@ export default function TodayPage() {
       {taskId ? <TaskPane id={taskId} onClose={() => setTaskId(null)} onChanged={changed} /> : null}
       {!taskId && selectedApproval ? <DecisionPane item={selectedApproval} onClose={() => { setApprovalKey(null); setHeldApproval(null); }} onDecided={(m, it) => { if (m) { setToast(m); setHeldApproval(it); } reload(); }} /> : null}
       {creating ? <CreateTaskDialog onClose={() => setCreating(false)} onCreated={(t, m) => { setCreating(false); setToast(m); reload(); setTaskId(t.id); }} /> : null}
+      {reorderCall ? <ReorderCallDialog item={reorderCall} onClose={() => setReorderCall(null)} onDone={(m) => { setReorderCall(null); setToast(m); reload(); }} /> : null}
+      {crmResult ? <CrmResultDialog crm={crmResult} onClose={() => setCrmResult(null)} onDone={(m) => { setCrmResult(null); setToast(m); reload(); }} /> : null}
       {newAppt ? <AppointmentDialog onClose={() => setNewAppt(false)} onSaved={(m) => { setNewAppt(false); setToast(m); reload(); }} /> : null}
     </WsShell>
+  );
+}
+
+const REORDER_STATE: Record<ReorderDue["state"], [string, string, string]> = {
+  DUE: ["حان موعد إعادة الطلب", "Due to reorder", ""],
+  LATE: ["متأخر عن موعده", "Late to reorder", " tone-warning"],
+  INACTIVE: ["منقطع عن الشراء", "Stopped ordering", " tone-danger"],
+};
+
+/**
+ * «عملاء يحتاجون اتصالاً»: suggestions from the account's own reorder rhythm — the customer, why (N days
+ * since the last order against a usual N), what they usually take, and «تسجيل اتصال».
+ */
+function ReorderList({ items, onCall }: { items: ReorderDue[]; onCall: (r: ReorderDue) => void }) {
+  const L = useL();
+  const lang = useLang();
+  return (
+    <div className="ws-group is-reorder" data-testid="ws-reorder">
+      <h3 className="ws-group-title">{L("عملاء يحتاجون اتصالاً", "Customers to call")} <span className="hr-caption">· {items.length}</span></h3>
+      <ul className="ws-rows">
+        {items.map((r) => {
+          const [ar, en, tone] = REORDER_STATE[r.state];
+          return (
+            <li key={r.customerId} className="ws-row">
+              <TypeChip type="CALL" />
+              <Link className="ws-row-main" href={r.openUrl}>
+                <span className="ws-row-title">{lang === "ar" ? r.name : r.nameEn}</span>
+                <span className="ws-row-meta">
+                  <span className={`hr-flag${tone}`}><span>{L(ar, en)}</span></span>
+                  <span>{L(`آخر طلب قبل ${r.daysSince} يومًا · المعتاد كل ${r.intervalDays} يومًا`, `Last order ${r.daysSince} days ago · usually every ${r.intervalDays} days`)}</span>
+                  {r.usualItems.length ? <span>{r.usualItems.join("، ")}</span> : null}
+                </span>
+              </Link>
+              {r.canRecord ? <Btn size="sm" onClick={() => onCall(r)}>{L("تسجيل اتصال", "Log a call")}</Btn> : <Link className="hr-btn is-sm" href={r.openUrl}>{L("فتح", "Open")}</Link>}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 

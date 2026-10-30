@@ -4,6 +4,7 @@ import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { convertLead } from "@/lib/services/sales/leads";
+import { customerInScope } from "@/lib/services/sales/customer-access";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -60,6 +61,12 @@ export async function POST(request: Request, { params }: Params) {
         { error: "No active pipeline stage is configured. Configure the pipeline first." },
         { status: 409 },
       );
+    }
+
+    // Linking the new deal to an existing customer would pull that customer into the rep's book
+    // (council gate B3): only a customer already in it, else 404 as if it did not exist.
+    if (typeof b.linkToCustomerId === "string" && b.linkToCustomerId && !(await customerInScope(user, b.linkToCustomerId))) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
     const result = await prisma.$transaction(

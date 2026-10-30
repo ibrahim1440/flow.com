@@ -15,6 +15,8 @@ import {
   ACTIVITY_OUTCOMES, qualifies, qualifyLeadFromActivity, markLeadNotInterested, lockLeadForAutomation,
 } from "./qualification";
 import { seesAllSales, NOT_FOUND_MESSAGE } from "./scope";
+import { CONTACT_TYPES, fulfilPlannedContacts, markLeadContacted, syncLeadNextFollowUp } from "./follow-through";
+import { parseQualificationInput } from "./needs";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -23,6 +25,11 @@ export const ACTIVITY_TYPES = ["CALL", "VISIT", "MEETING", "NOTE", "TASK", "SAMP
 export type ActivityInput = {
   type?: unknown; subject?: unknown; body?: unknown; outcome?: unknown; dueAt?: unknown; completed?: unknown;
   leadId?: unknown; opportunityId?: unknown;
+  /**
+   * Optional `{ businessType, needSummary, expectedMonthlyKg?, nextStep }` (20261204100000_pipeline_qualification):
+   * the qualification answers collected with the activity. Read only on a lead; see `qualifyLeadFromActivity`.
+   */
+  qualification?: unknown;
 };
 
 const bad = (message: string, status = 400) => ({ _appCode: status, message });
@@ -45,7 +52,10 @@ export function parseActivity(b: ActivityInput, opts: { maxSubject?: number; lea
     if (Number.isNaN(dueAt.getTime())) throw bad("dueAt is not a date.");
   } else if (b.dueAt instanceof Date) dueAt = b.dueAt;
   if (type === "TASK" && !dueAt) throw bad("A task needs a due date.");
+  const qualification = parseQualificationInput(b.qualification);
+  if (!qualification.ok) throw { _appCode: 400, message: qualification.error, errorAr: qualification.errorAr };
   return {
+    qualification: qualification.data,
     type, outcome, subject, dueAt,
     body: typeof b.body === "string" ? b.body.trim() || null : null,
     completed: b.completed === true,
@@ -91,12 +101,20 @@ export async function logLeadOrDealActivity(tx: Tx, actor: ActivityActor, a: Par
     },
     select: { id: true, type: true, subject: true, outcome: true, dueAt: true, completedAt: true, createdAt: true },
   });
+  // The follow-through (follow-through.ts): a completed contact marks a NEW lead CONTACTED and keeps
+  // the planned contacts it fulfils from staying open as a second copy of the same promise.
+  if (a.completed) {
+    if (a.leadId && (CONTACT_TYPES as readonly string[]).includes(a.type)) await markLeadContacted(tx, a.leadId);
+    await fulfilPlannedContacts(tx, { ownerId: actor.id, leadId: a.leadId, opportunityId: a.opportunityId, exceptId: activity.id });
+  }
   let qualification = null;
   if (a.leadId && qualifies(a.outcome)) {
-    qualification = await qualifyLeadFromActivity(tx, { leadId: a.leadId, activityId: activity.id, outcome: a.outcome, actorId: actor.id });
+    qualification = await qualifyLeadFromActivity(tx, { leadId: a.leadId, activityId: activity.id, outcome: a.outcome, actorId: actor.id, qualification: a.qualification });
   } else if (a.leadId && a.outcome === "NOT_INTERESTED") {
     await markLeadNotInterested(tx, { leadId: a.leadId, reason: a.body, actorId: actor.id });
   }
+  // The lead list's «المتابعة القادمة» follows what is actually open, in the same transaction.
+  if (a.leadId) await syncLeadNextFollowUp(tx, a.leadId);
   return { activity, qualification };
 }
 
@@ -117,5 +135,6 @@ export async function logCustomerActivity(tx: Tx, actor: ActivityActor, customer
     },
     select: { id: true, type: true, subject: true, outcome: true, dueAt: true, completedAt: true, createdAt: true, customerId: true, opportunityId: true },
   });
+  if (a.completed) await fulfilPlannedContacts(tx, { ownerId: actor.id, customerId, opportunityId: a.opportunityId, exceptId: activity.id });
   return { activity };
 }

@@ -288,8 +288,10 @@ export function QuoteDialog({ ar, customer, openDeals, canCreateDeal, credit, cr
 }
 
 // ── The customer's particulars and account details ────────────────────────────────────────
-export function DetailsDialog({ ar, customer, onClose, onDone }: {
-  ar: boolean; customer: Customer; onClose: () => void; onDone: () => void;
+export function DetailsDialog({ ar, customer, canOwner, canCredit, onClose, onDone }: {
+  // The account owner and the credit terms have their own duties (services/customers/account-guard.ts);
+  // without them the fields are shown read-only and the server refuses a change anyway.
+  ar: boolean; customer: Customer; canOwner: boolean; canCredit: boolean; onClose: () => void; onDone: () => void;
 }) {
   const L = (a: string, e: string) => (ar ? a : e);
   const [f, setF] = useState({
@@ -344,7 +346,7 @@ export function DetailsDialog({ ar, customer, onClose, onDone }: {
         </Field>
         <Field label={L("المدينة", "City")}><input className="hr-input" value={f.city} onChange={set("city")} maxLength={80} /></Field>
         <Field label={L("المسؤول", "Account owner")}>
-          <Select className="hr-select" value={f.accountOwnerId} onChange={set("accountOwnerId")} data-testid="details-owner">
+          <Select className="hr-select" value={f.accountOwnerId} onChange={set("accountOwnerId")} disabled={!canOwner} data-testid="details-owner">
             <option value="">{L("بلا مسؤول", "None")}</option>
             {customer.accountOwner && !employees.some((x) => x.id === customer.accountOwner!.id) && <option value={customer.accountOwner.id}>{customer.accountOwner.name}</option>}
             {employees.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
@@ -357,16 +359,16 @@ export function DetailsDialog({ ar, customer, onClose, onDone }: {
           <input className="hr-input" dir="ltr" style={{ textAlign: "start" }} inputMode="numeric" value={f.vatNumber} onChange={set("vatNumber")} data-testid="details-vat" />
         </Field>
         <Field label={L("قائمة الأسعار", "Price list")} help={L("نص يصف الاتفاق، لا يغيّر أي سعر.", "Text recording the agreement; it changes no price.")}>
-          <input className="hr-input" value={f.priceList} onChange={set("priceList")} maxLength={80} />
+          <input className="hr-input" value={f.priceList} onChange={set("priceList")} maxLength={80} disabled={!canCredit} />
         </Field>
         <Field label={L("شروط الدفع (أيام)", "Payment terms (days)")}>
-          <input className="hr-input" dir="ltr" inputMode="numeric" value={f.paymentTermsDays} onChange={set("paymentTermsDays")} data-testid="details-terms" />
+          <input className="hr-input" dir="ltr" inputMode="numeric" value={f.paymentTermsDays} onChange={set("paymentTermsDays")} disabled={!canCredit} data-testid="details-terms" />
         </Field>
         <Field label={L("حد الائتمان (ر.س)", "Credit limit (SAR)")} help={L("تجاوزه يظهر تحذيرًا أحمر؛ إيقاف البيع قرار يدوي.", "Going over it shows a red warning; holding sales is a manual decision.")}>
-          <input className="hr-input" dir="ltr" inputMode="decimal" value={f.creditLimit} onChange={set("creditLimit")} data-testid="details-credit" />
+          <input className="hr-input" dir="ltr" inputMode="decimal" value={f.creditLimit} onChange={set("creditLimit")} disabled={!canCredit} data-testid="details-credit" />
         </Field>
         <Field label={L("مدة الإيقاف الافتراضية (أيام)", "Default hold duration (days)")} help={L("تقترحها نافذة «إيقاف البيع»؛ فارغة = 14 يومًا.", "Proposed by the «Hold sales» dialog; empty = 14 days.")}>
-          <input className="hr-input" dir="ltr" inputMode="numeric" value={f.defaultHoldDays} onChange={set("defaultHoldDays")} data-testid="details-hold-days" />
+          <input className="hr-input" dir="ltr" inputMode="numeric" value={f.defaultHoldDays} onChange={set("defaultHoldDays")} disabled={!canCredit} data-testid="details-hold-days" />
         </Field>
         <label className="cu-check is-wide">
           <input type="checkbox" checked={f.whatsappOptOut} onChange={set("whatsappOptOut")} />

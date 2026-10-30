@@ -15,6 +15,11 @@ import {
   currencyLabel, dayCount, dayUnit, daysFromToday, dueText, money2, relativeDays, shortDate, whole,
 } from "@/components/d21/format";
 import { CollectionsPanel, type CollectionRow, type Summary } from "./CollectionsPanel";
+import {
+  NeedsBlock, NeedsDialog, SkipSamplesDialog, LostReasonCodeSelect, actionLabel,
+} from "./PipelinePanels";
+import { stagePrimaryAction, type StageAction } from "@/lib/services/sales/stage-actions";
+import { parseSampleSkip, type StagePurpose } from "@/lib/services/sales/stages";
 
 /**
  * Deal detail — built to the approved frame `crm-deal` (Figma `176:1032` / `177:1168`;
@@ -35,15 +40,23 @@ type Deal = {
   title: string;
   outcome: "OPEN" | "WON" | "LOST";
   lostReason: string | null;
+  lostReasonCode?: string | null;
   closedAt: string | null;
+  /** «تحليل الاحتياج» (20261204100000_pipeline_qualification). */
+  businessType: string | null;
+  needSummary: string | null;
+  expectedMonthlyKg: string | null;
+  agreedNextStep: string | null;
   amount: string;
   currency: string;
   probability: number;
   expectedCloseAt: string | null;
   nextFollowUpAt: string | null;
   createdAt: string;
-  stage: { id: string; code: string; nameEn: string; nameAr: string; probability: number };
+  stage: { id: string; code: string; nameEn: string; nameAr: string; probability: number; purpose?: StagePurpose | null };
   customer: { id: string; name: string; nameAr: string | null; phone: string | null; email: string | null } | null;
+  /** The customer file's balance figure (services/customers/balance.ts). */
+  customerBalance?: { outstanding: string; documents: number; ar: { outstanding: string } | null } | null;
   owner: { id: string; name: string } | null;
   owners: { id: string; sharePercent: string; effectiveFrom: string; employee: { id: string; name: string } }[];
   conversion: { leadId: string; convertedAt: string; convertedById: string | null; lead: { companyName: string; contactName: string; phone: string | null; source: string } } | null;
@@ -52,10 +65,16 @@ type Deal = {
     validUntil: string | null; grandTotal: string; taxTotal: string; issuedAt: string | null; acceptedAt: string | null;
     lines: { taxRatePercent: string }[];
     _count: { lines: number; orderLinks: number };
+    /** The discount-approval state, as the quotation screens compute it. */
+    discountApproval?: "NOT_NEEDED" | "PENDING" | "APPROVED" | "REJECTED";
   }[];
   samples: {
     id: string; description: string | null; quantity: string; unit: string; status: string;
     sentAt: string | null; feedbackScore: number | null; feedbackNotes: string | null;
+    /** Issued from finished stock by dispatch (a product in units); false = record-only, moves no stock. */
+    fromStock?: boolean; issuedAt?: string | null;
+    /** «للعميل من كل محصول عيّنة واحدة»: a second sample of the product and the manager's decision on it. */
+    approval?: "NOT_NEEDED" | "PENDING" | "APPROVED" | "DECLINED"; approvalNote?: string | null;
     productSku: { id: string; skuCode: string; name: string | null } | null;
   }[];
   activities: {
@@ -74,21 +93,33 @@ type Deal = {
   }[];
 };
 
-type Stage = { id: string; code: string; nameEn: string; nameAr: string; position: number; probability: number; isActive: boolean };
+type Stage = { id: string; code: string; nameEn: string; nameAr: string; position: number; probability: number; isActive: boolean; purpose?: StagePurpose | null };
 
 type Can = {
   write: boolean; close: boolean; reopen: boolean; quote: boolean;
   approveDiscount: boolean; assign: boolean; createOrder: boolean;
+  /** Approves a customer's second sample of a product (sales manager / admin). */
+  approveSample?: boolean;
   submitCollection?: boolean; verifyCollection?: boolean;
   rejectCollection?: boolean; reverseCollection?: boolean;
 };
 
 
+// A stock sample (docs/sales/SAMPLES_INVENTORY.md) reads requested → being prepared → sent: the rep asks, the
+// dispatch department prepares and issues it from stock. A record-only sample keeps «قيد التحضير» → «أُرسلت».
 const SAMPLE_LABELS: Record<string, { en: string; ar: string }> = {
+  REQUESTED: { en: "Requested · awaiting dispatch", ar: "مطلوبة · بانتظار الشحن" },
   PREPARING: { en: "Preparing", ar: "قيد التحضير" },
   SENT: { en: "Sent", ar: "أُرسلت" },
   FEEDBACK_RECEIVED: { en: "Feedback received", ar: "وصل التقييم" },
   CANCELLED: { en: "Cancelled", ar: "ملغاة" },
+};
+// A customer's second sample of a product waits for the sales manager (owner decision «للعميل من كل محصول عيّنة واحدة»):
+// shown instead of the status while it waits, and beside it once decided.
+const SAMPLE_APPROVAL_LABELS: Record<string, { en: string; ar: string }> = {
+  PENDING: { en: "Awaiting the manager's approval", ar: "بانتظار موافقة المدير" },
+  APPROVED: { en: "second sample · approved by the manager", ar: "عيّنة ثانية · وافق عليها المدير" },
+  DECLINED: { en: "declined by the manager", ar: "رفضها المدير" },
 };
 
 /** Same wording as the lead page's outcome list (`leads/[id]/page.tsx`). */
@@ -107,6 +138,7 @@ const OUTCOME_LABELS: Record<string, { en: string; ar: string }> = {
 
 const UNIT_LABELS: Record<string, { en: string; ar: string }> = {
   KG: { en: "kg", ar: "كغ" }, G: { en: "g", ar: "غ" }, PCS: { en: "pcs", ar: "قطعة" },
+  GRAM: { en: "g", ar: "غ" }, UNIT: { en: "units", ar: "عبوة" },
 };
 
 const ACTIVITY_LABELS: Record<string, { en: string; ar: string }> = {
@@ -139,7 +171,15 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   const [success, setSuccess] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const [dialog, setDialog] = useState<"activity" | "sample" | "close" | "edit" | "splits" | null>(null);
+  const [dialog, setDialog] = useState<"activity" | "sample" | "close" | "edit" | "splits" | "needs" | "skip" | null>(null);
+  // The sample whose customer evaluation is being recorded («تسجيل النتيجة»).
+  const [feedbackFor, setFeedbackFor] = useState<Deal["samples"][number] | null>(null);
+  // «للعميل من كل محصول عيّنة واحدة»: the coffee products this customer already had a sample of (the dialog warns),
+  // and the second sample a manager is declining (the reason is asked for).
+  const [sampledProducts, setSampledProducts] = useState<string[]>([]);
+  const [declineFor, setDeclineFor] = useState<Deal["samples"][number] | null>(null);
+  // The stage a refused move was headed for (409 SAMPLE_SKIP_REASON_REQUIRED), set with the skip dialog.
+  const [skipTarget, setSkipTarget] = useState<{ id: string; nameAr: string; nameEn: string } | null>(null);
   // The timeline used to stop at twenty with no sign that there were more (IMD-04).
   const [allEntries, setAllEntries] = useState(false);
   // Phone (below 768): the 390 frame `178:1285`, with its «⋯» menu in the sticky bar.
@@ -160,10 +200,12 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
         deal: Deal; stages: Stage[]; actors: Record<string, string>; can: Can;
         collections: CollectionRow[]; collectionSummary: Summary;
         collectionAction: { available: boolean; reason: string };
+        sampledProductIds?: string[];
       }>(`/api/sales/opportunities/${id}`);
       if (cancelled) return;
       if (res.ok) {
         setDeal(res.data.deal);
+        setSampledProducts(res.data.sampledProductIds ?? []);
         setStages(res.data.stages);
         setActors(res.data.actors ?? {});
         setCan(res.data.can);
@@ -204,8 +246,16 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
     if (busy) return;
     setBusy(true);
     setError("");
-    const res = await api(`/api/sales/opportunities/${id}/transition`, { method: "POST", body });
+    const res = await api<{ code?: string }>(`/api/sales/opportunities/${id}/transition`, { method: "POST", body });
     setBusy(false);
+    // Moving past Sample Evaluation with no sample: the server asks for the reason — ask for it
+    // here, then send the same move again with `skipReason`.
+    if (!res.ok && res.data.code === "SAMPLE_SKIP_REASON_REQUIRED" && typeof body.toStageId === "string") {
+      const target = stages.find((s) => s.id === body.toStageId);
+      setSkipTarget(target ? { id: target.id, nameAr: target.nameAr, nameEn: target.nameEn } : { id: body.toStageId, nameAr: "", nameEn: "" });
+      setDialog("skip");
+      return false;
+    }
     if (!res.ok) {
       setError(res.data.error ?? (ar ? "تعذّر التنفيذ." : "Could not do that."));
       return false;
@@ -273,16 +323,79 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   // privilege, a linked customer and an accepted quotation. The stage plays no part — reaching
   // the last stage does not make a deal winnable, and these rules are not changed here.
   const winnable = open && can.close && !!deal.customer && !!acceptedQuote;
-  let primary: React.ReactNode = null;
-  if (winnable) primary = winButton(true);
-  else if (open && can.write && nextStage) {
-    primary = (
-      <button type="button" className="btn p" data-testid="next-stage" disabled={busy}
-        onClick={() => transition({ toStageId: nextStage.id }, ar ? `نُقلت إلى ${nextStage.nameAr}.` : `Moved to ${nextStage.nameEn}.`)}>
-        {ar ? `التالي: ${nextStage.nameAr}` : `Next: ${nextStage.nameEn}`}
-      </button>
-    );
+  const nextButton = (isPrimary: boolean) => nextStage ? (
+    <button type="button" className={`btn${isPrimary ? " p" : ""}`} data-testid="next-stage" disabled={busy}
+      onClick={() => transition({ toStageId: nextStage.id }, ar ? `نُقلت إلى ${nextStage.nameAr}.` : `Moved to ${nextStage.nameEn}.`)}>
+      {ar ? `التالي: ${nextStage.nameAr}` : `Next: ${nextStage.nameEn}`}
+    </button>
+  ) : null;
+
+  // ── The stage's one job (docs/sales/PIPELINE_STAGES.md; `stagePrimaryAction`): record the needs,
+  //    the sample and its evaluation (or skip it, with a reason), the quotation, the negotiation,
+  //    the win or the loss. Moving on stays available beside it, quieter, and on the tracker.
+  const stageAction = stagePrimaryAction(deal.stage.purpose ?? stages.find((s) => s.id === deal.stage.id)?.purpose ?? null, {
+    outcome: deal.outcome, hasCustomer: !!deal.customer, hasNextStage: !!nextStage,
+    businessType: deal.businessType, needSummary: deal.needSummary, agreedNextStep: deal.agreedNextStep,
+    samples: deal.samples, quotes: deal.quotes.map((q) => ({ id: q.id, status: q.status, discountPending: q.discountApproval === "PENDING" })),
+  });
+  const allowed = (k: StageAction["key"]) =>
+    k === "WIN" ? winnable
+      : k === "DOCUMENT_LOSS" ? open && can.close
+        : k === "CREATE_QUOTE" || k === "REQUEST_APPROVAL" ? open && can.quote
+          : k === "FOLLOW_QUOTE" ? open
+            : k === "ADVANCE" ? open && can.write && !!nextStage
+              : open && can.write;
+  async function runAction(a: StageAction) {
+    switch (a.key) {
+      case "RECORD_NEEDS": setDialog("needs"); return;
+      case "RECORD_SAMPLE": setDialog("sample"); return;
+      // The samples section's own «تسجيل النتيجة» dialog — one way to record an evaluation.
+      case "RECORD_SAMPLE_EVALUATION": { const s = deal?.samples.find((x) => x.id === a.sampleId); if (s) setFeedbackFor(s); return; }
+      case "SKIP_SAMPLES":
+        if (nextStage) { setSkipTarget({ id: nextStage.id, nameAr: nextStage.nameAr, nameEn: nextStage.nameEn }); setDialog("skip"); }
+        return;
+      case "SEND_SAMPLE": {
+        setBusy(true);
+        const res = await api(`/api/sales/samples/${a.sampleId}`, { method: "PATCH", body: { status: "SENT" } });
+        setBusy(false);
+        if (res.ok) { setSuccess(ar ? "عُلّمت العيّنة مُرسلة." : "Sample marked sent."); reload(); } else setError(res.data.error ?? "");
+        return;
+      }
+      case "RECORD_NEGOTIATION": setDialog("activity"); return;
+      case "DOCUMENT_LOSS": setDialog("close"); return;
+      case "WIN": transition({ toOutcome: "WON" }, ar ? "سُجّلت الصفقة رابحة." : "Deal marked won."); return;
+      case "ADVANCE":
+        if (nextStage) transition({ toStageId: nextStage.id }, ar ? `نُقلت إلى ${nextStage.nameAr}.` : `Moved to ${nextStage.nameEn}.`);
+        return;
+      default: return; // the quotation actions are links (below)
+    }
   }
+  const actionHref = (a: StageAction) =>
+    a.key === "CREATE_QUOTE" ? `/dashboard/sales/quotes/new?opportunityId=${deal.id}`
+      : (a.key === "FOLLOW_QUOTE" || a.key === "REQUEST_APPROVAL") && a.quoteId ? `/dashboard/sales/quotes/${a.quoteId}` : null;
+  const actionControl = (a: StageAction, isPrimary: boolean) => {
+    if (!allowed(a.key)) return null;
+    if (a.key === "ADVANCE") return nextButton(isPrimary);
+    if (a.key === "WIN") return winButton(isPrimary);
+    const text = actionLabel(a, ar, nextStage ? (ar ? nextStage.nameAr : nextStage.nameEn) : undefined);
+    const href = actionHref(a);
+    const testId = `stage-action-${a.key.toLowerCase().replace(/_/g, "-")}`;
+    return href
+      ? <Link key={a.key} className={`btn${isPrimary ? " p" : ""}`} href={href} data-testid={testId}>{text}</Link>
+      : <button key={a.key} type="button" className={`btn${isPrimary ? " p" : " g"}`} data-testid={testId} disabled={busy} onClick={() => runAction(a)}>{text}</button>;
+  };
+  const primaryControl = stageAction ? actionControl(stageAction, true) : null;
+  const secondaryControl = stageAction?.secondary
+    ? actionControl({ key: stageAction.secondary, quoteId: stageAction.quoteId }, false) : null;
+  let primary: React.ReactNode = null;
+  if (primaryControl) {
+    // The stage's job leads; «التالي» stays beside it (quiet) unless the job IS moving on.
+    primary = <>{secondaryControl}{stageAction?.key !== "ADVANCE" && stageAction?.key !== "WIN" && open && can.write && stageAction?.key !== "SKIP_SAMPLES" && stageAction?.secondary !== "SKIP_SAMPLES" ? nextButton(false) : null}{primaryControl}</>;
+  } else if (winnable) primary = winButton(true);
+  else if (open && can.write && nextStage) primary = nextButton(true);
+  // The documented skip, if this deal skipped its samples: shown with the needs, not lost in the history.
+  const skipEvent = deal.stageEvents.find((e) => parseSampleSkip(e.reason));
+  const skippedBecause = skipEvent ? parseSampleSkip(skipEvent.reason) : null;
 
   // ── The activity timeline: what happened on the deal, newest first — activities, samples
   //    sent, quotations issued and accepted, stage and outcome changes, the conversion.
@@ -386,8 +499,37 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   });
   const visible = allEntries ? entries : entries.slice(0, 20);
 
-  // The «mark sent» column exists only while a sample is still being prepared.
-  const canSend = can.write && deal.samples.some((x) => x.status === "PREPARING");
+  // The action column exists only while some sample has a next step for the rep: a record-only sample being
+  // prepared («mark sent»), a stock request not yet issued («cancel request»), or a sent sample whose result is
+  // still to be recorded («record result»). Sending a stock sample is dispatch's issue, never a button here.
+  const sampleAction = (x: Deal["samples"][number]) =>
+    !x.fromStock && x.status === "PREPARING" ? "send"
+      : x.fromStock && (x.status === "REQUESTED" || x.status === "PREPARING") ? "cancel"
+      : x.status === "SENT" ? "result" : null;
+  // A second sample waiting for the manager: the manager (lead_assign / admin) approves or declines it right here.
+  const awaitsManager = (x: Deal["samples"][number]) => x.approval === "PENDING" && x.status === "REQUESTED";
+  const canSend = (can.write && deal.samples.some((x) => sampleAction(x) !== null))
+    || (!!can.approveSample && deal.samples.some(awaitsManager));
+  const patchSample = async (sid: string, body: Record<string, unknown>) => {
+    setBusy(true);
+    const res = await api<{ error?: string; errorEn?: string }>(`/api/sales/samples/${sid}`, { method: "PATCH", body });
+    setBusy(false);
+    if (res.ok) reload(); else setError((ar ? res.data.error : res.data.errorEn ?? res.data.error) ?? "");
+    return res.ok;
+  };
+  // The manager's decision (POST /api/sales/samples/[id]/approval), recorded on the request.
+  const decideSample = async (sid: string, decision: "APPROVE" | "DECLINE", note?: string) => {
+    setBusy(true);
+    const res = await api<{ error?: string; errorEn?: string }>(`/api/sales/samples/${sid}/approval`, { method: "POST", body: { decision, note } });
+    setBusy(false);
+    if (res.ok) {
+      setSuccess(decision === "APPROVE"
+        ? (ar ? "وافقت على العيّنة الثانية؛ وصل الطلب إلى قسم الشحن." : "Second sample approved; the request has gone to dispatch.")
+        : (ar ? "رُفضت العيّنة الثانية وأُلغي طلبها." : "Second sample declined; its request is cancelled."));
+      reload();
+    } else setError((ar ? res.data.error : res.data.errorEn ?? res.data.error) ?? "");
+    return res.ok;
+  };
 
   // Collections: under the quotations once there is something to collect against; before
   // that only the panel's reason («no accepted quotation yet») is useful, so it waits at the
@@ -417,7 +559,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
         <h2 className="bt">{ar ? "العيّنات" : "Samples"}</h2>
         {can.write && open && (
           <button type="button" className="lk" data-testid="add-sample" onClick={() => setDialog("sample")}>
-            <Ico name="plus" small />{ar ? "عيّنة" : "Sample"}
+            <Ico name="plus" small />{ar ? "طلب عيّنة" : "Request sample"}
           </button>
         )}
       </div>
@@ -428,24 +570,55 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
           <table className="t dense"><tbody>
             {deal.samples.map((s) => (
               <tr key={s.id} data-testid={`sample-${s.id}`}>
-                <td><span className="who">{s.productSku?.name ?? s.productSku?.skuCode ?? s.description}</span>
-                  {s.description && s.productSku && <span className="sm"> · {s.description}</span>}</td>
+                <td style={{ whiteSpace: "normal", minWidth: 160 }}><span className="who">{s.productSku?.name ?? s.productSku?.skuCode ?? s.description}</span>
+                  {s.description && s.productSku && <span className="sm"> · {s.description}</span>}
+                  {/* Which kind it is, said plainly: only a stock sample ever leaves the shelf. */}
+                  <span className="sm" data-testid={`sample-kind-${s.id}`}> · {s.fromStock
+                    ? (ar ? "من المخزون" : "from stock")
+                    : (ar ? "للتسجيل فقط · لا يُصرف من المخزون" : "record only · no stock movement")}</span></td>
                 <td className="num">{qty(s.quantity, s.unit)}</td>
-                <td><span className={`st ${SAMPLE_ST[s.status] ?? ""}`}>{pick(SAMPLE_LABELS, s.status, lang)}</span></td>
-                <td className="sm">
+                <td><span className={`st ${awaitsManager(s) ? "" : SAMPLE_ST[s.status] ?? ""}`} data-testid={`sample-status-${s.id}`}>
+                  {awaitsManager(s) ? pick(SAMPLE_APPROVAL_LABELS, "PENDING", lang) : pick(SAMPLE_LABELS, s.status, lang)}</span></td>
+                <td className="sm" style={{ whiteSpace: "normal", maxWidth: 240 }}>
                   {s.sentAt ? shortDate(s.sentAt, lang) : ""}
                   {s.feedbackScore !== null && <> · {ar ? "التقييم" : "score"} {s.feedbackScore}/5</>}
+                  {/* A second sample of the product: the manager's decision, and the reason of a decline. */}
+                  {(s.approval === "APPROVED" || s.approval === "DECLINED") && (
+                    <span data-testid={`sample-approval-${s.id}`}>{s.sentAt || s.feedbackScore !== null ? " · " : ""}{pick(SAMPLE_APPROVAL_LABELS, s.approval, lang)}
+                      {/* A long reason wraps, clamped to two lines (full text on hover), so the action buttons stay in view (I-45). */}
+                      {s.approval === "DECLINED" && s.approvalNote && <>: <bdi data-testid={`sample-approval-note-${s.id}`} title={s.approvalNote}
+                        style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", overflowWrap: "anywhere" }}>{s.approvalNote}</bdi></>}</span>
+                  )}
                 </td>
                 {canSend && <td style={{ textAlign: "end" }}>
-                  {s.status === "PREPARING" && can.write && (
+                  {can.approveSample && awaitsManager(s) && (
+                    <>
+                      <button type="button" className="btn sm" data-testid={`approve-sample-${s.id}`} disabled={busy}
+                        onClick={() => decideSample(s.id, "APPROVE")}>
+                        {ar ? "موافقة" : "Approve"}
+                      </button>{" "}
+                      <button type="button" className="btn sm" data-testid={`decline-sample-${s.id}`} disabled={busy}
+                        onClick={() => setDeclineFor(s)}>
+                        {ar ? "رفض" : "Decline"}
+                      </button>{" "}
+                    </>
+                  )}
+                  {can.write && sampleAction(s) === "send" && (
                     <button type="button" className="btn sm" data-testid={`send-sample-${s.id}`} disabled={busy}
-                      onClick={async () => {
-                        setBusy(true);
-                        const res = await api(`/api/sales/samples/${s.id}`, { method: "PATCH", body: { status: "SENT" } });
-                        setBusy(false);
-                        if (res.ok) reload(); else setError(res.data.error ?? "");
-                      }}>
+                      onClick={() => patchSample(s.id, { status: "SENT" })}>
                       {ar ? "تعليم مُرسلة" : "Mark sent"}
+                    </button>
+                  )}
+                  {can.write && sampleAction(s) === "cancel" && (
+                    <button type="button" className="btn sm" data-testid={`cancel-sample-${s.id}`} disabled={busy}
+                      onClick={() => patchSample(s.id, { status: "CANCELLED" })}>
+                      {ar ? "إلغاء الطلب" : "Cancel request"}
+                    </button>
+                  )}
+                  {can.write && sampleAction(s) === "result" && (
+                    <button type="button" className="btn sm" data-testid={`result-sample-${s.id}`} disabled={busy}
+                      onClick={() => setFeedbackFor(s)}>
+                      {ar ? "تسجيل النتيجة" : "Record result"}
                     </button>
                   )}
                 </td>}
@@ -517,7 +690,15 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
           {/* CRM.md backend dependencies: no customer AR balance, open-order query or
               contacts relation exists yet, so these say so rather than show a figure. */}
           <dl className="props" style={{ marginBottom: 24 }}>
-            <dt>{ar ? "الرصيد المستحق" : "Balance due"}</dt><dd>{notYet}</dd>
+            {/* The customer file's figure (release item I-44): the balance owed from receivables once invoiced,
+                else the accepted quotations not yet invoiced or paid — labelled as such, as on the customer file. */}
+            {deal.customerBalance?.ar ? (
+              <><dt>{ar ? "الرصيد المستحق" : "Balance due"}</dt><dd data-testid="deal-customer-balance"><span className="n">{whole(deal.customerBalance.ar.outstanding)}</span> {ar ? "ر.س" : "SAR"}</dd></>
+            ) : deal.customerBalance ? (
+              <><dt>{ar ? "عروض مقبولة لم تُفوتر" : "Accepted, not invoiced"}</dt><dd data-testid="deal-customer-balance"><span className="n">{whole(deal.customerBalance.outstanding)}</span> {ar ? "ر.س" : "SAR"}</dd></>
+            ) : (
+              <><dt>{ar ? "الرصيد المستحق" : "Balance due"}</dt><dd>{notYet}</dd></>
+            )}
             <dt>{ar ? "طلب مفتوح" : "Open order"}</dt><dd>{notYet}</dd>
             {/* The contact is the person on the lead this deal came from. Without one, the
                 customer's own phone is shown under its own name, not passed off as a person. */}
@@ -603,7 +784,17 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
     <>
   {dialog === "close" && (
     <LostDialog ar={ar} busy={busy} onClose={() => setDialog(null)}
-      onSubmit={(reason) => transition({ toOutcome: "LOST", lostReason: reason }, ar ? "سُجّلت الصفقة خاسرة." : "Deal marked lost.")} />
+      onSubmit={(reason, code) => transition({ toOutcome: "LOST", lostReason: reason, ...(code ? { lostReasonCode: code } : {}) }, ar ? "سُجّلت الصفقة خاسرة." : "Deal marked lost.")} />
+  )}
+  {dialog === "needs" && (
+    <NeedsDialog ar={ar} dealId={deal.id} needs={deal} onClose={() => setDialog(null)}
+      onDone={() => { setDialog(null); setSuccess(ar ? "حُفظ تحليل الاحتياج." : "Needs saved."); reload(); }} />
+  )}
+  {dialog === "skip" && skipTarget && (
+    <SkipSamplesDialog ar={ar} busy={busy} targetName={ar ? skipTarget.nameAr : skipTarget.nameEn}
+      onClose={() => { setDialog(null); setSkipTarget(null); }}
+      onSubmit={(reason) => transition({ toStageId: skipTarget.id, skipReason: reason },
+        ar ? `تُخطّيت العيّنات ونُقلت إلى ${skipTarget.nameAr}.` : `Samples skipped; moved to ${skipTarget.nameEn}.`)} />
   )}
   {dialog === "activity" && (
     <ActivityDialog ar={ar} opportunityId={deal.id} onClose={() => setDialog(null)}
@@ -611,7 +802,32 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   )}
   {dialog === "sample" && (
     <SampleDialog ar={ar} opportunityId={deal.id} onClose={() => setDialog(null)}
-      onDone={() => { setDialog(null); setSuccess(ar ? "سُجّلت العيّنة." : "Sample recorded."); reload(); }} />
+      sampledProductIds={sampledProducts} manager={!!can.approveSample}
+      onDone={(requested, replayed, approval) => {
+        setDialog(null);
+        setSuccess(replayed
+          ? (ar ? "هذا الطلب مُسجّل مسبقًا؛ لم يُكرَّر." : "This request was already recorded; it was not duplicated.")
+          : approval === "PENDING"
+          // A rep's second sample of the product: recorded, but it waits for the manager before dispatch sees it.
+          ? (ar ? "سُجّل طلب العيّنة الثانية وهو بانتظار موافقة المدير؛ لن يصل إلى قسم الشحن قبل موافقته." : "Second-sample request recorded; it awaits the sales manager's approval and reaches dispatch only once approved.")
+          : approval === "APPROVED"
+          ? (ar ? "سُجّلت موافقتك على العيّنة الثانية وأُرسل الطلب إلى قسم الشحن. لم يتحرك المخزون بعد." : "Your approval of the second sample is recorded and the request has gone to dispatch. No stock has moved yet.")
+          : requested
+          ? (ar ? "أُرسل طلب العيّنة إلى قسم الشحن. لم يتحرك المخزون بعد." : "Sample requested from dispatch. No stock has moved yet.")
+          : (ar ? "سُجّلت العيّنة." : "Sample recorded."));
+        reload();
+      }} />
+  )}
+  {feedbackFor && (
+    <FeedbackDialog ar={ar} sample={feedbackFor} busy={busy} onClose={() => setFeedbackFor(null)}
+      onSubmit={async (score, notes) => {
+        const ok = await patchSample(feedbackFor.id, { status: "FEEDBACK_RECEIVED", feedbackScore: score, feedbackNotes: notes });
+        if (ok) { setFeedbackFor(null); setSuccess(ar ? "سُجّلت نتيجة العيّنة." : "Sample result recorded."); }
+      }} />
+  )}
+  {declineFor && (
+    <DeclineSampleDialog ar={ar} busy={busy} onClose={() => setDeclineFor(null)}
+      onSubmit={async (reason) => { if (await decideSample(declineFor.id, "DECLINE", reason)) setDeclineFor(null); }} />
   )}
   {dialog === "edit" && (
     <EditDialog ar={ar} deal={deal} onClose={() => setDialog(null)}
@@ -639,6 +855,15 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
     // does not complete the open follow-up; that stays «إكمال» in the next-step band. Moving
     // the deal on («التالي») and marking it won keep their permissions, under «⋯».
     const moreItems: React.ReactNode[] = [];
+    // The stage's job (`stagePrimaryAction`) heads the menu; moving on and winning follow as before.
+    if (stageAction && stageAction.key !== "ADVANCE" && stageAction.key !== "WIN" && allowed(stageAction.key)) {
+      const href = actionHref(stageAction);
+      const text = actionLabel(stageAction, ar);
+      moreItems.push(href
+        ? <Link key="stage-action" role="menuitem" href={href} data-testid="stage-action">{text}</Link>
+        : <button key="stage-action" type="button" role="menuitem" data-testid="stage-action" disabled={busy}
+            onClick={() => { setMore(false); runAction(stageAction); }}>{text}</button>);
+    }
     if (open && can.write && nextStage) moreItems.push(
       <button key="next" type="button" role="menuitem" data-testid="next-stage" disabled={busy}
         onClick={() => { setMore(false); transition({ toStageId: nextStage.id }, ar ? `نُقلت إلى ${nextStage.nameAr}.` : `Moved to ${nextStage.nameEn}.`); }}>
@@ -894,6 +1119,14 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       </ol>
       </div>
 
+      {/* «تحليل الاحتياج» — a detail of the Qualified Opportunity stage, so it sits with the stage. */}
+      <NeedsBlock ar={ar} needs={deal} canEdit={open && can.write} onEdit={() => setDialog("needs")} />
+      {skippedBecause && (
+        <p className="sm" data-testid="samples-skipped" style={{ maxWidth: 628, margin: "-12px 0 22px", color: "var(--text-secondary)" }}>
+          <b style={{ fontWeight: 600 }}>{ar ? "تُخطّيت العيّنات:" : "Samples skipped:"}</b> <bdi>{skippedBecause}</bdi>
+        </p>
+      )}
+
       {/* The next step (reference: red tint when it is overdue). Closed deals show why instead. */}
       {open ? (
         <div data-testid="next-step" className={`callout${lateBy ? " er" : ""}`} style={{ marginBottom: 32 }}>
@@ -998,9 +1231,13 @@ const SAMPLE_ST: Record<string, string> = { SENT: "in", FEEDBACK_RECEIVED: "ok",
 function LostDialog({
   ar, busy, onClose, onSubmit,
 }: {
-  ar: boolean; busy: boolean; onClose: () => void; onSubmit: (reason: string) => void;
+  ar: boolean; busy: boolean; onClose: () => void; onSubmit: (reason: string, code: string | null) => void;
 }) {
   const [reason, setReason] = useState("");
+  // The coded reason (20261204100000_pipeline_qualification): optional; a code other than «other»
+  // is a reason on its own, «other» needs the text.
+  const [code, setCode] = useState("");
+  const enough = reason.trim().length >= 2 || (!!code && code !== "OTHER");
   return (
     <Modal
       title={ar ? "تسجيل خسارة الصفقة" : "Mark the deal lost"}
@@ -1009,16 +1246,17 @@ function LostDialog({
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>{ar ? "إلغاء" : "Cancel"}</Button>
-          <Button variant="danger" disabled={busy || reason.trim().length < 2} onClick={() => onSubmit(reason)} testId="confirm-lost">
+          <Button variant="danger" disabled={busy || !enough} onClick={() => onSubmit(reason, code || null)} testId="confirm-lost">
             {ar ? "تأكيد الخسارة" : "Confirm lost"}
           </Button>
         </>
       }
     >
+      <LostReasonCodeSelect ar={ar} value={code} onChange={setCode} />
       <Field
         id="lost-reason"
         label={ar ? "السبب" : "Reason"}
-        required
+        required={!code || code === "OTHER"}
         hint={
           ar
             ? "مطلوب. مسار مليء بصفقات خاسرة بلا أسباب لا يُعلّم أحداً شيئاً."
@@ -1133,57 +1371,98 @@ function ActivityDialog({
   );
 }
 
+/**
+ * «طلب عيّنة». The rep's whole job is: pick the product, say how many bags, send the request. A product in units is a
+ * STOCK sample — it goes to the dispatch queue as REQUESTED and leaves the shelf only when dispatch issues it, so there
+ * is no status to choose. Free text or kilograms / grams stay what they always were: a record-only sample with no
+ * stock movement, still allowed (and labelled as such) for the coffee that does not come out of a packed bag.
+ */
 function SampleDialog({
-  ar, opportunityId, onClose, onDone,
+  ar, opportunityId, sampledProductIds, manager, onClose, onDone,
 }: {
-  ar: boolean; opportunityId: string; onClose: () => void; onDone: () => void;
+  ar: boolean; opportunityId: string;
+  /** The coffee products this customer already had a sample of («للعميل من كل محصول عيّنة واحدة»). */
+  sampledProductIds: string[];
+  /** A sales manager / admin: a second sample is recorded with their own approval. */
+  manager: boolean;
+  onClose: () => void; onDone: (requested: boolean, replayed: boolean, approval?: string) => void;
 }) {
-  const [skus, setSkus] = useState<{ id: string; skuCode: string; name: string | null }[]>([]);
+  const [skus, setSkus] = useState<{ id: string; skuCode: string; name: string | null; coffee?: { id: string } | null }[]>([]);
   const [productSkuId, setProductSkuId] = useState("");
   const [description, setDescription] = useState("");
-  const [quantity, setQuantity] = useState("0.25");
-  const [unit, setUnit] = useState("KG");
+  const [quantity, setQuantity] = useState("1");
+  const [unit, setUnit] = useState("UNIT");
   const [status, setStatus] = useState("PREPARING");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  // One key per opening of the dialog: a double click or a retry after a lost answer is the same request, and the
+  // server answers it with the request it already recorded (`replayed`) instead of a second one.
+  const [requestKey] = useState(() => `smp-${typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`);
+  // A product is always counted in units (the server refuses a product in KG / GRAM); free text keeps any unit.
+  const unitShown = productSkuId ? "UNIT" : unit;
+  // Same rule as the server (sample-rules.ts isStockSample): a product counted in units is issued from stock.
+  const fromStock = !!productSkuId && unitShown === "UNIT";
+  // Owner decision «للعميل من كل محصول عيّنة واحدة»: a stock sample is one unit (the server refuses more).
+  const wholeOk = !fromStock || quantity.trim() === "1";
+  // The same coffee through any of its SKUs counts (ProductSKU.productId): a second one waits for the manager.
+  const productId = skus.find((s) => s.id === productSkuId)?.coffee?.id ?? null;
+  const alreadySampled = fromStock && !!productId && sampledProductIds.includes(productId);
 
   useEffect(() => {
     // The catalogue endpoint answers with a bare array of SKUs, already filtered to the
-    // active ones.
-    api<{ id: string; skuCode: string; name: string | null }[]>("/api/products").then((r) => {
+    // active ones (each with its coffee product, `coffee.id`).
+    api<{ id: string; skuCode: string; name: string | null; coffee?: { id: string } | null }[]>("/api/products").then((r) => {
       if (r.ok && Array.isArray(r.data)) setSkus(r.data);
     });
   }, []);
 
   return (
     <Modal
-      title={ar ? "تسجيل عيّنة" : "Record a sample"}
+      title={ar ? "طلب عيّنة" : "Request a sample"}
       onClose={onClose}
       testId="sample-dialog"
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>{ar ? "إلغاء" : "Cancel"}</Button>
           <Button
-            disabled={busy || (!productSkuId && description.trim().length < 2) || Number(quantity) <= 0}
+            disabled={busy || (!productSkuId && description.trim().length < 2) || Number(quantity) <= 0 || !wholeOk}
             testId="save-sample"
             onClick={async () => {
               setBusy(true);
               setErr("");
-              const res = await api("/api/sales/samples", {
+              const res = await api<{ error?: string; errorEn?: string; replayed?: boolean; sample?: { approval?: string } }>("/api/sales/samples", {
                 method: "POST",
-                body: { opportunityId, productSkuId: productSkuId || null, description, quantity, unit, status },
+                body: {
+                  opportunityId, productSkuId: productSkuId || null, description, quantity, unit: unitShown,
+                  ...(fromStock ? { requestKey } : { status }),
+                },
               });
               setBusy(false);
-              if (res.ok) onDone();
-              else setErr(res.data.error ?? "");
+              // A replay (200, the request already recorded a moment ago) is a success: the same request, once.
+              if (res.ok) onDone(fromStock, res.data.replayed === true, res.data.sample?.approval);
+              else setErr((ar ? res.data.error : res.data.errorEn ?? res.data.error) ?? "");
             }}
           >
-            {ar ? "حفظ" : "Save"}
+            {alreadySampled && !manager
+              ? (ar ? "إرسال للموافقة" : "Send for approval")
+              : fromStock ? (ar ? "إرسال الطلب" : "Send request") : (ar ? "حفظ" : "Save")}
           </Button>
         </>
       }
     >
       {err && <Alert kind="error">{err}</Alert>}
+      {alreadySampled && (
+        <div data-testid="sample-second-warning">
+          <Alert kind="info">
+            {ar
+              ? "سبق إرسال عينة من هذا المحصول لهذا العميل؛ يحتاج طلب عينة ثانية موافقة المدير"
+              : "This customer has already had a sample of this product; a second sample needs the sales manager's approval"}
+            {manager
+              ? (ar ? " — ويُسجَّل طلبك بموافقتك." : " — your request records your own approval.")
+              : (ar ? " — يُرسل طلبك إلى المدير ولا يصل إلى قسم الشحن قبل موافقته." : " — your request goes to the manager and reaches dispatch only once approved.")}
+          </Alert>
+        </div>
+      )}
       <Field id="smp-sku" label={ar ? "المنتج" : "Product"}>
         <Select id="smp-sku" value={productSkuId} onChange={setProductSkuId}>
           <option value="">{ar ? "— وصف حر —" : "— free text —"}</option>
@@ -1198,29 +1477,103 @@ function SampleDialog({
         </Field>
       )}
       <div className="grid grid-cols-2 gap-3">
-        <Field id="smp-qty" label={ar ? "الكمية" : "Quantity"} required>
-          <TextInput id="smp-qty" value={quantity} onChange={setQuantity} inputMode="decimal" />
+        <Field id="smp-qty" label={ar ? "الكمية" : "Quantity"} required
+          error={wholeOk ? undefined : (ar ? "العيّنة وحدة واحدة من كل محصول" : "A sample is one unit of each product")}>
+          <TextInput id="smp-qty" value={quantity} onChange={setQuantity} inputMode={fromStock ? "numeric" : "decimal"} />
         </Field>
         <Field id="smp-unit" label={ar ? "الوحدة" : "Unit"}>
-          <Select id="smp-unit" value={unit} onChange={setUnit}>
-            <option value="KG">{ar ? "كجم" : "KG"}</option>
-            <option value="GRAM">{ar ? "غرام" : "GRAM"}</option>
+          <Select id="smp-unit" value={unitShown} onChange={setUnit}>
             <option value="UNIT">{ar ? "عبوة" : "UNIT"}</option>
+            {/* Kilograms / grams are for a free-text (record-only) sample; a product is always requested in bags. */}
+            <option value="KG" disabled={!!productSkuId}>{ar ? "كجم (للتسجيل فقط)" : "KG (record only)"}</option>
+            <option value="GRAM" disabled={!!productSkuId}>{ar ? "غرام (للتسجيل فقط)" : "GRAM (record only)"}</option>
           </Select>
         </Field>
       </div>
-      <Field id="smp-status" label={ar ? "الحالة" : "Status"}>
-        <Select id="smp-status" value={status} onChange={setStatus}>
-          <option value="PREPARING">{pick(SAMPLE_LABELS, "PREPARING", ar ? "ar" : "en")}</option>
-          <option value="SENT">{pick(SAMPLE_LABELS, "SENT", ar ? "ar" : "en")}</option>
+      {!fromStock && (
+        <Field id="smp-status" label={ar ? "الحالة" : "Status"}>
+          <Select id="smp-status" value={status} onChange={setStatus}>
+            <option value="PREPARING">{pick(SAMPLE_LABELS, "PREPARING", ar ? "ar" : "en")}</option>
+            <option value="SENT">{pick(SAMPLE_LABELS, "SENT", ar ? "ar" : "en")}</option>
+          </Select>
+        </Field>
+      )}
+      {/* It matters at the moment a sample is requested: what will (and will not) happen to the stock. */}
+      <p data-ui="field-hint" data-testid="sample-stock-hint">
+        {fromStock
+          ? (ar
+            ? "يصل الطلب إلى قسم الشحن. لا يُخصم شيء من المخزون الآن؛ يُخصم عند صرف العيّنة فقط، وترى حالتها هنا."
+            : "The request goes to dispatch. Nothing is deducted now; the stock leaves only when the sample is issued, and you see its status here.")
+          : (ar
+            ? "عيّنة للتسجيل فقط: لا تُحرّك المخزون. لصرفها من المخزون اختر منتجًا بالعبوة."
+            : "Record-only sample: it does not move stock. To have it issued from stock, pick a product (requested in units).")}
+      </p>
+    </Modal>
+  );
+}
+
+/** «تسجيل النتيجة»: what the customer thought of a sent sample — the existing score (1–5) and notes. */
+function FeedbackDialog({
+  ar, sample, busy, onClose, onSubmit,
+}: {
+  ar: boolean; sample: Deal["samples"][number]; busy: boolean; onClose: () => void;
+  onSubmit: (score: number, notes: string) => void;
+}) {
+  const [score, setScore] = useState("");
+  const [notes, setNotes] = useState(sample.feedbackNotes ?? "");
+  return (
+    <Modal
+      title={ar ? "نتيجة العيّنة" : "Sample result"}
+      onClose={onClose}
+      testId="sample-feedback-dialog"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>{ar ? "إلغاء" : "Cancel"}</Button>
+          <Button disabled={busy || !score} testId="save-sample-feedback" onClick={() => onSubmit(Number(score), notes)}>
+            {ar ? "حفظ" : "Save"}
+          </Button>
+        </>
+      }
+    >
+      <p data-ui="field-hint"><bdi>{sample.productSku?.name ?? sample.productSku?.skuCode ?? sample.description}</bdi></p>
+      <Field id="smp-score" label={ar ? "تقييم العميل" : "Customer's score"} required>
+        <Select id="smp-score" value={score} onChange={setScore}>
+          <option value="">{ar ? "— اختر —" : "— choose —"}</option>
+          {[5, 4, 3, 2, 1].map((n) => <option key={n} value={String(n)}>{n} / 5</option>)}
         </Select>
       </Field>
-      {/* Moved here from under the samples list: it matters at the moment a sample is recorded. */}
-      <p data-ui="field-hint">
-        {ar
-          ? "تسجيل العيّنة لا يُحرّك المخزون. اصرف البن من مسار المخزون والشحن المعتاد."
-          : "Recording a sample does not move stock. Issue the coffee through the normal inventory and dispatch path."}
-      </p>
+      <Field id="smp-notes" label={ar ? "ماذا قال العميل" : "What the customer said"}>
+        <TextArea id="smp-notes" value={notes} onChange={setNotes} rows={3} />
+      </Field>
+    </Modal>
+  );
+}
+
+/** The manager declines a customer's second sample of a product: the reason is required (the rep reads it). */
+function DeclineSampleDialog({
+  ar, busy, onClose, onSubmit,
+}: {
+  ar: boolean; busy: boolean; onClose: () => void; onSubmit: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+  return (
+    <Modal
+      title={ar ? "رفض العيّنة الثانية" : "Decline the second sample"}
+      onClose={onClose}
+      testId="sample-decline-dialog"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>{ar ? "إلغاء" : "Cancel"}</Button>
+          <Button disabled={busy || !reason.trim()} testId="confirm-sample-decline" onClick={() => onSubmit(reason.trim())}>
+            {ar ? "رفض الطلب" : "Decline request"}
+          </Button>
+        </>
+      }
+    >
+      <Field id="smp-decline" label={ar ? "سبب الرفض" : "Reason"} required>
+        <TextArea id="smp-decline" value={reason} onChange={setReason} rows={3} />
+      </Field>
+      <p data-ui="field-hint">{ar ? "يُلغى الطلب ولا يُحسب عيّنة للعميل." : "The request is cancelled and does not count as a sample for the customer."}</p>
     </Modal>
   );
 }

@@ -619,6 +619,16 @@ export async function reverseCollection(
     };
   }
   const accountant = row.source === "ACCOUNTANT";
+  // Separation of duties, the same rule as approve and reject: whoever recorded the collection
+  // does not undo it — a reversal moves their own commission. The screen hid the button
+  // (collectionDecisionAbility → SELF_SUBMITTED) while this service accepted the request, so a
+  // submitter holding `collection_reverse` could reverse their own receipt by calling the API.
+  // An accountant's receipt keeps the sole-confirmer exception (receipt-four-eyes.ts).
+  if (row.submittedById === input.actorId && !(accountant && (await receiptSelfConfirmAllowed(tx, input.actorId)))) {
+    throw accountant
+      ? bi("SOD_SELF_REVERSE", 403, "من سجّل سند القبض لا يعكسه؛ يعكسه شخص آخر.", "The person who recorded a receipt cannot reverse it. Ask another accountant.")
+      : bi("SOD_SELF_REVERSE", 403, "من سجّل التحصيل لا يعكسه؛ يعكسه شخص آخر من المالية.", "The person who recorded a collection cannot be the one who reverses it. Ask another member of Finance.");
+  }
   if (!row.collectionEventId && !accountant) {
     // The check constraint makes this unreachable; the guard is here so that if it ever
     // becomes reachable it fails loudly instead of silently skipping the correction.
@@ -633,6 +643,10 @@ export async function reverseCollection(
     });
   }
 
+  // The sole-confirmer exception on the way back (council gate S6a) is listed as RECEIPT_SELF_REVERSED by
+  // accounting/sod.ts from the row itself (reversedById = submittedById). The sodBypass flag is NOT written
+  // here: it records the CONFIRMATION, and the batch-22 trigger freezes it once decided (release gate N3) —
+  // writing it on a receipt another accountant confirmed would make the reversal fail.
   await tx.salesCollection.update({
     where: { id: row.id },
     data: {

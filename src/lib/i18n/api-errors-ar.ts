@@ -4,6 +4,19 @@
  * Keys are the English exactly as sent.
  */
 export const API_ERRORS_AR: Readonly<Record<string, string>> = {
+  // ── Sales CRM optimization (29 Oct 2026) ──
+  "Only a sales manager, a commission manager or the administrator changes the account owner.": "تغيير المسؤول عن الحساب لمدير المبيعات أو مدير العمولات أو المدير فقط.",
+  "Only credit control (customers › sales_hold) or the administrator changes the credit limit, terms or price list.": "تغيير حد الائتمان أو شروط الدفع أو قائمة الأسعار لمسؤول الائتمان أو المدير فقط.",
+  "The next step needs a date.": "الخطوة التالية تحتاج موعدًا.",
+  // Samples from stock — review fixes S2 / S3 (sample-rules.ts; the routes answer them bilingually already).
+  "A product sample is requested in units (whole bags). For a record-only sample in kilograms or grams, describe it without picking a product.": "عيّنة المنتج تُطلب بالعبوة (عدد صحيح). للتسجيل فقط بالكيلوغرام أو الغرام اكتب وصفًا حرًّا بلا منتج.",
+  "requestKey must be 8–128 characters.": "مفتاح الطلب غير صالح (من 8 إلى 128 حرفًا).",
+  "Recording a result needs the right to log activities.": "تسجيل النتيجة يحتاج صلاحية تسجيل الأنشطة.",
+  "activityId is required: the qualifying activity this completes.": "حدّد النشاط الذي يُستكمل تأهيله.",
+  "Activity not found on this lead.": "النشاط غير موجود على هذا العميل المحتمل.",
+  "That activity's outcome does not qualify a lead (interest, an appointment, or one held).": "نتيجة هذا النشاط لا تؤهّل العميل المحتمل (اهتمام أو موعد متفق عليه أو لقاء تم).",
+  "requireQualificationMinimum is true or false.": "قيمة «الحد الأدنى للتأهيل» نعم أو لا.",
+  "This deal has no sample and is moving past Sample Evaluation. Record a sample, or give the reason the customer does not need one.": "لا عيّنة على هذه الصفقة وهي تتجاوز مرحلة تقييم العيّنات. سجّل عيّنة، أو اذكر سبب عدم حاجة العميل إليها.",
   "lotScanRequired is true or false.": "قيمة «تأكيد الكيس بالمسح» نعم أو لا.",
   "locationId must be a string when it is given.": "موقع الشحن غير صالح.",
   "A MATERIAL component requires a materialItemId.": "مكوّن المادة يحتاج تحديد المادة.",
@@ -690,6 +703,10 @@ export const API_ERRORS_AR: Readonly<Record<string, string>> = {
   "You do not hold the duty required to decide this request.": "لا تحمل الصلاحية اللازمة للبت في هذا الطلب.",
   "zatcaTaxCategoryCode must be a string or null.": "رمز فئة ضريبة ZATCA يجب أن يكون نصًا أو فارغًا.",
   "Zero amount": "مبلغ صفري.",
+  // ── Year-end credit-note commission clawback (fix/commission-credit-clawback) ──
+  "year must be a four-digit calendar year.": "السنة يجب أن تكون سنة ميلادية من أربعة أرقام.",
+  "That year has not ended in Riyadh yet. The credit-note clawback runs once, after 31 December.": "هذه السنة لم تنتهِ بعد بتوقيت الرياض. يُشغَّل استرداد عمولة الإشعارات الدائنة مرة واحدة بعد 31 ديسمبر.",
+  "No open commission month was found to carry the credit-note clawback.": "لا يوجد شهر عمولة مفتوح يُخصم فيه استرداد عمولة الإشعار الدائن.",
   // ── Commission plan builder (feat/commission-builder) ──
   "The CSV is empty.": "ملف CSV فارغ.",
   "The CSV is larger than 2 MB.": "ملف CSV أكبر من 2 ميغابايت.",
@@ -936,5 +953,6 @@ export const API_ERROR_TEMPLATES_AR: ReadonlyArray<readonly [string, string]> = 
   ["WhatsApp is not connected (state: ${state.state}).", "واتساب غير متصل (الحالة: {0})."],
   // ── Commission plan builder (feat/commission-builder) ──
   ["Collection ${e.id} is in ${e.currency} but the plan pays in ${version.currency}. There is no exchange-rate policy configured, so this cannot be converted.", "التحصيل {0} بعملة {1} والخطة تدفع بـ {2}، ولا توجد سياسة صرف عملات."],
-  ["A stored plan version is not valid: ${problems[0]?.message ?? \"unknown\"}", "نسخة خطة محفوظة غير صالحة: {0}"],
+  ["A stored plan version is not valid: ${problems[0]?.message ?? \"unknown\"}", "نسخة خطة محفوظة غير صالحة: {0}"],  // ── Sales CRM optimization (29 Oct 2026) ──
+  ["This deal is ${existing.outcome.toLowerCase()}. Reopen it before editing its needs.", "الصفقة مغلقة ({0}). أعد فتحها قبل تعديل تحليل الاحتياج."],
 ];

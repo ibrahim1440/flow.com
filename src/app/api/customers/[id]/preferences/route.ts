@@ -1,16 +1,19 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
+import { customerInScope } from "@/lib/services/sales/customer-access";
 import { handlePrismaError } from "@/lib/api-error";
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { error } = await requireSub("customers", "manage");
+  const { user, error } = await requireSub("customers", "manage");
   if (error) return error;
 
   const { id: customerId } = await params;
+  // Council gate S1: a scoped sales rep changes only the customers in their own book (services/sales/scope.ts).
+  if (!(await customerInScope(user, customerId))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   try {
     const VALID_USAGE = ["ESPRESSO", "FILTER", "BOTH"];
     const body = await request.json() as {

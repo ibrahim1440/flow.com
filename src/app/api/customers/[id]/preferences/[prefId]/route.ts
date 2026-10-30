@@ -1,17 +1,23 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
+import { customerInScope } from "@/lib/services/sales/customer-access";
 import { handlePrismaError } from "@/lib/api-error";
 
 export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string; prefId: string }> }
 ) {
-  const { error } = await requireSub("customers", "manage");
+  const { user, error } = await requireSub("customers", "manage");
   if (error) return error;
 
   const VALID_USAGE = ["ESPRESSO", "FILTER", "BOTH"];
-  const { prefId } = await params;
+  const { id, prefId } = await params;
+  // Council gate S1: the customer in the URL is in the viewer's book, and the preference is that customer's.
+  if (!(await customerInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!(await prisma.customerRoastPreference.findFirst({ where: { id: prefId, customerId: id }, select: { id: true } }))) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   try {
     const body = await request.json() as {
       profileName?: string; usageType?: string; notes?: string;
@@ -51,10 +57,15 @@ export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string; prefId: string }> }
 ) {
-  const { error } = await requireSub("customers", "manage");
+  const { user, error } = await requireSub("customers", "manage");
   if (error) return error;
 
-  const { prefId } = await params;
+  const { id, prefId } = await params;
+  // Council gate S1: the customer in the URL is in the viewer's book, and the preference is that customer's.
+  if (!(await customerInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!(await prisma.customerRoastPreference.findFirst({ where: { id: prefId, customerId: id }, select: { id: true } }))) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   try {
     await prisma.customerRoastPreference.delete({ where: { id: prefId } });
     return NextResponse.json({ deleted: true });

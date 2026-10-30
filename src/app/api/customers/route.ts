@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireAnyModule, requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
+import { customerVisibilityWhere } from "@/lib/services/sales/scope";
 
 export async function GET() {
   const { user, error } = await requireAnyModule("customers", "orders");
@@ -15,11 +16,13 @@ export async function GET() {
       orderBy: { createdAt: "asc" as const },
     },
   };
+  // A scoped sales rep lists their own book only (services/sales/scope.ts); everyone else as before.
+  const where = customerVisibilityWhere(user);
   // F4 / review F-1: orders:view alone (production, dispatch) lists customers by name for the
   // order screens; the contact record (phone, email, address, opt-out) is the customers module's.
   const customers = canSeeCustomerContact(user.permissions)
-    ? await prisma.customer.findMany({ orderBy: { name: "asc" }, take: 200, include: related })
-    : await prisma.customer.findMany({ orderBy: { name: "asc" }, take: 200, select: { ...CUSTOMER_NAME_SELECT, ...related } });
+    ? await prisma.customer.findMany({ where, orderBy: { name: "asc" }, take: 200, include: related })
+    : await prisma.customer.findMany({ where, orderBy: { name: "asc" }, take: 200, select: { ...CUSTOMER_NAME_SELECT, ...related } });
   return NextResponse.json(customers);
 }
 

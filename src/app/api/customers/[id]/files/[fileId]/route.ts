@@ -4,6 +4,7 @@ import { requireEdit, requireModule } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { customerFileHeaders, deleteCustomerFileBlobs, openCustomerFile } from "@/lib/services/customers/files";
 import { editableCustomer } from "@/lib/services/customers/direct-upload";
+import { customerInScope } from "@/lib/services/sales/customer-access";
 
 type Params = { params: Promise<{ id: string; fileId: string }> };
 
@@ -15,9 +16,11 @@ type Params = { params: Promise<{ id: string; fileId: string }> };
  * that cannot be read is a clear Arabic 502, reported as a storage incident.
  */
 export async function GET(_req: Request, { params }: Params) {
-  const { error } = await requireModule("customers");
+  const { user, error } = await requireModule("customers");
   if (error) return error;
   const { id, fileId } = await params;
+  // A scoped sales rep reaches only the customers in their own book (services/sales/scope.ts) — 404 otherwise.
+  if (!(await customerInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   try {
     const row = await prisma.customerFile.findFirst({
       where: { id: fileId, customerId: id },

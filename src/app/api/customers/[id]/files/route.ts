@@ -6,6 +6,7 @@ import {
   CUSTOMER_FILE_SELECT, MAX_FILES_PER_CUSTOMER, saveCustomerFile, tooLarge, uploadLimit, validateCustomerFile,
 } from "@/lib/services/customers/files";
 import { directUploadOffered, editableCustomer } from "@/lib/services/customers/direct-upload";
+import { customerInScope } from "@/lib/services/sales/customer-access";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -18,9 +19,11 @@ type Params = { params: Promise<{ id: string }> };
  * have their own route and headers.
  */
 export async function GET(_req: Request, { params }: Params) {
-  const { error } = await requireModule("customers");
+  const { user, error } = await requireModule("customers");
   if (error) return error;
   const { id } = await params;
+  // A scoped sales rep reaches only the customers in their own book (services/sales/scope.ts) — 404 otherwise.
+  if (!(await customerInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   try {
     const customer = await prisma.customer.findUnique({ where: { id }, select: { id: true } });
     if (!customer) return NextResponse.json({ error: "العميل غير موجود.", errorEn: "Not found" }, { status: 404 });

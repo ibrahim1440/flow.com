@@ -7,6 +7,13 @@ import { seesAllSales, collectionWhere, NOT_FOUND_MESSAGE } from "@/lib/services
 import { collectionSummary, collectionAction } from "@/lib/services/sales/collections";
 import { serialiseSummary } from "@/app/api/sales/collections/route";
 import { parseFiniteDecimal } from "@/lib/services/commissions/engine";
+import { discountApprovalState } from "@/lib/services/sales/quotes";
+import { discountThreshold } from "@/lib/services/sales/quote-settings";
+import { approvesSamples, sampleApprovalState } from "@/lib/services/sales/sample-rules";
+import { sampledProductIds } from "@/lib/services/sales/sample-request";
+import { customerInScope } from "@/lib/services/sales/customer-access";
+import { customerBalance } from "@/lib/services/customers/balance";
+import { canViewInvoices } from "@/lib/services/invoicing/access";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -31,10 +38,12 @@ export async function GET(_request: Request, { params }: Params) {
     const deal = await prisma.opportunity.findFirst({
       where: { id, ...(seesAllSales(user.permissions) ? {} : { ownerId: user.id }) },
       select: {
-        id: true, title: true, outcome: true, lostReason: true, closedAt: true,
+        id: true, title: true, outcome: true, lostReason: true, lostReasonCode: true, closedAt: true,
         amount: true, currency: true, probability: true,
         expectedCloseAt: true, nextFollowUpAt: true, createdAt: true, updatedAt: true,
-        stage: { select: { id: true, code: true, nameEn: true, nameAr: true, position: true, probability: true } },
+        // «تحليل الاحتياج» (20261204100000_pipeline_qualification); edited at …/needs.
+        businessType: true, needSummary: true, expectedMonthlyKg: true, agreedNextStep: true,
+        stage: { select: { id: true, code: true, nameEn: true, nameAr: true, position: true, probability: true, purpose: true } },
         customer: { select: { id: true, name: true, nameAr: true, phone: true, email: true, address: true } },
         owner: { select: { id: true, name: true } },
         owners: {
@@ -54,6 +63,8 @@ export async function GET(_request: Request, { params }: Params) {
             validUntil: true, subtotal: true, discountTotal: true, taxTotal: true, grandTotal: true,
             issuedAt: true, acceptedAt: true, rejectedAt: true, rejectionNote: true,
             discountApprovedAt: true, supersedesId: true,
+            // For `discountApproval` below (the stage primary action «request approval»).
+            discountApprovedById: true, discountApprovedPercent: true, discountRejectedAt: true,
             // The VAT rate is per line; the deal page names it only when every line agrees.
             lines: { select: { taxRatePercent: true } },
             _count: { select: { lines: true, orderLinks: true } },
@@ -64,6 +75,10 @@ export async function GET(_request: Request, { params }: Params) {
           select: {
             id: true, description: true, quantity: true, unit: true, status: true,
             sentAt: true, feedbackAt: true, feedbackScore: true, feedbackNotes: true, createdAt: true,
+            // Issued from stock by dispatch (docs/sales/SAMPLES_INVENTORY.md). The cost stays out of a sales answer.
+            fromStock: true, issuedAt: true,
+            // A second sample of a product for this customer and its manager's decision (20261205090000_sample_approval).
+            approvalRequired: true, approvedAt: true, declinedAt: true, approvalNote: true,
             productSku: { select: { id: true, skuCode: true, name: true } },
           },
         },
@@ -95,9 +110,15 @@ export async function GET(_request: Request, { params }: Params) {
     });
     if (!deal) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });
 
+    // Each quotation's discount-approval state, by the rule the quotation screens use, so the
+    // deal page can say «needs approval» instead of «follow the quotation» (stage-actions.ts).
+    const threshold = await discountThreshold(prisma);
+    const quotes = deal.quotes.map((q) => ({ ...q, discountApproval: discountApprovalState(q, threshold) }));
+
     // Stage names for the history, resolved once rather than joined onto every event.
     const stages = await prisma.pipelineStage.findMany({
-      select: { id: true, code: true, nameEn: true, nameAr: true, position: true, probability: true, isActive: true },
+      // `purpose`: the deal page's primary action is chosen per stage purpose (stage-actions.ts).
+      select: { id: true, code: true, nameEn: true, nameAr: true, position: true, probability: true, isActive: true, purpose: true },
       orderBy: [{ position: "asc" }, { code: "asc" }],
     });
 
@@ -127,6 +148,11 @@ export async function GET(_request: Request, { params }: Params) {
 
     const summary = await collectionSummary(prisma, id);
 
+    // «للعميل من كل محصول عيّنة واحدة»: the coffee products this customer has already had a sample of (on any deal,
+    // not cancelled), so the sample dialog can say before sending that a second one waits for the manager. Product
+    // ids only — no other deal's detail leaves this answer.
+    const sampledProducts = await sampledProductIds(prisma, { customerId: deal.customer?.id ?? null, opportunityId: deal.id });
+
     // Who did it, for the history lines whose record names the person (the conversion and
     // stage/outcome changes). Quotation issue and sample dispatch record no actor, so none is shown.
     const actorIds = [...new Set([deal.conversion?.convertedById, ...deal.stageEvents.map((e) => e.actorId)]
@@ -135,8 +161,15 @@ export async function GET(_request: Request, { params }: Params) {
       where: { id: { in: actorIds } }, select: { id: true, name: true },
     }) : []).map((e) => [e.id, e.name]));
 
+    // The customer panel's «الرصيد المستحق» (release item I-44): the customer file's own figure, over the deals
+    // the viewer sees (services/customers/balance.ts) — AR once invoiced, else accepted quotations not invoiced.
+    const balance = deal.customer
+      ? await customerBalance(prisma, deal.customer.id, seesAllSales(user.permissions) ? {} : { ownerId: user.id }, canViewInvoices(user.permissions), new Date())
+      : null;
+
     return NextResponse.json({
-      deal,
+      deal: { ...deal, quotes, samples: deal.samples.map((s) => ({ ...s, approval: sampleApprovalState(s) })), customerBalance: balance },
+      sampledProductIds: sampledProducts,
       stages,
       actors,
       collections,
@@ -158,6 +191,8 @@ export async function GET(_request: Request, { params }: Params) {
         quote: hasSubPrivilege(user.permissions, "sales", "quote_write"),
         approveDiscount: hasSubPrivilege(user.permissions, "sales", "quote_approve_discount"),
         assign: seesAllSales(user.permissions),
+        // A customer's second sample of a product: the sales manager or the administrator approves it.
+        approveSample: approvesSamples(user.permissions),
         createOrder: hasSubPrivilege(user.permissions, "orders", "create"),
         submitCollection: hasSubPrivilege(user.permissions, "sales", "collection_submit"),
         verifyCollection: hasSubPrivilege(user.permissions, "commissions", "collection_verify"),
@@ -243,6 +278,10 @@ export async function PATCH(request: Request, { params }: Params) {
       }
     }
     if (typeof b.customerId === "string" && b.customerId) {
+      // Release gate N1: relinking a deal to a customer outside the rep's book would pull that customer
+      // into it (a deal widens the book, services/sales/scope.ts). Refused as missing — and BEFORE any
+      // existence read, so the answer does not tell a rep whether somebody else's customer exists.
+      if (!(await customerInScope(user, b.customerId))) throw { _appCode: 404, message: NOT_FOUND_MESSAGE };
       const customer = await prisma.customer.findUnique({
         where: { id: b.customerId },
         select: { id: true },

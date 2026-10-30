@@ -4,7 +4,7 @@ import { forbidden, requireAuth } from "@/lib/auth-server";
 import { hasModuleAccess } from "@/lib/auth-shared";
 import { handleDomainError } from "@/lib/api-error";
 import { canSeeCustomerContact } from "@/lib/auth/customer-detail";
-import { isScopedSalesRep } from "@/lib/services/orders/owner-access";
+import { orderInScope } from "@/lib/services/sales/customer-access";
 import { NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
 import { documentPrintGate } from "@/lib/print/server/auth";
 import { DocumentNotFound, deliveryNoteFacts, documentSeller } from "@/lib/print/server/documents";
@@ -54,7 +54,8 @@ export async function GET(request: Request) {
     if (!facts) {
       return NextResponse.json({ error: "The deliveries belong to more than one order.", errorAr: "التسليمات المحددة لأكثر من طلب.", code: "MIXED_ORDERS" }, { status: 400 });
     }
-    if (!dispatch && isScopedSalesRep(p) && facts.order.ownerId !== user.id && facts.order.customerAccountOwnerId !== user.id) return notFound();
+    // A scoped rep prints only the notes of an order in their book (services/sales/scope.ts, council gate S4).
+    if (!dispatch && !(await orderInScope(user, facts.order.id))) return notFound();
     const { ownerId: _o, customerAccountOwnerId: _c, ...order } = facts.order;
     void _o; void _c;
     return NextResponse.json(

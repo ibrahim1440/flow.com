@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { seesAllSales, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
+import { syncLeadNextFollowUp } from "@/lib/services/sales/follow-through";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -29,7 +30,7 @@ export async function PATCH(request: Request, { params }: Params) {
   try {
     const existing = await prisma.activity.findUnique({
       where: { id },
-      select: { id: true, ownerId: true, completedAt: true, type: true },
+      select: { id: true, ownerId: true, completedAt: true, type: true, leadId: true },
     });
     if (!existing) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });
     if (existing.ownerId !== user.id) {
@@ -75,10 +76,16 @@ export async function PATCH(request: Request, { params }: Params) {
       return NextResponse.json({ error: "Nothing to change." }, { status: 400 });
     }
 
-    const activity = await prisma.activity.update({
-      where: { id },
-      data,
-      select: { id: true, type: true, subject: true, body: true, dueAt: true, completedAt: true },
+    // With the lead's next follow-up recomputed from what is still open (follow-through.ts), in the
+    // same transaction — completing or moving a promise moves the lead list's date with it.
+    const activity = await prisma.$transaction(async (tx) => {
+      const a = await tx.activity.update({
+        where: { id },
+        data,
+        select: { id: true, type: true, subject: true, body: true, dueAt: true, completedAt: true },
+      });
+      if (existing.leadId) await syncLeadNextFollowUp(tx, existing.leadId);
+      return a;
     });
 
     return NextResponse.json({ activity });

@@ -162,24 +162,40 @@ export async function POST(request: Request) {
       );
     }
 
-    const lead = await prisma.lead.create({
-      data: {
-        companyName,
-        companyNameAr: typeof b.companyNameAr === "string" ? b.companyNameAr.trim() || null : null,
-        contactName,
-        phone: typeof b.phone === "string" ? b.phone.trim() || null : null,
-        email: typeof b.email === "string" ? b.email.trim() || null : null,
-        city: typeof b.city === "string" ? b.city.trim() || null : null,
-        address: typeof b.address === "string" ? b.address.trim() || null : null,
-        source: source as never,
-        sourceNote: typeof b.sourceNote === "string" ? b.sourceNote.trim() || null : null,
-        notes: typeof b.notes === "string" ? b.notes.trim() || null : null,
-        nextFollowUpAt: typeof b.nextFollowUpAt === "string" ? new Date(b.nextFollowUpAt) : null,
-        ownerId,
-        createdById: user.id,
-        ...norm,
-      },
-      select: { id: true, companyName: true, contactName: true, status: true, ownerId: true },
+    const followUp = typeof b.nextFollowUpAt === "string" && b.nextFollowUpAt ? new Date(b.nextFollowUpAt) : null;
+    if (followUp && Number.isNaN(followUp.getTime())) {
+      return NextResponse.json({ error: "موعد المتابعة غير صالح.", errorEn: "nextFollowUpAt is not a date." }, { status: 400 });
+    }
+
+    // With a first follow-up, the promise is a TASK activity in the same transaction — the lead's
+    // `nextFollowUpAt` alone says "when" but not "who promised what" (services/sales/follow-up.ts),
+    // and it is the activity that appears on the owner's «مساحة عملي».
+    const lead = await prisma.$transaction(async (tx) => {
+      const created = await tx.lead.create({
+        data: {
+          companyName,
+          companyNameAr: typeof b.companyNameAr === "string" ? b.companyNameAr.trim() || null : null,
+          contactName,
+          phone: typeof b.phone === "string" ? b.phone.trim() || null : null,
+          email: typeof b.email === "string" ? b.email.trim() || null : null,
+          city: typeof b.city === "string" ? b.city.trim() || null : null,
+          address: typeof b.address === "string" ? b.address.trim() || null : null,
+          source: source as never,
+          sourceNote: typeof b.sourceNote === "string" ? b.sourceNote.trim() || null : null,
+          notes: typeof b.notes === "string" ? b.notes.trim() || null : null,
+          nextFollowUpAt: followUp,
+          ownerId,
+          createdById: user.id,
+          ...norm,
+        },
+        select: { id: true, companyName: true, contactName: true, status: true, ownerId: true },
+      });
+      if (followUp) {
+        await tx.activity.create({
+          data: { type: "TASK", subject: `متابعة ${companyName}`, leadId: created.id, dueAt: followUp, ownerId },
+        });
+      }
+      return created;
     });
 
     return NextResponse.json({ lead, weakDuplicates: candidates.filter((c) => !c.strong) }, { status: 201 });

@@ -1,5 +1,5 @@
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
-import { stageFor, advancesForward } from "./stages";
+import { stageFor, advancesForward, sampleSkipRequired, sampleSkipReasonText } from "./stages";
 import { emitDealMoved } from "./deal-events";
 
 type Tx = PrismaNS.TransactionClient;
@@ -69,6 +69,18 @@ export async function advanceToQuotationStage(
   if (deal.stageId === stage.id) return { moved: false, reason: "ALREADY_THERE" };
   if (!advancesForward(deal.position, stage.position)) return { moved: false, reason: "WOULD_GO_BACKWARDS" };
 
+  // Issuing a quotation is never refused for want of a sample (the quotation is the act; see
+  // above), but when it carries the deal past Sample Evaluation with no sample on it, the skip
+  // is written into the move's reason so it is as visible as one a person documented.
+  let reason = "Automatic: a quotation was issued";
+  const sampleStage = await stageFor(tx, "SAMPLE_EVALUATION");
+  if (sampleStage) {
+    const sampleCount = await tx.sampleShipment.count({ where: { opportunityId, status: { not: "CANCELLED" } } });
+    if (sampleSkipRequired({ fromPosition: deal.position, toPosition: stage.position, samplePosition: sampleStage.position, sampleCount })) {
+      reason = `${sampleSkipReasonText("أُصدر عرض السعر دون عيّنة مسجّلة")} · ${reason}`;
+    }
+  }
+
   await tx.opportunity.update({
     where: { id: opportunityId },
     data: { stageId: stage.id },
@@ -80,7 +92,7 @@ export async function advanceToQuotationStage(
       toStageId: stage.id,
       fromOutcome: deal.outcome as "OPEN",
       toOutcome: "OPEN",
-      reason: "Automatic: a quotation was issued",
+      reason,
       actorId,
     },
   });

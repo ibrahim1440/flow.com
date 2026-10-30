@@ -19,7 +19,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { Prisma as PrismaNS, PrismaClient } from "@/generated/prisma/client";
 import type { Permissions } from "@/lib/auth-shared";
-import { isScopedSalesRep } from "../orders/owner-access";
+import { customersScopedToOwner, ownedCustomerWhere } from "../sales/scope";
 import { safeFilename } from "../sales/evidence";
 import { blobPathnameFor, chooseStorage, errorCode, supportsDirectUpload, type BlobStore } from "./file-store";
 import { reportStorageFailure, reportStorageSuccess } from "../system/storage-alerts";
@@ -59,13 +59,16 @@ const NOT_OFFERED = problem(409, "DIRECT_UPLOAD_UNAVAILABLE", {
  */
 export async function editableCustomer(
   db: Db,
-  user: { id: string; permissions: Permissions; scope?: unknown },
+  user: { id: string; role?: string | null; permissions: Permissions; scope?: unknown },
   customerId: string,
 ): Promise<{ ok: true; customer: { id: string; fileCount: number } } | { ok: false; problem: Problem }> {
   if (user.scope === "STATION") return { ok: false, problem: problem(403, "STATION_REFUSED", { error: "لا يُتاح رفع ملفات العملاء من جهاز محطة.", errorEn: "Customer files cannot be uploaded from a station." }) };
   const c = await db.customer.findUnique({ where: { id: customerId }, select: { id: true, accountOwnerId: true, _count: { select: { files: true } } } });
   if (!c) return { ok: false, problem: problem(404, "NOT_FOUND", NOT_FOUND) };
-  if (isScopedSalesRep(user.permissions) && c.accountOwnerId !== user.id) return { ok: false, problem: problem(404, "NOT_FOUND", NOT_FOUND) };
+  // The customer is in the viewer's book (services/sales/scope.ts — the one predicate, council gate S4).
+  if (customersScopedToOwner(user) && !(await db.customer.findFirst({ where: { id: customerId, ...ownedCustomerWhere(user.id) }, select: { id: true } }))) {
+    return { ok: false, problem: problem(404, "NOT_FOUND", NOT_FOUND) };
+  }
   return { ok: true, customer: { id: c.id, fileCount: c._count.files } };
 }
 

@@ -6,6 +6,7 @@ import { hasModuleAccess } from "@/lib/auth-shared";
 import { parseFiniteDecimal, roundMoney } from "@/lib/services/commissions/engine";
 import { requireStageFor } from "@/lib/services/sales/stages";
 import { NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
+import { customerInScope } from "@/lib/services/sales/customer-access";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -38,6 +39,9 @@ export async function POST(request: Request, { params }: Params) {
     return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
   }
   const { id } = await params;
+  // Council gate B3: a deal on a customer outside the rep's book would pull the customer into it (a deal
+  // they hold widens their book, services/sales/scope.ts) — refused as if the customer did not exist.
+  if (!(await customerInScope(user, id))) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 }); }
   const b = (body ?? {}) as Record<string, unknown>;

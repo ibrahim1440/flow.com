@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireModule, requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { appendOrderActivity, isNoteDepartment, NOTE_MESSAGE_MAX_LENGTH } from "@/lib/services/order-operations";
+import { orderInScope } from "@/lib/services/sales/customer-access";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -22,6 +23,8 @@ export async function POST(request: Request, { params }: Params) {
   if (error) return error;
 
   const { id } = await params;
+  // A scoped sales rep acts only on the orders of their own book (services/sales/scope.ts) — 404 otherwise.
+  if (!(await orderInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   let body: unknown;
   try {

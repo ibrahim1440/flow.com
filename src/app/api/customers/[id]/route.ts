@@ -5,12 +5,17 @@ import { handlePrismaError } from "@/lib/api-error";
 import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
 import { parseAccountFields } from "@/lib/services/customers/fields";
 import { deleteCustomerFileBlobs } from "@/lib/services/customers/files";
+import { customerInScope } from "@/lib/services/sales/customer-access";
+import { protectedAccountChanges } from "@/lib/services/customers/account-guard";
+import { writeSettingsAudit } from "@/lib/services/settings/audit";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { user, error } = await requireAnyModule("customers", "orders");
   if (error) return error;
 
   const { id } = await params;
+  // Outside a scoped rep's book reads as missing (404), never as forbidden.
+  if (!(await customerInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const related = {
     _count: { select: { orders: true } },
     roastPreferences: {
@@ -27,10 +32,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 }
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { error } = await requireEdit("customers");
+  const { user, error } = await requireEdit("customers");
   if (error) return error;
 
   const { id } = await params;
+  if (!(await customerInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   try {
     const body = await request.json() as {
       name?: string; nameAr?: string; phone?: string; email?: string; address?: string;
@@ -51,7 +57,19 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       if (!owner) return NextResponse.json({ error: "المسؤول غير موجود أو غير نشط.", errorEn: "The account owner is not an active employee." }, { status: 400 });
     }
 
-    const customer = await prisma.customer.update({
+    // Who may change what decides somebody's book, commission or credit (services/customers/account-guard.ts):
+    // a change to one of those fields is refused to anyone without its duty, and every change is audited
+    // before / after. A value sent unchanged (the dialog posts the whole form) is not a change.
+    const current = await prisma.customer.findUnique({
+      where: { id },
+      select: { accountOwnerId: true, creditLimit: true, paymentTermsDays: true, priceList: true, defaultHoldDays: true, reorderIntervalDays: true },
+    });
+    if (!current) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    const guarded = protectedAccountChanges(user, current, account.data as Record<string, unknown>);
+    if (!guarded.ok) return NextResponse.json({ error: guarded.errorAr, errorEn: guarded.error, code: "PROTECTED_ACCOUNT_FIELD" }, { status: 403 });
+
+    const customer = await prisma.$transaction(async (tx) => {
+     const updated = await tx.customer.update({
       where: { id },
       data: {
         ...(body.name !== undefined && { name: body.name.trim() }),
@@ -62,6 +80,14 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         ...(body.whatsappOptOut !== undefined && { whatsappOptOut: body.whatsappOptOut }),
         ...account.data,
       },
+     });
+     if (guarded.changed.length) {
+       await writeSettingsAudit(tx, {
+         section: "organisation", action: "SETTINGS_UPDATED", entityType: "Customer", entityId: id,
+         changed: guarded.changed, before: guarded.before, after: guarded.after, actor: { id: user.id, name: user.name },
+       });
+     }
+     return updated;
     });
     return NextResponse.json(customer);
   } catch (err) {
@@ -70,10 +96,11 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 }
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { error } = await requireEdit("customers");
+  const { user, error } = await requireEdit("customers");
   if (error) return error;
 
   const { id } = await params;
+  if (!(await customerInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   try {
     // The customer's documents cascade with it; their private blobs are removed after it commits.
     const blobs = await prisma.customerFile.findMany({ where: { customerId: id, blobPathname: { not: null } }, select: { blobPathname: true } });

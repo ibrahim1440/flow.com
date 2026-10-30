@@ -4,9 +4,10 @@ import { requireModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { seesAllSales } from "@/lib/services/sales/scope";
 import {
-  Decimal, ZERO, roundMoney, riyadhMonthStart, riyadhMonthEnd, qualifyingBase, parseFiniteDecimal,
+  Decimal, ZERO, roundMoney, riyadhMonthStart, riyadhMonthEnd, parseFiniteDecimal,
 } from "@/lib/services/commissions/engine";
 import { isSimpleMode } from "@/lib/simple-mode";
+import { attributeCollections } from "@/lib/services/sales/performance";
 
 /**
  * Monthly sales targets.
@@ -74,30 +75,9 @@ export async function GET(request: Request) {
           },
         })
       : [];
-    const oppById = new Map(opps.map((o) => [o.id, o]));
-
-    const collected = new Map<string, Decimal>();
-    const add = (employeeId: string, amount: Decimal) =>
-      collected.set(employeeId, roundMoney((collected.get(employeeId) ?? ZERO).plus(amount)));
-
-    for (const e of events) {
-      if (!e.opportunityId) continue;
-      const opp = oppById.get(e.opportunityId);
-      if (!opp) continue;
-      const base = qualifyingBase({
-        amountGross: e.amountGross,
-        amountTax: e.amountTax,
-        amountNonQualifying: e.amountNonQualifying,
-      });
-      const live = opp.owners.filter((o) => o.effectiveFrom.getTime() <= e.collectedAt.getTime());
-      if (live.length === 0) {
-        add(opp.ownerId, base);
-      } else {
-        for (const o of live) {
-          add(o.employeeId, roundMoney(base.times(o.sharePercent).dividedBy(100)));
-        }
-      }
-    }
+    // The performance screen's own attribution (services/sales/performance.ts), not a copy of it:
+    // two implementations of "achieved" are two answers to one question.
+    const collected = attributeCollections(events, opps);
 
     const sources = [...new Set(events.map((e) => e.sourceSystem))];
 

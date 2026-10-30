@@ -17,6 +17,7 @@ export type AccountFields = {
   city?: string | null;
   priceList?: string | null;
   paymentTermsDays?: number | null;
+  reorderIntervalDays?: number | null;
   creditLimit?: Decimal | null;
   accountOwnerId?: string | null;
   /** «مدة الإيقاف الافتراضية» (feat/credit-hold): the hold dialog's proposed duration, 1–365 days. */
@@ -89,6 +90,16 @@ export function parseAccountFields(b: Record<string, unknown>): Parsed<AccountFi
       const n = typeof v === "number" ? v : typeof v === "string" && /^\d+$/.test(digitsOnly(v)) ? Number(digitsOnly(v)) : NaN;
       if (!Number.isInteger(n) || n < 0 || n > 365) return fail("Payment terms are whole days, 0 to 365.", "شروط الدفع أيام صحيحة من 0 إلى 365.");
       data.paymentTermsDays = n;
+    }
+  }
+  // «فترة إعادة الطلب المتفق عليها» (services/customers/reorder.ts): whole days 1–365, "" / null clears it.
+  if ("reorderIntervalDays" in b) {
+    const v = b.reorderIntervalDays;
+    if (v === null || v === "") data.reorderIntervalDays = null;
+    else {
+      const n = typeof v === "number" ? v : typeof v === "string" && /^\d+$/.test(digitsOnly(v)) ? Number(digitsOnly(v)) : NaN;
+      if (!Number.isInteger(n) || n < 1 || n > 365) return fail("The reorder interval is whole days, 1 to 365.", "فترة إعادة الطلب أيام صحيحة من 1 إلى 365.");
+      data.reorderIntervalDays = n;
     }
   }
   if ("creditLimit" in b) {

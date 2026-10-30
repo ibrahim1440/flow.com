@@ -17,6 +17,7 @@ import { listAdvances } from "@/lib/hr/services/advances";
 import { discountThreshold } from "@/lib/services/sales/quote-settings";
 import { discountApprovalState, priceQuote } from "@/lib/services/sales/quotes";
 import { seesAllSales } from "@/lib/services/sales/scope";
+import { approvesSamples } from "@/lib/services/sales/sample-rules";
 import { approvalQueue } from "@/lib/finance/server/approvals";
 import { leaveTypeName } from "@/lib/i18n/hr";
 import { resolveScope as finScope } from "@/lib/finance/server/context";
@@ -24,7 +25,7 @@ import { listApprovals as mktList } from "@/lib/marketing/server/approvals";
 import { parseDay } from "@/lib/hr/dates";
 import type { WsActor } from "./context";
 
-export type ApprovalType = "LEAVE" | "ADVANCE" | "DISCOUNT" | "FINANCE" | "MARKETING";
+export type ApprovalType = "LEAVE" | "ADVANCE" | "DISCOUNT" | "SAMPLE" | "FINANCE" | "MARKETING";
 
 export type ApprovalItem = {
   key: string;
@@ -157,6 +158,37 @@ async function discountItems(actor: WsActor): Promise<ApprovalItem[]> {
   return out;
 }
 
+// «للعميل من كل محصول عيّنة واحدة» (20261205090000_sample_approval): a customer's second sample of a coffee product
+// waits for the sales manager or the administrator (approvesSamples). Decided at POST /api/sales/samples/[id]/approval
+// (APPROVE, or REJECT = decline with the reason), which re-checks the duty and the state under the sample's lock.
+async function sampleItems(actor: WsActor): Promise<ApprovalItem[]> {
+  if (!approvesSamples(actor.permissions)) return [];
+  const rows = await prisma.sampleShipment.findMany({
+    where: { approvalRequired: true, approvedAt: null, declinedAt: null, status: "REQUESTED" },
+    orderBy: { createdAt: "asc" }, take: 200,
+    select: {
+      id: true, quantity: true, createdAt: true, createdById: true,
+      productSku: { select: { skuCode: true, name: true } },
+      opportunity: { select: { id: true, title: true, customer: { select: { name: true } }, owner: { select: { name: true } } } },
+    },
+  });
+  const creators = new Map((await prisma.employee.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.createdById).filter((x): x is string => !!x))] } }, select: { id: true, name: true } })).map((p) => [p.id, p.name]));
+  return rows.map((r) => {
+    const product = r.productSku?.name ?? r.productSku?.skuCode ?? "—";
+    return {
+      key: `SAMPLE:${r.id}`, type: "SAMPLE" as const, id: r.id,
+      title: `عيّنة ثانية · ${product}`, titleEn: `Second sample · ${product}`,
+      requester: r.createdById ? creators.get(r.createdById) ?? null : null, subject: r.opportunity.customer?.name ?? r.opportunity.title,
+      createdAt: iso(r.createdAt),
+      facts: { customer: r.opportunity.customer?.name ?? null, deal: r.opportunity.title, dealOwner: r.opportunity.owner?.name ?? null, product, units: Number(r.quantity) },
+      warnings: [{ ar: "سبق إرسال عيّنة من هذا المحصول لهذا العميل.", en: "This customer has already had a sample of this product." }],
+      decide: { url: `/api/sales/samples/${encodeURIComponent(r.id)}/approval`, rejectNeedsReason: true as const },
+      openUrl: `/dashboard/sales/deals/${encodeURIComponent(r.opportunity.id)}`,
+      notice: { ar: "الموافقة تُرسل الطلب إلى قسم الشحن ولا تُخرج المخزون؛ يُصرف عند صرف الشحن له. الرفض يلغي الطلب.", en: "Approving sends the request to dispatch; stock leaves only when dispatch issues it. Declining cancels the request." },
+    };
+  });
+}
+
 const FIN_TYPE_AR: Record<string, string> = { BUDGET_APPROVAL: "اعتماد ميزانية", ALLOCATION_RULES: "قواعد التوزيع", CATEGORY_TRANSFER: "تحويل بين البنود", SPEND_OVERRIDE: "تجاوز حد الصرف", PERIOD_REOPEN: "إعادة فتح فترة" };
 const FIN_TYPE_EN: Record<string, string> = { BUDGET_APPROVAL: "Budget approval", ALLOCATION_RULES: "Allocation rules", CATEGORY_TRANSFER: "Transfer between categories", SPEND_OVERRIDE: "Spending limit override", PERIOD_REOPEN: "Reopen a period" };
 /** The marketing request's subject type, in both languages (the screen showed the raw code). */
@@ -197,7 +229,7 @@ async function marketingItems(actor: WsActor): Promise<ApprovalItem[]> {
 }
 
 const SOURCES: [ApprovalType, (a: WsActor) => Promise<ApprovalItem[]>][] = [
-  ["LEAVE", leaveItems], ["ADVANCE", advanceItems], ["DISCOUNT", discountItems], ["FINANCE", financeItems], ["MARKETING", marketingItems],
+  ["LEAVE", leaveItems], ["ADVANCE", advanceItems], ["DISCOUNT", discountItems], ["SAMPLE", sampleItems], ["FINANCE", financeItems], ["MARKETING", marketingItems],
 ];
 
 export async function myApprovals(actor: WsActor, only?: ApprovalType | null) {

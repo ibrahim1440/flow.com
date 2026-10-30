@@ -19,6 +19,9 @@ import {
 import { useUnsavedGuard, isDirtyAgainst } from "../../../_components/useUnsavedGuard";
 import { SectionPages } from "@/components/shell/page-context";
 import { ACTIVITY_OUTCOMES, QUALIFYING_OUTCOMES as QUALIFYING } from "@/lib/services/sales/qualification";
+import {
+  QualificationFields, EMPTY_QUALIFICATION, draftFromLead, qualificationPayload, missingText, type QualificationDraft,
+} from "../../_components/QualificationFields";
 
 /**
  * Lead detail.
@@ -52,6 +55,8 @@ type Lead = {
   phone: string | null; email: string | null; city: string | null; address: string | null;
   source: string; sourceNote: string | null; status: string; notes: string | null;
   nextFollowUpAt: string | null; createdAt: string; updatedAt: string;
+  /** The qualification answers gathered so far (20261204100000_pipeline_qualification). */
+  businessType?: string | null; needSummary?: string | null; expectedMonthlyKg?: string | null; agreedNextStep?: string | null;
   owner: { id: string; name: string } | null;
   conversion: {
     customerId: string; opportunityId: string; customerCreated: boolean; convertedAt: string;
@@ -125,6 +130,10 @@ export default function LeadDetailPage() {
   const [logType, setLogType] = useState("CALL");
   const [logOutcome, setLogOutcome] = useState<string>("NOTE_ONLY");
   const [qualifiedDealId, setQualifiedDealId] = useState<string | null>(null);
+  // The qualification minimum, asked with a qualifying outcome; `pendingQual` is set when the
+  // server logged the activity but could not convert (it names the activity and what is missing).
+  const [qualDraft, setQualDraft] = useState<QualificationDraft>(EMPTY_QUALIFICATION);
+  const [pendingQual, setPendingQual] = useState<{ activityId: string; missing: string[] } | null>(null);
   const [logSubject, setLogSubject] = useState("");
   const [logBody, setLogBody] = useState("");
   const [scheduleAt, setScheduleAt] = useState("");
@@ -160,6 +169,8 @@ export default function LeadDetailPage() {
         notes: data.lead.notes ?? "", status: data.lead.status ?? "NEW",
       };
       setSaved(fromServer);
+      // Known answers are offered, not asked again; a draft being typed is left alone.
+      if (!pendingQual) setQualDraft(draftFromLead(data.lead));
       // Never overwrite a draft somebody is in the middle of. `saveEdits` closes the panel
       // before it reloads, so a save still re-seeds; what this stops is a reload arriving
       // while the panel is open and silently discarding what has been typed. React's
@@ -217,24 +228,56 @@ export default function LeadDetailPage() {
         body: JSON.stringify({
           type: logType, subject: logSubject.trim(), outcome: logOutcome,
           body: logBody.trim() || null, leadId: params.id,
+          // The qualification answers ride with a qualifying outcome only.
+          ...(QUALIFYING.has(logOutcome) ? { qualification: qualificationPayload(qualDraft) } : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { setError(localizeApiError(data) ?? (ar ? "تعذّر تسجيل النشاط." : "Could not record the activity.")); return; }
       setLogSubject(""); setLogBody("");
-      // The server says whether this put the lead into the pipeline, and names the deal it
-      // created. Saying so here is the difference between automation and a surprise.
-      const q = data.qualification;
-      setSuccess(
-        q
-          ? q.alreadyInPipeline
-            ? (ar ? "سُجِّل النشاط وأُضيف إلى الصفقة القائمة." : "Recorded, and added to the existing deal.")
-            : (ar
-                ? "سُجِّل النشاط، ودخل العميل المحتمل مسار الصفقات في مرحلة التأهيل."
-                : "Recorded — and the lead has entered the pipeline at Qualification.")
-          : (ar ? "سُجِّل النشاط." : "Activity recorded."),
-      );
-      setQualifiedDealId(q?.opportunityId ?? null);
+      showQualification(data.qualification, data.activity?.id ?? null);
+      await load();
+    } finally { setBusy(""); }
+  }
+
+  /**
+   * What the server said about the pipeline, in words. It says whether this put the lead into
+   * the pipeline and names the deal it created — the difference between automation and a
+   * surprise — or, since the qualification minimum, what it still needs to know.
+   */
+  function showQualification(q: { converted?: boolean; alreadyInPipeline?: boolean; opportunityId?: string | null; missing?: string[] } | null, activityId: string | null) {
+    if (q && q.converted === false && activityId) {
+      setPendingQual({ activityId, missing: q.missing ?? [] });
+      setSuccess(ar ? `سُجِّل النشاط. ${missingText(q.missing ?? [], true)}` : `Recorded. ${missingText(q.missing ?? [], false)}`);
+      setQualifiedDealId(null);
+      return;
+    }
+    setPendingQual(null);
+    setSuccess(
+      q
+        ? q.alreadyInPipeline
+          ? (ar ? "سُجِّل النشاط وأُضيف إلى الصفقة القائمة." : "Recorded, and added to the existing deal.")
+          : (ar
+              ? "سُجِّل النشاط، ودخل العميل المحتمل مسار الصفقات فرصةً مؤهلة."
+              : "Recorded — and the lead has entered the pipeline as a qualified opportunity.")
+        : (ar ? "سُجِّل النشاط." : "Activity recorded."),
+    );
+    setQualifiedDealId(q?.opportunityId ?? null);
+  }
+
+  /** Completes the qualification of the activity just logged (POST …/qualify), without logging another. */
+  async function completeQualification() {
+    if (busy || !pendingQual) return;
+    setBusy("qualify"); setError("");
+    try {
+      const res = await fetch(`/api/sales/leads/${params.id}/qualify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ activityId: pendingQual.activityId, qualification: qualificationPayload(qualDraft) ?? {} }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(localizeApiError(data) ?? (ar ? "تعذّر الحفظ." : "Could not save.")); return; }
+      showQualification(data.qualification, pendingQual.activityId);
       await load();
     } finally { setBusy(""); }
   }
@@ -603,8 +646,8 @@ export default function LeadDetailPage() {
                   hint={
                     QUALIFYING.has(logOutcome)
                       ? (ar
-                          ? "هذه النتيجة تُدخل العميل المحتمل مسار الصفقات تلقائياً."
-                          : "This outcome puts the lead into the pipeline automatically.")
+                          ? "هذه النتيجة تُدخل العميل المحتمل مسار الصفقات تلقائياً متى عُرف نوع النشاط والاحتياج والخطوة التالية."
+                          : "This outcome puts the lead into the pipeline once its business type, need and next step are known.")
                       : (ar
                           ? "لن تُنشأ صفقة. الصفقة تبدأ عند اهتمام مؤكَّد أو موعد مع العميل."
                           : "No deal is created. A deal starts at confirmed interest or a customer appointment.")
@@ -622,6 +665,17 @@ export default function LeadDetailPage() {
                 <Field id="logBody" label={ar ? "التفاصيل" : "Details"}>
                   <TextArea id="logBody" value={logBody} onChange={setLogBody} rows={3} />
                 </Field>
+                {/* The qualification minimum, asked with the outcome that may convert the lead —
+                    or, when the server just said what is missing, asked for that activity. */}
+                {(pendingQual || (QUALIFYING.has(logOutcome) && !lead.conversion)) && (
+                  <QualificationFields ar={ar} value={qualDraft} onChange={setQualDraft}
+                    missing={pendingQual?.missing} idPrefix="lead-qual" disabled={!!busy} />
+                )}
+                {pendingQual && (
+                  <Button onClick={completeQualification} disabled={busy === "qualify"} testId="complete-qualification">
+                    {busy === "qualify" ? (ar ? "جارٍ الحفظ…" : "Saving…") : (ar ? "حفظ واستكمال التأهيل" : "Save and qualify")}
+                  </Button>
+                )}
                 <Button onClick={logActivity} disabled={busy === "log"} testId="log-activity">
                   {busy === "log" ? (ar ? "جارٍ التسجيل…" : "Recording…") : (ar ? "تسجيل" : "Record")}
                 </Button>

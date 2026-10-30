@@ -12,7 +12,9 @@ import { DISCOUNT_APPROVAL_THRESHOLD, DISCOUNT_MAX } from "@/lib/services/sales/
  *   · the seller block of the quotation document — sellerLegalNameAr / En, sellerAddressAr / En,
  *     sellerVatNumber (15 digits 3…3), sellerCrNumber (10 digits), sellerPhone, and the bank
  *     transfer details printed on the document — sellerBankName, sellerBankAccountName, sellerIban
- *     (SA + 22 digits; spaces allowed on input, stored without).
+ *     (SA + 22 digits; spaces allowed on input, stored without);
+ *   · «الحد الأدنى للتأهيل» — requireQualificationMinimum, true / false (default true; 20261204100000_pipeline_qualification):
+ *     whether a qualifying activity needs business type + need + agreed next step before it converts a lead.
  *
  * GET: the admin role or the sales module (the quotation screens state the threshold).
  * PUT: the admin role, by a verified individual after a recent step-up — a policy change, gated
@@ -62,7 +64,7 @@ export async function PUT(request: Request) {
       const before = settingsFromRow(await tx.systemConfig.findUnique({ where: { id: "singleton" } }));
       const row = await tx.systemConfig.update({ where: { id: "singleton" }, data: parsed.data });
       const after = settingsFromRow(row);
-      const changed = (["discountApprovalPercent"] as const).filter((k) => before[k] !== after[k]) as string[];
+      const changed = (["discountApprovalPercent", "requireQualificationMinimum"] as const).filter((k) => before[k] !== after[k]) as string[];
       for (const k of SELLER_FIELDS) if (before.seller[k] !== after.seller[k]) changed.push(k);
       if (changed.length) {
         const actor = await tx.employee.findUnique({ where: { id: user.id }, select: { name: true } });
@@ -73,8 +75,8 @@ export async function PUT(request: Request) {
             actorName: actor?.name ?? null,
             details: {
               changed,
-              before: { discountApprovalPercent: before.discountApprovalPercent, ...before.seller },
-              after: { discountApprovalPercent: after.discountApprovalPercent, ...after.seller },
+              before: { discountApprovalPercent: before.discountApprovalPercent, requireQualificationMinimum: before.requireQualificationMinimum, ...before.seller },
+              after: { discountApprovalPercent: after.discountApprovalPercent, requireQualificationMinimum: after.requireQualificationMinimum, ...after.seller },
             },
           },
         });

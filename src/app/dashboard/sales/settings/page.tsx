@@ -34,7 +34,7 @@ import { DISCOUNT_APPROVAL_THRESHOLD, DISCOUNT_MAX } from "@/lib/services/sales/
  * (`SettingsNav`, shared with the organisation and automation settings).
  */
 
-type StagePurpose = "QUALIFICATION" | "QUOTATION";
+type StagePurpose = "QUALIFICATION" | "SAMPLE_EVALUATION" | "QUOTATION" | "NEGOTIATION";
 
 type Stage = {
   id: string;
@@ -52,24 +52,46 @@ type Stage = {
 };
 
 /**
- * The two moments the server makes by itself, and where each one puts the deal.
+ * What each column means to the server, and what happens there — the approved pipeline in
+ * order (docs/sales/PIPELINE_STAGES.md). «مغلقة» is not here: closing is the deal's outcome
+ * (Won / Lost), not a column.
  *
  * Deliberately not matched against the stage's code or its name: the names are translated
  * and editable, and this deployment's codes are historical (`UAT_QUALIFY`, `UAT_PROPOSAL`).
  * Somebody has to say which column is which, once, here.
  */
-const PURPOSE_LABELS: Record<StagePurpose, { en: string; ar: string; whenEn: string; whenAr: string }> = {
+const PURPOSE_LABELS: Record<StagePurpose, { en: string; ar: string; whenEn: string; whenAr: string; unsetEn: string; unsetAr: string }> = {
   QUALIFICATION: {
-    en: "Qualification",
-    ar: "التأهيل",
-    whenEn: "where a lead lands when an interaction qualifies it",
-    whenAr: "حيث يصل العميل المحتمل عندما يؤهّله تفاعل",
+    en: "Qualified opportunity",
+    ar: "فرصة مؤهلة",
+    whenEn: "where a lead lands once qualified (needs analysis is recorded here)",
+    whenAr: "حيث يصل العميل المحتمل بعد تأهيله (ويُسجَّل فيها تحليل الاحتياج)",
+    unsetEn: "Not set — no lead will qualify automatically until a stage is chosen.",
+    unsetAr: "غير مُهيَّأة — لن يتحوّل أي عميل محتمل تلقائيًا حتى تُحدَّد مرحلة.",
+  },
+  SAMPLE_EVALUATION: {
+    en: "Sample evaluation",
+    ar: "تجربة وتقييم العينات",
+    whenEn: "moving a deal past it with no sample needs a documented reason",
+    whenAr: "تجاوزها دون عيّنة على الصفقة يحتاج سببًا موثّقًا",
+    unsetEn: "Not set — deals move past samples without a skip reason.",
+    unsetAr: "غير مُهيَّأة — تتجاوز الصفقات العينات دون سبب تخطٍّ.",
   },
   QUOTATION: {
     en: "Quotation",
     ar: "عرض السعر",
     whenEn: "where a deal moves when a quotation is issued",
     whenAr: "حيث تنتقل الصفقة عند إصدار عرض سعر",
+    unsetEn: "Not set — quotations are still issued, the card just does not move.",
+    unsetAr: "غير مُهيَّأة — يُصدَر عرض السعر كالمعتاد، ولا تتحرّك بطاقة الصفقة.",
+  },
+  NEGOTIATION: {
+    en: "Negotiation & approval",
+    ar: "التفاوض والاعتماد",
+    whenEn: "the deal page offers recording the negotiation result or the approval",
+    whenAr: "تقترح صفحة الصفقة فيها تسجيل نتيجة التفاوض أو طلب الاعتماد",
+    unsetEn: "Not set — the deal page falls back to «Next stage».",
+    unsetAr: "غير مُهيَّأة — تقترح صفحة الصفقة «المرحلة التالية» فقط.",
   },
 };
 
@@ -123,12 +145,29 @@ export default function SalesSettingsPage() {
   // «حد الخصم الذي يحتاج اعتماد» (GET/PUT /api/settings/quotation). Empty = the built-in figure.
   const [disc, setDisc] = useState<{ stored: string | null; effective: string; canEdit: boolean } | null>(null);
   const [discInput, setDiscInput] = useState("");
+  // «الحد الأدنى للتأهيل» (same endpoint, same admin gate): null until read.
+  const [qualMin, setQualMin] = useState<boolean | null>(null);
+  async function saveQualMin(next: boolean) {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    const res = await api<{ requireQualificationMinimum: boolean; errorEn?: string }>(
+      "/api/settings/quotation", { method: "PUT", body: { requireQualificationMinimum: next } },
+    );
+    setBusy(false);
+    if (!res.ok) { setError((ar ? res.data.error : res.data.errorEn) ?? res.data.error ?? (ar ? "تعذّر الحفظ." : "Could not save.")); return; }
+    setQualMin(res.data.requireQualificationMinimum);
+    setSuccess(res.data.requireQualificationMinimum
+      ? (ar ? "لا يتحوّل العميل المحتمل إلى فرصة إلا بعد معرفة نوع النشاط والاحتياج والخطوة التالية." : "A lead now converts only once its business type, need and next step are known.")
+      : (ar ? "عادت القاعدة السابقة: أي تفاعل مؤهِّل يحوّل العميل المحتمل." : "The legacy rule is back: any qualifying interaction converts the lead."));
+  }
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const res = await api<{ discountApprovalPercent: string | null; effectiveThresholdPercent: string; can: { edit: boolean } }>("/api/settings/quotation");
+      const res = await api<{ discountApprovalPercent: string | null; effectiveThresholdPercent: string; requireQualificationMinimum?: boolean; can: { edit: boolean } }>("/api/settings/quotation");
       if (cancelled || !res.ok) return;
       setDisc({ stored: res.data.discountApprovalPercent, effective: res.data.effectiveThresholdPercent, canEdit: res.data.can.edit });
+      setQualMin(res.data.requireQualificationMinimum !== false);
       setDiscInput(res.data.discountApprovalPercent === null ? "" : String(Number(res.data.discountApprovalPercent)));
     })();
     return () => { cancelled = true; };
@@ -405,9 +444,7 @@ export default function SalesSettingsPage() {
                       </span>
                     ) : (
                       <span style={{ color: "var(--status-warning)" }}>
-                        {p === "QUALIFICATION"
-                          ? ar ? "غير مُهيَّأة — لن يتحوّل أي عميل محتمل تلقائيًا حتى تُحدَّد مرحلة." : "Not set — no lead will qualify automatically until a stage is chosen."
-                          : ar ? "غير مُهيَّأة — يُصدَر عرض السعر كالمعتاد، ولا تتحرّك بطاقة الصفقة." : "Not set — quotations are still issued, the card just does not move."}
+                        {ar ? PURPOSE_LABELS[p].unsetAr : PURPOSE_LABELS[p].unsetEn}
                       </span>
                     )}
                   </li>
@@ -420,6 +457,26 @@ export default function SalesSettingsPage() {
           </div>
         </PerfNote>
       </div>
+
+      {/* «الحد الأدنى للتأهيل»: what makes an interested lead a qualified opportunity. */}
+      {qualMin !== null && (
+        <div style={{ marginTop: 12 }} data-testid="qualification-minimum">
+          <PerfNote>
+            <div>
+              <b style={{ fontWeight: 600 }}>{ar ? "الحد الأدنى للتأهيل:" : "Qualification minimum:"}</b>{" "}
+              {qualMin
+                ? (ar ? "مفعّل — يتحوّل العميل المحتمل إلى فرصة مؤهلة عند معرفة نوع النشاط والاحتياج والخطوة التالية المتفق عليها (الكمية اختيارية)." : "On — a lead becomes a qualified opportunity once its business type, need and agreed next step are known (volume optional).")
+                : (ar ? "غير مفعّل — أي تفاعل مؤهِّل (مهتم، موعد، زيارة) يحوّل العميل المحتمل كما في السابق." : "Off — any qualifying interaction (interested, a meeting, a visit) converts the lead, as before.")}
+              {disc?.canEdit && (
+                <button type="button" className="btn sm" style={{ marginInlineStart: 8 }} disabled={busy}
+                  data-testid="qualification-minimum-toggle" onClick={() => saveQualMin(!qualMin)}>
+                  {qualMin ? (ar ? "إيقاف" : "Turn off") : (ar ? "تفعيل" : "Turn on")}
+                </button>
+              )}
+            </div>
+          </PerfNote>
+        </div>
+      )}
 
       <div className="hr" style={{ margin: "28px 0" }} />
 
