@@ -4,7 +4,7 @@ declare module 'arabic-reshaper' {
 
 declare module 'bidi-js' {
   interface BidiEngine {
-    getEmbeddingLevels(text: string): unknown;
+    getEmbeddingLevels(text: string, baseDirection?: "ltr" | "rtl"): unknown;
     getReorderedString(text: string, embeddingLevels: unknown): string;
   }
   function bidiFactory(): BidiEngine;

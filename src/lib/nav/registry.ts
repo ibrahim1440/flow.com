@@ -5,7 +5,7 @@ import {
   ClipboardList, UserPlus, KanbanSquare, Percent, CalendarCheck, FileText, Target, BarChart3,
   ScrollText, Briefcase, Landmark, Boxes, Workflow, Zap, MessageSquareText, QrCode,
   Contact, UserRound, CalendarDays, Banknote, Laptop,
-  Flame, ListChecks, Coffee, Bell, Megaphone,
+  Flame, ListChecks, Coffee, Bell, Megaphone, Mail,
 } from "lucide-react";
 import { hasModuleAccess, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 import type { D21IconName } from "@/components/shell/icons";
@@ -179,7 +179,7 @@ export const SHELL_GROUP_ORDER = ["orders", "production", "quality", "inventory"
  * The gear menu, in this order (GX F-P01 settings navigation: «المنشأة · المستخدمون والصلاحيات ·
  * … · المبيعات · … · الأتمتة والواتساب»), after the profile. An entry not listed follows.
  */
-export const MENU_ORDER = ["profile", "settings", "employees", "settings.production", "settings.inventory", "settings.products", "sales.settings", "settings.invoicing", "automation"];
+export const MENU_ORDER = ["profile", "settings", "employees", "settings.email", "settings.production", "settings.inventory", "settings.products", "sales.settings", "settings.invoicing", "automation"];
 
 const sales = (sub?: string): Ability => ({ module: "sales", ...(sub ? { sub } : {}) });
 const commissions = (sub?: string): Ability => ({ module: "commissions", ...(sub ? { sub } : {}) });
@@ -875,6 +875,8 @@ export const NAV: NavNode[] = [
   { id: "settings.inventory", ar: "المخزون", en: "Inventory", icon: Boxes, href: "/dashboard/settings/inventory", anyOf: [{ module: "settings" }], adminOnly: true, shell: { place: "menu", icon: "box", trailRoot: "settings" } },
   { id: "settings.products", ar: "المنتجات", en: "Products", icon: Coffee, href: "/dashboard/settings/products", anyOf: [{ module: "settings" }], adminOnly: true, shell: { place: "menu", icon: "cup", trailRoot: "settings" } },
   { id: "settings.invoicing", ar: "الفوترة والضرائب", en: "Invoicing & tax", icon: FileText, href: "/dashboard/settings/invoicing", anyOf: [{ module: "settings" }], adminOnly: true, shell: { place: "menu", icon: "invoice", trailRoot: "settings" } },
+  // feature/email-demo: the e-mail provider's state and the demo send — the audience of «المنشأة».
+  { id: "settings.email", ar: "البريد الإلكتروني", en: "E-mail", icon: Mail, href: "/dashboard/settings/email", anyOf: [{ module: "settings" }], adminOnly: true, shell: { place: "menu", icon: "inbox", trailRoot: "settings" } },
 ];
 
 // Icons imported for the tree above but not otherwise referenced keep the import list
