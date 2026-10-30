@@ -34,6 +34,7 @@
     "preview:nav-fixtures:remove": "tsx scripts/sales-preview/nav-fixtures.ts --remove",
     "test:finance:unit": "tsx --import ./tests/support/simple-mode-off.mjs --test tests/finance/unit/*.test.ts",
     "test:automation:unit": "tsx --import ./tests/support/simple-mode-off.mjs --test tests/automation/*.test.ts",
+    "test:automation:db": "tsx --import ./tests/support/simple-mode-off.mjs --import ./tests/support/server-only-stub.mjs --test --test-concurrency=1 --test-force-exit tests/automation/db/*.test.ts",
     "test:automation:http": "tsx --test --test-concurrency=1 tests/automation/http/*.test.ts",
     "test:print:unit": "tsx --import ./tests/support/simple-mode-off.mjs --test tests/print/unit/*.test.ts",
     "test:ops:unit": "tsx --import ./tests/support/simple-mode-off.mjs --test tests/ops/unit/*.test.ts",

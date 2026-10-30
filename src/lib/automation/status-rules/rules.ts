@@ -6,8 +6,8 @@
  * Node. sync.ts and the dispatcher do the reads and writes around these functions.
  */
 import type { Person } from "../context";
-import { normalizePhoneForWhatsApp } from "../phone";
 import type { EffectiveMode } from "../settings";
+import { planDelivery } from "../send-mode";
 import { renderTemplate, TEMPLATE_MAX_LENGTH, unknownPlaceholders, type RenderContext } from "../template";
 import { getStatusSource, sourceEventDef, statusCanFire, statusEnglishDefault, type StatusRecipient } from "./sources";
 import { pickStaffTemplate, resolveMessageLang, staffIdOf, type MsgLang } from "../employee-lang";
@@ -267,8 +267,9 @@ export function statusDedupeKey(e: {
 
 /**
  * The rows one enabled rule produces for one event. Same sending rules as the automation rules
- * (dispatcher.ts): no phone or an invalid one is SKIPPED with the reason, an opted-out customer
- * is SKIPPED, OFF records what it would have sent, TEST redirects to the test number.
+ * (dispatcher.ts, through planDelivery): an opted-out customer is SKIPPED, OFF records what it would
+ * have sent, TEST sends to the test number only (even when the recipient's own number is missing or
+ * unusable), LIVE skips a missing or unusable number with the reason.
  */
 export function planStatusMessages(input: {
   rule: { source: string; statusKey: string; labelAr: string; labelEn?: string; recipients: StatusRecipient[]; template: string; templateEn?: string | null; renotify?: boolean };
@@ -329,17 +330,14 @@ export function planStatusMessages(input: {
       if (seenPeople.has(person.key)) continue;
       seenPeople.add(person.key);
       const base = { dedupeKey: key(person.key), recipientKind: kind, recipientName: person.name, body: bodyFor(person) };
-      const phone = normalizePhoneForWhatsApp(person.phone);
-      if (!phone.ok) {
-        rows.push({ ...base, phone: null, status: "SKIPPED", statusNote: phone.reason });
-        continue;
+      // planDelivery (send-mode.ts), shared with the automation rules: in TEST mode the test number
+      // is the only destination, whatever the recipient's own number is — missing or unusable included.
+      const d = planDelivery(person, input.mode);
+      if (d.ownPhone) {
+        if (seenPhones.has(d.ownPhone)) continue;
+        seenPhones.add(d.ownPhone);
       }
-      if (seenPhones.has(phone.phone)) continue;
-      seenPhones.add(phone.phone);
-      if (person.optOut) rows.push({ ...base, phone: phone.phone, status: "SKIPPED", statusNote: "This customer asked not to receive WhatsApp messages." });
-      else if (input.mode.mode === "OFF") rows.push({ ...base, phone: phone.phone, status: "SKIPPED", statusNote: input.mode.note });
-      else if (input.mode.mode === "TEST") rows.push({ ...base, phone: input.mode.testPhone, intendedPhone: phone.phone, status: "QUEUED", statusNote: null });
-      else rows.push({ ...base, phone: phone.phone, status: "QUEUED", statusNote: null });
+      rows.push({ ...base, phone: d.phone, intendedPhone: d.intendedPhone, status: d.status, statusNote: d.statusNote });
     }
   }
   return rows;

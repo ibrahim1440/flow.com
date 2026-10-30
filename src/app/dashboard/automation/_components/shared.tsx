@@ -63,6 +63,8 @@ const NOTE_AR: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^Not a valid Saudi mobile number\.$/, () => "رقم الجوال السعودي غير صالح."],
   [/^A local number that is not a Saudi mobile/, () => "رقم محلي ليس جوالا سعوديا. اكتبه مع مفتاح الدولة."],
   [/^Not a valid phone number\.$/, () => "رقم الجوال غير صالح."],
+  [/^Test mode: sent to the test number only\. The recipient's own number is not usable: (.+)$/, (m) => `وضع التجربة: أُرسلت إلى رقم التجربة فقط. رقم المستلم الأصلي لا يصلح للإرسال: ${noteText(m[1], "ar")}`],
+  [/^Test mode: refused to send to a number other than the test number\.$/, () => "وضع التجربة: رُفض الإرسال إلى رقم غير رقم التجربة."],
   [/^Expired: not sent within 24 hours/, () => "انتهت صلاحيتها: لم تُرسل خلال 24 ساعة من موعدها."],
   // GX E-90 E-S8.
   [/^Too many requests\. Wait a few minutes\.$/, () => "طلبات كثيرة. انتظر بضع دقائق ثم أعد المحاولة. حدّ الاتصال 60 إجراء كل 10 دقائق، والرسائل التجريبية 10."],

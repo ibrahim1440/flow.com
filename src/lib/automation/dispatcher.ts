@@ -24,9 +24,9 @@ import { getEvent, type Lang } from "./catalog";
 import { firstFailingCondition } from "./conditions";
 import { employeeMessageLangs, employeeRecipient, resolveEventContext, type EventContext, type Person, type StoredEvent } from "./context";
 import { pickStaffTemplate, resolveMessageLang, ruleEnglishDefault, staffIdOf, type MsgLang } from "./employee-lang";
-import { normalizePhoneForWhatsApp } from "./phone";
 import { isStaffRecipient, parseStoredConditions, parseStoredSteps, stepOffsetsMinutes, type Recipient } from "./rules";
 import { effectiveMode, readSettings, SETTINGS_ID, type EffectiveMode } from "./settings";
+import { isTestTraceNote, planDelivery, sendTarget } from "./send-mode";
 import { renderTemplate } from "./template";
 import { processStatusRules } from "./status-rules/evaluate";
 import { isSilentEventPayload } from "./order-progress";
@@ -305,25 +305,17 @@ async function processOneEvent(tx: Tx, id: string, mode: EffectiveMode, report: 
       const seenPhones = new Set<string>();
       for (const person of people) {
         const dedupeKey = `${run.id}:${i}:${person.key}`;
-        const phone = normalizePhoneForWhatsApp(person.phone);
-        const row = { ...base, dedupeKey, recipientName: person.name, body: await bodyFor(person) };
-        if (!phone.ok) {
-          rows.push({ ...row, phone: null, status: "SKIPPED", statusNote: phone.reason });
-        } else if (seenPhones.has(phone.phone)) {
-          continue;
-        } else if (person.optOut) {
-          seenPhones.add(phone.phone);
-          rows.push({ ...row, phone: phone.phone, status: "SKIPPED", statusNote: "This customer asked not to receive WhatsApp messages." });
-        } else if (mode.mode === "OFF") {
-          seenPhones.add(phone.phone);
-          rows.push({ ...row, phone: phone.phone, status: "SKIPPED", statusNote: mode.note });
-        } else if (mode.mode === "TEST") {
-          seenPhones.add(phone.phone);
-          rows.push({ ...row, phone: mode.testPhone, intendedPhone: phone.phone, status: "QUEUED" });
-        } else {
-          seenPhones.add(phone.phone);
-          rows.push({ ...row, phone: phone.phone, status: "QUEUED" });
+        // planDelivery (send-mode.ts): in TEST mode the test number is the only destination, so the
+        // recipient's own number — missing or unusable — never stops the test, and is never dialled.
+        const d = planDelivery(person, mode);
+        if (d.ownPhone) {
+          if (seenPhones.has(d.ownPhone)) continue;
+          seenPhones.add(d.ownPhone);
         }
+        rows.push({
+          ...base, dedupeKey, recipientName: person.name, body: await bodyFor(person),
+          phone: d.phone, intendedPhone: d.intendedPhone, status: d.status, statusNote: d.statusNote,
+        });
       }
     }
 
@@ -355,7 +347,7 @@ async function recipientsOf(tx: Tx, to: Recipient, ctx: EventContext): Promise<P
 
 // ─── 4. Sending ────────────────────────────────────────────────────────────────
 
-type Claimed = { id: string; phone: string | null; intendedPhone: string | null; body: string; attempts: number };
+type Claimed = { id: string; phone: string | null; intendedPhone: string | null; body: string; attempts: number; statusNote: string | null };
 
 async function sendDueMessages(report: DispatchReport, deadline: number, maxSends: number) {
   const settings = await readSettings();
@@ -392,7 +384,7 @@ async function sendDueMessages(report: DispatchReport, deadline: number, maxSend
       LIMIT ${maxSends}
       FOR UPDATE SKIP LOCKED
     )
-    RETURNING id, phone, "intendedPhone", body, attempts`;
+    RETURNING id, phone, "intendedPhone", body, attempts, "statusNote"`;
 
   for (let i = 0; i < claimed.length; i++) {
     const msg = claimed[i];
@@ -402,16 +394,16 @@ async function sendDueMessages(report: DispatchReport, deadline: number, maxSend
     }
     if (i > 0) await new Promise((r) => setTimeout(r, PAUSE_BETWEEN_SENDS_MS));
 
-    // TEST mode means nothing reaches a real recipient — including messages queued while
-    // the mode was LIVE.
-    let phone = msg.phone;
-    let intendedPhone = msg.intendedPhone;
-    if (mode.mode === "TEST" && !intendedPhone) {
-      intendedPhone = phone;
-      phone = mode.testPhone;
-    }
+    // TEST mode means nothing reaches a real recipient — including messages queued while the
+    // mode was LIVE. sendTarget decides the number again, with the mode of this moment.
+    const { phone, intendedPhone } = sendTarget(mode, msg);
     if (!phone) {
       await prisma.whatsAppMessage.update({ where: { id: msg.id }, data: { status: "FAILED", lockedAt: null, statusNote: "No phone number." } });
+      continue;
+    }
+    if (mode.mode === "TEST" && phone !== mode.testPhone) {
+      // Unreachable by construction; the last line between a test run and a customer's phone.
+      await prisma.whatsAppMessage.update({ where: { id: msg.id }, data: { status: "FAILED", lockedAt: null, statusNote: "Test mode: refused to send to a number other than the test number." } });
       continue;
     }
 
@@ -435,7 +427,7 @@ async function sendDueMessages(report: DispatchReport, deadline: number, maxSend
       report.sent++;
       await prisma.whatsAppMessage.update({
         where: { id: msg.id },
-        data: { status: "SENT", phone, intendedPhone, attempts: attemptNo, sentAt: new Date(), lockedAt: null, nextAttemptAt: null, providerMessageId: result.messageId, statusNote: null },
+        data: { status: "SENT", phone, intendedPhone, attempts: attemptNo, sentAt: new Date(), lockedAt: null, nextAttemptAt: null, providerMessageId: result.messageId, statusNote: isTestTraceNote(msg.statusNote) ? msg.statusNote : null },
       });
       continue;
     }
