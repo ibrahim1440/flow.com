@@ -24,8 +24,39 @@ import type { SendMode } from "./send-mode";
 /** LIVE is refused unless a test e-mail reached the test address within this many days. */
 export const TEST_EMAIL_FRESH_DAYS = 30;
 
+/**
+ * The host the production deployment answers on (batch 25b, seat 6 N13): EMAIL_PRODUCTION_HOST when the owner sets it,
+ * else the production domain Vercel gives (VERCEL_PROJECT_PRODUCTION_URL). Lower case, no scheme, no port.
+ */
+export function productionHost(env: Record<string, string | undefined> = process.env): string | null {
+  const raw = (env.EMAIL_PRODUCTION_HOST?.trim() || env.VERCEL_PROJECT_PRODUCTION_URL?.trim() || "").toLowerCase();
+  return raw ? raw.replace(/^https?:\/\//, "").replace(/\/.*$/, "") || null : null;
+}
+
+/** The links' base URL is the production domain over https (batch 25b: LIVE never relies on VERCEL_ENV alone). */
+export function baseUrlIsProduction(env: Record<string, string | undefined> = process.env): boolean {
+  const host = productionHost(env);
+  const base = (env.APP_BASE_URL?.trim() || (env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${env.VERCEL_PROJECT_PRODUCTION_URL.trim()}` : "")).toLowerCase();
+  if (!host || !base) return false;
+  try {
+    const u = new URL(base);
+    return u.protocol === "https:" && u.host === host;
+  } catch {
+    return false;
+  }
+}
+
+/** EMAIL_LINK_SECRET is set and long enough (batch 25b: required for LIVE; seat 6 N2). */
+export const linkSecretConfigured = (env: Record<string, string | undefined> = process.env) => (env.EMAIL_LINK_SECRET?.trim().length ?? 0) >= 32;
+
+/**
+ * The deployment gate for LIVE e-mail. Batch 25b (seat 6 N13): not VERCEL_ENV alone — also running ON Vercel (VERCEL=1), the
+ * links' base URL being the production domain over https, and EMAIL_LINK_SECRET set (the unsubscribe links of LIVE
+ * e-mails are signed with it, never with a key derived from JWT_SECRET). A local copy carrying production's env file
+ * fails the first two.
+ */
 export function emailLiveAllowed(env: Record<string, string | undefined> = process.env): boolean {
-  return env.EMAIL_LIVE_ENABLED === "true" && env.VERCEL_ENV === "production";
+  return env.EMAIL_LIVE_ENABLED === "true" && env.VERCEL_ENV === "production" && env.VERCEL === "1" && baseUrlIsProduction(env) && linkSecretConfigured(env);
 }
 
 export type EffectiveEmailMode =
@@ -174,14 +205,21 @@ export function emailModeRefusal(
 ): ModeChangeRefusal | null {
   if (to === "TEST" && !s.testEmail) return { status: 400, code: "TEST_EMAIL_REQUIRED", error: "وضع التجربة يحتاج إيميل تجربة.", errorEn: "Test mode needs a test e-mail address." };
   if (to !== "LIVE") return null;
+  if (env.EMAIL_LIVE_ENABLED === "true" && env.VERCEL_ENV === "production" && !(env.APP_BASE_URL?.trim() || env.VERCEL_PROJECT_PRODUCTION_URL?.trim())) {
+    return { status: 409, code: "EMAIL_BASE_URL_MISSING", error: "قبل «فعلي» لازم يُضبط عنوان النظام (APP_BASE_URL) حتى يوصل رابط الإيقاف. كلّم الدعم الفني.", errorEn: "Before Live, APP_BASE_URL must be set (the unsubscribe link)." };
+  }
+  // Batch 25b: the two new conditions get their own reason (the card shows it) before the generic lock.
+  if (env.EMAIL_LIVE_ENABLED === "true" && env.VERCEL_ENV === "production" && !linkSecretConfigured(env)) {
+    return { status: 409, code: "EMAIL_LINK_SECRET_MISSING", error: "قبل «فعلي» لازم يُضبط مفتاح روابط الإيميل (EMAIL_LINK_SECRET، 32 حرف أو أكثر). كلّم الدعم الفني.", errorEn: "Before Live, EMAIL_LINK_SECRET (32+ characters) must be set." };
+  }
+  if (env.EMAIL_LIVE_ENABLED === "true" && env.VERCEL_ENV === "production" && (env.APP_BASE_URL?.trim() || env.VERCEL_PROJECT_PRODUCTION_URL?.trim()) && !baseUrlIsProduction(env)) {
+    return { status: 409, code: "EMAIL_BASE_URL_NOT_PRODUCTION", error: "عنوان النظام لهذا الخادم مو عنوان الإنتاج (https). «فعلي» يشتغل على خادم الإنتاج فقط. كلّم الدعم الفني.", errorEn: "The base URL is not the production domain over https." };
+  }
   if (!emailLiveAllowed(env)) {
     return { status: 409, code: "EMAIL_LIVE_DISABLED", error: "الإرسال الفعلي للإيميل مقفل على هذا الخادم. يفتحه الدعم الفني بقرار من المالك.", errorEn: "Live e-mail is locked on this server (EMAIL_LIVE_ENABLED on production)." };
   }
   if (!env.RESEND_WEBHOOK_SECRET?.trim()) {
     return { status: 409, code: "EMAIL_WEBHOOK_MISSING", error: "قبل «فعلي» لازم يُضبط سر الـ webhook (RESEND_WEBHOOK_SECRET) حتى نعرف الإيميلات المرتدّة. كلّم الدعم الفني.", errorEn: "Before Live, RESEND_WEBHOOK_SECRET must be set (bounces and complaints)." };
-  }
-  if (!(env.APP_BASE_URL?.trim() || env.VERCEL_PROJECT_PRODUCTION_URL?.trim())) {
-    return { status: 409, code: "EMAIL_BASE_URL_MISSING", error: "قبل «فعلي» لازم يُضبط عنوان النظام (APP_BASE_URL) حتى يوصل رابط الإيقاف. كلّم الدعم الفني.", errorEn: "Before Live, APP_BASE_URL must be set (the unsubscribe link)." };
   }
   if (!testEmailFresh(s.testEmailVerifiedAt, now)) {
     return { status: 409, code: "EMAIL_TEST_NOT_VERIFIED", error: "قبل «فعلي» لازم توصلك رسالة تجربة على إيميل التجربة (خلال آخر 30 يوم) وتضغط «وصلتني».", errorEn: "Before Live, a test e-mail must reach the test address (in the last 30 days) and be confirmed." };

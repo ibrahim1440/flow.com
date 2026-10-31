@@ -19,7 +19,7 @@ type Mode = "OFF" | "TEST" | "LIVE";
 type ChannelState = {
   whatsapp: { sendMode: Mode; testPhone: string | null; liveAllowed: boolean; effectiveMode: Mode; effectiveNote: string | null; lastTestSentAt: string | null };
   email: { sendMode: Mode; testEmail: string | null; testEmailVerifiedAt: string | null; verifiedFresh: boolean; liveAllowed: boolean; effectiveMode: Mode; effectiveNote: string | null; providerConfigured: boolean; lastTestSentAt: string | null;
-    webhookConfigured: boolean; baseUrlConfigured: boolean; replyToEmail: string | null };
+    webhookConfigured: boolean; baseUrlConfigured: boolean; replyToEmail: string | null; linkSecretConfigured?: boolean; baseUrlProduction?: boolean };
   can: { manage: boolean; live: boolean };
 };
 
@@ -100,7 +100,7 @@ export function ChannelsCard({ lang, onChanged }: { lang: "ar" | "en"; onChanged
     const c = channel === "whatsapp" ? s.whatsapp : s.email;
     const saved = c.sendMode;
     const eff = SEND_MODE_LABELS[c.effectiveMode];
-    const liveLocked = !c.liveAllowed || (channel === "email" && (!s.email.verifiedFresh || !s.email.webhookConfigured || !s.email.baseUrlConfigured || !s.email.providerConfigured));
+    const liveLocked = !c.liveAllowed || (channel === "email" && (!s.email.verifiedFresh || !s.email.webhookConfigured || !s.email.baseUrlConfigured || !s.email.providerConfigured || !s.email.linkSecretConfigured || !s.email.baseUrlProduction));
     const name = channel === "whatsapp" ? L("واتساب", "WhatsApp") : L("إيميل", "E-mail");
     return (
       <div className="tl-chrow" data-testid={`channel-${channel}`}>
@@ -175,12 +175,12 @@ export function ChannelsCard({ lang, onChanged }: { lang: "ar" | "en"; onChanged
       <div className="tl-chrow" data-testid="reply-to-row">
         <div>
           <span className="tl-chname">{L("بريد الردود", "Reply address")}</span>
-          <span className="tl-chsub">{L("لما العميل يرد على الإيميل، يروح الرد لإيميل مندوبه. إذا المندوب ما له إيميل عمل، يروح لهذا البريد.", "Customer replies go to the rep's work e-mail; when the rep has none, to this address.")}</span>
+          <span className="tl-chsub" data-testid="reply-to-help">{L("لما العميل يرد على الإيميل، يروح الرد لإيميل العمل حق المندوب اللي يتابعه: في عرض السعر صاحب الصفقة، وفي غيره مسؤول حساب العميل. هذا البريد احتياط فقط لما المندوب ما له إيميل عمل.", "Customer replies go to the work e-mail of the rep who handles them: the deal owner for a quotation, otherwise the customer's account owner. This address is only the fallback when that rep has no work e-mail.")}</span>
         </div>
         <div>
           {!s.email.replyToEmail ? (
             <span className="tl-chsub" style={{ color: "var(--status-warning, #946200)" }} data-testid="reply-to-warning">
-              {L("ما فيه بريد ردود: الإيميل ما بيقول «رد على هذه الرسالة»، وبيعطي رقم التواصل بدلها.", "No reply address: e-mails will not say «reply to this e-mail» and give the phone number instead.")}
+              {L("ما فيه بريد ردود احتياطي: إذا المندوب ما له إيميل عمل، الإيميل ما بيقول «رد على هذه الرسالة» وبيعطي رقم التواصل بدلها.", "No fallback reply address: when the rep has no work e-mail, e-mails will not say «reply to this e-mail» and give the phone number instead.")}
             </span>
           ) : <span className="tl-chsub">{L("الحين: ", "Now: ")}<bdi dir="ltr">{s.email.replyToEmail}</bdi></span>}
         </div>
@@ -217,6 +217,9 @@ function EmailSetupChecks({ s, L }: { s: ChannelState["email"]; L: (a: string, e
     { ok: s.providerConfigured, testId: "check-provider", text: s.providerConfigured ? L("الإيميل مربوط", "E-mail is connected") : L("الإيميل غير مربوط على هذا الخادم (مفتاح Resend ناقص)، فالإيميلات تنتظر وما تطلع. كلّم الدعم الفني.", "E-mail is not connected (no Resend key): e-mails wait, none goes out.") },
     { ok: s.webhookConfigured, testId: "check-webhook", text: s.webhookConfigured ? L("نعرف إذا الإيميل وصل أو ارتدّ", "Delivery reports are on") : L("ما نعرف إذا الإيميل وصل أو ارتدّ، لأن ربط تقارير التسليم ناقص. «فعلي» مقفل لين يُضبط.", "No delivery reports (webhook secret missing). Live stays locked until it is set.") },
     { ok: s.baseUrlConfigured, testId: "check-base-url", text: s.baseUrlConfigured ? L("رابط الإيقاف يشتغل", "The unsubscribe link works") : L("عنوان النظام ناقص، فرابط الإيقاف ما يشتغل والإيميلات للعملاء ما تطلع. كلّم الدعم الفني.", "The system address is missing: no unsubscribe link, so customer e-mails are not sent.") },
+    // Batch 25b: LIVE needs the link key (so links survive a key rotation) and this server to be the production domain.
+    { ok: !!s.linkSecretConfigured, testId: "check-link-secret", text: s.linkSecretConfigured ? L("مفتاح روابط الإيميل مضبوط", "The e-mail link key is set") : L("مفتاح روابط الإيميل (EMAIL_LINK_SECRET) ناقص. «فعلي» مقفل لين يُضبط. كلّم الدعم الفني.", "The e-mail link key (EMAIL_LINK_SECRET) is missing. Live stays locked until it is set.") },
+    { ok: !!s.baseUrlProduction, testId: "check-production-url", text: s.baseUrlProduction ? L("هذا خادم الإنتاج (https)", "This is the production server (https)") : L("عنوان هذا الخادم مو عنوان الإنتاج، فـ«فعلي» مقفل هنا (يشتغل على خادم الإنتاج فقط).", "This server's address is not the production domain: Live is locked here (production only).") },
   ];
   const stale = s.sendMode === "LIVE" && !s.verifiedFresh;
   return (

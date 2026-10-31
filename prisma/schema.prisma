@@ -267,6 +267,10 @@ model Customer {
   emailOptOutNote   String?
   /// The opaque id the signed unsubscribe link carries (never the customer id). Made on the first e-mail.
   emailLinkId       String?   @unique
+  /// Batch 25b (20261208090000_email_followups): a legal hold on this customer's archived messages — while on, neither the
+  /// 5-year retention nor an erasure destroys them. Set by the administrator (audited).
+  messageLegalHold   Boolean   @default(false)
+  messageLegalHoldAt DateTime?
 
   // ─── Customer account (additive, migration 20261019120000_customer_account) ───────────
   // The account page (Figma crm-account 179:1312) shows particulars the system had no source

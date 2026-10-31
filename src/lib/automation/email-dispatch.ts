@@ -84,13 +84,21 @@ async function companyInfo(): Promise<CompanyInfo> {
  * The reply address (fix round 1): the account owner's company e-mail, else the company «بريد الردود» (AutomationSettings.
  * replyToEmail), else none — and then the e-mail never promises «يكفي الرد على هذه الرسالة». Never the customer's data.
  */
-export async function replyToFor(customerId: string | null, companyReplyTo: string | null): Promise<string | undefined> {
-  if (customerId) {
-    const c = await prisma.customer.findUnique({ where: { id: customerId }, select: { accountOwnerId: true } });
-    if (c?.accountOwnerId) {
-      const r = await recipientFor(prisma, { accountId: c.accountOwnerId }, "system");
-      if (r.email) return r.email;
+export async function replyToFor(customerId: string | null, companyReplyTo: string | null, subject: { type: string | null; id: string | null } = { type: null, id: null }): Promise<string | undefined> {
+  // Owner decision (31 Oct 2026, batch 25b): replies go to the rep who handles the customer — for a quotation the deal's
+  // owner, otherwise the customer's account owner — at their work e-mail. «بريد الردود» only when that rep has none.
+  const repOf = async (): Promise<string | null> => {
+    if (subject.type === "Quote" && subject.id) {
+      const q = await prisma.quote.findUnique({ where: { id: subject.id }, select: { opportunity: { select: { ownerId: true } } } });
+      if (q?.opportunity.ownerId) return q.opportunity.ownerId;
     }
+    if (!customerId) return null;
+    return (await prisma.customer.findUnique({ where: { id: customerId }, select: { accountOwnerId: true } }))?.accountOwnerId ?? null;
+  };
+  const rep = await repOf();
+  if (rep) {
+    const r = await recipientFor(prisma, { accountId: rep }, "system");
+    if (r.email) return r.email;
   }
   return companyReplyTo ?? undefined;
 }
@@ -225,7 +233,7 @@ export async function sendDueEmails(report: EmailSendReport, deadline: number, m
       await done(msg.id, { status: refused.status, statusNote: refused.note, toEmail, intendedEmail });
       continue;
     }
-    const replyTo = await replyToFor(msg.customerId, companyReplyTo);
+    const replyTo = await replyToFor(msg.customerId, companyReplyTo, { type: msg.subjectType, id: msg.subjectId });
     const content = await contentOf(msg, company, !!replyTo);
     if ("refused" in content) {
       await done(msg.id, { status: "FAILED", statusNote: content.refused, toEmail, intendedEmail });

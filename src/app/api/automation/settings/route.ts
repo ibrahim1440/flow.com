@@ -5,7 +5,7 @@ import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { normalizePhoneForWhatsApp } from "@/lib/automation/phone";
 import { effectiveMode, liveAllowed, SETTINGS_ID, type SendMode } from "@/lib/automation/settings";
-import { effectiveEmailMode, emailLiveAllowed, emailModeRefusal, parseEmailAddress, testEmailFresh } from "@/lib/automation/email-mode";
+import { effectiveEmailMode, emailLiveAllowed, emailModeRefusal, parseEmailAddress, testEmailFresh, baseUrlIsProduction, linkSecretConfigured } from "@/lib/automation/email-mode";
 import { emailProviderStatus } from "@/lib/notify/email";
 import { appBaseUrl } from "@/lib/automation/email-links";
 import { writeSettingsAudit } from "@/lib/services/settings/audit";
@@ -44,6 +44,8 @@ export async function GET() {
       providerConfigured: !!provider.provider, lastTestSentAt: emailTest?.sentAt ?? null,
       // Fix round 1: what is missing on this server, in plain words on the card (never a secret, only whether it is set).
       webhookConfigured: !!process.env.RESEND_WEBHOOK_SECRET?.trim(), baseUrlConfigured: !!appBaseUrl(),
+      // Batch 25b: LIVE also needs the link key and the production domain — only whether each holds, never a value.
+      linkSecretConfigured: linkSecretConfigured(), baseUrlProduction: baseUrlIsProduction(),
       replyToEmail: s?.replyToEmail ?? null,
     },
     can: { manage: hasSubPrivilege(user.permissions, "automation", "manage_connection"), live: user.role === "admin" },

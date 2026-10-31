@@ -145,6 +145,9 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
   const { id } = await params;
   if (!(await customerInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Batch 25b (gate F1): a customer under a legal hold cannot be deleted (the database refuses too: customer_legal_hold_guard).
+  const HELD = { error: "العميل عليه حجز قانوني — ما ينحذف", errorEn: "This customer is under a legal hold and cannot be deleted.", code: "LEGAL_HOLD" };
+  if ((await prisma.customer.findUnique({ where: { id }, select: { messageLegalHold: true } }))?.messageLegalHold) return NextResponse.json(HELD, { status: 409 });
   try {
     // The customer's documents cascade with it; their private blobs are removed after it commits.
     const blobs = await prisma.customerFile.findMany({ where: { customerId: id, blobPathname: { not: null } }, select: { blobPathname: true } });
@@ -152,6 +155,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     await deleteCustomerFileBlobs(prisma, blobs.map((b) => b.blobPathname));
     return NextResponse.json({ deleted: true });
   } catch (err) {
+    if (/CUSTOMER_LEGAL_HOLD/.test(String((err as Error)?.message ?? ""))) return NextResponse.json(HELD, { status: 409 });
     // P2003 = foreign key constraint: customer has orders
     const code = err && typeof err === "object" && "code" in err ? (err as { code: string }).code : null;
     if (code === "P2003" || code === "P2014") {

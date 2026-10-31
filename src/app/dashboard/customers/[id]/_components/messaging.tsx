@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Mail, MessageCircle } from "lucide-react";
 import { api } from "../../../sales/_components/ui";
+import { useUser } from "../../../user-context";
 
 /**
  * «الرسائل» on the customer page (batch 25; concept screen 4): the customer's e-mail with an easy edit, «يستقبل
@@ -16,11 +17,11 @@ type Messaging = {
   customerDecided: boolean; suppressed: boolean; history: string[];
 };
 
-const AR_LATN = "ar-SA-u-nu-latn-ca-gregory";
 const SOURCE_AR: Record<string, string> = { customer_link: "أوقفها العميل من رابط الإيميل", staff: "أوقفها موظف", complaint: "بلّغ عن إيميل كسبام", bounce: "الإيميل ارتدّ" };
 
 export function MessagingCard({ customerId, ar, onSaved }: { customerId: string; ar: boolean; onSaved?: (text: string) => void }) {
   const L = (a: string, e: string) => (ar ? a : e);
+  const isAdmin = useUser()?.role === "admin";
   const [m, setM] = useState<Messaging | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -59,7 +60,12 @@ export function MessagingCard({ customerId, ar, onSaved }: { customerId: string;
   }
 
   const lastText = m.last
-    ? `${new Date(m.last.at).toLocaleString(ar ? AR_LATN : "en-GB", { timeZone: "Asia/Riyadh", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}`
+    // dd/mm/yyyy HH:mm (24-hour, no ص/م, no bidi marks) — shown in an LTR <bdi> (batch 25b, as in «الرسائل المرسلة»).
+    ? (() => {
+        const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Riyadh", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(m.last.at));
+        const g = (t: string) => p.find((x) => x.type === t)?.value ?? "";
+        return `${g("day")}/${g("month")}/${g("year")} ${g("hour")}:${g("minute")}`;
+      })()
     : null;
   return (
     <section data-testid="customer-messaging" style={{ marginTop: 24 }}>
@@ -107,7 +113,7 @@ export function MessagingCard({ customerId, ar, onSaved }: { customerId: string;
           {m.last ? (
             <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
               {m.last.channel === "email" ? <Mail size={15} strokeWidth={1.6} aria-label={L("إيميل", "E-mail")} /> : <MessageCircle size={15} strokeWidth={1.6} aria-label={L("واتساب", "WhatsApp")} />}
-              <bdi className="n">{lastText}</bdi>
+              <bdi dir="ltr" className="n" data-testid="cm-last-when" style={{ unicodeBidi: "isolate" }}>{lastText}</bdi>
               {m.last.status === "DELIVERED" ? L(" · وصل", " · delivered") : m.last.status === "BOUNCED" ? L(" · ارتدّ", " · bounced") : ""}
             </span>
           ) : <span className="acc-muted">{L("ما انرسل له شي بعد", "Nothing sent yet")}</span>}
@@ -128,6 +134,67 @@ export function MessagingCard({ customerId, ar, onSaved }: { customerId: string;
         </div>
       ) : null}
       {err ? <p role="alert" className="acc-muted" style={{ color: "var(--status-danger, #b42318)", margin: "6px 0 0" }} data-testid="cm-error">{err}</p> : null}
+      {isAdmin ? <ArchiveAdmin customerId={customerId} L={L} /> : null}
     </section>
+  );
+}
+
+/**
+ * «الأرشيف القانوني» (batch 25b, the administrator only): the customer's legal hold, and «حذف رسائل العميل من الأرشيف» — the
+ * data-subject erasure (reason required; refused under a legal hold). Read only when opened: every call steps up.
+ */
+function ArchiveAdmin({ customerId, L }: { customerId: string; L: (a: string, e: string) => string }) {
+  const [info, setInfo] = useState<{ legalHold: boolean; archived: number } | null>(null);
+  const [reason, setReason] = useState("");
+  const [confirmErase, setConfirmErase] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const url = `/api/customers/${encodeURIComponent(customerId)}/message-archive`;
+  const load = async () => {
+    const r = await api<{ legalHold: boolean; archived: number }>(url);
+    if (r.ok) setInfo(r.data); else setMsg({ ok: false, text: r.data.error ?? L("تعذّر فتح الأرشيف.", "Could not open the archive.") });
+  };
+  async function send(method: "PUT" | "POST", body: Record<string, unknown>, done: (d: Record<string, unknown>) => string) {
+    setBusy(true); setMsg(null);
+    const r = await api<Record<string, unknown>>(url, { method, body: { ...body, reason } });
+    setBusy(false);
+    if (!r.ok) return setMsg({ ok: false, text: r.data.error ?? L("ما انحفظ.", "Not saved.") });
+    setMsg({ ok: true, text: done(r.data) }); setReason(""); setConfirmErase(false); await load();
+  }
+  return (
+    <details style={{ marginTop: 14 }} data-testid="cm-archive-admin" onToggle={(e) => { if ((e.target as HTMLDetailsElement).open && !info) void load(); }}>
+      <summary style={{ cursor: "pointer", fontSize: 13.5, fontWeight: 600 }}>{L("الأرشيف القانوني (مدير النظام)", "Legal archive (administrator)")}</summary>
+      {info ? (
+        <div style={{ display: "grid", gap: 8, marginTop: 8, fontSize: 13 }}>
+          <p style={{ margin: 0 }} data-testid="cm-archive-count">{L(`رسائل هذا العميل في الأرشيف: ${info.archived}. تنحفظ 5 سنوات ثم تنحذف تلقائيًا.`, `Archived messages of this customer: ${info.archived}. Kept 5 years, then destroyed automatically.`)}</p>
+          <p style={{ margin: 0 }} data-testid="cm-legal-hold" data-on={info.legalHold ? "1" : "0"}>
+            {info.legalHold ? L("⚖ عليها حجز قانوني: ما تنحذف رسائله أبدًا (لا بعد 5 سنوات ولا بطلب حذف) لين ينشال الحجز.", "⚖ Under a legal hold: nothing is destroyed until the hold is lifted.") : L("ما عليها حجز قانوني.", "No legal hold.")}
+          </p>
+          <label>
+            <span style={{ fontSize: 12.5 }}>{L("السبب (إلزامي)", "Reason (required)")}</span>
+            <textarea className="hr-textarea" rows={2} value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} data-testid="cm-archive-reason" />
+          </label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" className="hr-btn is-sm" disabled={busy || reason.trim().length < 5} data-testid="cm-legal-hold-toggle"
+              onClick={() => send("PUT", { legalHold: !info.legalHold }, () => (info.legalHold ? L("انشال الحجز القانوني.", "Legal hold lifted.") : L("انحط حجز قانوني.", "Legal hold set.")))}>
+              {info.legalHold ? L("شيل الحجز القانوني", "Lift the legal hold") : L("حط حجز قانوني", "Set a legal hold")}
+            </button>
+            {!confirmErase ? (
+              <button type="button" className="hr-btn is-danger is-sm" disabled={busy || info.legalHold || info.archived === 0} data-testid="cm-archive-erase" onClick={() => setConfirmErase(true)}>
+                {L("حذف رسائل العميل من الأرشيف", "Erase this customer's archived messages")}
+              </button>
+            ) : (
+              <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }} data-testid="cm-archive-erase-confirm-row">
+                <strong style={{ color: "var(--status-danger, #b42318)" }}>{L(`تنحذف ${info.archived} رسالة نهائيًا. متأكد؟`, `${info.archived} messages will be destroyed for good. Sure?`)}</strong>
+                <button type="button" className="hr-btn is-danger is-sm" disabled={busy || reason.trim().length < 5} data-testid="cm-archive-erase-confirm"
+                  onClick={() => send("POST", { action: "erase" }, (d) => L(`انحذفت ${String(d.erased ?? 0)} رسالة من الأرشيف، وانسجل السبب.`, `${String(d.erased ?? 0)} archived messages erased; the reason was recorded.`))}>{L("احذف", "Erase")}</button>
+                <button type="button" className="hr-btn is-sm" onClick={() => setConfirmErase(false)}>{L("إلغاء", "Cancel")}</button>
+              </span>
+            )}
+          </div>
+        </div>
+      ) : null}
+      {msg ? <p role={msg.ok ? "status" : "alert"} style={{ margin: "6px 0 0", fontSize: 13, color: msg.ok ? "inherit" : "var(--status-danger, #b42318)" }} data-testid="cm-archive-msg">{msg.text}</p> : null}
+    </details>
   );
 }

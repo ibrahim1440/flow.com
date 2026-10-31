@@ -3,7 +3,8 @@ import { cronAuthorized } from "@/lib/cron/auth";
 import { archiveOldMessages, messageArchiveEnabled } from "@/lib/automation/message-archive";
 
 /**
- * Daily: message bodies older than 180 days move from the live logs to the archive (owner decision, 31 Oct 2026;
+ * Daily: message bodies older than 180 days move from the live logs to the archive, and archived messages older than
+ * five years are destroyed through the controlled database path (owner decisions, 31 Oct 2026;
  * lib/automation/message-archive.ts). It MOVES data, so like the recurring job it accepts ONLY the CRON_SECRET bearer
  * (lib/cron/auth.ts), never the Vercel user-agent fallback. Idempotent and transactional per batch. Answers counts only.
  * Does nothing (`{ skipped: "disabled" }`) unless MESSAGE_ARCHIVE_ENABLED=true.

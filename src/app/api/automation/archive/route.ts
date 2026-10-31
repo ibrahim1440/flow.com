@@ -4,6 +4,10 @@ import { forbidden, requireAdminAction, requireAuth, requirePrivilegedAction } f
 import { bookArchiveWhere, logScopeFor } from "@/lib/automation/log-scope";
 import type { Prisma } from "@/generated/prisma/client";
 import { foldArabic } from "@/lib/services/search/normalize";
+import { archivePdf } from "@/lib/automation/archive-pdf";
+import { customerInScope } from "@/lib/services/sales/customer-access";
+import { companyInfoFrom } from "@/lib/notify/templates/demo";
+import { sellerSnapshot } from "@/lib/services/invoicing/settings";
 
 const PER_PAGE = 50;
 const day = (v: string | null) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00+03:00`) : null);
@@ -51,6 +55,19 @@ export async function GET(request: Request) {
     const ids = everyone.filter((c) => c.id === customer || foldArabic(c.name).includes(f) || (c.nameAr ? foldArabic(c.nameAr).includes(f) : false)).map((c) => c.id);
     truncated = ids.length > 1000;
     where.OR = [{ customerId: { in: ids.slice(0, 1000) } }, { recipientName: { contains: customer, mode: "insensitive" } }];
+  }
+  // ?format=pdf&customerId=<id> (batch 25b): one customer's archived messages as a PDF — the same scope and filters.
+  const pdfFor = url.searchParams.get("format") === "pdf" ? (url.searchParams.get("customerId") ?? "").trim().slice(0, 64) : null;
+  if (pdfFor !== null) {
+    if (!pdfFor) return NextResponse.json({ error: "اختر العميل أول.", errorEn: "customerId is required." }, { status: 400 });
+    const c = await prisma.customer.findUnique({ where: { id: pdfFor }, select: { id: true, name: true, nameAr: true } });
+    // Gate D5: a customer outside the viewer's book is answered like a missing one — not even its name in a header.
+    if (!c || (!admin && !(await customerInScope(user, pdfFor)))) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    const pdfWhere: Prisma.MessageArchiveWhereInput = { AND: [where, { customerId: pdfFor }] };
+    const rows = await prisma.messageArchive.findMany({ where: pdfWhere, orderBy: { messageCreatedAt: "asc" }, take: 2001 });
+    const company = companyInfoFrom(await sellerSnapshot(prisma));
+    const pdf = archivePdf({ customerName: c.nameAr || c.name, customerId: c.id, rows: rows.slice(0, 2000), truncated: rows.length > 2000, exportedBy: user.name ?? user.id, now: new Date(), company: company.nameAr || null });
+    return new Response(new Uint8Array(pdf), { status: 200, headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="archive-${c.id}.pdf"`, "Cache-Control": "no-store" } });
   }
   const take = all ? 2000 : PER_PAGE;
   const [rows, total] = await Promise.all([

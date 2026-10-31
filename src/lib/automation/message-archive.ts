@@ -14,6 +14,8 @@ import "server-only";
  * (the next day carries on). Rows are claimed FOR UPDATE SKIP LOCKED; the archive's (channel, messageId) is unique and
  * inserted ON CONFLICT DO NOTHING, so a repeated or interrupted run moves nothing twice. A message still waiting or in
  * flight is never touched (and a CHECK keeps an archived row from ever being queued again).
+ *
+ * Then (batch 25b) the archive itself is kept five years: older archived messages are destroyed by purgeExpiredArchive().
  */
 import { prisma } from "@/lib/db";
 
@@ -30,7 +32,27 @@ export function messageArchiveEnabled(env: Record<string, string | undefined> = 
   return env.MESSAGE_ARCHIVE_ENABLED === "true";
 }
 
-export type ArchiveReport = { whatsapp: number; email: number; batches: number; timedOut: boolean };
+export type ArchiveReport = { whatsapp: number; email: number; batches: number; timedOut: boolean; purged?: number };
+
+/** Owner decision (31 Oct 2026, batch 25b): archived messages are kept FIVE YEARS, then destroyed. */
+export const ARCHIVE_RETENTION_YEARS = 5;
+const PURGE_BATCH = 500;
+
+/**
+ * The 5-year retention (batch 25b): archived messages created more than five years ago are destroyed, in batches, through
+ * the database's ONLY controlled path — message_archive_purge_expired() (migration 20261208090000_email_followups): the
+ * cutoff is fixed inside it, customers on a legal hold are skipped, and it writes one audit row per batch (count and date
+ * range, never the content). Returns how many were destroyed.
+ */
+export async function purgeExpiredArchive(deadline: number): Promise<{ purged: number; timedOut: boolean }> {
+  let purged = 0;
+  for (;;) {
+    if (Date.now() > deadline) return { purged, timedOut: true };
+    const [r] = await prisma.$queryRaw<{ purged: number }[]>`SELECT purged FROM message_archive_purge_expired(${PURGE_BATCH}::integer)`;
+    purged += r?.purged ?? 0;
+    if (!r || r.purged < PURGE_BATCH) return { purged, timedOut: false };
+  }
+}
 
 /** customer:<id> inside a WhatsApp dedupe key (rules «run:i:customer:<id>», statuses «…:customer:<id>[:…]»). */
 const CUSTOMER_IN_KEY = String.raw`customer:([A-Za-z0-9_-]+)`;
@@ -102,5 +124,8 @@ export async function archiveOldMessages(opts: { now?: Date; olderThanDays?: num
       cursor = r.next;
     }
   }
+  const p = await purgeExpiredArchive(deadline);
+  out.purged = p.purged;
+  if (p.timedOut) out.timedOut = true;
   return out;
 }

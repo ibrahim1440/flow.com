@@ -59,6 +59,25 @@ export default function MessageArchivePage() {
   const pages = data ? Math.max(1, Math.ceil(data.total / data.perPage)) : 1;
 
   /** CSV of the current search (up to 2,000 messages), with the document reference and the PDF's sha256 in full. */
+  // Batch 25b: one customer's archived messages as a PDF (Arabic, Riyadh time) — offered when the search shows ONE customer.
+  const oneCustomer = (() => {
+    const ids = [...new Set((data?.rows ?? []).map((r) => r.customerId).filter((x): x is string => !!x))];
+    return ids.length === 1 ? { id: ids[0], name: data!.rows.find((r) => r.customerId === ids[0])?.customerName ?? "" } : null;
+  })();
+  async function exportPdf() {
+    if (!oneCustomer) return;
+    setExporting(true);
+    const p = new URLSearchParams({ format: "pdf", customerId: oneCustomer.id });
+    for (const [k, v] of Object.entries(applied)) if (v.trim() && k !== "customer") p.set(k, v.trim());
+    const res = await fetch(`/api/automation/archive?${p}`);
+    setExporting(false);
+    if (!res.ok) { const d = (await res.json().catch(() => ({}))) as { error?: string }; return setError(d.error ?? L("تعذّر التصدير.", "Could not export.")); }
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(await res.blob());
+    a.download = `archive-${oneCustomer.id}.pdf`;
+    a.click();
+  }
+
   async function exportCsv() {
     setExporting(true);
     const p = new URLSearchParams({ all: "1" });
@@ -103,6 +122,7 @@ export default function MessageArchivePage() {
           </label>
           <Btn variant="primary" type="submit" data-testid="archive-search">{L("ابحث", "Search")}</Btn>
           <Btn type="button" onClick={exportCsv} busy={exporting} disabled={!data || data.total === 0} data-testid="archive-export">{L("تصدير CSV للمحامي", "Export CSV")}</Btn>
+          {oneCustomer ? <Btn type="button" onClick={exportPdf} busy={exporting} data-testid="archive-export-pdf">{L(`تصدير PDF — ${oneCustomer.name}`, `Export PDF — ${oneCustomer.name}`)}</Btn> : null}
         </form>
         {!data && !error ? <OpsLoading /> : data && data.rows.length === 0 ? (
           <div className="tl-empty"><Empty title={L("ما فيه رسائل في الأرشيف", "Nothing in the archive")} body={L("تنتقل الرسائل هنا تلقائيًا بعد 180 يوم من إرسالها.", "Messages move here automatically 180 days after they were sent.")} /></div>

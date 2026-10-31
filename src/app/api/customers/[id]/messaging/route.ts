@@ -8,6 +8,7 @@ import { parseEmailAddress } from "@/lib/automation/email-mode";
 import { canEditMessaging, emailConsentChange, isCustomerManager } from "@/lib/services/customers/email-consent";
 import { CUSTOMER_DECIDED_SOURCES } from "@/lib/automation/email-consent";
 import type { Prisma } from "@/generated/prisma/client";
+import { bookEmailWhere, bookWhatsAppWhere, logScopeFor } from "@/lib/automation/log-scope";
 import { writeSettingsAudit } from "@/lib/services/settings/audit";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -28,9 +29,14 @@ export async function GET(_req: Request, { params }: Ctx) {
   if (!(await customerInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const c = await prisma.customer.findUnique({ where: { id }, select: { email: true, emailOptOut: true, emailOptOutAt: true, emailOptOutSource: true, emailOptOutNote: true, whatsappOptOut: true, accountOwnerId: true } });
   if (!c) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Batch 25b (gate R3 P2): the "last message" line follows the message-log scope — a rep never learns of another rep's
+  // quotation e-mail to this customer; a viewer outside the log's audience gets no line at all.
+  const scope = await logScopeFor(user);
+  const emScope: Prisma.EmailMessageWhereInput = !scope ? { id: "-" } : scope.kind === "book" ? bookEmailWhere(scope) : {};
+  const waScope: Prisma.WhatsAppMessageWhereInput = !scope ? { id: "-" } : scope.kind === "book" ? bookWhatsAppWhere(scope) : {};
   const [email, wa] = await Promise.all([
-    prisma.emailMessage.findFirst({ where: { customerId: id, status: { in: ["SENT", "DELIVERED", "BOUNCED", "COMPLAINED"] }, planMode: "LIVE" }, orderBy: { sentAt: "desc" }, select: { sentAt: true, status: true, subject: true } }),
-    prisma.whatsAppMessage.findFirst({ where: { status: "SENT", recipientKind: "customer", dedupeKey: { contains: `customer:${id}` }, intendedPhone: null }, orderBy: { sentAt: "desc" }, select: { sentAt: true } }),
+    prisma.emailMessage.findFirst({ where: { AND: [emScope], customerId: id, status: { in: ["SENT", "DELIVERED", "BOUNCED", "COMPLAINED"] }, planMode: "LIVE" }, orderBy: { sentAt: "desc" }, select: { sentAt: true, status: true, subject: true } }),
+    prisma.whatsAppMessage.findFirst({ where: { AND: [waScope], status: "SENT", recipientKind: "customer", dedupeKey: { contains: `customer:${id}` }, intendedPhone: null }, orderBy: { sentAt: "desc" }, select: { sentAt: true } }),
   ]);
   const last = [email ? { channel: "email" as const, at: email.sentAt, status: email.status } : null, wa ? { channel: "whatsapp" as const, at: wa.sentAt, status: "SENT" } : null]
     .filter((x): x is NonNullable<typeof x> => !!x && !!x.at)

@@ -1,8 +1,8 @@
 /**
  * Signed links in customer e-mails (batch 25): «إيقاف الإيميلات» (unsubscribe) and «وصلتني» (the test e-mail reached
  * the test address). HMAC-SHA256 over a typed payload; the key is EMAIL_LINK_SECRET when set, else derived from
- * JWT_SECRET (EMAIL_LINK_SECRET is RECOMMENDED before LIVE: rotating JWT_SECRET after an incident would otherwise break
- * every unsubscribe link already sent). The payload is base64url, NOT encrypted, so it carries no customer id: the
+ * JWT_SECRET (batch 25b: EMAIL_LINK_SECRET is REQUIRED for LIVE — email-mode.ts — and EMAIL_LINK_SECRET_PREVIOUS keeps the
+ * links signed before a rotation working). The payload is base64url, NOT encrypted, so it carries no customer id: the
  * unsubscribe link carries Customer.emailLinkId — a random, opaque id made for this purpose — and any change to the
  * payload breaks the signature (compared in constant time).
  */
@@ -18,8 +18,20 @@ function key(env: Record<string, string | undefined> = process.env): Buffer {
   return createHmac("sha256", base).update("hiqbah/email-links/v1").digest();
 }
 
-function sign(payload: string, env?: Record<string, string | undefined>): string {
-  return createHmac("sha256", key(env)).update(payload).digest("base64url");
+/**
+ * Batch 25b (seat 6 N2), key rotation: links are always SIGNED with the current key; a link is ACCEPTED when it was signed
+ * with the current key or with EMAIL_LINK_SECRET_PREVIOUS (the key before the last rotation), so the unsubscribe links in
+ * e-mails already sent keep working. Rotate: move the old value to EMAIL_LINK_SECRET_PREVIOUS, set a new EMAIL_LINK_SECRET.
+ */
+function verifyKeys(env: Record<string, string | undefined> = process.env): Buffer[] {
+  const keys = [key(env)];
+  const prev = env.EMAIL_LINK_SECRET_PREVIOUS?.trim();
+  if (prev && prev.length >= 32) keys.push(Buffer.from(prev));
+  return keys;
+}
+
+function sign(payload: string, env?: Record<string, string | undefined>, k?: Buffer): string {
+  return createHmac("sha256", k ?? key(env)).update(payload).digest("base64url");
 }
 
 export function makeToken(kind: "u" | "tv", fields: string[], env?: Record<string, string | undefined>): string {
@@ -35,9 +47,12 @@ export function readToken(kind: "u" | "tv", token: unknown, env?: Record<string,
   let payload: string;
   try { payload = Buffer.from(p, "base64url").toString("utf8"); } catch { return null; }
   if (b64u(payload) !== p) return null;
-  const want = Buffer.from(sign(payload, env));
   const got = Buffer.from(sig);
-  if (want.length !== got.length || !timingSafeEqual(want, got)) return null;
+  const ok = verifyKeys(env).some((k) => {
+    const want = Buffer.from(sign(payload, env, k));
+    return want.length === got.length && timingSafeEqual(want, got);
+  });
+  if (!ok) return null;
   const parts = payload.split("|");
   if (parts[0] !== `${kind}1`) return null;
   return parts.slice(1);
