@@ -35,7 +35,10 @@ export function renderQuotationEmail(q: QuoteEmailInput): RenderedEmail {
         { label: "الإجمالي شامل الضريبة · ر.س", value: ltr(formatMoney(q.priced.grandTotal)), grand: true },
       ],
     ),
-    para("لاعتماد العرض يكفي الرد على هذه الرسالة، وسنؤكد لكم موعد التحميص والتسليم. ولأي استفسار عن الأصناف أو الكميات يسعدنا التواصل معكم."),
+    q.replyable === false
+      ? para(`لاعتماد العرض أو لأي استفسار تواصلوا معنا${q.company.phone ? ` على ${ltr(q.company.phone)}` : ` عن طريق مندوبكم${q.repName ? ` ${esc(q.repName)}` : ""}`}، وسنؤكد لكم موعد التحميص والتسليم.`)
+      : para("لاعتماد العرض يكفي الرد على هذه الرسالة، وسنؤكد لكم موعد التحميص والتسليم. ولأي استفسار عن الأصناف أو الكميات يسعدنا التواصل معكم."),
+    ...(q.repName ? [para(`مندوبكم: ${esc(q.repName)}`)] : []),
   ].join("\n");
   const pdf = quotationPdf(q);
   return {
@@ -46,11 +49,12 @@ export function renderQuotationEmail(q: QuoteEmailInput): RenderedEmail {
       greeting(q.customer.contact, q.customer.name), "",
       `يسعدنا تزويدكم بعرض السعر رقم ${q.quoteNumber}، ونرفق نسخته بصيغة PDF.`,
       `صالح حتى: ${longDate(q.validUntil, "ar")} (${q.validityDays} يومًا)`,
-      ...q.priced.lines.map((l) => `- ${l.description}: ${formatQuantity(l.quantity)} ${unitLabel(l.unit, "ar")} × ${formatMoney(l.unitPrice)} = ${formatMoney(l.lineTotal)}`),
+      ...q.priced.lines.map((l) => `- ${l.description}: ${formatQuantity(l.quantity)} ${unitLabel(l.unit, "ar")} × ${formatMoney(l.unitPrice)} = ${formatMoney(l.lineTotal)} شامل الضريبة`),
       `الإجمالي قبل الضريبة: ${formatMoney(q.priced.taxable)} ر.س`,
       `ضريبة القيمة المضافة: ${formatMoney(q.priced.taxTotal)} ر.س`,
       `الإجمالي شامل الضريبة: ${formatMoney(q.priced.grandTotal)} ر.س`,
-      "", "لاعتماد العرض يكفي الرد على هذه الرسالة.",
+      "", q.replyable === false ? `لاعتماد العرض أو لأي استفسار تواصلوا معنا${q.company.phone ? ` على ${q.company.phone}` : ` عن طريق مندوبكم${q.repName ? ` ${q.repName}` : ""}`}.` : "لاعتماد العرض يكفي الرد على هذه الرسالة.",
+      ...(q.repName ? [`مندوبكم: ${q.repName}`] : []),
     ], q.company, q.demo),
     attachments: [{ filename: `${q.quoteNumber}.pdf`, contentBase64: pdf.toString("base64"), contentType: "application/pdf" }],
   };

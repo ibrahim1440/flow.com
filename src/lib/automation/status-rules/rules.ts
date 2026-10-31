@@ -8,6 +8,7 @@
 import type { Person } from "../context";
 import type { EffectiveMode } from "../settings";
 import { planDelivery } from "../send-mode";
+import { cleanSubject, emailKey, planEmailDelivery, type EffectiveEmailMode } from "../email-mode";
 import { renderTemplate, TEMPLATE_MAX_LENGTH, unknownPlaceholders, type RenderContext } from "../template";
 import { getStatusSource, sourceEventDef, statusCanFire, statusEnglishDefault, type StatusRecipient } from "./sources";
 import { pickStaffTemplate, resolveMessageLang, staffIdOf, type MsgLang } from "../employee-lang";
@@ -135,7 +136,18 @@ export function syncMessage(r: SyncReport, lang: "ar" | "en"): string {
 // ─── Validation ────────────────────────────────────────────────────────────────
 
 /** templateEn (owner language decision 3): the English text for employees who receive English; "" = none. */
-export type StatusRuleInput = { enabled: boolean; recipients: StatusRecipient[]; template: string; templateEn?: string; renotify: boolean };
+export type StatusRuleInput = {
+  enabled: boolean; recipients: StatusRecipient[]; template: string; templateEn?: string; renotify: boolean;
+  /** Batch 25: «إيميل» — also e-mail the customer (never on the tax invoice source); the subject ("" = the default). */
+  emailEnabled?: boolean; emailSubject?: string;
+};
+
+/** Sources whose e-mail is locked in phase 1 (ZATCA is not live: no tax invoice may be e-mailed). */
+export const EMAIL_LOCKED_SOURCES: readonly string[] = ["sales_invoice"];
+export const canEmailSource = (sourceKey: string): boolean => {
+  const src = getStatusSource(sourceKey);
+  return !!src && !EMAIL_LOCKED_SOURCES.includes(sourceKey) && src.recipients.includes("customer");
+};
 
 export type StatusRuleValidation =
   | { ok: true; value: StatusRuleInput }
@@ -207,6 +219,36 @@ export function validateStatusRuleInput(
     }
   }
 
+  let emailEnabled = current.emailEnabled ?? false;
+  if (body.emailEnabled !== undefined) {
+    if (typeof body.emailEnabled !== "boolean") return bad("قيمة الإيميل غير صالحة.", "emailEnabled must be true or false.");
+    emailEnabled = body.emailEnabled;
+  }
+  let emailSubject = current.emailSubject ?? "";
+  if (body.emailSubject !== undefined) {
+    if (body.emailSubject !== null && typeof body.emailSubject !== "string") return bad("موضوع الإيميل غير صالح.", "emailSubject must be text.");
+    const raw = body.emailSubject ?? "";
+    if (/[\r\n]/.test(raw)) return bad("موضوع الإيميل لازم يكون سطر واحد.", "The e-mail subject must be one line.");
+    emailSubject = raw.trim();
+    if (emailSubject.length > 150) return bad("موضوع الإيميل أطول من 150 حرف.", "The e-mail subject must be 150 characters or fewer.");
+    const unknownS = unknownPlaceholders(sourceEventDef(source), emailSubject);
+    if (unknownS.length) {
+      const list = unknownS.map((k) => `{{${k}}}`).join(", ");
+      return bad(`متغير غير معروف في موضوع الإيميل: ${list}`, `Unknown variable in the e-mail subject: ${list}`);
+    }
+  }
+  if (emailEnabled) {
+    if (EMAIL_LOCKED_SOURCES.includes(rule.source)) {
+      return bad("إيميل الفواتير مقفل لين تشتغل الفوترة الإلكترونية (زاتكا).", "Tax invoice e-mails are locked until ZATCA clears or reports invoices.", 409);
+    }
+    if (!source.recipients.includes("customer")) return bad("هذه الحالة ما لها عميل نرسل له إيميل.", "This status has no customer to e-mail.", 409);
+    if (!rule.active) return bad("هذه الحالة لم تعد مستخدمة في النظام، فلا يمكن تفعيلها.", "This status is no longer in use, so it cannot be switched on.", 409);
+    if (!statusCanFire(source, rule.statusKey)) {
+      return bad("لا يوجد حدث في النظام يُعلن هذه الحالة، فلا يمكن الإرسال عندها.", "No event in the system announces this status, so nothing can be sent for it.", 409);
+    }
+    if (!template) return bad("اكتب نص الرسالة.", "Write the message.");
+  }
+
   if (enabled) {
     if (!rule.active) return bad("هذه الحالة لم تعد مستخدمة في النظام، فلا يمكن تفعيلها.", "This status is no longer in use, so it cannot be switched on.", 409);
     if (!statusCanFire(source, rule.statusKey)) {
@@ -215,7 +257,7 @@ export function validateStatusRuleInput(
     if (recipients.length === 0) return bad("اختر مستلمًا واحدًا على الأقل.", "Choose at least one recipient.");
     if (!template) return bad("اكتب نص الرسالة.", "Write the message.");
   }
-  return { ok: true, value: { enabled, recipients, template, templateEn, renotify } };
+  return { ok: true, value: { enabled, recipients, template, templateEn, renotify, emailEnabled, emailSubject } };
 }
 
 export function parseRecipients(raw: unknown): StatusRecipient[] {
@@ -341,4 +383,73 @@ export function planStatusMessages(input: {
     }
   }
   return rows;
+}
+
+// ─── Batch 25: the e-mail of a status notification ─────────────────────────────
+
+export type PlannedEmail = {
+  dedupeKey: string;
+  recipientKind: string;
+  recipientName: string | null;
+  customerId: string | null;
+  toEmail: string | null;
+  intendedEmail: string | null;
+  planMode: "OFF" | "TEST" | "LIVE";
+  subject: string;
+  bodyText: string;
+  attachmentKind: "quote_pdf" | null;
+  attachmentRefId: string | null;
+  status: "QUEUED" | "SKIPPED";
+  statusNote: string | null;
+};
+
+/** The default subject: «عرض سعر Q-0012» for an issued quotation, else «<status> — <source>». */
+export function defaultEmailSubject(sourceKey: string, statusKey: string, labelAr: string): string {
+  if (sourceKey === "quote" && statusKey === "ISSUED") return "عرض سعر {{quote.number}}";
+  const src = getStatusSource(sourceKey);
+  return `${labelAr}${src ? ` — ${src.ar}` : ""}`;
+}
+
+/**
+ * The e-mails one status rule produces for one event: to the CUSTOMER of the record only (phase 1). Keys are the
+ * WhatsApp status key under "email:", so the two channels never collide and each stays exactly-once on its own; the
+ * ":mode:" suffix keeps a TEST or OFF row from blocking the later LIVE one. «عرض السعر صدر» attaches the event's own
+ * quotation (subjectId), nothing else.
+ */
+export function planStatusEmails(input: {
+  rule: { source: string; statusKey: string; labelAr: string; template: string; emailSubject?: string | null; renotify?: boolean };
+  subject: { type: string; id: string };
+  eventId?: string;
+  vars: RenderContext;
+  customers: Person[];
+  mode: EffectiveEmailMode;
+  suppressed?: (email: string) => boolean;
+}): PlannedEmail[] {
+  const source = getStatusSource(input.rule.source);
+  if (!source || !canEmailSource(input.rule.source)) return [];
+  const def = sourceEventDef(source);
+  const vars = { ...input.vars, "status.name": input.rule.labelAr };
+  const bodyText = renderTemplate(def, input.rule.template, vars, "ar");
+  const subject = cleanSubject(renderTemplate(def, input.rule.emailSubject?.trim() || defaultEmailSubject(input.rule.source, input.rule.statusKey, input.rule.labelAr), vars, "ar"));
+  const attach = input.rule.source === "quote" && input.rule.statusKey === "ISSUED" && input.subject.type === "Quote";
+  const key = (personKey: string) =>
+    emailKey(statusDedupeKey({
+      source: input.rule.source, statusKey: input.rule.statusKey, subjectType: input.subject.type, subjectId: input.subject.id, personKey,
+      mode: input.mode.mode, entryEventId: input.rule.renotify ? input.eventId ?? null : null,
+    }));
+  const base = { recipientKind: "customer", planMode: input.mode.mode, subject, bodyText, attachmentKind: attach ? ("quote_pdf" as const) : null, attachmentRefId: attach ? input.subject.id : null };
+  if (input.customers.length === 0) {
+    return [{ ...base, dedupeKey: key("none:customer"), recipientName: null, customerId: null, toEmail: null, intendedEmail: null, status: "SKIPPED", statusNote: "No recipient for this event (for example, the order has no owner yet)." }];
+  }
+  const out: PlannedEmail[] = [];
+  const seen = new Set<string>();
+  for (const c of input.customers) {
+    const d = planEmailDelivery({ key: c.key, name: c.name, email: c.email, optOut: c.emailOptOut }, input.mode, input.suppressed);
+    if (d.ownEmail) {
+      if (seen.has(d.ownEmail)) continue;
+      seen.add(d.ownEmail);
+    }
+    out.push({ ...base, dedupeKey: key(c.key), recipientName: c.name, customerId: c.key.startsWith("customer:") ? c.key.slice(9) : null, toEmail: d.toEmail, intendedEmail: d.intendedEmail, status: d.status, statusNote: d.statusNote });
+  }
+  return out;
 }

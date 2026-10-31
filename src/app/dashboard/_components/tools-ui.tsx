@@ -44,7 +44,7 @@ const SETTINGS_NAV: { ar: string; en: string; items: SettingsLink[] }[] = [
     { href: "/dashboard/settings/invoicing", ar: "الفوترة والضرائب", en: "Invoicing & tax", icon: "invoice" },
   ] },
   { ar: "الأتمتة", en: "Automation", items: [
-    { href: "/dashboard/automation", ar: "الأتمتة والواتساب", en: "Automation & WhatsApp", icon: "bell", also: ["/dashboard/automation/"] },
+    { href: "/dashboard/automation", ar: "رسائل العملاء التلقائية", en: "Automated customer messages", icon: "bell", also: ["/dashboard/automation/"] },
   ] },
 ];
 

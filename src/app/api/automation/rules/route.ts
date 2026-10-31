@@ -1,8 +1,8 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
-import { requireModule, requireSub } from "@/lib/auth-server";
+import { requireAdminAction, requireModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
-import { validateRuleInput } from "@/lib/automation/rules";
+import { fixedTargetsOf, validateRuleInput } from "@/lib/automation/rules";
 import { createRule } from "@/lib/automation/rule-service";
 
 /** Every rule, with what it has sent in the last 30 days. */
@@ -42,6 +42,11 @@ export async function POST(request: Request) {
   }
   const parsed = validateRuleInput(body);
   if (!parsed.ok) return NextResponse.json({ error: parsed.errors[0], details: parsed.errors }, { status: 400 });
+  // A fixed outside address (a typed e-mail or number) can carry customer data out: the administrator, after a step-up.
+  if (fixedTargetsOf(parsed.value.steps).length) {
+    const refused = await requireAdminAction(user, "automation.fixed_recipient", { stepUp: true, message: "الإرسال لعنوان أو رقم ثابت يضيفه المدير فقط." });
+    if (refused) return refused;
+  }
 
   try {
     const rule = await prisma.$transaction((tx) => createRule(tx, user.id, parsed.value));

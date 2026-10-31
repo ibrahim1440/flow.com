@@ -47,7 +47,7 @@ type Action = (typeof ACTIONS)[number];
  * { action: "pair", number }           → a pairing code to type into WhatsApp on that phone
  * { action: "logout" }                 → unlink the current phone
  * { action: "restart" }                → restart a stuck connection
- * { action: "test", phone?, text? }    → send one message now (to the test number by default)
+ * { action: "test", text? }           → send one message now, to the SAVED test number only (batch 25)
  *
  * There is deliberately no action that deletes the instance.
  */
@@ -106,10 +106,16 @@ export async function POST(request: Request) {
   }
 
   // ── test ──
+  // Batch 25 fix round 1: the manual check goes to the SAVED test number only — never a number typed in the request.
   const settings = await readSettings();
-  const target = normalizePhoneForWhatsApp(
-    typeof body.phone === "string" && body.phone.trim() ? body.phone : settings.testPhone,
-  );
+  if (!settings.testPhone) return NextResponse.json({ error: "احفظ رقم التجربة أول.", errorEn: "Save a test number first.", code: "TEST_PHONE_REQUIRED" }, { status: 400 });
+  if (typeof body.phone === "string" && body.phone.trim()) {
+    const asked = normalizePhoneForWhatsApp(body.phone);
+    if (!asked.ok || asked.phone !== settings.testPhone) {
+      return NextResponse.json({ error: "اختبار الاتصال يروح لرقم التجربة المحفوظ فقط.", errorEn: "The connection check goes to the saved test number only.", code: "TEST_PHONE_ONLY" }, { status: 400 });
+    }
+  }
+  const target = normalizePhoneForWhatsApp(settings.testPhone);
   if (!target.ok) return NextResponse.json({ error: `Test number: ${target.reason}` }, { status: 400 });
   const text =
     typeof body.text === "string" && body.text.trim()

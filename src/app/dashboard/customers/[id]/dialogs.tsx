@@ -310,7 +310,7 @@ export function DetailsDialog({ ar, customer, canOwner, canCredit, onClose, onDo
   const L = (a: string, e: string) => (ar ? a : e);
   const [f, setF] = useState({
     name: customer.name, nameAr: customer.nameAr ?? "", phone: customer.phone ?? "", email: customer.email ?? "",
-    address: customer.address ?? "", whatsappOptOut: customer.whatsappOptOut,
+    address: customer.address ?? "", whatsappOptOut: customer.whatsappOptOut, emailOptOut: customer.emailOptOut ?? false,
     commercialRegNo: customer.commercialRegNo ?? "", vatNumber: customer.vatNumber ?? "", segment: customer.segment ?? "",
     city: customer.city ?? "", priceList: customer.priceList ?? "",
     paymentTermsDays: customer.paymentTermsDays != null ? String(customer.paymentTermsDays) : "",
@@ -320,6 +320,7 @@ export function DetailsDialog({ ar, customer, canOwner, canCredit, onClose, onDo
   const [employees, setEmployees] = useState<{ id: string; name: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [emailErr, setEmailErr] = useState("");
   useEffect(() => {
     // The roster: id, name, role and active for anyone signed in (GET /api/employees).
     api<{ id: string; name: string; active: boolean }[]>("/api/employees").then((r) => {
@@ -332,10 +333,18 @@ export function DetailsDialog({ ar, customer, canOwner, canCredit, onClose, onDo
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!f.name.trim() || busy) return;
-    setBusy(true); setErr("");
-    const res = await api(`/api/customers/${customer.id}`, { method: "PUT", body: f });
+    setBusy(true); setErr(""); setEmailErr("");
+    // Fix round 1 (council b25): the opt-outs are sent ONLY when changed here — saving another field never rewrites a
+    // choice the customer (or a colleague) made since this dialog was opened.
+    const { whatsappOptOut, emailOptOut, ...rest } = f;
+    const body: Record<string, unknown> = { ...rest };
+    if (whatsappOptOut !== customer.whatsappOptOut) body.whatsappOptOut = whatsappOptOut;
+    if (emailOptOut !== (customer.emailOptOut ?? false)) body.emailOptOut = emailOptOut;
+    const res = await api<{ field?: string }>(`/api/customers/${customer.id}`, { method: "PUT", body });
     setBusy(false);
-    if (res.ok) onDone(); else setErr(errorOf(res.data as never, ar, L("تعذّر الحفظ.", "Could not save.")));
+    if (res.ok) return onDone();
+    const msg = errorOf(res.data as never, ar, L("تعذّر الحفظ.", "Could not save."));
+    if (res.data.field === "email") setEmailErr(msg); else setErr(msg);
   }
 
   return (
@@ -349,7 +358,7 @@ export function DetailsDialog({ ar, customer, canOwner, canCredit, onClose, onDo
         <Field label={`${L("الاسم", "Name")} *`}><input className="hr-input" required value={f.name} onChange={set("name")} /></Field>
         <Field label={L("الاسم بالعربية", "Arabic name")}><input className="hr-input" dir="rtl" value={f.nameAr} onChange={set("nameAr")} /></Field>
         <Field label={L("الهاتف", "Phone")}><input className="hr-input" dir="ltr" style={{ textAlign: "start" }} value={f.phone} onChange={set("phone")} /></Field>
-        <Field label={L("البريد", "Email")}><input className="hr-input" dir="ltr" style={{ textAlign: "start" }} type="email" value={f.email} onChange={set("email")} /></Field>
+        <Field label={L("الإيميل", "Email")} error={emailErr || undefined} help={L("تروح له الإيميلات التلقائية (عروض الأسعار).", "Automated e-mails (quotations) go here.")}><input className="hr-input" dir="ltr" style={{ textAlign: "start" }} type="text" inputMode="email" value={f.email} onChange={set("email")} data-testid="details-email" /></Field>
         <Field label={L("التوصيل (العنوان)", "Delivery (address)")} wide><textarea className="hr-textarea" rows={2} value={f.address} onChange={set("address")} /></Field>
         <p className="cu-formsec is-wide">{L("الحساب", "Account")}</p>
         <Field label={L("الفئة", "Category")}>
@@ -387,6 +396,10 @@ export function DetailsDialog({ ar, customer, canOwner, canCredit, onClose, onDo
         <label className="cu-check is-wide">
           <input type="checkbox" checked={f.whatsappOptOut} onChange={set("whatsappOptOut")} />
           {L("لا يرغب برسائل واتساب من النظام", "Opted out of system WhatsApp messages")}
+        </label>
+        <label className="cu-check is-wide">
+          <input type="checkbox" checked={f.emailOptOut} onChange={set("emailOptOut")} data-testid="details-email-optout" />
+          {L("لا يرغب بإيميلات من النظام", "Opted out of system e-mails")}
         </label>
       </form>
     </Dialog>

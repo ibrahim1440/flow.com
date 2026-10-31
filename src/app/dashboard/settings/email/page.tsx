@@ -5,6 +5,7 @@
 // admin types: POST /api/settings/email/test (step-up, 3 runs an hour, one audit row, nothing else
 // written). GET /api/settings/email.
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Btn, Dot, Field, OpsLoading, OpsRoot, PageHeader, useL } from "@/components/ops/ui";
 import { useD21Phone } from "@/components/shell/page-context";
 import { Sec, SettingsFrame } from "../../_components/tools-ui";
@@ -20,7 +21,7 @@ const EMAIL_RE = /^[^\s@,;<>]+@[^\s@,;<>]+\.[a-z]{2,}$/i;
 const KIND: Record<string, [string, string]> = {
   connection_test: ["اختبار الربط", "Connection test"],
   quotation: ["عرض سعر + PDF", "Quotation + PDF"],
-  invoice: ["فاتورة تجريبية + PDF", "Demo invoice + PDF"],
+  invoice: ["فاتورة نموذجية + PDF", "Demo invoice + PDF"],
   payment_reminder: ["تذكير بالسداد + كشف حساب", "Payment reminder + statement"],
 };
 const STATUS: Record<Result["status"], [string, string, "success" | "danger" | "warning"]> = {
@@ -92,16 +93,20 @@ export default function EmailSettingsPage() {
               {!s.configured ? (
                 <div className="hr-notice tone-warning" role="status">{L("لا يوجد مزوّد بريد مُعدّ: التنبيهات تظهر داخل النظام فقط، ولا يُرسَل بريد.", "No e-mail provider is configured: alerts appear in the app only; no mail is sent.")}</div>
               ) : null}
+              <p className="tl-foot" data-testid="email-to-automation">
+                {L("تبي ترسل إيميلات للعملاء (عروض الأسعار)؟ ", "Want to e-mail customers (quotations)? ")}
+                <Link href="/dashboard/automation/whatsapp">{L("رسائل العملاء التلقائية ← إعدادات الإرسال", "Automated customer messages → Sending settings")}</Link>
+              </p>
             </Sec>
 
-            <Sec title={L("إرسال رسائل تجريبية", "Send demo e-mails")} caption={L("أربع رسائل ببيانات وهمية إلى عنوان واحد: اختبار الربط، وعرض سعر، وفاتورة تجريبية، وتذكير بالسداد — مع ملفات PDF", "Four e-mails with mock data to one address: a connection test, a quotation, a demo invoice and a payment reminder — with PDFs")} testId="email-demo">
+            <Sec title={L("إرسال رسائل نموذجية", "Send demo e-mails")} caption={L("أربع رسائل ببيانات وهمية إلى عنوان واحد: اختبار الربط، وعرض سعر، وفاتورة نموذجية، وتذكير بالسداد — مع ملفات PDF", "Four e-mails with mock data to one address: a connection test, a quotation, a demo invoice and a payment reminder — with PDFs")} testId="email-demo">
               <form className="ss-setrow" noValidate onSubmit={send}>
                 <Field label={L("المستلم", "Recipient")} error={fieldError} help={L("عنوان واحد فقط · لا تُنشأ فواتير ولا عروض ولا قيود", "One address only · no invoice, quotation or entry is created")}>
                   <input className="hr-input" type="email" dir="ltr" inputMode="email" autoComplete="email" value={to} placeholder="name@example.com"
                     onChange={(e) => setTo(e.target.value)} onBlur={() => setTouched(true)} aria-invalid={!!fieldError} data-testid="email-test-to" />
                 </Field>
                 <div className="tl-acts" style={{ paddingBottom: 22 }}>
-                  <Btn type="submit" variant="primary" busy={busy} disabled={!valid || s.limit.remaining === 0} data-testid="email-test-send">{L("إرسال الرسائل التجريبية", "Send the demo e-mails")}</Btn>
+                  <Btn type="submit" variant="primary" busy={busy} disabled={!valid || s.limit.remaining === 0} data-testid="email-test-send">{L("إرسال الرسائل النموذجية", "Send the demo e-mails")}</Btn>
                 </div>
               </form>
               <p className="tl-foot" data-testid="email-test-limit">

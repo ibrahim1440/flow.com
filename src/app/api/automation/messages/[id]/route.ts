@@ -3,17 +3,18 @@ import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { actOnMessage } from "@/lib/automation/rule-service";
+import { actOnEmail } from "@/lib/automation/email-dispatch";
 import { requestAutomationDispatch } from "@/lib/automation/emit";
 
 type Params = { params: Promise<{ id: string }> };
 
-/** { action: "retry" | "cancel" } */
+/** { action: "retry" | "cancel", channel?: "whatsapp" | "email" } */
 export async function POST(request: Request, { params }: Params) {
   const { user, error } = await requireSub("automation", "manage_messages");
   if (error) return error;
   const { id } = await params;
 
-  let body: { action?: unknown };
+  let body: { action?: unknown; channel?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -25,7 +26,7 @@ export async function POST(request: Request, { params }: Params) {
   const action = body.action;
 
   try {
-    await prisma.$transaction((tx) => actOnMessage(tx, id, action, user.name));
+    await prisma.$transaction((tx) => (body.channel === "email" ? actOnEmail(tx, id, action, user.name) : actOnMessage(tx, id, action, user.name)));
     if (action === "retry") requestAutomationDispatch();
     return NextResponse.json({ ok: true });
   } catch (err) {

@@ -19,7 +19,7 @@ import "./quick-jump.css";
  * The same component is «لأي عميل؟» for the «+ جديد» items done on a customer (`pick`): customers only.
  * Typing is debounced (150 ms); Arabic is folded on both sides (أ/إ/آ→ا, ة→ه, ى→ي, no tatweel/harakat).
  */
-export type PalPage = { id: string; href: string; text: string; context: string | null; group: string | null; groupLabel: string | null; icon: ReactNode };
+export type PalPage = { id: string; href: string; text: string; context: string | null; group: string | null; groupLabel: string | null; icon: ReactNode; keywords?: string[] };
 type Hit = { kind: "customer" | "deal" | "quote" | "lead"; id: string; title: string; titleEn: string; sub: string | null; href: string; customerId: string | null; phone?: string | null; status: string | null; tier?: "VIP" | "REGULAR" | "SMALL" | "QUIET" | null };
 /** The derived tier (WP-B «يومي»), the same words «يومي» uses. */
 const TIER_WORD: Record<"VIP" | "REGULAR" | "SMALL" | "QUIET", [string, string]> = { VIP: ["VIP", "VIP"], REGULAR: ["عادي", "Regular"], SMALL: ["صغير", "Small"], QUIET: ["بدون طلبات حديثة", "No recent orders"] };
@@ -109,7 +109,7 @@ export function QuickJump({ lang, userId, pages, actions, pick, onClose }: {
     if (!pick) {
       const f = foldArabic(query);
       const hit = (s: string | null) => !!s && foldArabic(s).includes(f);
-      for (const p of query ? pages.filter((d) => hit(d.text) || hit(d.context) || hit(d.groupLabel)) : pages) {
+      for (const p of query ? pages.filter((d) => hit(d.text) || hit(d.context) || hit(d.groupLabel) || (d.keywords ?? []).some(hit)) : pages) {
         out.push({ t: "page", key: `page-${p.id}`, group: `page-${p.group ?? "top"}`, label: query ? L("الصفحات", "Pages") : p.groupLabel, page: p });
       }
     }

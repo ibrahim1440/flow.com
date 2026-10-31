@@ -64,7 +64,7 @@ export async function GET(_request: Request, { params }: Params) {
       where: { id },
       select: {
         id: true, name: true, nameAr: true, phone: true, email: true, address: true,
-        whatsappOptOut: true, createdAt: true,
+        whatsappOptOut: true, emailOptOut: true, createdAt: true,
         commercialRegNo: true, vatNumber: true, segment: true, city: true, priceList: true,
         paymentTermsDays: true, creditLimit: true, defaultHoldDays: true,
         accountOwner: { select: { id: true, name: true } },

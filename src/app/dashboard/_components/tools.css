@@ -236,3 +236,34 @@
 @media (min-width: 768px) { [data-ops-root] .tl-sgroup .hr-table { table-layout: fixed; width: 100%; } }
 /* GX E-04 / E-04e: the log's search field is 182px, so search · statuses · «معالجة الآن» share one row. */
 @media (min-width: 768px) { [data-ops-root] .tl-msgtool .hr-search { flex: 0 1 182px; min-width: 182px; } }
+
+/* ── Batch 25: the e-mail channel ─────────────────────────────────────────────────────────── */
+.tl-chan { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; flex: none; vertical-align: middle; }
+.tl-chan.is-wa { color: #1f7a4d; background: #ecf5ef; }
+.tl-chan.is-email { color: var(--brand-olive, #5c5c38); background: #f0f0e9; }
+.tl-modes { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tl-channels { display: grid; gap: 0; border: 1px solid var(--border-subtle, #efeadf); border-radius: 12px; background: var(--surface, #fff); margin: 0 0 22px; }
+.tl-channels > header { padding: 14px 18px; border-bottom: 1px solid var(--border-subtle, #efeadf); }
+.tl-channels > header h2 { margin: 0; font-size: 16px; }
+.tl-channels > header p { margin: 4px 0 0; font-size: 13px; color: var(--text-muted, #6e6a61); line-height: 1.7; }
+.tl-chrow { display: grid; grid-template-columns: minmax(160px, 1.1fr) minmax(220px, 1.2fr) minmax(220px, 1.4fr); gap: 16px 22px; padding: 16px 18px; align-items: start; }
+.tl-chrow + .tl-chrow { border-top: 1px solid var(--border-subtle, #efeadf); }
+.tl-chrow .tl-chname { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; }
+.tl-chrow .tl-chsub { display: block; font-size: 12.5px; color: var(--text-muted, #6e6a61); margin-top: 4px; line-height: 1.7; }
+.tl-chrow .ops-seg button .tl-lock { margin-inline-start: 4px; vertical-align: -2px; }
+.tl-chrow .tl-target { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.tl-chrow .tl-target .hr-input { flex: 1 1 180px; min-width: 0; }
+.tl-chrow .tl-last { font-size: 13px; color: var(--text-secondary, #4a473d); margin-top: 8px; line-height: 1.7; }
+.tl-chrow .tl-last.is-ok { color: #1f7a4d; }
+.tl-chlock { margin: 0 18px 16px; }
+.tl-sentline { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13px; color: var(--text-secondary, #4a473d); margin: 8px 0 0; }
+.tl-sentline .tl-sentitem { display: inline-flex; gap: 6px; align-items: center; }
+.tl-chk { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; min-height: 36px; }
+.tl-chk.is-locked { color: var(--text-muted, #6e6a61); }
+.tl-dup { margin: 10px 0 0; }
+.tl-arch-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin: 0 0 14px; }
+.tl-arch-filters .hr-field { min-width: 150px; flex: 1 1 150px; }
+@media (max-width: 760px) {
+  .tl-chrow { grid-template-columns: 1fr; gap: 12px; padding: 14px; }
+  .tl-chlock { margin: 0 14px 14px; }
+}

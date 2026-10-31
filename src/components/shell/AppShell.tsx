@@ -103,7 +103,7 @@ function GroupIcon({ id }: { id: string }) {
 
 type Item = { node: NavNode; href: string; current: "page" | "true" | undefined };
 type Group = { id: string; label: string | null; items: Item[] };
-type Dest = { id: string; href: string; text: string; context: string | null; group: string | null; groupLabel: string | null; node: NavNode; ctx: NavNode | null };
+type Dest = { id: string; href: string; text: string; context: string | null; group: string | null; groupLabel: string | null; node: NavNode; ctx: NavNode | null; keywords: string[] };
 
 /** Where a group sits: the ungrouped entries first, then SHELL_GROUP_ORDER, the gear's screens last. */
 const SETTINGS_GROUP = "settings";
@@ -176,6 +176,7 @@ function destinations(tree: NavNode[], lang: string, viewer: Viewer): Dest[] {
       id: n.id, href: n.href, text: text(n, lang, viewer),
       context: parent ? text(parent, lang, viewer) : null,
       group, groupLabel: group ? groupText(group, lang, viewer) : null, node: n, ctx: parent ?? mod,
+      keywords: [...(n.shell?.keywords ?? []), ...(parent?.shell?.keywords ?? []), ...(mod?.shell?.keywords ?? [])],
     });
   };
   const walk = (nodes: NavNode[], group: string | null, parent: NavNode | null, mod: NavNode | null) => {
@@ -472,7 +473,7 @@ export function AppShell({
   const meNode = tree.find((n) => n.id === "me");
   const wsNode = tree.find((n) => n.id === "workspace");
   const dests = useMemo(() => destinations(tree, lang, viewer), [tree, lang, viewer]);
-  const palPages: PalPage[] = useMemo(() => dests.map((d) => ({ id: d.id, href: d.href, text: d.text, context: d.context, group: d.group, groupLabel: d.groupLabel, icon: <NodeIcon node={d.node} fallback={d.ctx ?? undefined} /> })), [dests]);
+  const palPages: PalPage[] = useMemo(() => dests.map((d) => ({ id: d.id, href: d.href, text: d.text, context: d.context, group: d.group, groupLabel: d.groupLabel, keywords: d.keywords, icon: <NodeIcon node={d.node} fallback={d.ctx ?? undefined} /> })), [dests]);
   const quickActions = useMemo(() => creates.filter((c) => c.onCustomer), [creates]);
   // The phone header keeps naming the section on a list page with a Segmented control (reference
   // crm-390: «الصفقات» over the pipeline); otherwise it names the last crumb.

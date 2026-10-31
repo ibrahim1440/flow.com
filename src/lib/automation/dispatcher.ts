@@ -30,6 +30,9 @@ import { isTestTraceNote, planDelivery, sendTarget } from "./send-mode";
 import { renderTemplate } from "./template";
 import { processStatusRules } from "./status-rules/evaluate";
 import { isSilentEventPayload } from "./order-progress";
+import { cleanSubject, emailKey, planEmailDelivery, type EffectiveEmailMode } from "./email-mode";
+import { currentEmailMode, recoverInterruptedEmails, sendDueEmails, suppressionLookup, withEmailSavepoint } from "./email-dispatch";
+import { EMAIL_LOCKED_EVENTS, QUOTE_ATTACH_EVENT } from "./rules";
 
 type Tx = Prisma.TransactionClient;
 
@@ -58,6 +61,12 @@ export type DispatchReport = {
   sendFailures: number;
   /** Why nothing was sent this run, when that is the case. */
   sendingPaused: string | null;
+  /** Batch 25: the e-mail channel (its own loop, never paused by the WhatsApp connection). */
+  emailsQueued: number;
+  emailsSkipped: number;
+  emailsSent: number;
+  emailFailures: number;
+  emailPaused: string | null;
 };
 
 export async function runAutomationDispatch(opts: DispatchOptions): Promise<DispatchReport> {
@@ -71,18 +80,36 @@ export async function runAutomationDispatch(opts: DispatchOptions): Promise<Disp
     sent: 0,
     sendFailures: 0,
     sendingPaused: null,
+    emailsQueued: 0,
+    emailsSkipped: 0,
+    emailsSent: 0,
+    emailFailures: 0,
+    emailPaused: null,
   };
   try {
     await recoverInterruptedSends();
     await sweepDueTasks(report);
     await processPendingEvents(report, deadline);
-    await sendDueMessages(report, deadline, opts.maxSends);
-    // feat/notifications: the scheduled dispatch also sends any notification e-mail still waiting.
-    if (Date.now() < deadline) await (await import("@/lib/notifications/deliver")).deliverPendingEmails({ limit: 50 });
   } catch (err) {
     // A dispatcher failure must never surface in the request that scheduled it. Whatever was
     // not done stays pending for the next run.
     console.error("[automation] dispatch failed:", err instanceof Error ? err.message : err);
+  }
+  // Batch 25 fix round 1: e-mail goes FIRST, with its own share of the budget (sends are 0.6 s apart, WhatsApp's 1.5 s),
+  // and in its own try: a WhatsApp queue never eats the e-mail window, and an e-mail error never stops WhatsApp.
+  try {
+    await recoverInterruptedEmails();
+    const emailDeadline = Math.min(deadline, Date.now() + Math.max(2_000, Math.floor((deadline - Date.now()) / 2)));
+    if (Date.now() < deadline) await sendDueEmails(report, emailDeadline, opts.maxSends);
+  } catch (err) {
+    console.error("[automation] e-mail send failed:", err instanceof Error ? err.message : err);
+  }
+  try {
+    if (Date.now() < deadline) await sendDueMessages(report, deadline, opts.maxSends);
+    // feat/notifications: the scheduled dispatch also sends any notification e-mail still waiting.
+    if (Date.now() < deadline) await (await import("@/lib/notifications/deliver")).deliverPendingEmails({ limit: 50 });
+  } catch (err) {
+    console.error("[automation] WhatsApp send failed:", err instanceof Error ? err.message : err);
   }
   return report;
 }
@@ -168,6 +195,7 @@ async function sweepDueTasks(report: DispatchReport) {
 async function processPendingEvents(report: DispatchReport, deadline: number) {
   const settings = await readSettings();
   const mode = effectiveMode(settings);
+  const emailMode = await currentEmailMode();
 
   const candidates = await prisma.automationEvent.findMany({
     where: { status: "PENDING", occurredAt: { lte: new Date() } },
@@ -179,7 +207,7 @@ async function processPendingEvents(report: DispatchReport, deadline: number) {
   for (const { id } of candidates) {
     if (Date.now() > deadline) return;
     try {
-      const done = await prisma.$transaction((tx) => processOneEvent(tx, id, mode, report, settings.employeeMessageLang));
+      const done = await prisma.$transaction((tx) => processOneEvent(tx, id, mode, report, settings.employeeMessageLang, emailMode));
       if (done) report.eventsProcessed++;
     } catch (err) {
       report.eventsFailed++;
@@ -197,7 +225,7 @@ async function processPendingEvents(report: DispatchReport, deadline: number) {
 }
 
 /** Returns false when another dispatcher holds the event or already finished it. */
-async function processOneEvent(tx: Tx, id: string, mode: EffectiveMode, report: DispatchReport, employeeDefault: MsgLang | null = null): Promise<boolean> {
+async function processOneEvent(tx: Tx, id: string, mode: EffectiveMode, report: DispatchReport, employeeDefault: MsgLang | null = null, emailMode: EffectiveEmailMode = { mode: "OFF", note: "E-mail sending is turned off. The message was recorded, not sent." }): Promise<boolean> {
   const locked = await tx.$queryRaw<{ id: string }[]>`
     SELECT id FROM "AutomationEvent" WHERE id = ${id} AND status = 'PENDING' FOR UPDATE SKIP LOCKED`;
   if (locked.length === 0) return false;
@@ -258,9 +286,43 @@ async function processOneEvent(tx: Tx, id: string, mode: EffectiveMode, report: 
     const steps = parseStoredSteps(rule.steps);
     const offsets = stepOffsetsMinutes(steps);
     const rows: Prisma.WhatsAppMessageCreateManyInput[] = [];
+    const emails: Prisma.EmailMessageCreateManyInput[] = [];
 
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
+      if (step.type === "email") {
+        // Batch 25: an e-mail step — the customer of the event or one fixed address; keys "email:<run>:<step>:<person>".
+        const scheduledAt = new Date(ev.occurredAt.getTime() + (offsets[i] ?? 0) * 60_000);
+        const people: Person[] = step.to.kind === "email"
+          ? [{ key: `email:${step.to.email}`, name: step.to.name ?? "", phone: null, email: step.to.email }]
+          : ctx.people.customer ?? [];
+        const base = { ruleId: rule.id, ruleName: rule.name, eventId: id, eventType: ev.eventType, subjectType: ev.subjectType, subjectId: ev.subjectId, stepIndex: i, recipientKind: step.to.kind, scheduledAt, planMode: emailMode.mode };
+        const subject = cleanSubject(renderTemplate(def!, step.subject, ctx.vars, lang));
+        const bodyText = renderTemplate(def!, step.template, ctx.vars, lang);
+        const locked = EMAIL_LOCKED_EVENTS.includes(ev.eventType);
+        const attach = step.attach === "quote_pdf" && ev.eventType === QUOTE_ATTACH_EVENT && ev.subjectType === "Quote" && step.to.kind === "customer";
+        if (people.length === 0) {
+          emails.push({ ...base, dedupeKey: emailKey(`${run.id}:${i}:none`), subject, bodyText, status: "SKIPPED", statusNote: "No recipient for this event (for example, the order has no owner yet)." });
+          continue;
+        }
+        const suppressed = await suppressionLookup(tx, people.map((p) => p.email));
+        const seen = new Set<string>();
+        for (const person of people) {
+          const d = planEmailDelivery({ key: person.key, name: person.name, email: person.email, optOut: person.emailOptOut }, emailMode, suppressed);
+          if (d.ownEmail) {
+            if (seen.has(d.ownEmail)) continue;
+            seen.add(d.ownEmail);
+          }
+          const customerId = person.key.startsWith("customer:") ? person.key.slice(9) : null;
+          emails.push({
+            ...base, dedupeKey: emailKey(`${run.id}:${i}:${person.key}`), recipientName: person.name || null, customerId, subject, bodyText,
+            toEmail: d.toEmail, intendedEmail: d.intendedEmail,
+            attachmentKind: attach && customerId ? "quote_pdf" : null, attachmentRefId: attach && customerId ? ev.subjectId : null,
+            status: locked ? "SKIPPED" : d.status, statusNote: locked ? "Tax invoice e-mails are locked until ZATCA clears or reports the invoice." : d.statusNote,
+          });
+        }
+        continue;
+      }
       if (step.type !== "whatsapp") continue;
       const scheduledAt = new Date(ev.occurredAt.getTime() + (offsets[i] ?? 0) * 60_000);
       const people = await recipientsOf(tx, step.to, ctx);
@@ -326,13 +388,23 @@ async function processOneEvent(tx: Tx, id: string, mode: EffectiveMode, report: 
         else report.messagesSkipped++;
       }
     }
+    if (emails.length) {
+      await withEmailSavepoint(tx, async () => {
+        const created = await tx.emailMessage.createMany({ data: emails, skipDuplicates: true });
+        const q = emails.filter((r) => r.status === "QUEUED").length;
+        report.emailsQueued += Math.min(q, created.count);
+        report.emailsSkipped += Math.max(0, created.count - q);
+      });
+    }
   }
 
   // «إشعارات الحالات»: the switched-on status rules this event matches (status-rules/evaluate.ts).
   if (def) {
-    const st = await processStatusRules(tx, event, mode, (l: Lang = "ar") => contextFor(l), employeeDefault);
+    const st = await processStatusRules(tx, event, mode, (l: Lang = "ar") => contextFor(l), employeeDefault, { mode: emailMode, suppression: (e) => suppressionLookup(tx, e), savepoint: (fn) => withEmailSavepoint(tx, fn) });
     report.messagesQueued += st.queued;
     report.messagesSkipped += st.skipped;
+    report.emailsQueued += st.emailsQueued ?? 0;
+    report.emailsSkipped += st.emailsSkipped ?? 0;
   }
 
   await finish("PROCESSED");

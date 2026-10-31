@@ -1,3 +1,4 @@
+import { parseEmailAddress } from "@/lib/automation/email-mode";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireAnyModule, requireEdit } from "@/lib/auth-server";
@@ -42,13 +43,18 @@ export async function POST(request: Request) {
     if (!body.name?.trim()) {
       return NextResponse.json({ error: "name is required" }, { status: 400 });
     }
+    // Batch 25: one valid address (lower-cased) or none — automated e-mails go to it.
+    const email = typeof body.email === "string" && body.email.trim() ? parseEmailAddress(body.email) : null;
+    if (typeof body.email === "string" && body.email.trim() && !email) {
+      return NextResponse.json({ error: "اكتب إيميل واحد صحيح، مثل orders@example.com", errorEn: "Enter one valid e-mail address.", code: "INVALID_EMAIL", field: "email" }, { status: 400 });
+    }
 
     const customer = await prisma.customer.create({
       data: {
         name: body.name.trim(),
         nameAr: body.nameAr?.trim() || null,
         phone: body.phone?.trim() || null,
-        email: body.email?.trim() || null,
+        email,
         address: body.address?.trim() || null,
         whatsappOptOut: body.whatsappOptOut === true,
       },

@@ -258,6 +258,15 @@ model Customer {
   /// WhatsApp automation (additive, defaulted): the customer asked not to receive WhatsApp
   /// messages. Every automated message to this customer is recorded as SKIPPED instead.
   whatsappOptOut Boolean @default(false)
+  /// «يستقبل إيميلات» (20261207090000_email_channel): no automated e-mail when true. Set by staff, by the
+  /// customer's own signed unsubscribe link, or after a complaint / hard bounce (emailOptOutSource, CHECK).
+  emailOptOut       Boolean   @default(false)
+  emailOptOutAt     DateTime?
+  emailOptOutSource String?
+  /// The opt-out history, one dated line per change — appended, never overwritten (fix round 1).
+  emailOptOutNote   String?
+  /// The opaque id the signed unsubscribe link carries (never the customer id). Made on the first e-mail.
+  emailLinkId       String?   @unique
 
   // ─── Customer account (additive, migration 20261019120000_customer_account) ───────────
   // The account page (Figma crm-account 179:1312) shows particulars the system had no source
@@ -5260,6 +5269,10 @@ model WhatsAppMessage {
   /// The real recipient's number when TEST mode redirected the message.
   intendedPhone     String?
   body              String
+  /// Every message row names its channel (20261207090000_email_channel); always "whatsapp" here (CHECK).
+  channel           String                @default("whatsapp")
+  /// Set when the daily job moved `body` (older than 180 days) to MessageArchive; `body` is then "".
+  bodyArchivedAt    DateTime?
   status            WhatsAppMessageStatus @default(QUEUED)
   /// Why a message was skipped, failed or cancelled. Never contains a credential.
   statusNote        String?
@@ -5308,6 +5321,17 @@ model AutomationSettings {
   /// The language of automation messages to EMPLOYEES who have not chosen one ("ar" | "en", CHECK).
   /// NULL = Arabic. Migration 20261110090000_i18n_preferences (additive).
   employeeMessageLang String?
+  /// Batch 25 (20261207090000_email_channel): the e-mail channel's own sending mode — independent of `sendMode`
+  /// (WhatsApp). LIVE needs EMAIL_LIVE_ENABLED=true on a production deployment AND a test e-mail that reached
+  /// `testEmail` in the last 30 days (`testEmailVerifiedAt`).
+  emailSendMode       WhatsAppSendMode @default(OFF)
+  /// Where every e-mail goes in TEST mode. Lower-case (CHECK). Changing it clears testEmailVerifiedAt.
+  testEmail           String?
+  testEmailVerifiedAt DateTime?
+  emailUpdatedById    String?
+  emailUpdatedAt      DateTime?
+  /// «بريد الردود» (fix round 1): the company reply address when the account owner has no work e-mail. Lower-case (CHECK).
+  replyToEmail        String?
 }
 
 /// «إشعارات الحالات» — one row per status that exists somewhere in the system (an order status,
@@ -5338,6 +5362,10 @@ model WhatsAppStatusRule {
   /// ever; true = one per ENTRY (per automation event), so a record re-entering the status is
   /// announced again — still never twice for the same entry.
   renotify      Boolean   @default(false)
+  /// «إيميل» next to WhatsApp (20261207090000_email_channel): also e-mail the CUSTOMER when a record enters this
+  /// status. Never on the tax-invoice source (CHECK; locked until ZATCA clears / reports invoices).
+  emailEnabled  Boolean   @default(false)
+  emailSubject  String?
   /// False when the status no longer exists or is hidden in its source.
   active        Boolean   @default(true)
   firstSeenAt   DateTime  @default(now())
@@ -9989,4 +10017,143 @@ model DeferralRun {
 
   @@index([periodStart])
   @@index([standingAuthorisationId])
+}
+
+// ─── Batch 25: the e-mail channel (migration 20261207090000_email_channel) ─────────────────────
+
+enum EmailMessageStatus {
+  QUEUED
+  SENDING
+  SENT
+  DELIVERED
+  BOUNCED
+  COMPLAINED
+  FAILED
+  SKIPPED
+  CANCELLED
+}
+
+/// One automated e-mail to one address. The e-mail twin of WhatsAppMessage, in its own table so the live WhatsApp
+/// queue is not touched: dedupe keys are namespaced "email:…", the sender is its own loop (not tied to the WhatsApp
+/// connection), and attachments are never stored — only the document reference and the sha256 of the PDF sent.
+model EmailMessage {
+  id                String             @id @default(cuid())
+  /// Always "email" (CHECK).
+  channel           String             @default("email")
+  dedupeKey         String             @unique
+  ruleId            String?
+  ruleName          String?
+  eventId           String?
+  eventType         String?
+  subjectType       String?
+  subjectId         String?
+  stepIndex         Int?
+  recipientKind     String
+  recipientName     String?
+  /// The customer the message is about: the attachment must belong to them (re-checked at send time).
+  customerId        String?
+  /// Where it goes: the test address in TEST mode.
+  toEmail           String?
+  /// The real recipient when TEST mode redirected the message.
+  intendedEmail     String?
+  /// OFF | TEST | LIVE when it was planned (CHECK).
+  planMode          String
+  subject           String
+  /// The plain-text part as sent. Moved to MessageArchive after 180 days ("" then, bodyArchivedAt set).
+  bodyText          String             @default("")
+  bodyArchivedAt    DateTime?
+  /// "quote_pdf" or null (CHECK).
+  attachmentKind    String?
+  attachmentRefId   String?
+  /// sha256 (hex) of the PDF bytes sent, so the same PDF can be regenerated and proven.
+  attachmentSha256  String?
+  status            EmailMessageStatus @default(QUEUED)
+  statusNote        String?
+  scheduledAt       DateTime           @default(now())
+  nextAttemptAt     DateTime?
+  attempts          Int                @default(0)
+  lockedAt          DateTime?
+  /// Resend's message id; the webhook (delivered / bounced / complained) is matched on it.
+  providerMessageId String?            @unique
+  httpStatus        Int?
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  bouncedAt         DateTime?
+  complainedAt      DateTime?
+  createdById       String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  sendAttempts      EmailSendAttempt[]
+
+  @@index([status, scheduledAt])
+  @@index([subjectType, subjectId])
+  @@index([customerId, createdAt])
+  @@index([createdAt])
+}
+
+model EmailSendAttempt {
+  id                String       @id @default(cuid())
+  messageId         String
+  message           EmailMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  attemptNo         Int
+  ok                Boolean
+  httpStatus        Int?
+  providerMessageId String?
+  error             String?
+  durationMs        Int?
+  createdAt         DateTime     @default(now())
+
+  @@index([messageId])
+}
+
+/// An address never e-mailed again: a hard bounce or a complaint reported by Resend, or set by hand.
+model EmailSuppression {
+  /// Lower-case (CHECK).
+  email           String   @id
+  /// HARD_BOUNCE | COMPLAINT | MANUAL (CHECK).
+  reason          String
+  providerEventId String?
+  createdById     String?
+  createdAt       DateTime @default(now())
+}
+
+/// Every Resend webhook delivery handled, by its svix-id: a replay is recognised and ignored.
+model EmailProviderEvent {
+  id                String   @id
+  type              String
+  providerMessageId String?
+  receivedAt        DateTime @default(now())
+
+  @@index([providerMessageId])
+}
+
+/// Message bodies older than 180 days, moved here from WhatsAppMessage / EmailMessage by the daily job
+/// (/api/cron/message-archive) — for legal claims. Immutable (trigger message_archive_immutable); the admin
+/// searches it by customer, date range and subject. Attachments are not kept: docKind / docRefId / docSha256 name
+/// the document so its PDF can be regenerated.
+model MessageArchive {
+  id               String    @id @default(cuid())
+  /// whatsapp | email (CHECK).
+  channel          String
+  messageId        String
+  customerId       String?
+  recipientName    String?
+  /// The phone number or e-mail address it went to.
+  address          String?
+  subject          String?
+  body             String
+  ruleName         String?
+  subjectType      String?
+  subjectId        String?
+  docKind          String?
+  docRefId         String?
+  docSha256        String?
+  status           String
+  messageCreatedAt DateTime
+  sentAt           DateTime?
+  archivedAt       DateTime  @default(now())
+
+  @@unique([channel, messageId])
+  @@index([customerId, messageCreatedAt])
+  @@index([messageCreatedAt])
 }

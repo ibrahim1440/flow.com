@@ -24,6 +24,9 @@ export type Person = {
   name: string;
   phone: string | null;
   optOut?: boolean;
+  /** Batch 25: a customer's e-mail address and «يستقبل إيميلات» (employees: not read in phase 1). */
+  email?: string | null;
+  emailOptOut?: boolean;
 };
 
 export type EventContext = {
@@ -97,14 +100,14 @@ async function employee(db: Db, id: string | null | undefined): Promise<Employee
   return db.employee.findUnique({ where: { id }, select: { id: true, name: true, phoneNumber: true, active: true } });
 }
 
-type CustomerRow = { id: string; name: string; nameAr: string | null; phone: string | null; whatsappOptOut: boolean };
+type CustomerRow = { id: string; name: string; nameAr: string | null; phone: string | null; whatsappOptOut: boolean; email?: string | null; emailOptOut?: boolean };
 
 const customerName = (c: CustomerRow | null | undefined, lang: Lang) => (c ? (lang === "ar" ? c.nameAr || c.name : c.name) : "");
 
 const customerPerson = (c: CustomerRow | null | undefined, lang: Lang): Person[] =>
-  c ? [{ key: `customer:${c.id}`, name: customerName(c, lang), phone: c.phone, optOut: c.whatsappOptOut }] : [];
+  c ? [{ key: `customer:${c.id}`, name: customerName(c, lang), phone: c.phone, optOut: c.whatsappOptOut, email: c.email ?? null, emailOptOut: c.emailOptOut ?? false }] : [];
 
-const CUSTOMER_SELECT = { id: true, name: true, nameAr: true, phone: true, whatsappOptOut: true } as const;
+const CUSTOMER_SELECT = { id: true, name: true, nameAr: true, phone: true, whatsappOptOut: true, email: true, emailOptOut: true } as const;
 const EMPLOYEE_SELECT = { id: true, name: true, phoneNumber: true, active: true } as const;
 
 async function orderContext(db: Db, orderId: string | null | undefined, lang: Lang) {

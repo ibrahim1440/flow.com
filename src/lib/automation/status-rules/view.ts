@@ -4,7 +4,7 @@
  * and the sync route so both answer with the same shape.
  */
 import type { Prisma } from "@/generated/prisma/client";
-import { parseRecipients } from "./rules";
+import { canEmailSource, EMAIL_LOCKED_SOURCES, parseRecipients } from "./rules";
 import { getStatusSource, STATUS_SOURCES, statusCanFire } from "./sources";
 import { lastSyncedAt } from "./sync";
 
@@ -23,6 +23,11 @@ export type StatusRuleView = {
   /** Owner language decision 3: the English text employees who receive English get ("" = none). */
   templateEn: string;
   renotify: boolean;
+  /** Batch 25: «إيميل» (to the customer), its subject, whether this source may e-mail, and the tax-invoice lock. */
+  emailEnabled: boolean;
+  emailSubject: string;
+  canEmail: boolean;
+  emailLocked: boolean;
   active: boolean;
   canFire: boolean;
   isNew: boolean;
@@ -68,6 +73,10 @@ export async function readStatusRules(db: Tx): Promise<{ rules: StatusRuleView[]
         template: r.template,
         templateEn: r.templateEn ?? "",
         renotify: r.renotify,
+        emailEnabled: r.emailEnabled,
+        emailSubject: r.emailSubject ?? "",
+        canEmail: canEmailSource(r.source),
+        emailLocked: EMAIL_LOCKED_SOURCES.includes(r.source),
         active: r.active && !!src,
         canFire: !!src && statusCanFire(src, r.statusKey),
         isNew: r.reviewedAt === null,

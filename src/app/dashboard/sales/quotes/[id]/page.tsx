@@ -20,6 +20,8 @@ import { longDate, shortDate } from "@/components/d21/format";
 import { DISCOUNT_MAX } from "@/lib/services/sales/discount-limits";
 import { useAccountantView } from "../../../accounting/_ui/qoyod-pages";
 import { useQuotesBase } from "../base";
+import { IssueOutcome, SentMessagesLine } from "@/components/automation/SentMessages";
+import { useUser } from "../../../user-context";
 
 /**
  * The quotation — editor while it is a draft (GX A-10, Figma 1230:121651 / EN 1230:147423,
@@ -191,6 +193,9 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  // Fix round 1 (council b25 #12): after «إصدار», say what reached the customer.
+  const [justIssued, setJustIssued] = useState(false);
+  const viewerIsAdmin = useUser()?.role === "admin";
   const [dialog, setDialog] = useState<"reject" | "order" | null>(null);
   /** Phone: the «⋯» menu of the sticky bar, and the lines opened for editing from it. */
   const [more, setMore] = useState(false);
@@ -338,6 +343,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       return;
     }
     setDialog(null);
+    if (to === "ISSUED") setJustIssued(true);
     setSuccess(
       to === "ISSUED"
         ? ar ? "صدر العرض وتُثبّتت أسعاره." : "Issued, and its prices are now frozen."
@@ -425,7 +431,8 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       )}
       {success && (
         <p className="notice ok" role="status" data-testid="alert-success" style={{ marginBottom: 16 }}>
-          {success}<button type="button" onClick={() => setSuccess("")} aria-label={ar ? "إغلاق" : "Dismiss"}>×</button>
+          {success}<button type="button" onClick={() => { setSuccess(""); setJustIssued(false); }} aria-label={ar ? "إغلاق" : "Dismiss"}>×</button>
+          {justIssued ? <IssueOutcome quoteId={id} ar={ar} isAdmin={viewerIsAdmin} /> : null}
         </p>
       )}
     </>
@@ -837,6 +844,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         <dd className="grand"><bdi>{formatMoney(fig.grand)}</bdi><span className="unit">{unit}</span></dd>
       </dl>
       {previewNote}
+      {quote.status !== "DRAFT" ? <SentMessagesLine subjectType="Quote" subjectId={quote.id} ar={ar} isAdmin={viewerIsAdmin} reloadKey={justIssued ? 1 : 0} /> : null}
     </div>
   );
 
@@ -1027,6 +1035,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         </dl>
         {previewNote}
         {issuedNote}
+        {quote.status !== "DRAFT" ? <SentMessagesLine subjectType="Quote" subjectId={quote.id} ar={ar} isAdmin={viewerIsAdmin} reloadKey={justIssued ? 1 : 0} /> : null}
         {chain && <div style={{ marginTop: 20 }}>{chain}</div>}
         <p className="q-band">
           {editable

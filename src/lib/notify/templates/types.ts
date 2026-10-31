@@ -79,6 +79,13 @@ export type QuoteEmailInput = DemoFlag & {
   validityDays: number;
   priced: PricedDocument;
   notes: string | null;
+  /**
+   * Fix round 1 (batch 25): false when a reply would reach nobody (no rep work e-mail, no «بريد الردود») — the e-mail
+   * then never says «يكفي الرد على هذه الرسالة» and gives the contact line instead. Absent = true (the demo).
+   */
+  replyable?: boolean;
+  /** Fix round 2: the rep who owns the deal, named in the e-mail (signature, and «تواصلوا مع مندوبكم …»). */
+  repName?: string | null;
 };
 
 export type InvoiceEmailInput = DemoFlag & {

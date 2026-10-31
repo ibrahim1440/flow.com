@@ -149,6 +149,11 @@ export type ShellHints = {
    * الطلبات»), while the registry keeps orders under Sales for a seller in the legacy shell.
    */
   as?: string;
+  /**
+   * Extra words the quick jump (Ctrl K) finds this entry by, besides its labels (batch 25: «ايميل», «بريد» find
+   * «رسائل العملاء التلقائية»). On a module, every subunit is found by them too.
+   */
+  keywords?: string[];
 };
 
 /**
@@ -739,29 +744,21 @@ export const NAV: NavNode[] = [
   },
 
   {
-    // WhatsApp messages sent by rules on ERP events. Its own module, because who may decide
-    // what customers are sent is not a sales, orders or settings question alone. Presented as
-    // GX E-P01…E-P04 draw it: «الأتمتة والواتساب» under «الإعدادات» (the gear menu, and the
-    // settings navigation of the page), trail «الإعدادات / الأتمتة والواتساب / القواعد».
+    // Customer messages sent by rules and status notifications on ERP events — WhatsApp and, since batch 25, e-mail.
+    // Its own module, because who may decide what customers are sent is not a sales, orders or settings question
+    // alone. Batch 25 (council seat 5): renamed «رسائل العملاء التلقائية» and drawn in the SIDEBAR for whoever holds
+    // the module (the administrators), no longer hidden in the gear menu; Ctrl K finds it by «ايميل / بريد / واتساب».
     id: "automation",
-    ar: "الأتمتة", en: "Automation",
+    ar: "رسائل العملاء التلقائية", en: "Automated customer messages",
     icon: Workflow,
-    shell: { ar: "الأتمتة والواتساب", en: "Automation & WhatsApp", icon: "bell", place: "menu", trailRoot: "settings" },
+    shell: { icon: "bell", keywords: ["ايميل", "إيميل", "ايميلات", "بريد", "البريد", "email", "واتساب", "رسائل", "أتمتة", "اتمته", "whatsapp"] },
     children: [
       {
         id: "automation.rules",
-        ar: "قواعد الأتمتة", en: "Automation rules",
+        ar: "القواعد", en: "Rules",
         icon: Zap,
         href: "/dashboard/automation",
         alsoMatches: ["/dashboard/automation/rules"],
-        anyOf: [{ module: "automation" }],
-        shell: { ar: "القواعد", en: "Rules" },
-      },
-      {
-        id: "automation.messages",
-        ar: "سجل الرسائل", en: "Message log",
-        icon: MessageSquareText,
-        href: "/dashboard/automation/messages",
         anyOf: [{ module: "automation" }],
       },
       {
@@ -774,11 +771,31 @@ export const NAV: NavNode[] = [
         anyOf: [{ module: "automation" }],
       },
       {
+        id: "automation.messages",
+        ar: "سجل الرسائل", en: "Message log",
+        icon: MessageSquareText,
+        href: "/dashboard/automation/messages",
+        // Fix round 2 (council b25 seat 5 N5): a sales manager / customers manager reads the messages to customers, a
+        // rep those to their book (read-only; the API scopes the rows — lib/automation/log-scope.ts).
+        anyOf: [{ module: "automation" }, { module: "sales" }],
+      },
+      {
+        // Both channels' sending modes and test targets, then the WhatsApp phone link (batch 25: «الإعدادات»).
         id: "automation.whatsapp",
-        ar: "ربط الواتساب", en: "WhatsApp connection",
+        ar: "إعدادات الإرسال", en: "Sending settings",
         icon: QrCode,
         href: "/dashboard/automation/whatsapp",
         anyOf: [{ module: "automation" }],
+      },
+      {
+        // «الأرشيف» (batch 25): message bodies older than 180 days. Same audience as «إشعارات الحالات»: the page and
+        // its API are for the admin role (step-up), others read a notice.
+        id: "automation.archive",
+        ar: "الأرشيف", en: "Archive",
+        icon: ScrollText,
+        href: "/dashboard/automation/archive",
+        // Fix round 2: also the managers and reps of the message log, scoped the same way, after a step-up.
+        anyOf: [{ module: "automation" }, { module: "sales" }],
       },
     ],
   },

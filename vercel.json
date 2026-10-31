@@ -11,6 +11,8 @@
     { "path": "/api/cron/contract-notices", "schedule": "20 3 * * *" },
     { "path": "/api/cron/zatca-reporting", "schedule": "0 2 * * *" },
     { "path": "/api/cron/workspace", "schedule": "0 4 * * *" },
-    { "path": "/api/cron/recurring", "schedule": "10 1 * * *" }
+    { "path": "/api/cron/recurring", "schedule": "10 1 * * *" },
+    { "path": "/api/cron/message-archive", "schedule": "40 0 * * *" },
+    { "path": "/api/automation/dispatch", "schedule": "30 5 * * *" }
   ]
 }

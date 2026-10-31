@@ -12,7 +12,9 @@ import {
 } from "@/lib/automation/catalog";
 import { CONDITION_OPS, CONDITION_OP_LABELS, OPS_WITHOUT_VALUE, type ConditionOp } from "@/lib/automation/conditions";
 import { normalizePhoneForWhatsApp } from "@/lib/automation/phone";
-import { MAX_STEPS, MAX_WAIT_MINUTES } from "@/lib/automation/rules";
+import { EMAIL_LOCKED_EVENTS, MAX_STEPS, MAX_WAIT_MINUTES, QUOTE_ATTACH_EVENT, SUBJECT_MAX_LENGTH } from "@/lib/automation/rules";
+import { parseEmailAddress } from "@/lib/automation/email-mode";
+import { Lock } from "lucide-react";
 import { renderTemplate, TEMPLATE_MAX_LENGTH, unknownPlaceholders } from "@/lib/automation/template";
 import { DEFAULT_RULE_TEMPLATES, ruleEnglishDefault } from "@/lib/automation/employee-lang";
 import { isStaffRecipient } from "@/lib/automation/rules";
@@ -38,7 +40,9 @@ type WaitUnit = "minutes" | "hours" | "days";
 type StepDraft =
   // templateEn: the English text of a staff step (owner language decision 3); unused for the customer / a typed number.
   | { key: number; type: "whatsapp"; kind: RecipientKind; employeeId: string; phone: string; phoneName: string; template: string; templateEn: string }
-  | { key: number; type: "wait"; amount: string; unit: WaitUnit };
+  | { key: number; type: "wait"; amount: string; unit: WaitUnit }
+  // Batch 25: an e-mail to the event's customer, or to one address; attach = the event's own quotation PDF.
+  | { key: number; type: "email"; toKind: "customer" | "email"; email: string; emailName: string; subject: string; template: string; attach: boolean };
 
 export type StoredRule = {
   id: string;
@@ -73,6 +77,9 @@ function toDraftSteps(raw: unknown, eventType: string): StepDraft[] {
     }
     const to = (s.to ?? {}) as Record<string, string>;
     const template = String(s.template ?? "");
+    if (s.type === "email") {
+      return { key: nextKey(), type: "email", toKind: to.kind === "email" ? "email" : "customer", email: to.email ?? "", emailName: to.name ?? "", subject: String(s.subject ?? ""), template, attach: s.attach === "quote_pdf" };
+    }
     const stored = typeof s.templateEn === "string" ? s.templateEn : "";
     return {
       key: nextKey(),
@@ -93,9 +100,22 @@ function toDraftConditions(raw: unknown): ConditionDraft[] {
   return raw.map((c: Record<string, unknown>) => ({ field: String(c.field ?? ""), op: (c.op as ConditionOp) ?? "eq", value: String(c.value ?? "") }));
 }
 
-/** Staff first: the first recipient the event offers that is not the customer. */
+/**
+ * Batch 25 (council seat 5): a new step goes to the CUSTOMER when the event has one — the case people build rules
+ * for — else to the event's first own recipient.
+ */
 function defaultRecipient(event: EventDef | undefined): RecipientKind {
-  return event?.recipients.find((r) => r !== "customer") ?? "employee";
+  if (event?.recipients.includes("customer")) return "customer";
+  return event?.recipients[0] ?? "employee";
+}
+
+function newEmailStep(event: EventDef | undefined): StepDraft {
+  const quote = event?.key === QUOTE_ATTACH_EVENT;
+  const d = event ? DEFAULT_RULE_TEMPLATES[event.key] : undefined;
+  return {
+    key: nextKey(), type: "email", toKind: event?.recipients.includes("customer") ? "customer" : "email", email: "", emailName: "",
+    subject: quote ? "عرض سعر {{quote.number}}" : event ? event.ar : "", template: d?.ar ?? "", attach: quote,
+  };
 }
 
 function newMessageStep(event: EventDef | undefined): StepDraft {
@@ -149,6 +169,9 @@ export function RuleEditor({ rule }: { rule: StoredRule | null }) {
     const allowed = recipientsFor(next);
     setSteps((ss) =>
       ss.map((s) => {
+        if (s.type === "email") {
+          return { ...s, toKind: next.recipients.includes("customer") ? s.toKind : "email", attach: s.attach && key === QUOTE_ATTACH_EVENT };
+        }
         if (s.type !== "whatsapp") return s;
         const kind = allowed.includes(s.kind) ? s.kind : defaultRecipient(next);
         const untouched = Object.values(DEFAULT_AR).includes(s.template) || !s.template.trim();
@@ -181,7 +204,13 @@ export function RuleEditor({ rule }: { rule: StoredRule | null }) {
       steps: steps.map((s) =>
         s.type === "wait"
           ? { type: "wait", minutes: Math.round(Number(s.amount) * UNIT_MINUTES[s.unit]) }
-          : {
+          : s.type === "email"
+            ? {
+                type: "email", subject: s.subject, template: s.template,
+                to: s.toKind === "customer" ? { kind: "customer" } : { kind: "email", email: s.email, ...(s.emailName.trim() ? { name: s.emailName } : {}) },
+                ...(s.attach && s.toKind === "customer" ? { attach: "quote_pdf" } : {}),
+              }
+            : {
               type: "whatsapp",
               template: s.template,
               ...(isStaffRecipient(s.kind) && s.templateEn.trim() ? { templateEn: s.templateEn } : {}),
@@ -223,13 +252,24 @@ export function RuleEditor({ rule }: { rule: StoredRule | null }) {
     router.push("/dashboard/automation");
   }
 
-  const messageCount = steps.filter((s) => s.type === "whatsapp").length;
+  const messageCount = steps.filter((s) => s.type === "whatsapp" || s.type === "email").length;
+  const emailLocked = EMAIL_LOCKED_EVENTS.includes(eventType);
+  // «تنبيه التكرار» (batch 25): a status notification on this event that also reaches the customer.
+  const [dupStatuses, setDupStatuses] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    api<{ statuses: { labelAr: string; labelEn: string; toCustomer: boolean }[] }>(`/api/automation/duplicates?eventType=${encodeURIComponent(eventType)}`).then((r) => {
+      if (!cancelled && r.ok) setDupStatuses(r.data.statuses.filter((x) => x.toCustomer).map((x) => (ar ? x.labelAr : x.labelEn)));
+    });
+    return () => { cancelled = true; };
+  }, [eventType, ar]);
+  const stepsToCustomer = steps.some((s) => (s.type === "whatsapp" && s.kind === "customer") || (s.type === "email" && s.toKind === "customer"));
 
   const L = (a: string, e: string) => (ar ? a : e);
 
   useD21Phone({
     title: rule ? rule.name : L("قاعدة جديدة", "New rule"),
-    sub: L("قاعدة · الأتمتة والواتساب", "Rule · Automation & WhatsApp"),
+    sub: L("قاعدة · رسائل العملاء التلقائية", "Rule · Automated customer messages"),
     back: "/dashboard/automation",
   });
 
@@ -374,7 +414,7 @@ export function RuleEditor({ rule }: { rule: StoredRule | null }) {
                 <div className="tl-step-head">
                   <strong>
                     {L(`الخطوة ${i + 1}: `, `Step ${i + 1}: `)}
-                    {s.type === "whatsapp" ? L("رسالة واتساب", "WhatsApp message") : L("انتظار", "Wait")}
+                    {s.type === "whatsapp" ? L("رسالة واتساب", "WhatsApp message") : s.type === "email" ? L("إيميل", "E-mail") : L("انتظار", "Wait")}
                   </strong>
                   {!readOnly && (
                     <span className="tl-acts" style={{ gap: 4 }}>
@@ -386,6 +426,8 @@ export function RuleEditor({ rule }: { rule: StoredRule | null }) {
                 </div>
                 {s.type === "wait" ? (
                   <WaitStepFields step={s} readOnly={readOnly} lang={lang} onChange={(p) => updateStep(s.key, p)} />
+                ) : s.type === "email" ? (
+                  <EmailStepFields step={s} event={event} readOnly={readOnly} locked={emailLocked} lang={lang} index={i} onChange={(p) => updateStep(s.key, p)} />
                 ) : (
                   <MessageStepFields step={s} event={event} employees={employees} locale={locale} readOnly={readOnly} lang={lang} index={i} onChange={(p) => updateStep(s.key, p)} />
                 )}
@@ -396,12 +438,19 @@ export function RuleEditor({ rule }: { rule: StoredRule | null }) {
                 <Btn size="sm" onClick={() => setSteps((ss) => [...ss, newMessageStep(event)])} data-testid="add-message-step">
                   <PlusIco /> {L("إضافة رسالة واتساب", "Add a WhatsApp message")}
                 </Btn>
+                <Btn size="sm" onClick={() => setSteps((ss) => [...ss, newEmailStep(event)])} disabled={emailLocked} data-testid="add-email-step" title={emailLocked ? L("إيميل الفواتير مقفل لين تشتغل الفوترة الإلكترونية", "Invoice e-mail is locked until e-invoicing is live") : undefined}>
+                  {emailLocked ? <Lock size={14} strokeWidth={1.6} aria-hidden /> : <PlusIco />} {L("إضافة إيميل", "Add an e-mail")}
+                </Btn>
                 <Btn size="sm" onClick={() => setSteps((ss) => [...ss, { key: nextKey(), type: "wait", amount: "1", unit: "hours" }])} data-testid="add-wait-step">
                   <PlusIco /> {L("إضافة انتظار", "Add a wait")}
                 </Btn>
               </div>
             )}
             {messageCount === 0 && <p className="hr-caption" style={{ margin: 0, color: "var(--status-danger)" }}>{L("أضف رسالة واحدة على الأقل.", "Add at least one message.")}</p>}
+            {emailLocked ? <p className="hr-caption" style={{ margin: 0 }} data-testid="email-locked-note">{L("إيميل الفواتير مقفل لين تشتغل الفوترة الإلكترونية (زاتكا). الواتساب متاح.", "Invoice e-mail is locked until e-invoicing (ZATCA) is live. WhatsApp is available.")}</p> : null}
+            {dupStatuses.length && stepsToCustomer ? (
+              <Notice tone="warning"><span data-testid="rule-duplicate-warning">{L(`تنبيه: «إشعارات الحالات» ترسل للعميل عند نفس الحدث (${dupStatuses.join("، ")}). العميل ممكن يوصله رسالتين.`, `Heads up: «Status notifications» already message the customer on this event (${dupStatuses.join(", ")}). The customer may get two messages.`)}</span></Notice>
+            ) : null}
           </Sec>
         )}
       </div>
@@ -610,6 +659,84 @@ function MessageStepFields({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function EmailStepFields({ step, event, readOnly, locked, lang, index, onChange }: {
+  step: Extract<StepDraft, { type: "email" }>;
+  event: EventDef;
+  readOnly: boolean;
+  locked: boolean;
+  lang: "ar" | "en";
+  index: number;
+  onChange: (p: Partial<StepDraft>) => void;
+}) {
+  const ar = lang === "ar";
+  const L = (a: string, e: string) => (ar ? a : e);
+  const preview = useMemo(() => renderTemplate(event, step.template, sampleContext(event), "ar"), [event, step.template]);
+  const subjectPreview = useMemo(() => renderTemplate(event, step.subject, sampleContext(event), "ar"), [event, step.subject]);
+  const unknown = [...unknownPlaceholders(event, step.subject), ...unknownPlaceholders(event, step.template)];
+  const hasCustomer = event.recipients.includes("customer");
+  const emailBad = step.toKind === "email" && step.email.trim() !== "" && !parseEmailAddress(step.email);
+  const canAttach = event.key === QUOTE_ATTACH_EVENT && step.toKind === "customer";
+  return (
+    <div className="hr-stack" style={{ gap: 12 }} data-testid={`email-step-${index}`}>
+      {locked ? <Notice tone="warning">{L("إيميل الفواتير مقفل لين تشتغل الفوترة الإلكترونية (زاتكا). احذف هذه الخطوة أو غيّر الحدث.", "Invoice e-mail is locked until e-invoicing (ZATCA) is live. Remove this step or change the event.")}</Notice> : null}
+      <div className="tl-cols" style={{ gap: 24 }}>
+        <div className="hr-stack" style={{ gap: 12 }}>
+          <Field label={L("إلى", "To")}>
+            <Select id={`email-to-${step.key}`} className="hr-select" value={step.toKind} onChange={(e) => onChange({ toKind: e.target.value as "customer" | "email" })} disabled={readOnly} data-testid={`email-to-${index}`}>
+              {hasCustomer ? <option value="customer">{L("العميل (إيميله المسجّل)", "The customer (their e-mail on record)")}</option> : null}
+              <option value="email">{L("إيميل محدد", "A fixed address")}</option>
+            </Select>
+          </Field>
+          {step.toKind === "email" ? (
+            <>
+              <Field label={L("الإيميل", "E-mail")} error={emailBad ? L("اكتب إيميل واحد صحيح.", "Enter one valid address.") : undefined} help={L("عنوان ثابت خارج النظام: يضيفه المدير فقط (يطلب تأكيد الهوية).", "A fixed outside address: only an administrator adds one (identity check).")}>
+                <input id={`email-addr-${step.key}`} className="hr-input" dir="ltr" type="email" value={step.email} onChange={(e) => onChange({ email: e.target.value })} disabled={readOnly} data-testid={`email-addr-${index}`} />
+              </Field>
+              <Field label={L("اسم المستلم (اختياري)", "Recipient name (optional)")}>
+                <input id={`email-name-${step.key}`} className="hr-input" value={step.emailName} onChange={(e) => onChange({ emailName: e.target.value })} disabled={readOnly} />
+              </Field>
+            </>
+          ) : null}
+          <Field label={L("موضوع الإيميل", "Subject")} help={L("سطر واحد · يقبل المتغيرات", "One line · variables allowed")}>
+            <input id={`email-subject-${step.key}`} className="hr-input" maxLength={SUBJECT_MAX_LENGTH} value={step.subject} onChange={(e) => onChange({ subject: e.target.value.replace(/[\r\n]+/g, " ") })} disabled={readOnly} data-testid={`email-subject-${index}`} />
+          </Field>
+          {canAttach ? (
+            <label className="tl-check">
+              <input type="checkbox" checked={step.attach} onChange={(e) => onChange({ attach: e.target.checked })} disabled={readOnly} data-testid={`email-attach-${index}`} />
+              {L("أرفق عرض السعر (PDF) تلقائيًا", "Attach the quotation (PDF) automatically")}
+            </label>
+          ) : null}
+        </div>
+        <div className="hr-stack" style={{ gap: 6 }}>
+          <span className="hr-label">{L("معاينة ببيانات مثال", "Preview with sample data")}</span>
+          <strong style={{ fontSize: 13.5 }} data-testid={`email-subject-preview-${index}`}>{subjectPreview}</strong>
+          <Bubble text={preview} lang={lang} testId={`preview-${index}`} />
+          {step.attach && canAttach ? <span className="hr-caption">{L("+ ملف عرض السعر PDF", "+ the quotation PDF")}</span> : null}
+          <span className="hr-caption">{L("في آخر كل إيميل رابط «إيقاف الإيميلات» للعميل.", "Every e-mail ends with a «stop e-mails» link for the customer.")}</span>
+        </div>
+      </div>
+      <Field label={L("نص الإيميل", "Message")}>
+        <textarea id={`email-tpl-${step.key}`} data-testid={`template-${index}`} rows={4} dir="auto" value={step.template} disabled={readOnly} maxLength={TEMPLATE_MAX_LENGTH} onChange={(e) => onChange({ template: e.target.value })} className="hr-textarea" style={{ lineHeight: "22px" }} />
+      </Field>
+      {unknown.length > 0 && (
+        <p className="hr-caption" style={{ margin: 0, color: "var(--status-danger)", fontWeight: 600 }} role="alert">
+          {L("متغيرات غير معروفة لهذا الحدث: ", "Unknown variables for this event: ")}<bdi dir="ltr">{[...new Set(unknown)].map((k) => `{{${k}}}`).join(" ")}</bdi>
+        </p>
+      )}
+      {!readOnly && (
+        <div className="tl-vars">
+          {event.variables.map((v) => (
+            <button key={v.key} type="button" className="tl-var" onClick={() => onChange({ template: step.template + `{{${v.key}}}` })} title={`{{${v.key}}}`}>
+              <span>{ar ? v.ar : v.en}</span>
+              <code dir="ltr">{v.key}</code>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

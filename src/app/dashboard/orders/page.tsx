@@ -23,6 +23,7 @@ import {
 } from "@/components/OrderLifecyclePanel";
 import { OrderLines, ProgressChip, type PipelineInfo } from "./_parts/board";
 import { Btn, FilterChip, KV, OpsEmpty, OpsError, OpsLoading, OpsRoot, PageHeader, Tabs, kg, rowOpen, Kg, opsDate } from "@/components/ops/ui";
+import { SentMessagesLine } from "@/components/automation/SentMessages";
 
 /** The statuses a structural edit is accepted from (mirrors services/order-edit.ts, server-only). */
 const EDITABLE_ORDER_STATUSES = new Set(["Waiting Approval", "Waiting Preparation Review", "Preparing", "Ready for Shipping"]);
@@ -965,6 +966,7 @@ export default function OrdersPage() {
                 <div className="ops-panel">
                   <h3>{t("activityTimelineLabel")}</h3>
                   <ActivityTimeline activities={order.activities} />
+                  <SentMessagesLine subjectType="Order" subjectId={order.id} ar={lang === "ar"} />
                 </div>
               </>
               ); })()}

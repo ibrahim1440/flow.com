@@ -43,7 +43,7 @@ export default function AutomationRulesPage() {
   const [error, setError] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
 
-  useD21Phone({ title: ar ? "الأتمتة والواتساب" : "Automation & WhatsApp", sub: ar ? "الإعدادات" : "Settings" });
+  useD21Phone({ title: ar ? "رسائل العملاء التلقائية" : "Automated customer messages", sub: ar ? "القواعد" : "Rules" });
 
   useEffect(() => {
     let cancelled = false;
@@ -109,8 +109,9 @@ export default function AutomationRulesPage() {
                   {rows.map((r) => {
                     const ev = getEvent(r.eventType);
                     const group = EVENT_GROUPS.find((g) => g.key === ev?.group);
-                    const recipients = [...new Set(r.steps.filter((s) => s.type === "whatsapp" && s.to).map((s) => s.to!.kind))];
-                    const to = recipients.map((k) => (ar ? RECIPIENT_LABELS[k]?.ar : RECIPIENT_LABELS[k]?.en) ?? k).join(ar ? "، " : ", ");
+                    const recipients = [...new Set(r.steps.filter((s) => (s.type === "whatsapp" || s.type === "email") && s.to).map((s) => s.to!.kind as string))];
+                    const to = recipients.map((k) => (k === "email" ? L("إيميل محدد", "a fixed e-mail") : (ar ? RECIPIENT_LABELS[k as RecipientKind]?.ar : RECIPIENT_LABELS[k as RecipientKind]?.en) ?? k)).join(ar ? "، " : ", ")
+                      + (r.steps.some((s) => s.type === "email") ? L(" · إيميل", " · e-mail") : "");
                     const sent = r.last30Days.SENT ?? 0;
                     const failed = r.last30Days.FAILED ?? 0;
                     const skipped = r.last30Days.SKIPPED ?? 0;

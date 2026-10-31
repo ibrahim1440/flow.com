@@ -4,6 +4,11 @@
  * Keys are the English exactly as sent.
  */
 export const API_ERRORS_AR: Readonly<Record<string, string>> = {
+  // ── «رسائل العملاء التلقائية» e-mail (batch 25) ──
+  "emailOptOut must be true or false": "خيار إيقاف الإيميلات يجب أن يكون نعم أو لا.",
+  "No e-mail provider is configured.": "الإيميل غير مربوط على هذا الخادم. كلّم الدعم الفني.",
+  "No recipient.": "لا يوجد مستلم.",
+  "Attachments over the size limit.": "المرفقات أكبر من الحد المسموح.",
   // ── «يومي» (batch 24 WP-B) ──
   "Only a sales manager may open another rep's day.": "فتح يوم مندوب آخر للمدير فقط.",
   "rep is not an employee id.": "المندوب غير صحيح.",

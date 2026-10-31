@@ -69,7 +69,7 @@ export function quotationPdf(q: QuoteEmailInput): Buffer {
   ];
   const bank = bankRows(q.company);
   return renderSheetPdf({
-    info: { title: `عرض سعر ${q.quoteNumber}`, subject: q.demo ? DEMO_WATERMARK : "Quotation" },
+    info: { title: `عرض سعر ${q.quoteNumber}`, subject: q.demo ? DEMO_WATERMARK : "Quotation", createdAt: q.issueDate },
     seller: sellerBlock(q.company),
     title: { main: "عرض سعر", lines: [`المراجعة ${q.revision}`, "Quotation"] },
     banner: q.demo ? { tone: "warning", title: "نموذج تجريبي", text: "نسخة تجريبية لاختبار البريد الإلكتروني، وليست عرض سعر صادرًا. الأسعار والبيانات للعرض فقط." } : null,

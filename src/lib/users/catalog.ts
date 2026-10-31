@@ -30,7 +30,7 @@ export const MODULE_AR: Record<string, Bi> = {
   sales: { ar: "المبيعات والصفقات", en: "Sales & deals" },
   commissions: { ar: "العمولات", en: "Commissions" },
   finance: { ar: "المالية", en: "Finance" },
-  automation: { ar: "الأتمتة والواتساب", en: "Automation & WhatsApp" },
+  automation: { ar: "رسائل العملاء التلقائية", en: "Automated customer messages" },
   hr: { ar: "الموارد البشرية", en: "Human resources" },
   marketing: { ar: "التسويق الذكي", en: "Smart marketing" },
   purchases: { ar: "المشتريات وفواتير الموردين", en: "Purchases & supplier invoices" },

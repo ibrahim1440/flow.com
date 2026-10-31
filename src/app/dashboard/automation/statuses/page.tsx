@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Btn, Dot, Empty, Field, Notice, OpsBanner, OpsLoading, OpsRoot, useL } from "@/components/ops/ui";
 import { Dialog, Flag } from "@/components/hr/ui";
 import { useD21Phone } from "@/components/shell/page-context";
@@ -12,7 +12,8 @@ import {
   defaultTemplateOf, getStatusSource, statusEnglishDefault, sourceEventDef, sourceVariables, STATUS_RECIPIENT_LABELS, STATUS_SOURCES,
   type StatusRecipient, type StatusSource,
 } from "@/lib/automation/status-rules/sources";
-import { AutomationHeader, Bubble, LoadError, Phone, whenParts, type Connection } from "../_components/shared";
+import { AutomationHeader, Bubble, ChannelIcon, LoadError, Phone, whenParts, type Channels, type Connection } from "../_components/shared";
+import { Lock } from "lucide-react";
 import { SettingsFrame } from "../../_components/tools-ui";
 
 /**
@@ -43,6 +44,11 @@ type Rule = {
   /** Owner language decision 3: the English text employees who receive English get. */
   templateEn: string;
   renotify: boolean;
+  /** Batch 25: «إيميل» to the customer, its subject; whether this source may e-mail; the tax-invoice lock. */
+  emailEnabled: boolean;
+  emailSubject: string;
+  canEmail: boolean;
+  emailLocked: boolean;
   active: boolean;
   canFire: boolean;
   isNew: boolean;
@@ -77,12 +83,14 @@ export default function StatusNotificationsPage() {
   const [success, setSuccess] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
+  // P1 (fix round 1): find a status by name; «صدر» for quotations is one word away.
+  const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<Rule | null>(null);
   const [reload, setReload] = useState(0);
   // The sending mode, read once for the header strip and the dialog's «where it goes» line.
   const [conn, setConn] = useState<Connection | null>(null);
 
-  useD21Phone({ title: ar ? "إشعارات الحالات" : "Status notifications", sub: ar ? "الأتمتة والواتساب" : "Automation & WhatsApp" });
+  useD21Phone({ title: ar ? "إشعارات الحالات" : "Status notifications", sub: ar ? "رسائل العملاء التلقائية" : "Automated customer messages" });
 
   // Opening the page is a sync too (GET): say so when it found something.
   useEffect(() => {
@@ -93,6 +101,13 @@ export default function StatusNotificationsPage() {
       if (cancelled) return;
       if (!r.ok) return setError(r.data.error ?? (ar ? "تعذر تحميل الحالات." : "Could not load the statuses."));
       setData(r.data);
+      // ?focus=quote:ISSUED (the quotation page's «فعّلها» link): open that status's dialog.
+      const f = new URLSearchParams(window.location.search).get("focus");
+      if (f) {
+        const [src, key] = f.split(":");
+        const row = r.data.rules.find((x) => x.source === src && x.statusKey === key);
+        if (row) setEditing(row);
+      }
       if (r.data.sync && r.data.sync.added > 0 && !r.data.sync.firstSync) {
         setSuccess(ar ? `وُجدت ${r.data.sync.added} حالة جديدة منذ آخر زيارة، وأُضيفت متوقفة.` : `${r.data.sync.added} new status(es) found since the last visit, added switched off.`);
       }
@@ -124,9 +139,12 @@ export default function StatusNotificationsPage() {
 
   async function quickToggle(rule: Rule) {
     // Switching on a status that has never been set up opens the editor with a suggestion.
-    if (!rule.enabled && (rule.recipients.length === 0 || !rule.template)) return setEditing(rule);
+    // Fix round 2: «مفعّلة» means WhatsApp OR e-mail. Switching on opens the editor (the owner picks the channels — nothing is
+    // pre-ticked); switching off stops both channels.
+    const on = rule.enabled || rule.emailEnabled;
+    if (!on) return setEditing(rule);
     setError("");
-    const r = await api<{ rule: Partial<Rule> }>(`/api/automation/status-rules/${rule.id}`, { method: "PUT", body: { enabled: !rule.enabled } });
+    const r = await api<{ rule: Partial<Rule> }>(`/api/automation/status-rules/${rule.id}`, { method: "PUT", body: { enabled: false, emailEnabled: false } });
     if (!r.ok) return setError(r.data.error ?? "");
     setData((d) => (d ? { ...d, rules: d.rules.map((x) => (x.id === rule.id ? { ...x, ...r.data.rule } : x)) } : d));
   }
@@ -134,12 +152,17 @@ export default function StatusNotificationsPage() {
   const rules = useMemo(() => data?.rules ?? [], [data]);
   const counts = useMemo(() => ({
     all: rules.length,
-    on: rules.filter((r) => r.enabled && r.active).length,
+    on: rules.filter((r) => (r.enabled || r.emailEnabled) && r.active).length,
     new: rules.filter((r) => r.isNew).length,
     inactive: rules.filter((r) => !r.active).length,
   }), [rules]);
-  const shown = rules.filter((r) => (filter === "on" ? r.enabled && r.active : filter === "new" ? r.isNew : filter === "inactive" ? !r.active : true));
-  const groups = STATUS_SOURCES.map((s) => ({ source: s, rows: shown.filter((r) => r.source === s.key) })).filter((g) => g.rows.length > 0);
+  const shown = rules.filter((r) => (filter === "on" ? (r.enabled || r.emailEnabled) && r.active : filter === "new" ? r.isNew : filter === "inactive" ? !r.active : true));
+  const fold = (t: string) => t.toLowerCase().replace(/[إأآٱ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").replace(/[\u064B-\u0652\u0640]/g, "");
+  const q = fold(search.trim());
+  const found = q ? shown.filter((r) => fold(`${r.labelAr} ${r.labelEn} ${r.statusKey}`).includes(q) || fold(getStatusSource(r.source)?.ar ?? "").includes(q)) : shown;
+  // Quotations first: «عرض السعر صدر» is the e-mail event of phase 1.
+  const ordered = [...STATUS_SOURCES].sort((a, b) => Number(b.key === "quote") - Number(a.key === "quote"));
+  const groups = ordered.map((s) => ({ source: s, rows: found.filter((r) => r.source === s.key) })).filter((g) => g.rows.length > 0);
   const [syncDate, syncTime] = whenParts(data?.lastSyncedAt ?? null);
 
   if (user && !isAdmin) {
@@ -187,6 +210,7 @@ export default function StatusNotificationsPage() {
                   </button>
                 ))}
               </div>
+              <input type="search" className="hr-input hr-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={L("ابحث عن حالة (مثلًا: صدر)", "Find a status (e.g. issued)")} aria-label={L("بحث", "Search")} data-testid="status-search" style={{ maxWidth: 240 }} />
               <span className="tl-sp" />
               <span className="hr-caption" data-testid="status-last-sync">
                 {data.lastSyncedAt
@@ -214,9 +238,10 @@ export default function StatusNotificationsPage() {
                       <thead>
                         <tr>
                           {/* Fixed widths so the groups' tables line up column for column. */}
-                          <th style={{ width: "27%" }}>{L("الحالة", "Status")}</th>
-                          <th className="hr-hide-compact" style={{ width: "14%" }}>{L("تُرسل إلى", "Sends to")}</th>
-                          <th className="hr-hide-compact" style={{ width: "20%" }}>{L("الرسالة", "Message")}</th>
+                          <th style={{ width: "24%" }}>{L("الحالة", "Status")}</th>
+                          <th className="hr-hide-compact" style={{ width: "13%" }}>{L("تُرسل إلى", "Sends to")}</th>
+                          <th style={{ width: "9%" }}>{L("تُرسل عبر", "Sent by")}</th>
+                          <th className="hr-hide-compact" style={{ width: "16%" }}>{L("الرسالة", "Message")}</th>
                           <th style={{ width: "11%" }}>{L("آخر 30 يومًا", "Last 30 days")}</th>
                           <th style={{ width: "11%" }}>{L("الإرسال", "Sending")}</th>
                           <th style={{ width: "17%" }}><span className="hr-sr">{L("إجراء", "Action")}</span></th>
@@ -274,7 +299,7 @@ function StatusRow({ rule: r, source, lang, onEdit, onToggle }: { rule: Rule; so
   const sent = r.last30Days.SENT ?? 0;
   const failed = r.last30Days.FAILED ?? 0;
   const skipped = r.last30Days.SKIPPED ?? 0;
-  const on = r.enabled && r.active;
+  const on = (r.enabled || r.emailEnabled) && r.active;
   const state = !r.active
     ? <Dot tone="neutral">{L("لم تعد مستخدمة", "No longer used")}</Dot>
     : !r.canFire
@@ -292,9 +317,17 @@ function StatusRow({ rule: r, source, lang, onEdit, onToggle }: { rule: Rule; so
           {source.userDefined ? L("مرحلة يحددها المستخدم", "User-defined stage") : <bdi dir="ltr">{r.statusKey}</bdi>}
           {!r.canFire ? L(" · لا يوجد حدث في النظام يُعلن هذه الحالة", " · no event in the system announces this status") : null}
         </span>
-        <span className="hr-msub">{(ar ? source.ar : source.en)}{to ? ` · ${to}` : ""}</span>
+        <span className="hr-msub">{(ar ? source.ar : source.en)}{to ? ` · ${to}` : ""}{r.emailEnabled && r.active ? L(" · إيميل", " · e-mail") : ""}</span>
       </td>
       <td className="hr-hide-compact">{to || <span style={{ color: "var(--text-muted)" }}>—</span>}</td>
+      <td data-testid={`status-channels-${r.source}-${r.statusKey}`}>
+        <span className="tl-modes">
+          {r.enabled && r.active ? <ChannelIcon channel="whatsapp" lang={lang} /> : null}
+          {r.emailEnabled && r.active ? <ChannelIcon channel="email" lang={lang} /> : null}
+          {r.emailLocked ? <span title={L("إيميل الفواتير مقفل لين تشتغل الفوترة الإلكترونية", "Invoice e-mail locked until e-invoicing is live")} data-testid="status-email-locked" style={{ color: "var(--text-muted)", display: "inline-flex" }}><Lock size={14} strokeWidth={1.6} aria-hidden /><span className="hr-sr">{L("الإيميل مقفل", "E-mail locked")}</span></span> : null}
+          {!(r.enabled || r.emailEnabled) || !r.active ? (r.emailLocked ? null : <span style={{ color: "var(--text-muted)" }}>—</span>) : null}
+        </span>
+      </td>
       <td className="hr-hide-compact" style={{ maxWidth: 280 }}>
         {r.template ? <span className="tl-clamp" style={{ fontSize: 13, color: "var(--text-secondary)" }} dir="auto">{r.template}</span> : <span style={{ color: "var(--text-muted)" }}>—</span>}
       </td>
@@ -324,27 +357,49 @@ function StatusRow({ rule: r, source, lang, onEdit, onToggle }: { rule: Rule; so
  * Where a message of this status goes right now, under the preview (feat/wa-status-rules): the
  * sending mode decides, not the rule — the owner keeps WhatsApp in test mode until he switches it.
  */
-function ModeLine({ conn, lang }: { conn: Connection | null; lang: "ar" | "en" }) {
+function ModeLine({ conn, channels, wa, email, lang }: { conn: Connection | null; channels: Channels | null; wa: boolean; email: boolean; lang: "ar" | "en" }) {
   const ar = lang === "ar";
-  if (!conn) return null;
-  const m = conn.effectiveMode;
-  const noTestPhone = conn.sendMode === "TEST" && m === "OFF";
-  const text = m === "TEST"
-    ? <>{ar ? "وضع التجربة: تذهب الرسالة إلى رقم التجربة " : "Test mode: the message goes to the test number "}<Phone value={conn.testPhone} />{ar ? " فقط، لا إلى المستلم." : " only, not to the recipient."}</>
-    : m === "LIVE"
-      ? ar ? "إرسال فعلي: تذهب الرسالة إلى المستلمين المختارين." : "Live: the message goes to the chosen recipients."
-      : noTestPhone
-        ? ar ? "وضع التجربة بلا رقم تجربة: تُسجَّل الرسالة في السجل كما كانت ستُرسل، ولا تصل لأحد." : "Test mode without a test number: the message is logged as it would be sent, and reaches no one."
-        : ar ? "الإرسال متوقف: تُسجَّل الرسالة في السجل كما كانت ستُرسل، ولا تصل لأحد." : "Sending is off: the message is logged as it would be sent, and reaches no one.";
-  return <span className="hr-caption" data-testid="status-mode-line" data-mode={m}>{text}</span>;
+  const lines: ReactNode[] = [];
+  // Fix round 2 (council b25 seat 5 N2): one line per ticked channel, each with ITS OWN sending mode.
+  if (wa && conn) {
+    const m = conn.effectiveMode;
+    const noTestPhone = conn.sendMode === "TEST" && m === "OFF";
+    lines.push(
+      <span key="wa" data-testid="status-mode-line" data-mode={m} data-channel="whatsapp" style={{ display: "block" }}>
+        {ar ? "واتساب — " : "WhatsApp — "}
+        {m === "TEST"
+          ? <>{ar ? "تجربة: تروح لرقم التجربة " : "test: it goes to the test number "}<Phone value={conn.testPhone} />{ar ? " فقط، لا إلى المستلم." : " only, not to the recipient."}</>
+          : m === "LIVE"
+            ? ar ? "فعلي: تروح للمستلمين المختارين." : "live: it goes to the chosen recipients."
+            : noTestPhone
+              ? ar ? "تجربة بلا رقم تجربة: تنسجل في السجل ولا تصل لأحد." : "test mode without a test number: logged, reaches no one."
+              : ar ? "الإرسال متوقف: تنسجل في السجل كما كانت ستنرسل، ولا تصل لأحد." : "sending is off: logged as it would be sent, reaches no one."}
+      </span>,
+    );
+  }
+  if (email && channels) {
+    const m = channels.email.effectiveMode;
+    lines.push(
+      <span key="em" data-testid="status-mode-line-email" data-mode={m} data-channel="email" style={{ display: "block" }}>
+        {ar ? "إيميل — " : "E-mail — "}
+        {m === "TEST"
+          ? <>{ar ? "تجربة — تروح لبريد التجربة فقط " : "test — it goes to the test address only "}{channels.email.testEmail ? <bdi dir="ltr">{channels.email.testEmail}</bdi> : null}{ar ? "، لا للعميل." : ", not to the customer."}</>
+          : m === "LIVE"
+            ? ar ? "فعلي: يروح لإيميل العميل." : "live: it goes to the customer's e-mail."
+            : ar ? "الإرسال متوقف: ينسجل في السجل ولا يوصل لأحد." : "sending is off: logged, reaches no one."}
+      </span>,
+    );
+  }
+  if (!lines.length) return null;
+  return <span className="hr-caption" data-testid="status-mode-lines">{lines}</span>;
 }
 
 function RuleDialog({ rule, lang, conn, onClose, onSaved }: { rule: Rule; lang: "ar" | "en"; conn: Connection | null; onClose: () => void; onSaved: (r: Partial<Rule> & { id: string }) => void }) {
   const ar = lang === "ar";
   const L = (a: string, e: string) => (ar ? a : e);
   const source = getStatusSource(rule.source);
-  const firstUse = rule.recipients.length === 0 && !rule.template;
-  const [enabled, setEnabled] = useState(rule.enabled || (firstUse && rule.active && rule.canFire));
+  // Fix round 1: nothing is pre-ticked — switching on e-mail never switches on WhatsApp with it.
+  const [enabled, setEnabled] = useState(rule.enabled);
   const [recipients, setRecipients] = useState<StatusRecipient[]>(
     rule.recipients.length ? rule.recipients : source ? [source.recipients[0]] : [],
   );
@@ -354,10 +409,29 @@ function RuleDialog({ rule, lang, conn, onClose, onSaved }: { rule: Rule; lang: 
   const [focus, setFocus] = useState<"ar" | "en">("ar");
   const areaEn = useRef<HTMLTextAreaElement>(null);
   const [renotify, setRenotify] = useState(rule.renotify);
+  const [emailEnabled, setEmailEnabled] = useState(rule.emailEnabled);
+  const [emailSubject, setEmailSubject] = useState(rule.emailSubject);
+  // «تنبيه التكرار» (batch 25): an active rule on the same event that also reaches the customer.
+  const [dupRules, setDupRules] = useState<string[]>([]);
+  useEffect(() => {
+    const ev = getStatusSource(rule.source)?.events[0];
+    if (!ev) return;
+    let cancelled = false;
+    api<{ rules: { name: string; toCustomer: boolean }[] }>(`/api/automation/duplicates?eventType=${encodeURIComponent(ev)}`).then((r) => {
+      if (!cancelled && r.ok) setDupRules(r.data.rules.filter((x) => x.toCustomer).map((x) => x.name));
+    });
+    return () => { cancelled = true; };
+  }, [rule.source]);
   const [busy, setBusy] = useState<"" | "save" | "test">("");
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const area = useRef<HTMLTextAreaElement>(null);
+  const [channels, setChannels] = useState<Channels | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api<Channels>("/api/automation/settings").then((r) => { if (!cancelled && r.ok) setChannels(r.data); });
+    return () => { cancelled = true; };
+  }, []);
 
   if (!source) return null;
   const def = sourceEventDef(source);
@@ -385,7 +459,7 @@ function RuleDialog({ rule, lang, conn, onClose, onSaved }: { rule: Rule; lang: 
   async function save() {
     setBusy("save");
     setError("");
-    const r = await api<{ rule: Partial<Rule> }>(`/api/automation/status-rules/${rule.id}`, { method: "PUT", body: { enabled: locked ? false : enabled, recipients, template, templateEn, renotify } });
+    const r = await api<{ rule: Partial<Rule> }>(`/api/automation/status-rules/${rule.id}`, { method: "PUT", body: { enabled: locked ? false : enabled, recipients, template, templateEn, renotify, emailEnabled: locked || !rule.canEmail ? false : emailEnabled, emailSubject } });
     setBusy("");
     if (!r.ok) return setError(r.data.error ?? "");
     onSaved({ id: rule.id, ...r.data.rule });
@@ -398,7 +472,7 @@ function RuleDialog({ rule, lang, conn, onClose, onSaved }: { rule: Rule; lang: 
     const r = await api<{ phone?: string }>(`/api/automation/status-rules/${rule.id}/test`, { method: "POST", body: { template } });
     setBusy("");
     if (!r.ok) return setError(r.data.error ?? "");
-    setInfo(L("أُرسلت تجربة إلى رقم التجربة.", "A test was sent to the test number."));
+    setInfo(L("انرسلت لك على رقم التجربة.", "Sent to you, on the test number."));
   }
 
   return (
@@ -410,7 +484,7 @@ function RuleDialog({ rule, lang, conn, onClose, onSaved }: { rule: Rule; lang: 
       testId="status-dialog"
       actions={
         <>
-          <Btn variant="ghost" onClick={test} busy={busy === "test"} disabled={!!busy || !template.trim()} data-testid="status-test">{L("إرسال تجربة", "Send a test")}</Btn>
+          <Btn variant="ghost" onClick={test} busy={busy === "test"} disabled={!!busy || !template.trim()} data-testid="status-test">{L("أرسلها لي الحين", "Send it to me now")}</Btn>
           <span style={{ flex: 1 }} />
           <Btn onClick={onClose}>{L("إلغاء", "Cancel")}</Btn>
           <Btn variant="primary" onClick={save} busy={busy === "save"} disabled={!!busy} data-testid="status-save">{L("حفظ", "Save")}</Btn>
@@ -426,10 +500,34 @@ function RuleDialog({ rule, lang, conn, onClose, onSaved }: { rule: Rule; lang: 
           <Notice tone="info">{L("لا يوجد حدث في النظام يُعلن دخول سجل إلى هذه الحالة، فلا يمكن الإرسال عندها.", "No event in the system announces a record entering this status, so nothing can be sent for it.")}</Notice>
         ) : null}
 
-        <label className="tl-check">
-          <input type="checkbox" checked={enabled && !locked} disabled={locked} onChange={(e) => setEnabled(e.target.checked)} data-testid="status-enabled" />
-          {L("أرسل رسالة واتساب عندما يدخل سجل هذه الحالة", "Send a WhatsApp message when a record enters this status")}
-        </label>
+        <fieldset className="hr-stack" style={{ gap: 4, border: 0, padding: 0, margin: 0 }} data-testid="status-channels">
+          <legend className="hr-label" style={{ marginBottom: 6 }}>{L("عندما يدخل سجل هذه الحالة، أرسل عبر:", "When a record enters this status, send by:")}</legend>
+          <label className="tl-check">
+            <input type="checkbox" checked={enabled && !locked} disabled={locked} onChange={(e) => setEnabled(e.target.checked)} data-testid="status-enabled" />
+            <ChannelIcon channel="whatsapp" lang={lang} /> {L("واتساب", "WhatsApp")}
+          </label>
+          {rule.emailLocked ? (
+            <label className={"tl-chk is-locked"} data-testid="status-email-locked-row">
+              <input type="checkbox" checked={false} disabled data-testid="status-email" />
+              <ChannelIcon channel="email" lang={lang} /> {L("إيميل", "E-mail")} <Lock size={14} strokeWidth={1.6} aria-hidden />
+              <span className="hr-caption">{L("مقفل لين تشتغل الفوترة الإلكترونية (زاتكا)", "Locked until e-invoicing (ZATCA) is live")}</span>
+            </label>
+          ) : rule.canEmail ? (
+            <label className="tl-check">
+              <input type="checkbox" checked={emailEnabled && !locked} disabled={locked} onChange={(e) => setEmailEnabled(e.target.checked)} data-testid="status-email" />
+              <ChannelIcon channel="email" lang={lang} /> {L("إيميل للعميل", "E-mail to the customer")}
+              {rule.source === "quote" && rule.statusKey === "ISSUED" ? <span className="hr-caption">{L(" (مع ملف عرض السعر PDF)", " (with the quotation PDF)")}</span> : null}
+            </label>
+          ) : null}
+          {dupRules.length && (enabled || emailEnabled) ? (
+            <Notice tone="warning"><span data-testid="status-duplicate-warning">{L(`تنبيه: فيه قاعدة ثانية ترسل للعميل عند نفس الحدث («${dupRules.join("»، «")}»). العميل ممكن يوصله رسالتين.`, `Heads up: another rule messages the customer on the same event («${dupRules.join("», «")}»). The customer may get two messages.`)}</span></Notice>
+          ) : null}
+        </fieldset>
+        {emailEnabled && rule.canEmail && !locked ? (
+          <Field label={L("موضوع الإيميل", "E-mail subject")} help={L("سطر واحد. فارغ = موضوع جاهز. الإيميل يروح للعميل فقط، ونصه نفس نص الرسالة تحت.", "One line. Empty = a ready subject. The e-mail goes to the customer only, with the message text below.")}>
+            <input className="hr-input" value={emailSubject} maxLength={150} onChange={(e) => setEmailSubject(e.target.value.replace(/[\r\n]+/g, " "))} placeholder={rule.source === "quote" && rule.statusKey === "ISSUED" ? L("عرض سعر {{quote.number}}", "Quotation {{quote.number}}") : ""} data-testid="status-email-subject" />
+          </Field>
+        ) : null}
 
         <label className="tl-check" style={{ alignItems: "flex-start" }}>
           <input type="checkbox" checked={renotify} onChange={(e) => setRenotify(e.target.checked)} data-testid="status-renotify" style={{ marginTop: 3 }} />
@@ -477,7 +575,7 @@ function RuleDialog({ rule, lang, conn, onClose, onSaved }: { rule: Rule; lang: 
           <span className="hr-label">{L("معاينة بالبيانات التجريبية", "Preview with sample data")}</span>
           <Bubble text={preview} lang={lang} testId="status-preview" />
           {templateEn.trim() ? <Bubble text={previewEn} lang={lang} testId="status-preview-en" /> : null}
-          <ModeLine conn={conn} lang={lang} />
+          <ModeLine conn={conn} channels={channels} wa={enabled && !locked} email={emailEnabled && !locked && !!rule.canEmail} lang={lang} />
         </div>
       </div>
     </Dialog>

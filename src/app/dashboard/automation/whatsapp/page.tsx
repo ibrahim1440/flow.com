@@ -8,7 +8,7 @@ import { api, useLang } from "../../sales/_components/ui";
 import { formatPhone, normalizePhoneForWhatsApp } from "@/lib/automation/phone";
 import { AutomationHeader, Phone, SEND_MODE_LABELS, connectionLabel, noteText, useAutomationAbilities } from "../_components/shared";
 import { SettingsFrame } from "../../_components/tools-ui";
-import { localizeApiError } from "@/lib/i18n/api-errors";
+import { ChannelsCard } from "../_components/channels";
 
 /**
  * Linking the WhatsApp number, and deciding whether anything is sent — Direction 2.1 (UI batch
@@ -53,11 +53,10 @@ export default function WhatsAppConnectionPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmLogout, setConfirmLogout] = useState(false);
 
-  const [mode, setMode] = useState<"OFF" | "TEST" | "LIVE">("OFF");
   const [testPhone, setTestPhone] = useState("");
   const [testText, setTestText] = useState("");
 
-  useD21Phone({ title: ar ? "ربط الواتساب" : "WhatsApp connection", sub: ar ? "الأتمتة والواتساب" : "Automation & WhatsApp" });
+  useD21Phone({ title: ar ? "إعدادات الإرسال" : "Sending settings", sub: ar ? "رسائل العملاء التلقائية" : "Automated customer messages" });
 
   /** Re-read the status. The form fields (mode, test number) are only set on first load. */
   const load = useCallback(async () => {
@@ -80,7 +79,6 @@ export default function WhatsAppConnectionPage() {
         return;
       }
       setStatus(r.data);
-      setMode(r.data.sendMode);
       setTestPhone(formatPhone(r.data.testPhone));
     })();
     return () => {
@@ -172,24 +170,9 @@ export default function WhatsAppConnectionPage() {
     }
   }
 
-  async function saveMode() {
-    setBusy("mode");
-    setError("");
-    setSuccess("");
-    const r = await api<{ sendMode: string; testPhone: string | null }>("/api/automation/settings", {
-      method: "PUT",
-      body: { sendMode: mode, testPhone },
-    });
-    setBusy(null);
-    if (!r.ok) return setError(r.data.error ?? "");
-    setTestPhone(formatPhone(r.data.testPhone));
-    setSuccess(ar ? "حفظ وضع الإرسال." : "Sending mode saved.");
-    load();
-  }
-
   async function sendTest() {
     const d = await post("test", { phone: testPhone, text: testText });
-    if (d) setSuccess(ar ? "أرسلت الرسالة التجريبية." : "Test message sent.");
+    if (d) setSuccess(ar ? "انرسلت رسالة اختبار الاتصال." : "Connection check sent.");
   }
 
   const L = (a: string, e: string) => (ar ? a : e);
@@ -207,7 +190,10 @@ export default function WhatsAppConnectionPage() {
 
         {!status && !error ? <OpsLoading /> : null}
 
-        {status && !status.configured && <Notice tone="danger">{localizeApiError({ error: status.configError }, ar ? "ar" : "en") ?? status.configError}</Notice>}
+        {/* Batch 25 (council seat 5): no server variable names in front of the owner — plain words, the detail for support in the title. */}
+        {status && !status.configured && <Notice tone="danger"><span title={status.configError ?? undefined} data-testid="wa-not-configured">{L("الواتساب غير مربوط على هذا الخادم، فرسائل الواتساب ما تطلع. كلّم الدعم الفني.", "WhatsApp is not connected on this server, so no WhatsApp message goes out. Contact support.")}</span></Notice>}
+
+        <ChannelsCard lang={lang} onChanged={() => void load()} />
 
         {status ? (
           <div className="tl-cols">
@@ -287,9 +273,9 @@ export default function WhatsAppConnectionPage() {
                   {canManageConnection ? (
                     <>
                       <hr className="tl-hr" />
-                      <div className="tl-h"><h2>{L("رسالة تجريبية", "Send a test message")}</h2></div>
+                      <div className="tl-h"><h2>{L("اختبار الاتصال", "Connection check")}</h2></div>
                       <p className="hr-caption" style={{ margin: 0 }}>
-                        {L("تُرسل الآن إلى رقم التجربة", "Sent now to the test number")}
+                        {L("رسالة واتساب وحدة الحين إلى رقم التجربة", "One WhatsApp message now to the test number")}
                         {normalizedTest && normalizedTest.ok && (
                           <>
                             {" "}<Phone value={(normalizedTest as { phone: string }).phone} />
@@ -298,56 +284,26 @@ export default function WhatsAppConnectionPage() {
                         {L("، بغض النظر عن وضع الإرسال.", ", whatever the sending mode.")}
                       </p>
                       <Field label={L("النص (اختياري)", "Text (optional)")}>
-                        <input id="test-text" className="hr-input" value={testText} onChange={(e) => setTestText(e.target.value)} placeholder={L("رسالة تجريبية من نظام حقبة", "A test message")} />
+                        <input id="test-text" className="hr-input" value={testText} onChange={(e) => setTestText(e.target.value)} placeholder={L("اختبار الاتصال من نظام حقبة", "A connection check")} />
                       </Field>
-                      <Btn onClick={sendTest} disabled={!!busy || status.state !== "open" || !testPhone.trim()} data-testid="send-test" style={{ alignSelf: "flex-start" }}>{L("أرسل", "Send")}</Btn>
+                      <Btn onClick={sendTest} disabled={!!busy || status.state !== "open" || !testPhone.trim()} data-testid="send-test" style={{ alignSelf: "flex-start" }}>{L("أرسل لي الحين", "Send me one now")}</Btn>
                     </>
                   ) : null}
                 </>
               ) : null}
             </section>
 
-            {/* ── Sending mode ── */}
-            <section aria-label={L("وضع الإرسال", "Sending mode")}>
+            {/* ── The queue (the sending modes are on the channels card above, batch 25) ── */}
+            <section aria-label={L("طابور الواتساب", "WhatsApp queue")}>
               <div className="tl-h">
-                <h2>{L("وضع الإرسال", "Sending mode")}</h2>
-                <span>{L("مستقل عن حالة الاتصال", "Independent of the connection")}</span>
+                <h2>{L("طابور الواتساب", "WhatsApp queue")}</h2>
                 {effective ? <span data-testid="wa-mode" style={{ marginInlineStart: "auto" }}><Dot tone={effective.tone}>{ar ? effective.ar : effective.en}</Dot></span> : null}
               </div>
-              {status.effectiveNote && status.sendMode !== "OFF" && <Notice tone="info">{noteText(status.effectiveNote, lang)}</Notice>}
-              <div className="tl-radios" role="radiogroup" aria-label={L("وضع الإرسال", "Sending mode")}>
-                {(
-                  [
-                    ["OFF", L("متوقف", "Off"), L("القواعد تعمل وتسجل في السجل ما كانت سترسله، ولا يرسل شيء. مناسب لتجربة القواعد بأمان.", "Rules run and the log shows what they would have sent. Nothing is sent.")],
-                    ["TEST", L("تجربة", "Test"), L("كل رسالة تذهب لرقم التجربة فقط، مهما كان مستلمها الأصلي.", "Every message goes to the test number only.")],
-                    ["LIVE", L("إرسال فعلي", "Live"), status.liveAllowed ? L("الرسائل تذهب للعملاء والموظفين فعلا.", "Messages go to the real recipients.") : L("غير متاح: يجب تفعيل الإرسال الفعلي على الخادم أولًا (WHATSAPP_LIVE_ENABLED).", "Unavailable: set WHATSAPP_LIVE_ENABLED on the server first.")],
-                  ] as const
-                ).map(([value, title, desc]) => {
-                  const disabled = !canManageConnection || (value === "LIVE" && !status.liveAllowed);
-                  return (
-                    <label key={value} className={`tl-radio${mode === value ? " is-on" : ""}${value === "LIVE" && !status.liveAllowed ? " is-off" : ""}`}>
-                      <input type="radio" name="send-mode" value={value} checked={mode === value} disabled={disabled} onChange={() => setMode(value)} data-testid={`mode-${value}`} />
-                      <span>
-                        <strong>{title}</strong>
-                        <span>{desc}</span>
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
-              <Field label={L("رقم التجربة", "Test number")} help={L("تذهب له الرسائل في وضع التجربة، وتذهب له الرسالة التجريبية.", "Where test-mode messages go.")}>
-                <input id="test-phone" className="hr-input" value={testPhone} onChange={(e) => setTestPhone(e.target.value)} inputMode="tel" placeholder="05XXXXXXXX" disabled={!canManageConnection} dir="ltr" />
-              </Field>
-              <div className="tl-acts">
-                {canManageConnection ? (
-                  <Btn variant="primary" onClick={saveMode} disabled={busy === "mode"} data-testid="save-mode">{L("حفظ الوضع", "Save mode")}</Btn>
-                ) : null}
-                <span className="hr-caption">
-                  {ar
-                    ? `آخر 24 ساعة: أرسلت ${status.queue.sent24h}، وفشلت ${status.queue.failed24h}. بانتظار الإرسال الآن: ${status.queue.queued}.`
-                    : `Last 24 h: ${status.queue.sent24h} sent, ${status.queue.failed24h} failed. Queued now: ${status.queue.queued}.`}
-                </span>
-              </div>
+              <p className="hr-caption" style={{ margin: 0 }}>
+                {ar
+                  ? `آخر 24 ساعة: انرسلت ${status.queue.sent24h}، وفشلت ${status.queue.failed24h}. تنتظر الإرسال الحين: ${status.queue.queued}.`
+                  : `Last 24 h: ${status.queue.sent24h} sent, ${status.queue.failed24h} failed. Queued now: ${status.queue.queued}.`}
+              </p>
             </section>
           </div>
         ) : null}

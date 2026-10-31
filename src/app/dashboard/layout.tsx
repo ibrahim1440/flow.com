@@ -106,7 +106,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <UserContext value={{ user }}>
       <LanguageProvider lang={user.preferredLanguage ?? "ar"} switcher={switcher}>
-        <StepUpProvider lang={user.preferredLanguage === "en" ? "en" : "ar"} privileged={!!user.privileged}>
+        <StepUpProvider lang={user.preferredLanguage === "en" ? "en" : "ar"} privileged={!!user.privileged} username={user.username ?? ""}>
           {user.mfaEnrollmentRequired ? (
             // AUTH_MFA_MODE=required: a privileged account without two-step verification may only enroll.
             <MfaRequiredScreen lang={user.preferredLanguage === "en" ? "en" : "ar"} />

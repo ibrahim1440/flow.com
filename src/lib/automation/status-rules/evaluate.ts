@@ -13,12 +13,22 @@ import type { Lang } from "../catalog";
 import { adminRecipients, employeeMessageLangs, type EventContext, type Person, type StoredEvent } from "../context";
 import { resolveMessageLang, staffIdOf, type MsgLang } from "../employee-lang";
 import type { EffectiveMode } from "../settings";
-import { parseRecipients, planStatusMessages } from "./rules";
+import { canEmailSource, parseRecipients, planStatusEmails, planStatusMessages } from "./rules";
+import type { EffectiveEmailMode } from "../email-mode";
 import { statusesOfEvent, type StatusRecipient } from "./sources";
 
 type Tx = Prisma.TransactionClient;
 
-export type StatusEvalReport = { queued: number; skipped: number };
+export type StatusEvalReport = { queued: number; skipped: number; emailsQueued?: number; emailsSkipped?: number };
+
+/** Batch 25: the e-mail half of a status notification (the customer only), planned in the same transaction. */
+export type EmailPlanning = {
+  mode: EffectiveEmailMode;
+  /** The suppressed addresses among those given (pre-loaded: the planner is pure). */
+  suppression: (emails: (string | null | undefined)[]) => Promise<(email: string) => boolean>;
+  /** Runs the e-mail part in a savepoint: an e-mail error never loses this event's WhatsApp rows. */
+  savepoint: (fn: () => Promise<void>) => Promise<void>;
+};
 
 export async function processStatusRules(
   tx: Tx,
@@ -27,13 +37,14 @@ export async function processStatusRules(
   contextFor: (lang?: Lang) => Promise<EventContext | null>,
   /** Owner language decision 3: the automation default for employees who have not chosen (null = Arabic). */
   employeeDefault: MsgLang | null = null,
+  email: EmailPlanning | null = null,
 ): Promise<StatusEvalReport> {
-  const out: StatusEvalReport = { queued: 0, skipped: 0 };
+  const out: StatusEvalReport = { queued: 0, skipped: 0, emailsQueued: 0, emailsSkipped: 0 };
   const hits = statusesOfEvent(ev.eventType, ev.payload);
   if (hits.length === 0) return out;
 
   const rules = await tx.whatsAppStatusRule.findMany({
-    where: { enabled: true, active: true, OR: hits.map((h) => ({ source: h.source, statusKey: h.statusKey })) },
+    where: { active: true, AND: [{ OR: [{ enabled: true }, { emailEnabled: true }] }, { OR: hits.map((h) => ({ source: h.source, statusKey: h.statusKey })) }] },
     orderBy: [{ source: "asc" }, { position: "asc" }],
   });
   if (rules.length === 0) return out;
@@ -43,6 +54,25 @@ export async function processStatusRules(
 
   let admins: Person[] | null = null;
   for (const rule of rules) {
+    // «إيميل» (batch 25): the customer of the record, on its own key namespace ("email:…"), never blocked by WhatsApp.
+    if (email && rule.emailEnabled && canEmailSource(rule.source)) await email.savepoint(async () => {
+      const customers = ctx.people.customer ?? [];
+      const suppressed = await email.suppression(customers.map((c) => c.email));
+      const planned = planStatusEmails({
+        rule: { source: rule.source, statusKey: rule.statusKey, labelAr: rule.labelAr, template: rule.template, emailSubject: rule.emailSubject, renotify: rule.renotify },
+        subject: { type: ev.subjectType, id: ev.subjectId }, eventId: ev.id, vars: ctx.vars, customers, mode: email.mode, suppressed,
+      });
+      if (planned.length) {
+        const created = await tx.emailMessage.createMany({
+          data: planned.map((m) => ({ ...m, ruleId: null, ruleName: `إشعار الحالة: ${rule.labelAr}`, eventId: ev.id, eventType: ev.eventType, subjectType: ev.subjectType, subjectId: ev.subjectId, scheduledAt: ev.occurredAt })),
+          skipDuplicates: true,
+        });
+        const q = planned.filter((m) => m.status === "QUEUED").length;
+        out.emailsQueued! += Math.min(q, created.count);
+        out.emailsSkipped! += Math.max(0, created.count - q);
+      }
+    });
+    if (!rule.enabled) continue;
     const recipients = parseRecipients(rule.recipients);
     const people: Partial<Record<StatusRecipient, Person[]>> = { ...ctx.people };
     if (recipients.includes("admins")) people.admins = admins ??= await adminRecipients(tx);

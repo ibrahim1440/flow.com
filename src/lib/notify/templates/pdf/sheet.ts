@@ -16,6 +16,7 @@
 // (arabic-reshaper) and put in visual order (bidi-js, paragraph direction RTL) before it is drawn,
 // and jsPDF is told the text is already visual. Diacritics are dropped (the reshaper does not
 // position marks). Latin and numeric runs keep their left-to-right order inside Arabic text.
+import { createHash } from "node:crypto";
 import { jsPDF } from "jspdf";
 import { convertArabic } from "arabic-reshaper";
 import bidiFactory from "bidi-js";
@@ -83,7 +84,7 @@ export type SheetInput = {
   bank?: { label: string; rows: SheetRow[] } | null;
   footer: { legal: string; status?: string | null; docNumber: string };
   /** Document properties (title / subject in the PDF info). */
-  info?: { title: string; subject?: string };
+  info?: { title: string; subject?: string; createdAt?: Date };
 };
 
 // A4 in points; document.css measures × 0.75.
@@ -177,6 +178,13 @@ export function renderSheetPdf(p: SheetInput): Buffer {
   const s = new Sheet();
   const doc = s.doc;
   if (p.info) doc.setProperties({ title: p.info.title, subject: p.info.subject ?? "", creator: "Hiqbah ERP" });
+  // Deterministic bytes (fix round 2): with a creation date given (a quotation's issue date), the PDF's /CreationDate and
+  // its file /ID are fixed, so the same document always renders to the same sha256 — a retried send under the same
+  // idempotency key carries identical bytes, and the stored attachmentSha256 is the one delivered.
+  if (p.info?.createdAt) {
+    doc.setCreationDate(p.info.createdAt);
+    doc.setFileId(createHash("sha256").update(`${p.info.title}\u0000${p.info.createdAt.toISOString()}`).digest("hex").slice(0, 32).toUpperCase());
+  }
   if (p.watermark) s.watermark(p.watermark);
 
   // Logo (start edge), 54 px high.

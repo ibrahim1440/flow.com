@@ -78,9 +78,11 @@ export async function deleteRule(tx: Tx, id: string) {
  * Cancel: a QUEUED message is withdrawn before it is sent.
  */
 export async function actOnMessage(tx: Tx, id: string, action: "retry" | "cancel", actorName: string) {
-  const msg = await tx.whatsAppMessage.findUnique({ where: { id }, select: { status: true, phone: true } });
+  const msg = await tx.whatsAppMessage.findUnique({ where: { id }, select: { status: true, phone: true, bodyArchivedAt: true } });
   if (!msg) throw { _appCode: 404, message: "Message not found." };
   if (action === "retry") {
+    // Batch 25 fix round 1: an archived message has no body here any more — never re-sent empty.
+    if (msg.bodyArchivedAt) throw { _appCode: 409, message: "نص هذه الرسالة انتقل للأرشيف (أقدم من 180 يوم)، فما تنعاد.", errorEn: "The text of this message was moved to the archive (older than 180 days); it cannot be sent again.", code: "ARCHIVED" };
     if (msg.status !== "FAILED") throw { _appCode: 409, message: "Only a failed message can be retried." };
     if (!msg.phone) throw { _appCode: 409, message: "This message has no phone number to send to." };
     const r = await tx.whatsAppMessage.updateMany({

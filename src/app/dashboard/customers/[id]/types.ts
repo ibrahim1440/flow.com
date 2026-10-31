@@ -14,7 +14,7 @@ export type RoastPreference = {
 
 export type Customer = {
   id: string; name: string; nameAr: string | null; phone: string | null; email: string | null; address: string | null;
-  whatsappOptOut: boolean; createdAt: string;
+  whatsappOptOut: boolean; emailOptOut?: boolean; createdAt: string;
   commercialRegNo: string | null; vatNumber: string | null; segment: string | null; city: string | null; priceList: string | null;
   paymentTermsDays: number | null; creditLimit: string | null;
   /** «مدة الإيقاف الافتراضية» (feat/credit-hold), days; null = not set. */

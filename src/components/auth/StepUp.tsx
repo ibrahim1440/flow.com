@@ -22,7 +22,7 @@ type Pending = { resolve: (ok: boolean) => void };
 const Ctx = createContext<{ requestStepUp: (opts?: { pinOnly?: boolean }) => Promise<boolean> }>({ requestStepUp: async () => false });
 export const useStepUp = () => useContext(Ctx);
 
-export function StepUpProvider({ lang, privileged, children }: { lang: "ar" | "en"; privileged: boolean; children: ReactNode }) {
+export function StepUpProvider({ lang, privileged, username = "", children }: { lang: "ar" | "en"; privileged: boolean; username?: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [mfa, setMfa] = useState(false);
   // Owner decision 4: a privileged stock change answers `factor: "PIN"` — only a PIN step-up counts.
@@ -75,14 +75,15 @@ export function StepUpProvider({ lang, privileged, children }: { lang: "ar" | "e
   return (
     <Ctx value={{ requestStepUp }}>
       {children}
-      {open && <StepUpDialog lang={lang} privileged={privileged} mfa={mfa} pinOnly={pinOnly} onDone={finish} />}
+      {open && <StepUpDialog lang={lang} privileged={privileged} mfa={mfa} pinOnly={pinOnly} username0={username} onDone={finish} />}
     </Ctx>
   );
 }
 
-function StepUpDialog({ lang, privileged, mfa, pinOnly, onDone }: { lang: "ar" | "en"; privileged: boolean; mfa: boolean; pinOnly: boolean; onDone: (ok: boolean) => void }) {
+function StepUpDialog({ lang, privileged, mfa, pinOnly, username0, onDone }: { lang: "ar" | "en"; privileged: boolean; mfa: boolean; pinOnly: boolean; username0: string; onDone: (ok: boolean) => void }) {
   const t = T[lang];
-  const [username, setUsername] = useState("");
+  // Fix round 2 (council b25 seat 5 N6): prefilled with the signed-in account's own username; still editable.
+  const [username, setUsername] = useState(username0);
   // SIMPLE MODE: with the PIN sign-in methods hidden, the step-up asks for the password first.
   const [usePassword, setUsePassword] = useState(!SHOW_PIN_SIGN_IN && !pinOnly);
   const [pin, setPin] = useState("");
@@ -126,13 +127,13 @@ function StepUpDialog({ lang, privileged, mfa, pinOnly, onDone }: { lang: "ar" |
       {privileged && (
         <label className="d21-dlg-field">
           <span className="d21-dlg-label">{t.username}</span>
-          <input dir="ltr" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} autoCapitalize="none" autoComplete="username" className="d21-dlg-input" data-testid="step-up-username" />
+          <input dir="ltr" autoFocus={!username0} value={username} onChange={(e) => setUsername(e.target.value)} autoCapitalize="none" autoComplete="username" className="d21-dlg-input" data-testid="step-up-username" />
         </label>
       )}
       {usePassword ? (
         <label className="d21-dlg-field">
           <span className="d21-dlg-label">{t.password}</span>
-          <input dir="ltr" type="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} autoComplete="current-password" className="d21-dlg-input" aria-invalid={error ? true : undefined} />
+          <input dir="ltr" type="password" autoFocus={!!username0 || !privileged} value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} autoComplete="current-password" className="d21-dlg-input" aria-invalid={error ? true : undefined} />
         </label>
       ) : (
         <div className="d21-dlg-field">

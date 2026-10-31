@@ -49,7 +49,7 @@ async function listenedEventTypes(): Promise<Set<string>> {
   // «إشعارات الحالات»: a switched-on status rule listens to its source's events. Read apart, so
   // a database without the status table yet (before 20261022100000) behaves exactly as before.
   const statusSources = await prisma.whatsAppStatusRule
-    .findMany({ where: { enabled: true, active: true }, select: { source: true }, distinct: ["source"] })
+    .findMany({ where: { active: true, OR: [{ enabled: true }, { emailEnabled: true }] }, select: { source: true }, distinct: ["source"] })
     .catch(() => [] as { source: string }[]);
   for (const t of eventTypesOfSources(statusSources.map((r) => r.source))) types.add(t);
   cache = { at: Date.now(), types };

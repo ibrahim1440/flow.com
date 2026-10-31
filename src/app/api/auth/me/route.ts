@@ -4,6 +4,7 @@ import { getUser, getUserWithPermissions } from "@/lib/auth-server";
 import { revokeSession } from "@/lib/auth/session";
 import { authAudit } from "@/lib/auth/sign-in";
 import { refreshSessionCookie } from "@/lib/session-cookie";
+import { prisma } from "@/lib/db";
 
 export async function GET() {
   const user = await getUserWithPermissions();
@@ -18,7 +19,9 @@ export async function GET() {
   void cv; void sid;
   // «صفحتي الرئيسية» (council fix round 2, item 11): read with the session's own employee row (getUserWithPermissions),
   // no extra query here. `homeSetByAdmin`: the administrator fixed the landing page — the choice is read-only.
-  const response = NextResponse.json({ user: { ...rest, classicHome: home?.choice === "classic" && !home.setByAdmin, homeSetByAdmin: !!home?.setByAdmin } });
+  // Batch 25 fix round 2: the account's own username, so the step-up dialog can prefill it (it is not a secret to its owner).
+  const own = await prisma.employee.findUnique({ where: { id: user.id }, select: { username: true } }).catch(() => null);
+  const response = NextResponse.json({ user: { ...rest, username: own?.username ?? null, classicHome: home?.choice === "classic" && !home.setByAdmin, homeSetByAdmin: !!home?.setByAdmin } });
   // A legacy (pre-v2) token — issued before the slim session cookie, carrying the whole
   // permission map — is accepted until it expires, and re-issued here in the slim form: the same
   // session row, so the same deadlines, MFA state and step-up time; nothing about the session

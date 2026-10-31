@@ -15,6 +15,7 @@ import { ACTIVITY_LABELS, OUTCOME_LABELS, initials, splitTitle } from "@/compone
 import { longDate, qtyText, dayCount, dayUnit, daysFromToday, dueText, money2, relativeDays, shortDate, whole } from "@/components/d21/format";
 import { api, pick, QUOTE_STATUS_SPECS, LEAD_SOURCE_LABELS } from "../../sales/_components/ui";
 import { ActivityDialog, ContactDialog, DealPickDialog, DetailsDialog, FileDialog, FILE_CATEGORY_LABELS, SEGMENT_LABELS, type ActivityKind } from "./dialogs";
+import { MessagingCard } from "./_components/messaging";
 import type { Account, Activity, AgingKey, Contact, CustomerFile, TimelineEntry } from "./types";
 import { CreditBadges, CreditCallout, HoldDialog, LiftDialog, badgesOf, fullDate } from "@/components/credit/credit-ui";
 import { orderProgress, progressText } from "@/lib/order-stage";
@@ -741,6 +742,9 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
     </section>
   );
 
+  // «الرسائل» (batch 25): e-mail, «يستقبل إيميلات», the last automated message.
+  const messaging = <MessagingCard customerId={id} ar={ar} onSaved={(text) => setNotice({ text, ok: true })} />;
+
   // ── Other tabs ──
   const st = (spec: { ar: string; en: string; tone?: string } | undefined, raw: string) => <span className={`st ${spec?.tone ?? ""}`}>{spec ? lx(spec) : raw}</span>;
   const empty = (t: string) => <p className="acc-muted acc-empty" data-testid="tab-empty">{t}</p>;
@@ -1021,7 +1025,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
           )}
           {contacts}
           {tabBar}
-          {tab === "overview" ? <>{activityBlock}<div style={{ marginTop: 24 }}>{usual}{details}</div></> : tabBody}
+          {tab === "overview" ? <>{activityBlock}<div style={{ marginTop: 24 }}>{usual}{details}{messaging}</div></> : tabBody}
           {mayLog || quoteBtn ? (
             <div className="sticky-act acc-quickbar" data-acc-more data-testid="account-quickbar">
               {mayLog ? (tel ? <a className="btn" href={tel} aria-label={L("اتصال", "Call")} data-testid="act-call" onClick={() => setDialog({ activity: "CALL" })}><Ico name="phone" /></a>
@@ -1103,6 +1107,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
               <div className="acc-rule" />
               {usual}
               {details}
+              {messaging}
             </aside>
           </div>
         ) : <div className="acc-tabbody">{tabBody}</div>}

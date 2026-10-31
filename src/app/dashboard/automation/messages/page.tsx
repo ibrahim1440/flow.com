@@ -6,7 +6,7 @@ import { useD21Phone } from "@/components/shell/page-context";
 import { api, useLang } from "../../sales/_components/ui";
 import { getEvent, RECIPIENT_LABELS, type RecipientKind } from "@/lib/automation/catalog";
 import { STATUS_RECIPIENT_LABELS, type StatusRecipient } from "@/lib/automation/status-rules/sources";
-import { AutomationHeader, MESSAGE_STATUS, MessageStatusBadge, Note, Phone, noteText, useAutomationAbilities, when, whenParts } from "../_components/shared";
+import { AutomationHeader, ChannelIcon, MESSAGE_STATUS, MessageStatusBadge, Note, Phone, noteText, useAutomationAbilities, when, whenParts } from "../_components/shared";
 import { SettingsFrame } from "../../_components/tools-ui";
 
 /**
@@ -21,6 +21,14 @@ import { SettingsFrame } from "../../_components/tools-ui";
 
 type Row = {
   id: string;
+  /** Batch 25: every row names its channel. */
+  channel: "whatsapp" | "email";
+  subject: string | null;
+  address: string | null;
+  intended: string | null;
+  attachmentKind: string | null;
+  deliveredAt: string | null;
+  bodyArchivedAt: string | null;
   ruleId: string | null;
   ruleName: string | null;
   eventType: string | null;
@@ -37,7 +45,7 @@ type Row = {
   createdAt: string;
 };
 
-type Report = { eventsProcessed: number; messagesQueued: number; sent: number; sendFailures: number; sendingPaused: string | null };
+type Report = { eventsProcessed: number; messagesQueued: number; sent: number; sendFailures: number; sendingPaused: string | null; emailsQueued?: number; emailsSent?: number };
 
 export default function AutomationMessagesPage() {
   const lang = useLang();
@@ -45,6 +53,7 @@ export default function AutomationMessagesPage() {
   const { canManageMessages } = useAutomationAbilities();
 
   const [status, setStatus] = useState("");
+  const [channel, setChannel] = useState("");
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const [data, setData] = useState<{ rows: Row[]; total: number; perPage: number; counts: Record<string, number> } | null>(null);
@@ -55,12 +64,13 @@ export default function AutomationMessagesPage() {
   const [reloadToken, setReloadToken] = useState(0);
   const reload = () => setReloadToken((t) => t + 1);
 
-  useD21Phone({ title: ar ? "سجل الرسائل" : "Message log", sub: ar ? "الأتمتة والواتساب" : "Automation & WhatsApp" });
+  useD21Phone({ title: ar ? "سجل الرسائل" : "Message log", sub: ar ? "رسائل العملاء التلقائية" : "Automated customer messages" });
 
   useEffect(() => {
     let cancelled = false;
     const params = new URLSearchParams({ page: String(page) });
     if (status) params.set("status", status);
+    if (channel) params.set("channel", channel);
     if (q.trim()) params.set("q", q.trim());
     const timer = setTimeout(async () => {
       const r = await api<{ rows: Row[]; total: number; perPage: number; counts: Record<string, number> }>(`/api/automation/messages?${params}`);
@@ -72,10 +82,10 @@ export default function AutomationMessagesPage() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [status, q, page, ar, reloadToken]);
+  }, [status, channel, q, page, ar, reloadToken]);
 
-  async function act(id: string, action: "retry" | "cancel") {
-    const r = await api(`/api/automation/messages/${id}`, { method: "POST", body: { action } });
+  async function act(id: string, action: "retry" | "cancel", ch: "whatsapp" | "email" = "whatsapp") {
+    const r = await api(`/api/automation/messages/${id}`, { method: "POST", body: { action, channel: ch } });
     if (!r.ok) setError(r.data.error ?? "");
     reload();
   }
@@ -88,8 +98,8 @@ export default function AutomationMessagesPage() {
     const d = r.data;
     setInfo(
       (ar
-        ? `عولج ${d.eventsProcessed} حدث، وأضيفت ${d.messagesQueued} رسالة، وأرسلت ${d.sent}`
-        : `${d.eventsProcessed} events processed, ${d.messagesQueued} queued, ${d.sent} sent`) +
+        ? `عولج ${d.eventsProcessed} حدث، وأضيفت ${d.messagesQueued + (d.emailsQueued ?? 0)} رسالة، وانرسل ${d.sent} واتساب و${d.emailsSent ?? 0} إيميل`
+        : `${d.eventsProcessed} events processed, ${d.messagesQueued + (d.emailsQueued ?? 0)} queued, ${d.sent} WhatsApp and ${d.emailsSent ?? 0} e-mails sent`) +
         (d.sendFailures ? (ar ? `، وفشلت ${d.sendFailures}` : `, ${d.sendFailures} failed`) : "") +
         (d.sendingPaused ? ` — ${noteText(d.sendingPaused, lang)}` : "."),
     );
@@ -117,11 +127,16 @@ export default function AutomationMessagesPage() {
             aria-label={L("بحث", "Search")}
             data-testid="msg-search"
           />
+          <div className="tl-seg" role="group" aria-label={L("القناة", "Channel")} data-testid="msg-channel">
+            {([["", L("الكل", "All")], ["whatsapp", L("واتساب", "WhatsApp")], ["email", L("إيميل", "E-mail")]] as const).map(([k, label]) => (
+              <button key={k || "all"} type="button" aria-pressed={channel === k} onClick={() => { setChannel(k); setPage(1); }} data-testid={`msg-channel-${k || "all"}`}>{label}</button>
+            ))}
+          </div>
           <div className="tl-seg" role="group" aria-label={L("الحالة", "Status")} data-testid="msg-status">
             <button type="button" aria-pressed={status === ""} onClick={() => { setStatus(""); setPage(1); }}>{L("الكل", "All")}</button>
             {/* GX E-04 / E-04e: five statuses, each with its count (0 included); «يرسل الآن» is a
                 moment, not a filter — those rows are under «الكل». */}
-            {Object.entries(MESSAGE_STATUS).filter(([k]) => k !== "SENDING").map(([k, s]) => (
+            {Object.entries(MESSAGE_STATUS).filter(([k]) => k !== "SENDING" && k !== "COMPLAINED").map(([k, s]) => (
               <button key={k} type="button" aria-pressed={status === k} onClick={() => { setStatus(k); setPage(1); }} data-testid={`msg-status-${k}`}>
                 {ar ? s.ar : s.en}
                 {data ? <span className="hr-count">{data.counts[k] ?? 0}</span> : null}
@@ -130,7 +145,7 @@ export default function AutomationMessagesPage() {
           </div>
           <span className="tl-sp" />
           {canManageMessages ? (
-            <Btn onClick={runNow} disabled={busy} busy={busy} data-testid="run-dispatch">{L("معالجة الآن", "Process now")}</Btn>
+            <Btn onClick={runNow} disabled={busy} busy={busy} data-testid="run-dispatch">{L("أرسل المنتظر الحين", "Send what is waiting now")}</Btn>
           ) : null}
         </div>
 
@@ -145,15 +160,16 @@ export default function AutomationMessagesPage() {
           </div>
         ) : data ? (
           <div className="hr-tablewrap">
-            <table className="hr-table is-mrow" aria-label={L("سجل الرسائل", "Message log")} data-testid="messages-table">
+            <table className="hr-table is-mrow" aria-label={L("سجل الرسائل", "Message log")} data-testid="messages-table" style={{ tableLayout: "fixed", width: "100%" }}>
               <thead>
                 <tr>
-                  <th style={{ width: 100 }}>{L("الوقت", "Time")}</th>
-                  <th style={{ minWidth: 170 }}>{L("القاعدة", "Rule")}</th>
-                  <th style={{ minWidth: 150 }}>{L("المستلم", "Recipient")}</th>
-                  <th className="hr-hide-compact" style={{ minWidth: 220 }}>{L("الرسالة", "Message")}</th>
-                  <th style={{ width: 170, minWidth: 150 }}>{L("الحالة", "Status")}</th>
-                  {canManageMessages ? <th style={{ width: 1 }}><span className="hr-sr">{L("إجراء", "Action")}</span></th> : null}
+                  <th style={{ width: 36 }}><span className="hr-sr">{L("القناة", "Channel")}</span></th>
+                  <th style={{ width: 92 }}>{L("الوقت", "Time")}</th>
+                  <th style={{ width: "17%" }}>{L("القاعدة", "Rule")}</th>
+                  <th style={{ width: "21%" }}>{L("المستلم", "Recipient")}</th>
+                  <th className="hr-hide-compact">{L("الرسالة", "Message")}</th>
+                  <th style={{ width: 150 }} data-testid="messages-status-head">{L("الحالة", "Status")}</th>
+                  {canManageMessages ? <th style={{ width: 76 }}><span className="hr-sr">{L("إجراء", "Action")}</span></th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -162,12 +178,14 @@ export default function AutomationMessagesPage() {
                   const kind = RECIPIENT_LABELS[m.recipientKind as RecipientKind] ?? STATUS_RECIPIENT_LABELS[m.recipientKind as StatusRecipient];
                   const open = expanded === m.id;
                   // Sent: when it went. Waiting: when it is due. Anything else: when it was decided.
-                  const at = m.status === "SENT" ? m.sentAt : m.status === "QUEUED" ? m.scheduledAt : m.createdAt;
+                  const at = m.status === "DELIVERED" ? m.deliveredAt ?? m.sentAt : m.status === "SENT" ? m.sentAt : m.status === "QUEUED" ? m.scheduledAt : m.createdAt;
+                  const email = m.channel === "email";
                   const [day, time] = whenParts(at);
-                  const ruleName = m.recipientKind === "test" ? L("رسالة تجريبية", "Test message") : m.ruleName ?? "—";
+                  const ruleName = m.recipientKind === "test" ? (email ? L("رسالة تجربة (إيميل)", "Test e-mail") : L("اختبار الاتصال", "Connection check")) : m.ruleName ?? "—";
                   const who = m.recipientName || (kind ? (ar ? kind.ar : kind.en) : m.recipientKind);
                   return (
-                    <tr key={m.id} data-testid={`msg-${m.id}`} className={m.status === "FAILED" ? "tl-hl" : undefined}>
+                    <tr key={`${m.channel}-${m.id}`} data-testid={`msg-${m.id}`} data-channel={m.channel} className={m.status === "FAILED" || m.status === "BOUNCED" ? "tl-hl" : undefined} style={{ overflowWrap: "anywhere" }}>
+                      <td><ChannelIcon channel={m.channel} lang={lang} /></td>
                       <td title={when(at, lang)} style={{ whiteSpace: "nowrap" }}>
                         <span className="hr-num" style={{ display: "block", fontWeight: 500 }}>{day}</span>
                         <span className="hr-num stk-sub">{time}</span>
@@ -179,14 +197,15 @@ export default function AutomationMessagesPage() {
                       <td className="m-title">
                         <span className="hr-desktop-only" style={{ display: "block", fontWeight: 500 }}>{ruleName}</span>
                         {ev && <span className="stk-sub hr-desktop-only">{ar ? ev.ar : ev.en}</span>}
-                        <span className="hr-mobile-only" style={{ fontWeight: 600 }}>{who}</span>
+                        <span className="hr-mobile-only" style={{ fontWeight: 600 }}><span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}><ChannelIcon channel={m.channel} lang={lang} />{who}</span></span>
                         <span className="hr-msub">{ruleName} · <span className="hr-num">{day.slice(0, 5)} {time}</span></span>
                       </td>
                       <td>
                         <span style={{ display: "block", fontWeight: 500 }}>{who}</span>
                         <span className="stk-sub hr-num">
-                          {m.phone ? <Phone value={m.phone} /> : "—"}
-                          {m.intendedPhone && (
+                          {email ? (m.address ? <bdi dir="ltr" style={{ overflowWrap: "anywhere" }}>{m.address}</bdi> : "—") : m.phone ? <Phone value={m.phone} /> : "—"}
+                          {email && m.intended ? <>{" "}{L("بدلًا من", "instead of")} <bdi dir="ltr">{m.intended}</bdi></> : null}
+                          {!email && m.intendedPhone && (
                             <>
                               {" "}
                               {L("بدلا من", "instead of")} <Phone value={m.intendedPhone} />
@@ -196,25 +215,26 @@ export default function AutomationMessagesPage() {
                       </td>
                       <td className="hr-hide-compact">
                         <button type="button" onClick={() => setExpanded(open ? null : m.id)} className="tl-body-btn" dir="auto" aria-expanded={open}>
-                          <span className={open ? "" : "tl-clamp"} style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 13.5 }}>{m.body}</span>
+                          {email && m.subject ? <span style={{ display: "block", fontWeight: 600, fontSize: 13.5 }}>{m.subject}{m.attachmentKind === "quote_pdf" ? L(" · مرفق عرض السعر PDF", " · quotation PDF attached") : ""}</span> : null}
+                          <span className={open ? "" : "tl-clamp"} style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 13.5 }}>{m.bodyArchivedAt ? L("انتقل نص الرسالة للأرشيف (أقدم من 180 يوم).", "The text moved to the archive (older than 180 days).") : m.body}</span>
                         </button>
                       </td>
                       <td className="m-end is-stack">
-                        <MessageStatusBadge status={m.status} lang={lang} testId={`msg-status-${m.id}`} />
+                        <MessageStatusBadge status={m.status} note={m.statusNote} lang={lang} testId={`msg-status-${m.id}`} />
                         <Note note={m.statusNote} lang={lang} className="stk-sub hr-desktop-only" />
-                        {canManageMessages && ((m.status === "FAILED" && m.phone) || m.status === "QUEUED") ? (
+                        {canManageMessages && ((m.status === "FAILED" && (m.phone || email)) || m.status === "QUEUED") ? (
                           <span className="hr-mobile-only">
-                            {m.status === "FAILED" ? <Btn size="sm" onClick={() => act(m.id, "retry")}>{L("إعادة", "Retry")}</Btn> : <Btn size="sm" onClick={() => act(m.id, "cancel")}>{L("إلغاء", "Cancel")}</Btn>}
+                            {m.status === "FAILED" ? <Btn size="sm" onClick={() => act(m.id, "retry", m.channel)}>{L("إعادة", "Retry")}</Btn> : <Btn size="sm" onClick={() => act(m.id, "cancel", m.channel)}>{L("إلغاء", "Cancel")}</Btn>}
                           </span>
                         ) : null}
                       </td>
                       {canManageMessages ? (
                         <td style={{ textAlign: "end" }}>
-                          {m.status === "FAILED" && m.phone && (
-                            <Btn size="sm" onClick={() => act(m.id, "retry")} data-testid={`retry-${m.id}`}>{L("إعادة", "Retry")}</Btn>
+                          {m.status === "FAILED" && (m.phone || email) && (
+                            <Btn size="sm" onClick={() => act(m.id, "retry", m.channel)} data-testid={`retry-${m.id}`}>{L("إعادة", "Retry")}</Btn>
                           )}
                           {m.status === "QUEUED" && (
-                            <Btn size="sm" onClick={() => act(m.id, "cancel")} data-testid={`cancel-${m.id}`}>{L("إلغاء", "Cancel")}</Btn>
+                            <Btn size="sm" onClick={() => act(m.id, "cancel", m.channel)} data-testid={`cancel-${m.id}`}>{L("إلغاء", "Cancel")}</Btn>
                           )}
                         </td>
                       ) : null}
@@ -228,7 +248,7 @@ export default function AutomationMessagesPage() {
 
         {data ? (
           <p className="tl-foot">
-            {L(`الأحدث أولًا · ${data.perPage} لكل صفحة · صفحة ${page} من ${pages} · لا تُجمع إيصالات التسليم أو القراءة`, `Newest first · ${data.perPage} per page · page ${page} of ${pages} · delivery and read receipts are not collected`)}
+            {L(`الأحدث أولًا · ${data.perPage} لكل صفحة · صفحة ${page} من ${pages} · «وصل» و«ارتدّ» للإيميل فقط (الواتساب ما يرجّع إيصال)`, `Newest first · ${data.perPage} per page · page ${page} of ${pages} · «delivered» and «bounced» are known for e-mail only`)}
           </p>
         ) : null}
         {pages > 1 && (

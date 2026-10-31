@@ -24,9 +24,59 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 export type EmailAttachment = { filename: string; contentBase64: string; contentType?: string };
-export type EmailMessage = { to: string[]; subject: string; html: string; text: string; attachments?: EmailAttachment[]; replyTo?: string };
+export type EmailMessage = {
+  to: string[]; subject: string; html: string; text: string; attachments?: EmailAttachment[]; replyTo?: string;
+  /** Extra mail headers (List-Unsubscribe…). Batch 25. Never a recipient header: cc / bcc are not supported at all. */
+  headers?: Record<string, string>;
+  /** Sent as Resend's Idempotency-Key request header (batch 25): a retried request is not delivered twice. */
+  idempotencyKey?: string;
+  /** Resend tags (fix round 2): the customer-automation channel tags its sends `hq=automation`, so its webhook can tell its own
+   * delivery reports from those of the alert / HR / notification e-mails sent through the same account. */
+  tags?: { name: string; value: string }[];
+};
 export type EmailResult = "SENT" | "FAILED" | "NOT_CONFIGURED" | "NO_RECIPIENTS";
-export type EmailAdapter = { name: string; send(m: EmailMessage): Promise<void> };
+/** What a provider answered (batch 25): its message id, when it gave one. */
+export type AdapterReceipt = { providerMessageId: string | null; httpStatus: number | null } | void;
+export type EmailAdapter = { name: string; send(m: EmailMessage): Promise<AdapterReceipt> };
+
+/** A provider refusal, with the HTTP status (batch 25: the automation sender tells a transient error from a permanent one). */
+export class EmailSendError extends Error {
+  constructor(message: string, readonly httpStatus: number | null) { super(message); }
+}
+
+/** The detailed outcome of one send (batch 25; `sendEmail` keeps answering the plain EmailResult). */
+export type EmailDelivery = {
+  status: EmailResult;
+  providerMessageId: string | null;
+  httpStatus: number | null;
+  /** True when trying again later may succeed (429, 5xx, timeout / network). */
+  transient: boolean;
+  error: string | null;
+};
+
+/** Header names a caller may set: never one that adds a recipient or changes the sender. */
+const HEADER_NAME = /^[A-Za-z0-9-]{1,64}$/;
+const FORBIDDEN_HEADERS = new Set(["to", "cc", "bcc", "from", "sender", "reply-to", "subject", "return-path"]);
+export function safeHeaders(h: Record<string, string> | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(h ?? {})) {
+    if (!HEADER_NAME.test(k) || FORBIDDEN_HEADERS.has(k.toLowerCase())) continue;
+    out[k] = String(v).replace(/[\r\n]+/g, " ").slice(0, 900);
+  }
+  return out;
+}
+
+/** Where the Resend adapter posts. Only api.resend.com — or, for tests, a LOOPBACK mock (RESEND_API_URL=http://127.0.0.1:…). */
+export function resendEndpoint(env: Record<string, string | undefined> = process.env): string {
+  const o = env.RESEND_API_URL?.trim();
+  if (!o) return "https://api.resend.com/emails";
+  let u: URL;
+  try { u = new URL(o); } catch { throw new Error("RESEND_API_URL is not a URL"); }
+  if (u.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(u.hostname) || env.VERCEL === "1") {
+    throw new Error("RESEND_API_URL may only point at a loopback mock, and never on Vercel");
+  }
+  return `${u.origin}/emails`;
+}
 
 /** The decoded size of all attachments of one message, at most (8 MB). */
 export const EMAIL_ATTACHMENTS_MAX_BYTES = 8 * 1024 * 1024;
@@ -54,6 +104,10 @@ export function safeAttachmentName(name: string): string {
 export function resendBody(from: string, m: EmailMessage): Record<string, unknown> {
   const body: Record<string, unknown> = { from, to: m.to, subject: m.subject, html: m.html, text: m.text };
   if (m.replyTo) body.reply_to = m.replyTo;
+  const headers = safeHeaders(m.headers);
+  if (Object.keys(headers).length) body.headers = headers;
+  const tags = (m.tags ?? []).filter((t) => /^[A-Za-z0-9_-]{1,256}$/.test(t.name) && /^[A-Za-z0-9_-]{1,256}$/.test(t.value)).slice(0, 10);
+  if (tags.length) body.tags = tags;
   if (m.attachments?.length) {
     body.attachments = m.attachments.map((a) => ({ filename: safeAttachmentName(a.filename), content: a.contentBase64, ...(a.contentType ? { content_type: a.contentType } : {}) }));
   }
@@ -84,13 +138,19 @@ export function emailAdapterFromEnv(env: Record<string, string | undefined> = pr
     return {
       name: "resend",
       async send(m) {
-        const r = await fetch("https://api.resend.com/emails", {
+        const endpoint = resendEndpoint(env);
+        const r = await fetch(endpoint, {
           method: "POST",
-          headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+          headers: {
+            Authorization: `Bearer ${key}`, "Content-Type": "application/json",
+            ...(m.idempotencyKey ? { "Idempotency-Key": m.idempotencyKey.replace(/[^A-Za-z0-9:_.-]/g, "").slice(0, 256) } : {}),
+          },
           body: JSON.stringify(resendBody(from, m)),
           signal: AbortSignal.timeout(15_000),
         });
-        if (!r.ok) throw new Error(`resend ${r.status}`);
+        if (!r.ok) throw new EmailSendError(`resend ${r.status}`, r.status);
+        const j = (await r.json().catch(() => null)) as { id?: unknown } | null;
+        return { providerMessageId: typeof j?.id === "string" ? j.id : null, httpStatus: r.status };
       },
     };
   }
@@ -106,8 +166,10 @@ export function emailAdapterFromEnv(env: Record<string, string | undefined> = pr
           writeFileSync(path.join(dir, file), Buffer.from(a.contentBase64, "base64"));
           return { filename: safeAttachmentName(a.filename), contentType: a.contentType ?? null, bytes: base64Bytes(a.contentBase64), file };
         });
-        writeFileSync(`${base}.json`, JSON.stringify({ to: m.to, subject: m.subject, text: m.text, ...(m.replyTo ? { replyTo: m.replyTo } : {}), ...(files.length ? { attachments: files } : {}) }, null, 2));
+        writeFileSync(`${base}.json`, JSON.stringify({ to: m.to, subject: m.subject, text: m.text, ...(m.replyTo ? { replyTo: m.replyTo } : {}), ...(m.headers ? { headers: safeHeaders(m.headers) } : {}), ...(m.idempotencyKey ? { idempotencyKey: m.idempotencyKey } : {}), ...(files.length ? { attachments: files } : {}) }, null, 2));
         writeFileSync(`${base}.html`, m.html);
+        // A stand-in provider id (batch 25), so the delivery webhook can be exercised locally.
+        return { providerMessageId: `outbox-${path.basename(base)}`, httpStatus: 200 };
       },
     };
   }
@@ -124,20 +186,28 @@ export function emailConfigured(): boolean {
 }
 
 export async function sendEmail(m: EmailMessage): Promise<EmailResult> {
+  return (await deliverEmail(m)).status;
+}
+
+/** Send one message and say exactly what happened (batch 25). Never throws; never logs an address. */
+export async function deliverEmail(m: EmailMessage): Promise<EmailDelivery> {
+  const none = { providerMessageId: null, httpStatus: null, transient: false };
   const adapter = testAdapter !== undefined ? testAdapter : emailAdapterFromEnv();
-  if (!adapter) return "NOT_CONFIGURED";
+  if (!adapter) return { ...none, status: "NOT_CONFIGURED", error: "No e-mail provider is configured." };
   const to = [...new Set(m.to.map((x) => x.trim()).filter(Boolean))];
-  if (to.length === 0) return "NO_RECIPIENTS";
+  if (to.length === 0) return { ...none, status: "NO_RECIPIENTS", error: "No recipient." };
   if (attachmentsBytes(m.attachments) > EMAIL_ATTACHMENTS_MAX_BYTES) {
     console.error(`[alert-email] refused: attachments over ${EMAIL_ATTACHMENTS_MAX_BYTES} bytes (${m.attachments?.length ?? 0} file(s))`);
-    return "FAILED";
+    return { ...none, status: "FAILED", error: "Attachments over the size limit." };
   }
   try {
-    await adapter.send({ ...m, to });
-    return "SENT";
+    const receipt = await adapter.send({ ...m, to });
+    return { status: "SENT", providerMessageId: receipt?.providerMessageId ?? null, httpStatus: receipt?.httpStatus ?? null, transient: false, error: null };
   } catch (e) {
+    const httpStatus = e instanceof EmailSendError ? e.httpStatus : null;
+    const transient = httpStatus === null || httpStatus === 429 || httpStatus >= 500;
     console.error(`[alert-email] ${adapter.name} failed for ${to.length} recipient(s): ${(e as Error)?.message ?? "error"}`);
-    return "FAILED";
+    return { status: "FAILED", providerMessageId: null, httpStatus, transient, error: (e as Error)?.message?.slice(0, 200) ?? "Send failed." };
   }
 }
 
