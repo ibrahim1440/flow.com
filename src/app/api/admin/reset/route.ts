@@ -6,6 +6,7 @@ import { extractIp, hashRateLimitKey, pruneExpired, isIpRateLimited, isPairRateL
 import { handlePrismaError } from "@/lib/api-error";
 import { deleteCustomerFileBlobs } from "@/lib/services/customers/files";
 import { evaluateResetAuthorization, resetRefusalBody } from "@/lib/reset-safety";
+import { auditResetUnavailable, auditResetErrorResponse } from "@/lib/audit-reset";
 import { validatePin } from "@/lib/pin-policy";
 import { pinVerifierInput, requirePinLookupSecret } from "@/lib/pin-lookup";
 
@@ -81,6 +82,10 @@ export async function POST(request: Request) {
     // BlendIngredient cascades from RoastingBatch but is deleted explicitly for clarity.
     // Customer files kept in the private Blob store go with their customers: listed before the
     // reset, removed after it commits (best effort — a failure is a storage incident, not a 500).
+    // Batch 26 (gate G3): the audit logs are cleared only through audit_reset_purge(), executable here only on a training /
+    // demo database (grant-app-runtime.sql -v allow_reset=1). Without it: a clear refusal, before anything is touched.
+    const unavailable = await auditResetUnavailable(prisma);
+    if (unavailable) return unavailable;
     const blobs = await prisma.customerFile.findMany({ where: { blobPathname: { not: null } }, select: { blobPathname: true } });
     await prisma.$transaction([
       prisma.cuppingScore.deleteMany(),
@@ -138,12 +143,14 @@ export async function POST(request: Request) {
       prisma.order.deleteMany(),
       // 20261028100000_credit_hold: the customers' holds and credit log (they would cascade with the
       // customers; deleted explicitly so the reset's list names every table it clears).
-      prisma.customerCreditLog.deleteMany(),
+      // Batch 26: the audit logs are append-only for the runtime role — the customers' credit log and the customer rows of
+      // the commission log are cleared ONLY through audit_reset_purge() (migration 20261209090000_audit_append_only): it checks
+      // the actor in the database, and records the counts in the settings log.
+      prisma.$queryRaw`SELECT * FROM audit_reset_purge(${user.id}, ${user.name ?? ""}, ${"admin reset"})`,
       prisma.customerSalesHold.deleteMany(),
       prisma.customer.deleteMany(),
-      // 20261101090000_commission_builder: the opening-setup and exclusion log of the customers just
-      // cleared (no FK, so named). The settings log and the commission settings, plans and ledger stay.
-      prisma.commissionAuditLog.deleteMany({ where: { customerId: { not: null } } }),
+      // 20261101090000_commission_builder: the opening-setup and exclusion log of the customers just cleared was removed by
+      // audit_reset_purge() above (batch 26). The settings log and the commission settings, plans and ledger stay.
       prisma.greenBean.deleteMany(),
       // 20261029090000_notifications: the notifications describe the records cleared above (orders,
       // customers, batches …) and the credit standing watch follows the customers; the people's
@@ -157,6 +164,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true });
   } catch (err) {
-    return handlePrismaError(err);
+    return auditResetErrorResponse(err) ?? handlePrismaError(err);
   }
 }
