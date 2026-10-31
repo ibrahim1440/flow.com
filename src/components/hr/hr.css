@@ -495,3 +495,17 @@
 .hr-email-preview { width: 100%; min-height: 360px; border: 1px solid var(--hr-border-subtle); border-radius: var(--hr-r-sm); background: #f6f5f2; }
 .hr-email-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .hr-email-log > li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* Motion (emil-design-eng review, UI phase 1): the HR/ops kit's buttons answer a press like the Direction 2.1 buttons
+   already do (.d21-btn: scale .97, 120-160 ms, the shell's ease-out curve), and dialogs enter instead of popping in —
+   opacity with a barely smaller scale (never from 0); on the phone the sheet rises a few pixels. Exits stay instant
+   (the dialog unmounts). Off under prefers-reduced-motion. */
+.hr-btn { transition: transform 160ms var(--ease, cubic-bezier(0.23, 1, 0.32, 1)), background-color 150ms var(--ease, cubic-bezier(0.23, 1, 0.32, 1)); }
+.hr-btn:active:not(:disabled) { transform: scale(0.97); }
+.hr-dialog-backdrop { animation: hr-fade 200ms var(--ease, cubic-bezier(0.23, 1, 0.32, 1)); }
+.hr-dialog { animation: hr-dialog-in 200ms var(--ease, cubic-bezier(0.23, 1, 0.32, 1)); }
+@keyframes hr-fade { from { opacity: 0; } }
+@keyframes hr-dialog-in { from { opacity: 0; transform: scale(0.97); } }
+@media (max-width: 767px) { .hr-dialog { animation-name: hr-sheet-in; } }
+@keyframes hr-sheet-in { from { opacity: 0; transform: translateY(16px); } }
+@media (prefers-reduced-motion: reduce) { .hr-btn { transition: none; } .hr-btn:active:not(:disabled) { transform: none; } .hr-dialog-backdrop, .hr-dialog { animation: none; } }

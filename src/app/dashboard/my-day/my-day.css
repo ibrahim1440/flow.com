@@ -20,7 +20,7 @@
 .d21 .md-pill.info { background: var(--status-info-tint); color: var(--status-info) }
 .d21 .md-pill.ok { background: var(--status-success-tint); color: var(--status-success) }
 .d21 .md-pill.pri { background: var(--action-primary-tint); color: var(--action-primary) }
-.d21 .md-pill.sig { background: var(--status-warning-tint); color: var(--brand-signature) }
+.d21 .md-pill.sig { background: var(--status-warning-tint); color: var(--status-warning) } /* polish: #bd7d47 on its tint was 3.0:1; the warning ink is the token for text on this tint */
 
 /* Target */
 .d21 .md-target { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: center }
@@ -81,7 +81,7 @@
 .d21 .md-swipe .bg .later { color: var(--status-warning) }
 .d21 .md-swipe .fg { position: relative; background: var(--surface); padding: 10px 12px; transition: transform .18s var(--ease) }
 .d21 .md-swipe .fg .md-row { border-top: 0; padding: 0 }
-.d21 .md-hint { font-size: 11.5px; color: var(--text-muted); text-align: center; margin: 0 }
+.d21 .md-hint { font-size: 12px; color: var(--text-muted); text-align: center; margin: 0 }
 .d21 .md-tabbar .d21-fab-slot .d21-menu { min-width: 200px }
 
 @media (max-width: 1279.98px) {

@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Btn, Field, Notice, OpsPane, useL } from "@/components/ops/ui";
 import { Select } from "@/components/ui/Select";
 import { Dialog, HrApiError } from "@/components/hr/ui";
-import { dueLabel } from "@/lib/workspace/format";
+import { dayOf, daysFrom, dueLabel } from "@/lib/workspace/format";
 import { PRIORITY_LABEL, PRIORITIES } from "@/lib/workspace/rules";
 import { toRiyadhLocal, parseRiyadhLocal } from "@/lib/workspace/time";
 import { DueText, OUTCOMES, StatusChip, TypeChip, recordOf, useLang, useNow, useWs, wsFetch, type CrmDue, type ReorderDue, type Task } from "./kit";
@@ -38,6 +38,15 @@ const HISTORY_LABEL: Record<string, [string, string]> = {
 function messageOf(e: unknown, L: (a: string, b: string) => string): string {
   if (e instanceof HrApiError && (e.code === "STALE" || e.code === "STALE_REQUEST")) return L("تغيّرت المهمة بعد فتحها. حدّثنا البيانات — راجعها ثم أعد المحاولة.", "The task changed after you opened it. It has been refreshed — review it and try again.");
   return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * The words beside the deadline, so they never repeat it: an overdue task gives its exact deadline («اليوم 7:21 م»);
+ * one due yesterday / today / tomorrow names the date («السبت 31 أكتوبر»); further out the label already carries it.
+ */
+function dueCaption(t: Pick<Task, "dueAt" | "overdue">, lang: "ar" | "en", now: Date): string | null {
+  if (t.overdue) return dueLabel(t.dueAt, lang, now);
+  return Math.abs(daysFrom(t.dueAt, now)) <= 1 ? dayOf(t.dueAt, lang, now) : null;
 }
 
 export function TaskPane({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: (msg?: string) => void }) {
@@ -78,13 +87,15 @@ export function TaskPane({ id, onClose, onChanged }: { id: string; onClose: () =
 
   const title = t ? t.title : L("المهمة", "Task");
   const actions = t?.actions ?? [];
-  const primary = actions.filter((a) => PRIMARY.includes(a));
+  // A follow-up's result is its meaningful next step, so it leads when offered (then the server's order).
+  const primary = actions.filter((a) => PRIMARY.includes(a)).sort((x, y) => Number(y === "record_result") - Number(x === "record_result"));
   const secondary = actions.filter((a) => ["hold", "return", "cancel"].includes(a));
 
   const footer = t ? (
     <div className="ws-pane-actions">
-      {primary.map((a) => (
-        <Btn key={a} variant="primary" busy={busy === a} data-testid={`task-${a}`} onClick={() => {
+      {primary.map((a, i) => (
+        // One primary per pane (polish): the first forward step leads, any second one sits beside it as secondary.
+        <Btn key={a} variant={i === 0 ? "primary" : "secondary"} busy={busy === a} data-testid={`task-${a}`} onClick={() => {
           if (a === "record_result") setResult(true); else void transition(a);
         }}>{L(...ACTION_LABEL[a])}</Btn>
       ))}
@@ -108,7 +119,7 @@ export function TaskPane({ id, onClose, onChanged }: { id: string; onClose: () =
           <dl className="hr-kv ws-kv">
             <div><dt>{L("المسؤول", "Owner")}</dt><dd>{t.assignee.name}{!t.assignee.active ? <> · <span className="ws-due is-overdue">{L("الحساب معطّل", "Account disabled")}</span></> : null}</dd></div>
             {t.createdById !== t.assigneeId ? <div><dt>{L("أسندها", "Assigned by")}</dt><dd>{t.createdBy.name}</dd></div> : null}
-            <div><dt>{L("الموعد النهائي", "Deadline")}</dt><dd><DueText dueAt={t.dueAt} overdue={t.overdue} now={now} /> <span className="hr-caption">({dueLabel(t.dueAt, lang, now)})</span></dd></div>
+            <div><dt>{L("الموعد النهائي", "Deadline")}</dt><dd><DueText dueAt={t.dueAt} overdue={t.overdue} now={now} />{dueCaption(t, lang, now) ? <> <span className="hr-caption">({dueCaption(t, lang, now)})</span></> : null}</dd></div>
             <div><dt>{L("الأولوية", "Priority")}</dt><dd>{L(PRIORITY_LABEL[t.priority].ar, PRIORITY_LABEL[t.priority].en)}</dd></div>
             {recordOf(t) ? <div><dt>{L("مرتبطة بـ", "Linked to")}</dt><dd>{recordOf(t)}</dd></div> : null}
             {t.requiresReview ? <div><dt>{L("المراجعة", "Review")}</dt><dd>{t.reviewer?.name ?? t.createdBy.name}</dd></div> : null}

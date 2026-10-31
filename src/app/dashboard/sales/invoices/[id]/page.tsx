@@ -165,14 +165,14 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
 
       <div className="acct-cards">
         <div className="acct-card" data-testid="state-document">
-          <h3>{L("المستند", "Document")}</h3>
+          <h2>{L("المستند", "Document")}</h2>
           <Tag map={DOC_STATUS} value={d.status} />
           <span className="acct-hint">{d.status === "ISSUED" ? L(`صدر ${d.issueDate} ${d.issueTime} · ${person(d.issuedById)}`, `Issued ${d.issueDate} ${d.issueTime} · ${person(d.issuedById)}`) : d.status === "CANCELLED" ? L(`أُلغيت: ${d.cancelReason}`, `Cancelled: ${d.cancelReason}`) : L(`أعدّها ${person(d.createdById)} · بلا رقم حتى الإصدار`, `Prepared by ${person(d.createdById)} · no number until issue`)}</span>
           {d.sodBypass ? <span className="inv-chip is-warn">{L("أصدرها مُعدّها (الوضع المبسّط)", "Issued by its preparer (simple mode)")}</span> : null}
         </div>
         {!isNote ? (
           <div className="acct-card" data-testid="state-payment">
-            <h3>{L("السداد", "Payment")}</h3>
+            <h2>{L("السداد", "Payment")}</h2>
             {d.status === "ISSUED" ? <>
               <Tag map={PAY_STATUS} value={Number(d.open) <= 0 ? "PAID" : Number(d.paid) > 0 ? "PARTIAL" : "UNPAID"} />
               <span className="acct-hint">{L(`المسدَّد ${money(d.paid)} · المتبقي ${money(d.open)} · يستحق ${d.dueDate ?? "—"}`, `Paid ${money(d.paid)} · open ${money(d.open)} · due ${d.dueDate ?? "—"}`)}</span>
@@ -181,7 +181,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           </div>
         ) : (
           <div className="acct-card" data-testid="state-original">
-            <h3>{L("الفاتورة الأصلية", "Original invoice")}</h3>
+            <h2>{L("الفاتورة الأصلية", "Original invoice")}</h2>
             {d.originalInvoice ? <Link href={`/dashboard/sales/invoices/${d.originalInvoice.id}`}><DocNo n={d.originalInvoice.number} /></Link> : "—"}
             <span className="acct-hint">{L("السبب: ", "Reason: ")}{d.reasonCode ? L(REASONS[d.reasonCode][0], REASONS[d.reasonCode][1]) : "—"}{d.reason ? ` — ${d.reason}` : ""}</span>
             {d.creditLeft !== null ? <span className="acct-hint">{L(`رصيد دائن غير مخصص ${money(d.creditLeft)}`, `Unapplied credit ${money(d.creditLeft)}`)}</span> : null}
@@ -203,7 +203,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               {!isNote ? <label className="hr-field"><span className="hr-label">{L("مدة السداد (يوم)", "Payment terms (days)")}</span><input className="hr-input acct-amount" inputMode="numeric" value={terms} onChange={(e) => setTerms(e.target.value)} /></label> : null}
               {isNote ? <label className="hr-field acct-grow"><span className="hr-label">{L("سبب الإصدار", "Reason")}</span><input className="hr-input" value={reason} onChange={(e) => setReason(e.target.value)} /></label> : null}
             </div>
-            <h3>{L("بيانات المشتري", "Buyer particulars")}</h3>
+            <h2>{L("بيانات المشتري", "Buyer particulars")}</h2>
             <BuyerFields buyer={buyer} family={family} onChange={setBuyer} />
           </div>
           <div className="acct-card">
@@ -265,7 +265,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               <Section title={L("ملخص الضريبة", "Tax summary")} testId="tax-summary">
                 <div className="hr-tablewrap">
                   <table className="hr-table is-dense">
-                    <thead><tr><th /> {cats.map((c) => <th key={c} className="num">{head[c]}</th>)}<th className="num">{L("الإجمالي", "Total")}</th></tr></thead>
+                    <thead><tr><th />{cats.map((c) => <th key={c} className="num">{head[c]}</th>)}<th className="num">{L("الإجمالي", "Total")}</th></tr></thead>
                     <tbody>
                       {([["taxable", L("الإجمالي قبل الضريبة", "Before VAT")], ["tax", L("الضريبة", "VAT")], ["gross", L("الإجمالي بعد الضريبة", "After VAT")]] as const).map(([k, label]) => (
                         <tr key={k}><td>{label}</td>{cats.map((c) => { const v = col(c); return <td key={c} className="num hr-num">{money((k === "gross" ? v.taxable + v.tax : v[k]) / 100)}</td>; })}<td className="num hr-num">{money((k === "gross" ? all.taxable + all.tax : all[k]) / 100)}</td></tr>
@@ -277,26 +277,26 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               </Section>
             );
           })() : null}
-          {d.notes ? <div className="acct-card"><h3>{L("ملاحظات", "Notes")}</h3><p style={{ margin: 0 }}><bdi>{d.notes}</bdi></p></div> : null}
+          {d.notes ? <div className="acct-card"><h2>{L("ملاحظات", "Notes")}</h2><p style={{ margin: 0 }}><bdi>{d.notes}</bdi></p></div> : null}
         </>
       )}
 
       <RequestHistory rows={d.history ?? []} />
       {d.notesIssued.length ? (
         <div className="acct-card" data-testid="notes-issued">
-          <h3>{L("الإشعارات على هذه الفاتورة", "Notes against this invoice")}</h3>
+          <h2>{L("الإشعارات على هذه الفاتورة", "Notes against this invoice")}</h2>
           <ul className="ops-list">{d.notesIssued.map((n) => <li key={n.id}><Link href={`/dashboard/sales/invoices/${n.id}`}><DocNo n={n.number} draftLabel={L("مسودة", "draft")} /></Link> <span>{L(KIND[n.kind]?.STANDARD[0] ?? n.kind, KIND[n.kind]?.STANDARD[1] ?? n.kind)}</span> <Tag map={DOC_STATUS} value={n.status} /> <span className="hr-num">{money(n.grandTotal)}</span></li>)}</ul>
         </div>
       ) : null}
       {d.applications.length ? (
         <div className="acct-card" data-testid="applications">
-          <h3>{L("ما سُدِّد منها", "Applied to it")}</h3>
+          <h2>{L("ما سُدِّد منها", "Applied to it")}</h2>
           <ul className="ops-list">{d.applications.map((a) => <li key={a.id}><span>{a.collectionId ? L("تحصيل", "Receipt") : L("إشعار دائن", "Credit note")} · <span className="hr-num">{a.appliedDate}</span>{a.atReceipt ? L(" · عند الاعتماد", " · at approval") : ""}</span><span className="hr-num">{money(a.amount)}{a.status === "REVERSED" ? L(" (أُلغي)", " (reversed)") : ""}</span></li>)}</ul>
         </div>
       ) : null}
       {d.entries.length ? (
         <div className="acct-card" data-testid="entries">
-          <h3>{L("القيود المحاسبية", "Journal entries")}</h3>
+          <h2>{L("القيود المحاسبية", "Journal entries")}</h2>
           <ul className="ops-list">{d.entries.map((e) => <li key={e.id}><Link href={`/dashboard/accounting/journals/${e.id}`} className="acct-code">{e.ref ?? e.id.slice(-6)}</Link><span>{e.event}</span></li>)}</ul>
         </div>
       ) : d.status === "ISSUED" ? <p className="acct-hint">{L("لم يُرحَّل قيد: المحاسبة غير مفعّلة أو المستند قبل تاريخ البدء.", "No entry: accounting is not active or the document precedes the go-live date.")}</p> : null}
