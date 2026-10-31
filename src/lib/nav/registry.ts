@@ -928,6 +928,9 @@ export const NAV: NavNode[] = [
   { id: "settings.inventory", ar: "المخزون", en: "Inventory", icon: Boxes, href: "/dashboard/settings/inventory", anyOf: [{ module: "settings" }], adminOnly: true, shell: { place: "menu", icon: "box", trailRoot: "settings" } },
   { id: "settings.products", ar: "المنتجات", en: "Products", icon: Coffee, href: "/dashboard/settings/products", anyOf: [{ module: "settings" }], adminOnly: true, shell: { place: "menu", icon: "cup", trailRoot: "settings" } },
   { id: "settings.invoicing", ar: "الفوترة والضرائب", en: "Invoicing & tax", icon: FileText, href: "/dashboard/settings/invoicing", anyOf: [{ module: "settings" }], adminOnly: true, shell: { place: "menu", icon: "invoice", trailRoot: "settings" } },
+  // «استيراد البيانات» (go-live from Qoyod): customers, suppliers, green coffee, materials and products from Excel —
+  // the audience of «المنشأة» (the admin role); the import itself steps up.
+  { id: "settings.dataImport", ar: "استيراد البيانات", en: "Data import", icon: FileText, href: "/dashboard/settings/data-import", anyOf: [{ module: "settings" }], adminOnly: true, shell: { place: "menu", icon: "dl", trailRoot: "settings" } },
   // feature/email-demo: the e-mail provider's state and the demo send — the audience of «المنشأة».
   { id: "settings.email", ar: "البريد الإلكتروني", en: "E-mail", icon: Mail, href: "/dashboard/settings/email", anyOf: [{ module: "settings" }], adminOnly: true, shell: { place: "menu", icon: "inbox", trailRoot: "settings" } },
 ];

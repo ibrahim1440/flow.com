@@ -30,6 +30,7 @@ const SETTINGS_NAV: { ar: string; en: string; items: SettingsLink[] }[] = [
     { href: "/dashboard/settings", ar: "المنشأة", en: "Organisation", icon: "home" },
     { href: "/dashboard/employees", ar: "المستخدمون والصلاحيات", en: "Users & permissions", icon: "users", also: ["/dashboard/employees/"] },
     { href: "/dashboard/settings/email", ar: "البريد الإلكتروني", en: "E-mail", icon: "inbox" },
+    { href: "/dashboard/settings/data-import", ar: "استيراد البيانات", en: "Data import", icon: "dl" },
   ] },
   { ar: "التشغيل", en: "Operations", items: [
     { href: "/dashboard/settings/production", ar: "الإنتاج والتحميص", en: "Production & roasting", icon: "flame", also: ["/dashboard/settings/production/"] },
