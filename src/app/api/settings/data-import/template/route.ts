@@ -1,5 +1,5 @@
 import { NextResponse } from "@/lib/api-response";
-import { forbidden, requireAuth } from "@/lib/auth-server";
+import { requireDataImport } from "@/lib/data-import/gate";
 import { handleDomainError } from "@/lib/api-error";
 import { prisma } from "@/lib/db";
 import { MATERIAL_TEMPLATES } from "@/lib/inventory/item-categories";
@@ -7,11 +7,10 @@ import { isTransitLocation } from "@/lib/inventory/locations";
 import { isImportEntity } from "@/lib/data-import/spec";
 import { templateXlsx } from "@/lib/data-import/sheet";
 
-/** The .xlsx template of one kind of data (?entity=customers|suppliers|green|materials|products), admin only. */
+/** The .xlsx template of one kind of data (?entity=customers|suppliers|green|materials|products), for the admin role or a holder of accounting › data_import (requireDataImport). */
 export async function GET(request: Request) {
-  const { user, error } = await requireAuth();
+  const { error } = await requireDataImport();
   if (error) return error;
-  if (user.role !== "admin") return forbidden();
   const entity = new URL(request.url).searchParams.get("entity");
   if (!isImportEntity(entity)) return NextResponse.json({ error: "نوع البيانات غير معروف.", errorEn: "Unknown entity." }, { status: 400 });
   try {

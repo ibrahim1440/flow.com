@@ -117,6 +117,10 @@ export const ACCOUNTANT_NAV: AcctGroup[] = [
       // «جودة المحاسبة» — reserved; today it opens the close checklist and reconciliation (the page redirects there).
       { id: "acct.accounting.quality", term: "quality", href: "/dashboard/accounting/quality" },
       { id: "acct.accounting.recurring", term: "recurring", href: "/dashboard/accounting/recurring", reserved: true, create: { href: "/dashboard/accounting/recurring/new", anyOf: [A("accounting", "recurring")] } },
+      // «استيراد البيانات» (accounting › data_import, owner-granted): customers, suppliers, green coffee, materials and
+      // products from Excel / Qoyod before the opening balances. «المحاسبة» claims the path for every accounting holder, so
+      // the item also names the duty (the registry's own entry, finance.dataImport, is the holder's or the admin role's).
+      { id: "acct.accounting.dataImport", term: "dataImport", href: "/dashboard/accounting/data-import", anyOf: [A("accounting", "data_import")] },
     ],
   },
   {

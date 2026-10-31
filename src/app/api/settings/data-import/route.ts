@@ -1,5 +1,5 @@
 import { NextResponse } from "@/lib/api-response";
-import { forbidden, requireAdminAction, requireAuth } from "@/lib/auth-server";
+import { requireDataImport, requireDataImportApply } from "@/lib/data-import/gate";
 import { handleDomainError } from "@/lib/api-error";
 import { auditFromRequest } from "@/lib/accounting/audit";
 import { isImportEntity } from "@/lib/data-import/spec";
@@ -10,14 +10,14 @@ import { ImportRefused, commitImport, fileChecksum, importCounts, previewImport 
 export const maxDuration = 300;
 
 /**
- * «استيراد البيانات من Excel» (Settings, admin only). GET: what the system holds now. POST
+ * «استيراد البيانات من Excel» (Settings for the admin role; «المحاسبة» for a holder of accounting › data_import — the gate
+ * is requireDataImport, src/lib/data-import/gate.ts). GET: what the system holds now. POST
  * `{ entity, fileName, fileBase64, apply? }`: without `apply` the file is checked and previewed (nothing written);
- * with `apply: true` it is imported — all or nothing, step-up — and a file with any error is refused with its preview.
+ * with `apply: true` it is imported — all or nothing, step-up (admin role or holder alike) — and a file with any error is refused with its preview.
  */
 export async function GET() {
-  const { user, error } = await requireAuth();
+  const { error } = await requireDataImport();
   if (error) return error;
-  if (user.role !== "admin") return forbidden();
   try {
     return NextResponse.json({ counts: await importCounts() });
   } catch (err) {
@@ -26,7 +26,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const { user, error } = await requireAuth();
+  const { user, error } = await requireDataImport();
   if (error) return error;
   let body: { entity?: unknown; fileName?: unknown; fileBase64?: unknown; apply?: unknown };
   try {
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "طلب غير صالح.", errorEn: "Invalid JSON body." }, { status: 400 });
   }
   const apply = body.apply === true;
-  const refused = apply ? await requireAdminAction(user, "settings.data_import", { stepUp: true }) : user.role === "admin" ? null : forbidden();
+  const refused = apply ? await requireDataImportApply(user) : null;
   if (refused) return refused;
   if (!isImportEntity(body.entity)) return NextResponse.json({ error: "نوع البيانات غير معروف.", errorEn: "Unknown entity." }, { status: 400 });
   if (typeof body.fileBase64 !== "string" || !body.fileBase64) return NextResponse.json({ error: "اختر ملفًا.", errorEn: "Choose a file." }, { status: 400 });

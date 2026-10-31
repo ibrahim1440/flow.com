@@ -273,6 +273,11 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     // BATCH22 WP-E: «إصدار عروض الأسعار من قسم المحاسبة» — create, edit and issue a quotation on an existing open deal from
     // the accounting section (not privileged: a quote is not a ledger or tax document). adminOnly in the backfill.
     { key: "quotes_issue", label: "Issue quotations from the accounting section (on an existing open deal)" },
+    // «استيراد البيانات من Excel / قيود» (owner: the accountant may be given the go-live import): the master data —
+    // customers, suppliers, green coffee, materials and products — carried in from Qoyod or the template. Privileged (the
+    // accounting module); the import itself steps up, like the admin path (src/lib/data-import/gate.ts). A new capability
+    // nobody held: permission-backfill writes it adminOnly (no migration: permissions are JSON).
+    { key: "data_import", label: "Import data from Excel / Qoyod (customers, suppliers, green coffee, materials, products)" },
   ],
   // Accounting A3: entering supplier invoices (drafts) and submitting them for approval.
   purchases: [

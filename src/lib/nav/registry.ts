@@ -564,6 +564,19 @@ export const NAV: NavNode[] = [
         highlightAs: ["finance.accounting"],
         shell: { icon: "invoice", place: "none" },
       },
+      {
+        // «استيراد البيانات» for the accountant (owner: «احتاج اعطي المحاسب صلاحية الاستيراد من قيود»): the Settings data
+        // import (customers, suppliers, green coffee, materials, products from Excel / Qoyod) drawn without the settings
+        // frame, for a holder of accounting › data_import, who has no settings module; the admin role keeps its own entry
+        // (settings.dataImport). The route guard is module level (the accounting module, or the admin role's settings);
+        // the page and every API re-check the duty (src/lib/data-import/access.ts, gate.ts).
+        id: "finance.dataImport",
+        ar: "استيراد البيانات", en: "Data import",
+        href: "/dashboard/accounting/data-import",
+        icon: FileText,
+        anyOf: [{ module: "accounting", sub: "data_import" }, { module: "settings", role: "admin" }],
+        shell: { icon: "dl" },
+      },
     ],
   },
 

@@ -54,6 +54,8 @@ export const GLOSSARY = {
   budgets: { ours: { ar: "الموازنات", en: "Budgets" }, qoyod: { ar: "الموازنات", en: "Budgets" } },
   commercialDocs: { ours: { ar: "مستندات القيود (المصدر)", en: "Source documents" }, qoyod: { ar: "المستندات التجارية", en: "Commercial documents" } },
   quality: { ours: { ar: "قائمة الإقفال والمطابقة", en: "Close checklist & reconciliation" }, qoyod: { ar: "جودة المحاسبة", en: "Accounting quality" }, where: "/dashboard/accounting/periods (close)" },
+  // «استيراد البيانات» (accounting › data_import): the go-live master-data import from Excel / Qoyod.
+  dataImport: { ours: { ar: "استيراد البيانات", en: "Data import" }, qoyod: { ar: "استيراد البيانات", en: "Data import" }, where: "/dashboard/accounting/data-import (Settings › data import for the admin role)" },
   recurring: { ours: { ar: "المعاملات المتكررة", en: "Recurring transactions" }, qoyod: { ar: "المعاملات المتكررة", en: "Recurring transactions" } },
   reports: { ours: { ar: "التقارير", en: "Reports" }, qoyod: { ar: "التقارير", en: "Reports" } },
   allReports: { ours: { ar: "التقارير المالية", en: "Financial reports" }, qoyod: { ar: "كل التقارير", en: "All reports" }, where: "/dashboard/accounting/reports" },
