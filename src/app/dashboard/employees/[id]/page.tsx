@@ -26,7 +26,7 @@ type Group = { key: string; ar: string; en: string; open: boolean; modules: { ro
 type Override = { id: string; module: string; sub: string | null; effect: string; value: string; roleValue: string; sensitive: boolean; reason: string; expiresAt: string | null; reviewAt: string | null; createdAt: string; createdByName: string | null; endedAt: string | null; endReason: string | null };
 type Event = { id: string; at: string; actor: string; actorId: string | null; action: string; label: string; target: string; source: string; details: string; reason: string | null; result: string; device: DeviceInfo; diff: { key: string; label: string; before: string; after: string }[] | null };
 type Profile = {
-  id: string; name: string; username: string | null; role: { key: string; id: string; name: string; nameEn: string; system: boolean }; customized: boolean;
+  id: string; name: string; username: string | null; phoneNumber?: string | null; role: { key: string; id: string; name: string; nameEn: string; system: boolean }; customized: boolean;
   status: UserStatus; active: boolean; self: boolean; lock: { attempts: number; since: string | null } | null;
   hr: { id: string; name: string; nameEn?: string | null; jobTitle: string; department: string | null; departmentEn?: string | null } | null; external: boolean;
   /** «البريد الإلكتروني للشركة»: the linked HR person's «بريد الشركة», else the account's own (feat/credit-hold). */
@@ -175,7 +175,8 @@ function UserProfilePageInner() {
         <>
           <CredentialsDialog open={dlg === "cred"} onClose={() => setDlg(null)} user={p} lock={p.lock} stationPinLocked={!!p.stationPin?.locked} onDone={(r) => {
             setDlg(null);
-            if (r.action === "reset_password" && r.temporaryPassword) setTemp({ password: r.temporaryPassword, expiresAt: r.expiresAt!, pending: !r.applied });
+            if (r.action === "send_activation" && r.activation) setNotice(r.activation.sent ? L(`أُرسل رابط التفعيل بالواتساب إلى ${r.activation.phone}.`, `The link was sent by WhatsApp to ${r.activation.phone}.`) : L(`ما انرسل الرابط: ${r.activation.note ?? ""}`, `Not sent: ${r.activation.note ?? ""}`));
+            else if (r.action === "reset_password" && r.temporaryPassword) setTemp({ password: r.temporaryPassword, expiresAt: r.expiresAt!, pending: !r.applied });
             else setNotice(r.action === "unlock" ? L("فُتح القفل. يستطيع الدخول بكلمة المرور الحالية.", "Unlocked.") : r.action === "reenable_station_pin" ? L(`أُعيد تفعيل رمز المحطة. يستطيع ${first} الدخول به من جديد.`, "The station PIN was re-enabled.") : L(`أُلغي رمز المحطة. يعيّن ${first} رمزًا جديدًا بنفسه.`, "The PIN was cleared."));
             refresh();
           }} />

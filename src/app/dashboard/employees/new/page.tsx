@@ -15,7 +15,7 @@ import { GROUPS, isSensitive, moduleLabel, subLabel, subsOf } from "@/lib/users/
 import { type Cells } from "@/lib/users/model";
 import { useUnsavedGuard } from "../../_components/useUnsavedGuard";
 import { Avatar, Latin, NoAccess, PasswordConfirmField, SensFlag, UsersFrame, api, endOfDayRiyadh, errText, useLangL, usePasswordConfirm, useUsersChrome } from "../_ui/shared";
-import { TempPasswordDialog } from "../_ui/dialogs";
+import { LinkSentDialog, TempPasswordDialog } from "../_ui/dialogs";
 
 type Person = { id: string; fullNameAr: string; fullNameEn: string | null; employeeNo: string; jobTitle: string; department: { nameAr: string } | null };
 type Role = { id: string; system: boolean; key: string | null; name: string; nameEn: string; description: string; permissions: Cells };
@@ -41,7 +41,7 @@ export default function NewUserPage() {
   const [sensExpiry, setSensExpiry] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [created, setCreated] = useState<{ id: string; name: string; username: string | null; temporaryPassword: string; expiresAt: string } | null>(null);
+  const [created, setCreated] = useState<{ id: string; name: string; username: string | null; temporaryPassword: string; expiresAt: string; activation?: { sent: boolean; phone: string | null; note: string | null } | null } | null>(null);
   const pc = usePasswordConfirm();
 
   useUsersChrome({
@@ -102,7 +102,7 @@ export default function NewUserPage() {
     if (!(await pc.confirm())) { setBusy(false); return; }
     const body = { name: name.trim(), username: username.trim(), hrEmployeeId: mode === "hr" ? personId : null, phoneNumber: phone.trim() || undefined,
       ...(role?.system ? { role: role.key } : { accessRoleId: role?.id }), sensitive: sens, sensitiveReason: sens.length ? sensReason : undefined, sensitiveExpiresAt: sens.length ? endOfDayRiyadh(sensExpiry) : undefined };
-    const r = await api<{ id: string; name: string; username: string | null; temporaryPassword: string; expiresAt: string }>("/api/users", { method: "POST", body });
+    const r = await api<{ id: string; name: string; username: string | null; temporaryPassword: string; expiresAt: string; activation?: { sent: boolean; phone: string | null; note: string | null } | null }>("/api/users", { method: "POST", body });
     setBusy(false);
     if (!r.ok) { setErr(errText(r.data, lang, L("تعذّر إنشاء المستخدم.", "Could not create the user."))); return; }
     setCreated(r.data);
@@ -161,7 +161,7 @@ export default function NewUserPage() {
               <div><dt>{L("كلمة المرور", "Password")}</dt><dd>{L("مؤقتة، تُولَّد عند الإنشاء وتُعرض مرة واحدة · يجب تغييرها عند أول دخول · تنتهي بعد 72 ساعة إن لم تُستخدم", "Temporary, generated at creation and shown once · changed at first sign-in · expires after 72 hours if unused")}</dd></div>
               <div><dt>{L("رمز المحطة", "Station PIN")}</dt><dd>{L("يعيّنه الموظف بنفسه بعد الدخول والتحقق من هويته. لا يراه المسؤول ولا يعيّنه.", "The person sets it after signing in and confirming their identity. The administrator never sees or sets it.")}</dd></div>
             </dl>
-            <label className="hr-field"><span className="hr-label">{L("رقم الجوال", "Mobile number")} <span className="ur-muted" style={{ fontWeight: 400 }}>{L("(اختياري)", "(optional)")}</span></span><input className="hr-input" type="tel" dir="ltr" value={phone} onChange={(e) => setPhone(e.target.value)} maxLength={30} /><span className="hr-help">{L("لرسائل واتساب الآلية فقط.", "For automated WhatsApp messages only.")}</span></label>
+            <label className="hr-field"><span className="hr-label">{L("رقم الجوال", "Mobile number")} <span className="ur-muted" style={{ fontWeight: 400 }}>{L("(اختياري)", "(optional)")}</span></span><input className="hr-input" type="tel" dir="ltr" value={phone} onChange={(e) => setPhone(e.target.value)} maxLength={30} /><span className="hr-help">{L("يوصله عليه رابط تفعيل الحساب بالواتساب، ورسائل النظام الآلية.", "The account activation link and automated messages go to it by WhatsApp.")}</span></label>
           </>
         ) : step === 3 ? (
           <>
@@ -212,7 +212,8 @@ export default function NewUserPage() {
         <Btn onClick={onBack}>{step === 1 ? L("إلغاء", "Cancel") : L("السابق", "Back")}</Btn>
         <Btn variant="primary" busy={busy} disabled={!canNext} onClick={onPrimary}>{primary}</Btn>
       </div>
-      {created ? <TempPasswordDialog open onClose={() => router.push(`/dashboard/employees/${created.id}`)} name={created.name} username={created.username} password={created.temporaryPassword} expiresAt={created.expiresAt} primaryLabel={L("فتح ملف المستخدم", "Open the user's profile")} onPrimary={() => router.push(`/dashboard/employees/${created.id}`)} /> : null}
+      {created?.activation?.sent ? <LinkSentDialog name={created.name} phone={created.activation.phone ?? ""} onPrimary={() => router.push(`/dashboard/employees/${created.id}`)} />
+        : created ? <TempPasswordDialog open onClose={() => router.push(`/dashboard/employees/${created.id}`)} name={created.name} username={created.username} password={created.temporaryPassword} expiresAt={created.expiresAt} primaryLabel={L("فتح ملف المستخدم", "Open the user's profile")} onPrimary={() => router.push(`/dashboard/employees/${created.id}`)} /> : null}
     </UsersFrame>
   );
 }

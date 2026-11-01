@@ -27,13 +27,13 @@ export function CredentialsDialog(props: Parameters<typeof CredentialsDialogInne
 }
 
 function CredentialsDialogInner({ open, onClose, user, lock, stationPinLocked, onDone }: {
-  open: boolean; onClose: () => void; user: { id: string; name: string; username: string | null }; lock: { attempts: number; since: string | null } | null;
+  open: boolean; onClose: () => void; user: { id: string; name: string; username: string | null; phoneNumber?: string | null }; lock: { attempts: number; since: string | null } | null;
   /** Workstations W2 (D7): the station PIN is locked on a device after too many wrong attempts. */
   stationPinLocked?: boolean;
-  onDone: (r: { action: string; temporaryPassword?: string; expiresAt?: string; applied?: boolean; pendingApproval?: unknown }) => void;
+  onDone: (r: { action: string; temporaryPassword?: string; expiresAt?: string; applied?: boolean; pendingApproval?: unknown; activation?: { sent: boolean; phone: string | null; note: string | null } }) => void;
 }) {
   const { lang, L } = useLangL();
-  const [action, setAction] = useState<"unlock" | "reset_password" | "reset_pin" | "reenable_station_pin">(lock ? "unlock" : stationPinLocked ? "reenable_station_pin" : "reset_password");
+  const [action, setAction] = useState<"unlock" | "reset_password" | "send_activation" | "reset_pin" | "reenable_station_pin">(lock ? "unlock" : stationPinLocked ? "reenable_station_pin" : user.phoneNumber && user.username ? "send_activation" : "reset_password");
   const [reason, setReason] = useState(L("طلب الموظف بعد التحقق من هويته", "The employee asked, after verifying their identity"));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -43,17 +43,19 @@ function CredentialsDialogInner({ open, onClose, user, lock, stationPinLocked, o
   async function go() {
     setBusy(true); setErr(null);
     if (!(await pc.confirm())) { setBusy(false); return; }
-    const r = await api<{ action: string; temporaryPassword?: string; expiresAt?: string; applied?: boolean; pendingApproval?: unknown }>(`/api/users/${user.id}/credentials`, { method: "POST", body: { action, reason } });
+    const r = await api<{ action: string; temporaryPassword?: string; expiresAt?: string; applied?: boolean; pendingApproval?: unknown; activation?: { sent: boolean; phone: string | null; note: string | null } }>(`/api/users/${user.id}/credentials`, { method: "POST", body: { action, reason } });
     setBusy(false);
     if (!r.ok) { setErr(errText(r.data, lang, L("تعذّر التنفيذ.", "Could not do it."))); return; }
     onDone(r.data);
   }
-  const primary = action === "unlock" ? L("فتح القفل", "Unlock") : action === "reset_password" ? L("إعادة تعيين كلمة المرور", "Reset password") : action === "reenable_station_pin" ? L("إعادة تفعيل رمز المحطة", "Re-enable station PIN") : L("إعادة تعيين رمز المحطة", "Reset station PIN");
+  const primary = action === "unlock" ? L("فتح القفل", "Unlock") : action === "send_activation" ? L("إرسال الرابط", "Send the link") : action === "reset_password" ? L("إعادة تعيين كلمة المرور", "Reset password") : action === "reenable_station_pin" ? L("إعادة تفعيل رمز المحطة", "Re-enable station PIN") : L("إعادة تعيين رمز المحطة", "Reset station PIN");
   return (
     <Dialog open={open} onClose={onClose} title={L(`بيانات دخول ${user.name}`, `${user.name}'s credentials`)} sub={L("لا تُعرض كلمة المرور ولا الرمز الحاليان ولا يمكن قراءتهما.", "The current password and PIN are never shown and cannot be read.")} className="ur-dlg" testId="ur-credentials-dialog"
       actions={<><Btn onClick={onClose}>{L("تراجع", "Back")}</Btn><Btn variant="primary" busy={busy} onClick={go} disabled={reason.trim().length < 3} data-testid="ur-cred-go">{primary}</Btn></>}>
       <div className="tl-radios">
         <Radio on={action === "unlock"} onClick={() => setAction("unlock")} disabled={!lock || !user.username} title={L("فتح القفل", "Unlock")} sub={lockText} testId="ur-cred-unlock" />
+        {/* «رابط تفعيل الحساب» (owner decision): the person gets a one-time link by WhatsApp and chooses the password. */}
+        <Radio on={action === "send_activation"} onClick={() => setAction("send_activation")} disabled={!user.phoneNumber || !user.username} title={L("إرسال رابط بالواتساب", "Send a link by WhatsApp")} sub={user.phoneNumber ? L(`يوصل ${first} رابط لمرة واحدة (صالح 72 ساعة) يختار منه كلمة مروره بنفسه. ما تشوف أنت أي كلمة مرور.`, `${first} gets a one-time link (72 hours) to choose a password. You see no password.`) : L("لا رقم جوال لهذا المستخدم.", "This user has no mobile number.")} testId="ur-cred-link" />
         <Radio on={action === "reset_password"} onClick={() => setAction("reset_password")} title={L("إعادة تعيين كلمة المرور", "Reset password")} sub={L("تُولَّد كلمة مؤقتة تُعرض مرة واحدة، ويُطلب تغييرها عند أول دخول. تُنهى جلساته كلها.", "A temporary password is generated and shown once; it must be changed at first sign-in. All sessions end.")} testId="ur-cred-password" />
         <Radio on={action === "reset_pin"} onClick={() => setAction("reset_pin")} title={L("إعادة تعيين رمز المحطة", "Reset station PIN")} sub={L(`يُلغى الرمز الحالي، ويعيّن ${first} رمزًا جديدًا بعد التحقق من هويته.`, `The current PIN is cleared; ${first} sets a new one after confirming their identity.`)} testId="ur-cred-pin" />
         {/* Workstations W2 (D7): lift a station-PIN lockout; the PIN itself is unchanged. */}
@@ -87,6 +89,18 @@ export function TempPasswordDialog({ open, onClose, name, username, password, ex
       {pending ? <div className="hr-notice tone-warning">{L("يسري بعد اعتماد محرر حسابات آخر.", "Takes effect after another account editor approves.")}</div> : null}
       {printing === false ? <PrintPhase1Notice /> : null}
       <label className="tl-check"><input type="checkbox" checked={handed} onChange={(e) => setHanded(e.target.checked)} data-testid="ur-temp-handed" />{L("سلّمتُ بيانات الدخول للموظف", "I handed the credentials to the employee")}</label>
+    </Dialog>
+  );
+}
+
+/** «رابط تفعيل الحساب»: the new account's link went by WhatsApp — no password is shown to anyone. */
+export function LinkSentDialog({ name, phone, onPrimary }: { name: string; phone: string; onPrimary: () => void }) {
+  const { L } = useLangL();
+  return (
+    <Dialog open onClose={onPrimary} title={L(`أُنشئ حساب ${name}`, `${name}'s account`)} className="ur-dlg" testId="ur-link-sent"
+      sub={L(`أُرسل رابط التفعيل بالواتساب إلى ${phone}. يفتحه ويختار كلمة مروره بنفسه (صالح 72 ساعة ولمرة واحدة).`, `The activation link was sent by WhatsApp to ${phone}. It is valid for 72 hours, once.`)}
+      actions={<Btn variant="primary" onClick={onPrimary}>{L("فتح ملف المستخدم", "Open the user's profile")}</Btn>}>
+      <div className="hr-notice tone-info">{L("ما وصله؟ من ملفه ← «بيانات الدخول» ← «إرسال رابط بالواتساب» مرة ثانية.", "Not received? Profile › Credentials › Send a link by WhatsApp again.")}</div>
     </Dialog>
   );
 }

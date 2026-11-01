@@ -495,7 +495,10 @@ export async function createUser(request: Request, user: SessionUser, raw: unkno
     }]);
     return emp;
   }, TX_OPTS);
-  return { id: created.id, name: created.name, username: avail.username, temporaryPassword: temp, expiresAt: tempExpiresAt.toISOString(), withheld };
+  // «رابط تفعيل الحساب» (owner decision): with a mobile number, the person gets a one-time link by WhatsApp and chooses
+  // their own password; the temporary password stays the fallback the administrator sees.
+  const activation = phoneNumber && b.sendActivation !== false ? await (await import("./activation")).sendActivation(created.id, user.id, "INVITE") : null;
+  return { id: created.id, name: created.name, username: avail.username, temporaryPassword: temp, expiresAt: tempExpiresAt.toISOString(), withheld, activation };
 }
 
 // ── Credentials (UR-04) ────────────────────────────────────────────────────────────────────────
@@ -519,6 +522,14 @@ export async function credentialsAction(request: Request, user: SessionUser, id:
     return { action, attemptsCleared: n };
   }
 
+  if (action === "send_activation") {
+    // «رابط تفعيل الحساب»: a one-time link by WhatsApp; the person chooses the password. Nothing is shown to the administrator.
+    const { sendActivation } = await import("./activation");
+    const purpose = (await prisma.employee.findUnique({ where: { id }, select: { passwordMustChange: true, password: true } }))?.passwordMustChange ? "INVITE" : "RESET";
+    const r = await sendActivation(id, user.id, purpose);
+    await prisma.$transaction(async (tx) => recordUsersAudit(tx, ctx, r.sent ? "ACTIVATION_LINK_SENT" : "ACTIVATION_LINK_FAILED", { targetEmployeeId: id, targetName: e.name, reason, ...(r.sent ? { phone: r.phone } : { note: r.noteEn }) }), TX_OPTS);
+    return { action, activation: r };
+  }
   if (action === "reset_password") {
     const temp = temporaryPassword();
     const expiresAt = new Date(Date.now() + TEMP_PASSWORD_HOURS * 60 * 60 * 1000);

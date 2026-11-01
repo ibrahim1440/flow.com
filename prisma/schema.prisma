@@ -60,6 +60,8 @@ model Employee {
   evidenceUploaded         CollectionEvidence[]      @relation("EvidenceUploader")
   qoyodCopiesUploaded      SalesInvoiceQoyod[]       @relation("QoyodCopyUploader")
   qoyodCopiesSent          SalesInvoiceQoyod[]       @relation("QoyodCopySender")
+  /// «رابط تفعيل الحساب» (20261212090000_account_activation).
+  activations              AccountActivation[]
 
   // Native HR (additive). The HR person this login belongs to, if any. A login account is
   // never required to be an HR person and an HR person never requires a login.
@@ -10197,4 +10199,21 @@ model MessageArchive {
   @@unique([channel, messageId])
   @@index([customerId, messageCreatedAt])
   @@index([messageCreatedAt])
+}
+
+/// «رابط تفعيل الحساب» (20261212090000_account_activation): a one-time link sent by WhatsApp; the person opens it and
+/// chooses their own password. Only the token's SHA-256 is stored. INVITE (a new login) or RESET (a forgotten password).
+model AccountActivation {
+  id          String    @id @default(cuid())
+  employeeId  String
+  employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  tokenHash   String    @unique
+  purpose     String
+  createdById String
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime
+  usedAt      DateTime?
+  revokedAt   DateTime?
+
+  @@index([employeeId])
 }
