@@ -63,8 +63,9 @@ export const HomeCrumb = PageCrumb;
  * Draft / applied filter state. The card's fields edit `draft`; «تصفية» copies it to `applied` (what the page
  * fetches with); «إعادة تعيين» puts both back to `initial`. `dirty` is true while the draft differs from what is applied.
  */
-export function useFilters<T extends Record<string, unknown>>(initial: T) {
-  const first = useRef(initial);
+export function useFilters<T extends Record<string, unknown>>(initial: T, resetTo?: T) {
+  // `resetTo`: what «إعادة تعيين» returns to when `initial` came from somewhere else (e.g. the URL); default `initial`.
+  const first = useRef(resetTo ?? initial);
   const [draft, setDraft] = useState<T>(initial);
   const [applied, setApplied] = useState<T>(initial);
   const set = useCallback(<K extends keyof T>(k: K, v: T[K]) => setDraft((d) => ({ ...d, [k]: v })), []);

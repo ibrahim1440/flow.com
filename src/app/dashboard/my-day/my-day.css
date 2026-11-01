@@ -121,3 +121,13 @@
 .d21 .md-nobook span { color: var(--text-secondary); font-size: 13.5px }
 .d21 .md-empty-line { margin: 0; color: var(--text-muted); font-size: 13px }
 .d21 .md-hint { margin-bottom: 6px }
+
+.d21 .md-hello-side { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
+/* UI phase 1 · P1: «عندك N مهام متأخرة ←» beside the greeting — the danger pill, made a link with a visible focus ring
+   and a quiet hover; 44px tall on the phone where it is a tap target. */
+.d21 .md-overdue { min-height: 24px; text-decoration: none; cursor: pointer; transition: background-color .15s var(--ease), transform .12s var(--ease) }
+.d21 .md-overdue:hover { text-decoration: underline; text-underline-offset: 3px }
+.d21 .md-overdue:active { transform: scale(.97) }
+.d21 .md-overdue:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }
+@media (max-width: 767.98px) { .d21 .md-overdue { height: 44px; padding: 0 14px; font-size: 13px } }
+@media (prefers-reduced-motion: reduce) { .d21 .md-overdue { transition: none } .d21 .md-overdue:active { transform: none } }

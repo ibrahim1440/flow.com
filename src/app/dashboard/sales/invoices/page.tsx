@@ -4,15 +4,15 @@
 // unpaid / overdue), filters (status, family, period, text), the payment state of each issued invoice. The ZATCA
 // column reads «المرحلة 2 لاحقًا» until A4. A rep sees the invoices of the customers they own (the API decides).
 import Link from "next/link";
-import { use, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import { OpsLoading } from "@/components/ops/ui";
 import { Select } from "@/components/ui/Select";
 import { DOC_STATUS, DocNo, FAMILY, InvShell, KIND, PAY_STATUS, Tag, money, useApi, useLang } from "./_ui/inv";
-import { DateRange, FilterCard, Section, ListFooter, ListPageSize, useFilters, useTerm } from "@/components/chrome";
+import { DateRange, FilterCard, Section, ListFooter, ListPageSize, LIST_PAGE_SIZES, useFilters, useTerm } from "@/components/chrome";
 import { LocationFilter } from "../../accounting/_ui/locations";
 import { moneyMinus, useAccountantView } from "../../accounting/_ui/qoyod-pages";
 import { D21Dialog } from "@/components/ui/Dialog";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { RequestQueue } from "./_ui/queue";
 
 type Row = {
@@ -21,7 +21,27 @@ type Row = {
   open: string | null; payment: "PAID" | "PARTIAL" | "UNPAID" | null; overdue: boolean; source: string;
 };
 type List = { items: Row[]; total: number; take: number; skip: number; byStatus: Record<string, number>; can: { create: boolean; view: boolean } };
-type Search = { tab?: string; orderId?: string; customerId?: string; view?: string };
+type Search = { tab?: string; orderId?: string; customerId?: string; view?: string; status?: string; family?: string; from?: string; to?: string; q?: string; loc?: string; page?: string; size?: string; skip?: string };
+// Hand-typed or stale URLs must never reach the API as nonsense (a 1e21 offset, page 1e20, the 45th of the 13th
+// month): anything that is not a sane value is dropped and the default stands. The API keeps its own checks.
+/** A whole number from the URL within [min, 100000] (plain digits only), or the fallback. */
+const urlInt = (v: string | undefined, fallback: number, min: number) => {
+  if (!v || !/^\d{1,6}$/.test(v)) return fallback;
+  const n = Number(v);
+  return n >= min && n <= 100_000 ? n : fallback;
+};
+/** A value only from the filter's own options, or "". */
+const urlOneOf = (v: string | undefined, allowed: readonly string[]) => (v && allowed.includes(v) ? v : "");
+const STATUSES = ["DRAFT", "ISSUED", "CANCELLED"] as const;
+const FAMILIES = ["STANDARD", "SIMPLIFIED"] as const;
+/** The page size, only from the list's own options. */
+const urlSize = (v: string | undefined) => { const n = Number(v); return (LIST_PAGE_SIZES as readonly number[]).includes(n) ? n : 15; };
+/** A real calendar date yyyy-mm-dd (it must survive a round trip through Date), or "". */
+const urlDate = (v: string | undefined) => {
+  if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return "";
+  const d = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v ? v : "";
+};
 const NO_SEARCH: Promise<Search> = Promise.resolve({});
 /** Qoyod's payment-state words for an issued invoice (QOYOD-REF §1.5; «معلقة» for unpaid is to confirm — Questions §4). */
 const Q_PAY: Record<string, [string, string, "warning" | "info" | "success"]> = {
@@ -47,15 +67,39 @@ function InvoiceList({ sp }: { sp: Search }) {
   const pick = useApi<List>(picker ? `/api/sales/invoices?status=ISSUED&take=10&skip=0${pq.trim() ? `&q=${encodeURIComponent(pq.trim())}` : ""}` : null);
   const router = useRouter();
   const t = useTerm();
-  const [status, setStatus] = useState("");
-  const [family, setFamily] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [q, setQ] = useState("");
-  const [skip, setSkip] = useState(0);
-  const f = useFilters({ from: "", to: "", status: "", family: "", customerId: "", q: "", locations: [] as string[] });
-  const [page, setPage] = useState(1);
-  const [size, setSize] = useState(15);
+  // The search, the filters and the page live in the URL (UI phase 1 · P1): opening an invoice and pressing back, or
+  // refreshing, brings the same list back. Read once from the URL here; written back with router.replace below, so the
+  // browser history gains no entry per keystroke. Same API and the same query parameters as before.
+  const [status, setStatus] = useState(urlOneOf(sp.status, STATUSES));
+  const [family, setFamily] = useState(urlOneOf(sp.family, FAMILIES));
+  const [from, setFrom] = useState(urlDate(sp.from));
+  const [to, setTo] = useState(urlDate(sp.to));
+  const [q, setQ] = useState(sp.q ?? "");
+  const [skip, setSkip] = useState(() => urlInt(sp.skip, 0, 0));
+  const f = useFilters({ from: urlDate(sp.from), to: urlDate(sp.to), status: urlOneOf(sp.status, STATUSES), family: urlOneOf(sp.family, FAMILIES), customerId: sp.customerId ?? "", q: sp.q ?? "", locations: sp.loc ? sp.loc.split(",").filter(Boolean) : [] as string[] },
+    // «إعادة تعيين» clears to nothing, not back to what the URL opened with.
+    { from: "", to: "", status: "", family: "", customerId: "", q: "", locations: [] as string[] });
+  const [page, setPage] = useState(() => urlInt(sp.page, 1, 1));
+  const [size, setSize] = useState(() => urlSize(sp.size));
+  const pathname = usePathname();
+  useEffect(() => {
+    const v = qoyod ? f.applied : { status, family, from, to, q, customerId: sp.customerId ?? "", locations: [] as string[] };
+    const u = new URLSearchParams();
+    for (const k of ["tab", "orderId"] as const) if (sp[k]) u.set(k, sp[k]!);
+    if (v.status) u.set("status", v.status);
+    if (v.family) u.set("family", v.family);
+    if (v.from) u.set("from", v.from);
+    if (v.to) u.set("to", v.to);
+    if (v.q.trim()) u.set("q", v.q.trim());
+    if (v.customerId) u.set("customerId", v.customerId);
+    if (v.locations.length) u.set("loc", v.locations.join(","));
+    if (qoyod) { if (page > 1) u.set("page", String(page)); if (size !== 15) u.set("size", String(size)); } else if (skip > 0) u.set("skip", String(skip));
+    const next = u.toString();
+    if (next === window.location.search.replace(/^\?/, "")) return;
+    // A short pause so typing in the search box does not rewrite the URL on every key.
+    const timer = setTimeout(() => router.replace(next ? `${pathname}?${next}` : pathname, { scroll: false }), 300);
+    return () => clearTimeout(timer);
+  }, [qoyod, f.applied, status, family, from, to, q, skip, page, size, sp, pathname, router]);
   const custs = useApi<{ items: { id: string; name: string; nameAr: string | null }[] }>(qoyod ? "/api/sales/invoices/customers?q=" : null);
   const url = useMemo(() => {
     const v = qoyod ? f.applied : { status, family, from, to, q, customerId: "" };

@@ -169,7 +169,11 @@ function MyDay() {
           : ro ? (ar ? `${n(Math.min(callCount, TOP))} اتصالات مهمة اليوم` : `${n(Math.min(callCount, TOP))} important calls today`)
             : ar ? `عندك ${n(Math.min(callCount, TOP))} اتصالات مهمة اليوم` : `${n(Math.min(callCount, TOP))} important calls today`}</p>
       </div>
-      <Streak d={data} lang={lang} third={ro} />
+      <span className="md-hello-side">
+        <Streak d={data} lang={lang} third={ro} />
+        {/* The rep's own overdue tasks are «مساحة عملي»'s; this is the way there (never on a manager's read-only view). */}
+        {!ro ? <OverdueTasksLink lang={lang} /> : null}
+      </span>
     </div>
   );
 
@@ -230,6 +234,31 @@ function MyDay() {
       </div>
       {quick}
     </div>
+  );
+}
+
+/**
+ * «عندك 3 مهام متأخرة ←» — the viewer's own overdue tasks, counted with the tasks list's own filter
+ * (GET /api/workspace/tasks?scope=mine&status=open&due=overdue) and opening that same filtered list. Shown only when
+ * there is something overdue; a failed count shows nothing (the tasks stay one menu away), never a wrong number.
+ */
+function OverdueTasksLink({ lang }: { lang: Lang }) {
+  const [count, setCount] = useState<{ n: number; more: boolean } | null>(null);
+  useEffect(() => {
+    let off = false;
+    fetch("/api/workspace/tasks?scope=mine&status=open&due=overdue&limit=100", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { items: unknown[]; next: string | null } | null) => { if (!off && d) setCount({ n: d.items.length, more: !!d.next }); })
+      .catch(() => undefined);
+    return () => { off = true; };
+  }, []);
+  if (!count || count.n === 0) return null;
+  const n = count.more ? `+${count.n}` : String(count.n);
+  const ar = lang === "ar";
+  return (
+    <Link className="md-pill bad md-overdue" href="/dashboard/workspace/tasks?due=overdue" data-testid="md-overdue-tasks">
+      {ar ? <>{count.n === 1 && !count.more ? "عندك مهمة متأخرة" : count.n === 2 && !count.more ? "عندك مهمتين متأخرتين" : <>عندك <bdi className="num">{n}</bdi> {count.n <= 10 ? "مهام متأخرة" : "مهمة متأخرة"}</>} ←</> : <><bdi className="num">{n}</bdi> overdue {count.n === 1 ? "task" : "tasks"} →</>}
+    </Link>
   );
 }
 

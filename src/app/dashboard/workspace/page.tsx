@@ -7,7 +7,7 @@ import { Fragment, useMemo, useState } from "react";
 import { Btn, Notice, OpsBanner, OpsEmpty, OpsError, OpsLoading, useL } from "@/components/ops/ui";
 import { dayOf, dueLabel, greeting, overdueBy, timeOf, ago } from "@/lib/workspace/format";
 import { DueText, PriorityMark, TypeChip, approvalTitle, WsPage, WsShell, recordOf, useLang, useNow, useSelection, useWs, type ApprovalItem, type Appointment, type CrmDue, type QuoteDue, type ReorderDue, type Task } from "./_components/kit";
-import { CreateTaskDialog, CrmResultDialog, ReorderCallDialog, TaskPane } from "./_components/task-ui";
+import { CreateTaskDialog, CrmResultDialog, ReorderCallDialog, ResultDialog, TaskPane } from "./_components/task-ui";
 import { useUser } from "../user-context";
 import { DecisionPane } from "./_components/approval-ui";
 import { AppointmentDialog } from "./_components/calendar-ui";
@@ -43,6 +43,7 @@ export default function TodayPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [showLater, setShowLater] = useState(false);
   const [crmResult, setCrmResult] = useState<CrmDue | null>(null);
+  const [resultTask, setResultTask] = useState<Task | null>(null);
   const [reorderCall, setReorderCall] = useState<ReorderDue | null>(null);
 
   const rows = useMemo<Row[]>(() => {
@@ -105,7 +106,8 @@ export default function TodayPage() {
               <PriorityMark priority={t.priority} />
             </span>
           </button>
-          {main ? <Btn size="sm" onClick={() => setTaskId(t.id)}>{L(...ACTION[main])}</Btn> : <Btn size="sm" variant="ghost" onClick={() => setTaskId(t.id)}>{L("فتح", "Open")}</Btn>}
+          {/* «تسجيل النتيجة» opens the result dialog itself (the same one as in the pane); the other actions open the pane. */}
+          {main ? <Btn size="sm" onClick={() => (main === "record_result" ? setResultTask(t) : setTaskId(t.id))} data-testid={main === "record_result" ? `today-result-${t.id}` : undefined}>{L(...ACTION[main])}</Btn> : <Btn size="sm" variant="ghost" onClick={() => setTaskId(t.id)}>{L("فتح", "Open")}</Btn>}
         </li>
       );
     }
@@ -233,6 +235,7 @@ export default function TodayPage() {
       {!taskId && selectedApproval ? <DecisionPane item={selectedApproval} onClose={() => { setApprovalKey(null); setHeldApproval(null); }} onDecided={(m, it) => { if (m) { setToast(m); setHeldApproval(it); } reload(); }} /> : null}
       {creating ? <CreateTaskDialog onClose={() => setCreating(false)} onCreated={(t, m) => { setCreating(false); setToast(m); reload(); setTaskId(t.id); }} /> : null}
       {reorderCall ? <ReorderCallDialog item={reorderCall} onClose={() => setReorderCall(null)} onDone={(m) => { setReorderCall(null); setToast(m); reload(); }} /> : null}
+      {resultTask ? <ResultDialog task={resultTask} onClose={() => setResultTask(null)} onDone={(m) => { setResultTask(null); setToast(m); reload(); }} /> : null}
       {crmResult ? <CrmResultDialog crm={crmResult} onClose={() => setCrmResult(null)} onDone={(m) => { setCrmResult(null); setToast(m); reload(); }} /> : null}
       {newAppt ? <AppointmentDialog onClose={() => setNewAppt(false)} onSaved={(m) => { setNewAppt(false); setToast(m); reload(); }} /> : null}
     </WsShell>
