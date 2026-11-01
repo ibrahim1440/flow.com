@@ -20,7 +20,10 @@
 .d21 .md-pill.info { background: var(--status-info-tint); color: var(--status-info) }
 .d21 .md-pill.ok { background: var(--status-success-tint); color: var(--status-success) }
 .d21 .md-pill.pri { background: var(--action-primary-tint); color: var(--action-primary) }
-.d21 .md-pill.sig { background: var(--status-warning-tint); color: var(--status-warning) } /* polish: #bd7d47 on its tint was 3.0:1; the warning ink is the token for text on this tint */
+/* The streak pill keeps the brand's brown (owner's choice, option ٣), darkened until it reads: --brand-signature
+   #bd7d47 on this tint was 3.0:1; this ink is 5.0:1 (WCAG AA). Scoped to «يومي»; the theme token is unchanged. */
+.d21 .md { --md-signature-ink: #935a29 }
+.d21 .md-pill.sig { background: var(--status-warning-tint); color: var(--md-signature-ink) }
 
 /* Target */
 .d21 .md-target { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: center }
