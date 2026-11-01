@@ -8,7 +8,7 @@ import { setAuditContext, type AuditContext } from "@/lib/accounting/audit";
 import { riyadhDay, dayText } from "@/lib/accounting/dates";
 import { Decimal, ZERO } from "@/lib/accounting/money";
 import { reverseEntry } from "@/lib/accounting/posting-engine";
-import { agingOf, allocateFifo, applicationRefusal, daysOverdue, statementOf, openOf, unappliedOf, type CreditItem, type DebitItem, type StatementMove } from "./ar-math";
+import { agingOf, allocateFifo, applicationRefusal, daysOverdue, statementOf, openOf, openingArItems, openingShare, unappliedOf, type CreditItem, type DebitItem, type StatementMove } from "./ar-math";
 import { postApplication, postReceiptReceived, postedEntry, reverseReceiptEntries } from "./postings";
 import { refuseInv, refuseWith } from "./refusals";
 
@@ -26,10 +26,56 @@ async function receiptCustomer(db: Db, c: { customerId: string | null; opportuni
   return o?.customerId ?? null;
 }
 
+/**
+ * The customers' OPENING AR — the balance the opening entry (go-live, from the old books) put on the AR account for
+ * each customer — and the part of each posted receipt that paid it: the AR credit of its RECEIVED entry beyond the
+ * invoices it was applied to at approval. Read from the ledger (no schema of its own), as the AP side does for the
+ * suppliers' opening balance (ops/ap.ts supplierOpeningOutstanding). A receipt posted before this rule credited AR
+ * only for its invoices: its share is zero.
+ */
+export async function openingAr(db: Db, customerIds: string[] | null) {
+  const empty = { goLive: null as string | null, balance: new Map<string, Decimal>(), paid: new Map<string, Decimal>(), share: new Map<string, Decimal>() };
+  const [role, st] = await Promise.all([
+    db.accountRole.findUnique({ where: { tenantId_role: { tenantId: "hiqbah", role: "AR" } }, select: { accountId: true } }),
+    db.accountingSettings.findUnique({ where: { id: "singleton" }, select: { goLiveDate: true, openingEntryId: true } }),
+  ]);
+  if (!role || !st?.goLiveDate || !st.openingEntryId) return empty;
+  const goLive = day(st.goLiveDate);
+  const ids = customerIds ?? null;
+  const opening = await db.$queryRaw<{ partyId: string; v: Prisma.Decimal }[]>`
+    SELECT l."partyId", sum(l."debit" - l."credit") AS v FROM "JournalEntryLine" l JOIN "JournalEntry" j ON j."id" = l."journalEntryId"
+     WHERE l."accountId" = ${role.accountId} AND l."partyType" = 'CUSTOMER' AND j."type"::text = 'OPENING' AND j."status" IN ('POSTED', 'REVERSED')
+       AND (${ids}::text[] IS NULL OR l."partyId" = ANY(${ids}::text[]))
+     GROUP BY l."partyId"`;
+  const received = await db.$queryRaw<{ collectionId: string; partyId: string; v: Prisma.Decimal; atReceipt: Prisma.Decimal }[]>`
+    SELECT j."sourceId" AS "collectionId", l."partyId", sum(l."credit" - l."debit") AS v,
+           coalesce((SELECT sum(a."amount") FROM "ArApplication" a WHERE a."collectionId" = j."sourceId" AND a."atReceipt"), 0) AS "atReceipt"
+      FROM "JournalEntryLine" l JOIN "JournalEntry" j ON j."id" = l."journalEntryId"
+     WHERE j."sourceModule" = 'sales' AND j."sourceType" = 'COLLECTION' AND j."sourceEvent" = 'RECEIVED' AND j."status" = 'POSTED'
+       AND l."accountId" = ${role.accountId} AND l."partyType" = 'CUSTOMER'
+       AND (${ids}::text[] IS NULL OR l."partyId" = ANY(${ids}::text[]))
+     GROUP BY j."sourceId", l."partyId"`;
+  const out = { ...empty, goLive };
+  for (const o of opening) out.balance.set(o.partyId, D(o.v));
+  for (const r of received) {
+    const share = Decimal.max(D(r.v).minus(D(r.atReceipt)), ZERO);
+    if (share.isZero()) continue;
+    out.share.set(r.collectionId, share);
+    out.paid.set(r.partyId, (out.paid.get(r.partyId) ?? ZERO).plus(share));
+  }
+  return out;
+}
+
+/** What the customer's opening balance still owes (negative: the old books owed the customer). */
+export async function customerOpeningOutstanding(db: Db, customerId: string): Promise<Decimal> {
+  const o = await openingAr(db, [customerId]);
+  return (o.balance.get(customerId) ?? ZERO).minus(o.paid.get(customerId) ?? ZERO);
+}
+
 /** Every AR item of the given customers (null = all customers with any). */
 export async function arItems(db: Db, customerIds: string[] | null) {
   const inCust = customerIds ? { customerId: { in: customerIds } } : {};
-  const [docs, apps, receipts] = await Promise.all([
+  const [docs, apps, receipts, opening] = await Promise.all([
     db.salesInvoice.findMany({
       where: { status: "ISSUED", ...inCust },
       select: { id: true, kind: true, number: true, customerId: true, issueDate: true, dueDate: true, grandTotal: true, issuedAt: true, originalInvoiceId: true, family: true },
@@ -39,6 +85,7 @@ export async function arItems(db: Db, customerIds: string[] | null) {
       where: { status: { in: ["APPROVED", "REVERSED"] }, ...(customerIds ? { OR: [{ customerId: { in: customerIds } }, { customerId: null, opportunity: { customerId: { in: customerIds } } }] } : {}) },
       select: { id: true, status: true, customerId: true, amountGross: true, collectedAt: true, decidedAt: true, reversedAt: true, referenceNumber: true, paymentMethod: true, opportunity: { select: { customerId: true, title: true } }, quote: { select: { quoteNumber: true } } },
     }),
+    openingAr(db, customerIds),
   ]);
   const appliedTo = new Map<string, Decimal>(), appliedFrom = new Map<string, Decimal>();
   for (const a of apps) {
@@ -70,7 +117,18 @@ export async function arItems(db: Db, customerIds: string[] | null) {
     if (r.status === "REVERSED") {
       b.moves.push({ date: day(r.reversedAt ?? r.collectedAt), at: (r.reversedAt ?? r.collectedAt).toISOString(), kind: "RECEIPT_REVERSED", ref, id: r.id, debit: amount, credit: ZERO });
     } else {
-      b.credits.push({ id: r.id, kind: "RECEIPT", ref, date: at, amount, applied: appliedFrom.get(r.id) ?? ZERO });
+      // The part of the receipt that paid the opening balance counts as applied (it is in the opening item's `paid`).
+      b.credits.push({ id: r.id, kind: "RECEIPT", ref, date: at, amount, applied: (appliedFrom.get(r.id) ?? ZERO).plus(opening.share.get(r.id) ?? ZERO) });
+    }
+  }
+  if (opening.goLive) {
+    for (const [cust, balance] of opening.balance) {
+      const it = openingArItems(cust, opening.goLive, balance, opening.paid.get(cust) ?? ZERO);
+      if (!it.move) continue;
+      const b = bucket(cust);
+      if (it.debit) b.debits.push(it.debit);
+      if (it.credit) b.credits.push(it.credit);
+      b.moves.push(it.move);
     }
   }
   return { byCustomer, applications: apps };
@@ -270,9 +328,15 @@ export async function onCollectionApproved(tx: Tx, collectionId: string, actorId
     await tx.arApplication.create({ data: { customerId, invoiceId: p.id, collectionId: c.id, amount: p.amount.toFixed(2), appliedDate: today, atReceipt: true, createdById: actorId } });
     applied = applied.plus(p.amount);
   }
+  // What the invoices did not take pays the customer's opening balance first (oldest debt), the rest is an advance.
+  let toOpening = ZERO;
+  if (amount.minus(applied).greaterThan(0)) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`ar:opening:${customerId}`}, 0))`;
+    toOpening = openingShare(amount.minus(applied), await customerOpeningOutstanding(tx, customerId));
+  }
   const ref = c.receiptNumber ?? c.referenceNumber ?? c.id.slice(-8);
-  const posting = await postReceiptReceived(tx, { collectionId: c.id, amount, appliedAtReceipt: applied, method: c.paymentMethod, depositAccountId: c.depositAccountId, customerId, date: dayText(riyadhDay(c.collectedAt)), ref, memo: c.receiptMemo, sodBypass: c.sodBypass, branchId: c.branchId }, actorId);
-  return { applied: applied.toFixed(2), posting: posting.status, parts: parts.map((p) => ({ invoiceId: p.id, amount: p.amount.toFixed(2) })) };
+  const posting = await postReceiptReceived(tx, { collectionId: c.id, amount, appliedAtReceipt: applied, toOpening, method: c.paymentMethod, depositAccountId: c.depositAccountId, customerId, date: dayText(riyadhDay(c.collectedAt)), ref, memo: c.receiptMemo, sodBypass: c.sodBypass, branchId: c.branchId }, actorId);
+  return { applied: applied.toFixed(2), toOpening: toOpening.toFixed(2), posting: posting.status, parts: parts.map((p) => ({ invoiceId: p.id, amount: p.amount.toFixed(2) })) };
 }
 
 /** A receipt was reversed: its applications are reversed and every posting of it is reversed. */

@@ -12,7 +12,7 @@ import { Select } from "@/components/ui/Select";
 import { DocNo, InvShell, Msg, money, useApi, useLang, useWrite, todayRiyadh } from "../../invoices/_ui/inv";
 
 type Open = { id: string; kind: string; number: string; issueDate: string; dueDate: string | null; total: string; applied: string; open: string; daysOverdue: number };
-type Credit = { id: string; kind: "RECEIPT" | "CREDIT_NOTE"; ref: string; date: string; amount: string; applied: string; unapplied: string };
+type Credit = { id: string; kind: "RECEIPT" | "CREDIT_NOTE" | "OPENING"; ref: string; date: string; amount: string; applied: string; unapplied: string };
 type Move = { date: string; kind: string; ref: string; id: string; debit: string; credit: string; balance: string };
 type App = { id: string; invoiceId: string; collectionId: string | null; creditNoteId: string | null; amount: string; appliedDate: string; atReceipt: boolean };
 type Data = {
@@ -21,7 +21,7 @@ type Data = {
   statement: { opening: string; closing: string; totalDebit: string; totalCredit: string; rows: Move[] };
   applications: App[]; can: { ar: boolean };
 };
-const MOVE: Record<string, [string, string]> = { INVOICE: ["فاتورة", "Invoice"], DEBIT_NOTE: ["إشعار مدين", "Debit note"], CREDIT_NOTE: ["إشعار دائن", "Credit note"], RECEIPT: ["تحصيل", "Receipt"], RECEIPT_REVERSED: ["عكس تحصيل", "Receipt reversed"] };
+const MOVE: Record<string, [string, string]> = { INVOICE: ["فاتورة", "Invoice"], DEBIT_NOTE: ["إشعار مدين", "Debit note"], CREDIT_NOTE: ["إشعار دائن", "Credit note"], RECEIPT: ["تحصيل", "Receipt"], RECEIPT_REVERSED: ["عكس تحصيل", "Receipt reversed"], OPENING: ["رصيد افتتاحي من النظام السابق", "Opening balance (old books)"] };
 
 export default function StatementPage({ params }: { params: Promise<{ customerId: string }> }) {
   const { customerId } = use(params);
@@ -33,6 +33,8 @@ export default function StatementPage({ params }: { params: Promise<{ customerId
   const [apply, setApply] = useState<{ source: Credit; invoiceId: string; amount: string } | null>(null);
   const [undo, setUndo] = useState<{ app: App; reason: string } | null>(null);
   const d = r.data;
+  // Applications go to invoices / debit notes only: the opening balance is settled by receipts at approval.
+  const targets = d ? d.open.filter((o) => o.kind !== "OPENING") : [];
   const docNo = (id: string) => d?.open.find((o) => o.id === id)?.number ?? d?.statement.rows.find((m) => m.id === id)?.ref ?? id.slice(-6);
   const doApply = async () => {
     if (!apply) return;
@@ -66,7 +68,7 @@ export default function StatementPage({ params }: { params: Promise<{ customerId
               <div className="hr-tablewrap"><table className="hr-table is-dense" data-testid="open-items">
                 <thead><tr><th>{L("المستند", "Document")}</th><th>{L("الإصدار", "Issued")}</th><th>{L("الاستحقاق", "Due")}</th><th className="num">{L("الإجمالي", "Total")}</th><th className="num">{L("المسدَّد", "Paid")}</th><th className="num">{L("المتبقي", "Open")}</th></tr></thead>
                 <tbody>{d.open.map((o) => (
-                  <tr key={o.id}><td><Link href={`/dashboard/sales/invoices/${o.id}`}><DocNo n={o.number} /></Link></td><td className="hr-num">{o.issueDate}</td>
+                  <tr key={o.id}><td>{o.kind === "OPENING" ? <span title={L("الرصيد المرحَّل من النظام السابق في تاريخ بدء التشغيل؛ يسدَّد بالتحصيلات تلقائيًا", "The balance carried in from the old books at go-live; receipts settle it automatically")}>{L("رصيد افتتاحي", "Opening balance")}</span> : <Link href={`/dashboard/sales/invoices/${o.id}`}><DocNo n={o.number} /></Link>}</td><td className="hr-num">{o.issueDate}</td>
                     <td className="hr-num">{o.dueDate ?? "—"}{o.daysOverdue > 0 ? <span className="inv-sub inv-late">{L(`متأخرة ${o.daysOverdue} يومًا`, `${o.daysOverdue} days overdue`)}</span> : null}</td>
                     <td className="num hr-num">{money(o.total)}</td><td className="num hr-num">{money(o.applied, true) || "—"}</td><td className="num hr-num"><b>{money(o.open)}</b></td></tr>
                 ))}</tbody>
@@ -78,9 +80,9 @@ export default function StatementPage({ params }: { params: Promise<{ customerId
             <h2>{L("تحصيلات وأرصدة دائنة غير مخصصة", "Unapplied receipts and credits")}</h2>
             {d.credits.length === 0 ? <p className="acct-hint">{L("لا شيء غير مخصص.", "Nothing unapplied.")}</p> : (
               <ul className="ops-list" data-testid="credits">{d.credits.map((c) => (
-                <li key={c.id}><span>{c.kind === "RECEIPT" ? L("تحصيل", "Receipt") : L("إشعار دائن", "Credit note")} <bdi className="acct-code">{c.ref}</bdi> · <span className="hr-num">{c.date}</span></span>
+                <li key={c.id}><span>{c.kind === "RECEIPT" ? L("تحصيل", "Receipt") : c.kind === "OPENING" ? L("رصيد افتتاحي دائن", "Opening credit balance") : L("إشعار دائن", "Credit note")} <bdi className="acct-code">{c.ref}</bdi> · <span className="hr-num">{c.date}</span></span>
                   <span className="acct-actions"><span className="hr-num">{money(c.unapplied)} / {money(c.amount)}</span>
-                    {d.can.ar && d.open.length ? <button type="button" className="hr-btn is-sm is-primary" onClick={() => setApply({ source: c, invoiceId: d.open[0].id, amount: String(Math.min(Number(c.unapplied), Number(d.open[0].open)).toFixed(2)) })} data-testid={`apply-${c.id}`}>{L("تخصيص على فاتورة", "Apply to an invoice")}</button> : null}</span></li>
+                    {d.can.ar && targets.length && c.kind !== "OPENING" ? <button type="button" className="hr-btn is-sm is-primary" onClick={() => setApply({ source: c, invoiceId: targets[0].id, amount: String(Math.min(Number(c.unapplied), Number(targets[0].open)).toFixed(2)) })} data-testid={`apply-${c.id}`}>{L("تخصيص على فاتورة", "Apply to an invoice")}</button> : null}</span></li>
               ))}</ul>
             )}
             {!d.can.ar ? <p className="acct-hint">{L("التخصيص يحتاج صلاحية «الذمم المدينة» في المحاسبة.", "Applying needs the accounting › receivables duty.")}</p> : null}
@@ -122,7 +124,7 @@ export default function StatementPage({ params }: { params: Promise<{ customerId
           <p className="acct-hint">{apply.source.kind === "RECEIPT" ? L("تحصيل", "Receipt") : L("إشعار دائن", "Credit note")} <bdi className="acct-code">{apply.source.ref}</bdi> · {L("غير مخصص", "unapplied")} {money(apply.source.unapplied)}</p>
           <label className="hr-field"><span className="hr-label">{L("الفاتورة", "Invoice")}</span>
             <Select value={apply.invoiceId} onChange={(e) => setApply({ ...apply, invoiceId: e.target.value })}>
-              {d.open.map((o) => <option key={o.id} value={o.id}>{`${o.number} · ${money(o.open)}`}</option>)}
+              {targets.map((o) => <option key={o.id} value={o.id}>{`${o.number} · ${money(o.open)}`}</option>)}
             </Select></label>
           <label className="hr-field"><span className="hr-label">{L("المبلغ", "Amount")}</span><input className="hr-input acct-amount" inputMode="decimal" value={apply.amount} onChange={(e) => setApply({ ...apply, amount: e.target.value })} data-testid="apply-amount" /></label>
         </D21Dialog>

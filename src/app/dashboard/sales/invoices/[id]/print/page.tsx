@@ -26,6 +26,8 @@ type Data = {
   taxBreakdown: { category: string; rate: string; taxable: string; tax: string; exemptionReason: string | null }[] | null;
   qr: string | null; qrPhase: 1 | 2 | null; orderNumber: number | null;
   zatca: { environment: string; status: string; flow: string; icv: string; cleared: boolean; notShareable: boolean; testCopy: boolean } | null;
+  /** «وضع التجربة مع قيود»: an internal copy (the customer's tax invoice is Qoyod's). */
+  internal?: { qoyodNumber: string | null } | null;
 };
 type Search = { lang?: string };
 const NO_SEARCH: Promise<Search> = Promise.resolve({});
@@ -112,15 +114,16 @@ function InvoiceDoc({ id, lang }: { id: string; lang: DocLang }) {
         logo={{ src: BRAND_PRIMARY_SRC, alt: L("حِقبة", "Hiqbah"), width: Math.round(54 * BRAND_PRIMARY_VIEWBOX.w / BRAND_PRIMARY_VIEWBOX.h), height: 54 }}
         seller={{ name: sellerName, lines: sellerLines, testId: "doc-seller" }}
         title={{ main: t.main, lines: [<span key="alt" className="alt" lang={ar ? "en" : "ar"} dir={ar ? "ltr" : "rtl"}>{t.alt}</span>] }}
-        banner={draft ? { tone: "warning", title: L("مسودة — ليست فاتورة ضريبية", "Draft — not a tax invoice"), text: L("مسودة غير صادرة: لا رقم ولا رمز QR، ولا تُسلَّم للعميل. يُعطى الرقم عند الإصدار.", "An unissued draft: no number and no QR; not to be given to the customer. The number is given at issue."), testId: "inv-draft-banner" }
+        banner={data.internal ? { tone: "warning", title: L("نسخة داخلية — ليست فاتورة ضريبية", "Internal copy — not a tax invoice"), text: data.internal.qoyodNumber ? L(`الفاتورة الضريبية للعميل صادرة من قيود برقم ${data.internal.qoyodNumber}. هذه النسخة لقيود النظام الداخلية ولا تُسلَّم للعميل.`, `The customer's tax invoice is Qoyod's no. ${data.internal.qoyodNumber}. This copy is for the internal books and is not given to the customer.`) : L("الفاتورة الضريبية للعميل تصدر من قيود أثناء فترة التجربة. هذه النسخة لقيود النظام الداخلية ولا تُسلَّم للعميل.", "During the pilot the customer's tax invoice is issued from Qoyod. This copy is for the internal books and is not given to the customer.") }
+          : draft ? { tone: "warning", title: L("مسودة — ليست فاتورة ضريبية", "Draft — not a tax invoice"), text: L("مسودة غير صادرة: لا رقم ولا رمز QR، ولا تُسلَّم للعميل. يُعطى الرقم عند الإصدار.", "An unissued draft: no number and no QR; not to be given to the customer. The number is given at issue."), testId: "inv-draft-banner" }
           : data.zatca?.notShareable ? { tone: "warning", title: L("لم تعتمدها الهيئة بعد · لا تُسلَّم للعميل", "Not cleared by ZATCA yet · not for the customer"), text: L("الفاتورة الضريبية تُسلَّم بعد اعتماد الهيئة فقط؛ يظهر رمز QR المعتمد عند الاعتماد.", "A tax invoice is shared only once ZATCA clears it; the cleared QR appears then."), testId: "inv-not-cleared-banner" }
           : data.zatca?.testCopy ? { tone: "warning", title: L("نسخة اختبار · غير صالحة للعميل", "Test copy · not valid for the customer"), text: L(`صدرت في بيئة ${data.zatca.environment === "SANDBOX" ? "التجربة (بوابة المطورين)" : "المحاكاة"} لدى الهيئة.`, `Issued in ZATCA's ${data.zatca.environment === "SANDBOX" ? "developer portal (sandbox)" : "simulation"} environment.`), testId: "inv-test-banner" } : null}
-        watermark={draft ? L("مسودة — ليست فاتورة ضريبية", "DRAFT — NOT A TAX INVOICE") : null}
+        watermark={draft ? L("مسودة — ليست فاتورة ضريبية", "DRAFT — NOT A TAX INVOICE") : data.internal ? L("نسخة داخلية — ليست فاتورة ضريبية", "INTERNAL COPY — NOT A TAX INVOICE") : null}
         metaStart={metaStart} metaEnd={metaEnd}
         columns={invoiceColumns(lang)}
         rows={data.lines.map((l, i) => invoiceCells(l, i + 1, lang))}
         totals={totals}
-        extra={!draft ? (
+        extra={!draft && !data.internal ? (
           <section className="dsh-extra" data-testid="inv-qr" style={{ display: "flex", gap: 12, alignItems: "center" }}>
             {data.qr ? <span data-testid="inv-qr-code" data-qr={data.qr} data-qr-phase={data.qrPhase ?? ""}><QRCodeSVG value={data.qr} size={data.qrPhase === 2 ? 132 : 112} level="M" /></span> : null}
             <p style={{ margin: 0, fontSize: "9pt", color: "#6e6a61", maxWidth: 260 }}>

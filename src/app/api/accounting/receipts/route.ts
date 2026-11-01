@@ -5,7 +5,7 @@ import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { Decimal } from "@/lib/services/commissions/engine";
 import { PAYMENT_METHODS, type PaymentMethodValue } from "@/lib/services/sales/collections";
-import { ageTone, businessDaysBetween, receiptAbilities, recordAccountantReceipt } from "@/lib/services/sales/receipts";
+import { ageTone, businessDaysBetween, receiptAbilities, recordAccountantReceipt, recordOpeningReceipt } from "@/lib/services/sales/receipts";
 import { receiptSelfConfirmAllowed } from "@/lib/services/sales/receipt-four-eyes";
 import { auditFromRequest, setAuditContext } from "@/lib/accounting/audit";
 import type { Prisma } from "@/generated/prisma/client";
@@ -17,7 +17,8 @@ import type { Prisma } from "@/generated/prisma/client";
  *   GET  ?view=pending|confirmed|returned|rejected|reversed|all &q= &from= &to=  — the queue «سندات بانتظار التأكيد» (aged in
  *        Riyadh business days: amber over 2, red over 5) and the numbered «سند قبض» vouchers.
  *   POST — record a receipt for an issued invoice whose customer has no open deal (no commission; a second person
- *        confirms it). accounting › receipts_confirm or accounting › ar.
+ *        confirms it), or — `{ customerId, forOpening: true }` — for the customer's opening balance carried in from the
+ *        old books. accounting › receipts_confirm or accounting › ar.
  */
 const VIEWS: Record<string, Prisma.SalesCollectionWhereInput> = {
   pending: { status: "PENDING_VERIFICATION" },
@@ -115,7 +116,8 @@ export async function POST(request: Request) {
   let b: Record<string, unknown>;
   try { b = ((await request.json()) ?? {}) as Record<string, unknown>; } catch { return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 }); }
   const invoiceId = typeof b.invoiceId === "string" ? b.invoiceId : "";
-  if (!invoiceId) return NextResponse.json({ error: "اختر الفاتورة.", errorEn: "Choose the invoice.", code: "INVOICE_REQUIRED" }, { status: 400 });
+  const openingCustomerId = b.forOpening === true && typeof b.customerId === "string" ? b.customerId : "";
+  if (!invoiceId && !openingCustomerId) return NextResponse.json({ error: "اختر الفاتورة.", errorEn: "Choose the invoice.", code: "INVOICE_REQUIRED" }, { status: 400 });
   const idempotencyKey = typeof b.idempotencyKey === "string" ? b.idempotencyKey.trim() : "";
   if (idempotencyKey.length < 8 || idempotencyKey.length > 128) return NextResponse.json({ error: "idempotencyKey must be 8–128 characters." }, { status: 400 });
   const raw = typeof b.amountGross === "string" || typeof b.amountGross === "number" ? String(b.amountGross).trim() : "";
@@ -130,11 +132,12 @@ export async function POST(request: Request) {
   try {
     const r = await prisma.$transaction(async (tx) => {
       await setAuditContext(tx, auditFromRequest(request, user.id));
-      return recordAccountantReceipt(tx, {
-        invoiceId, amountGross: new Decimal(raw), collectedAt, paymentMethod,
+      const common = {
+        amountGross: new Decimal(raw), collectedAt, paymentMethod,
         referenceNumber: typeof b.referenceNumber === "string" ? b.referenceNumber : null, note: typeof b.note === "string" ? b.note : null,
         idempotencyKey, submittedById: user.id,
-      });
+      };
+      return invoiceId ? recordAccountantReceipt(tx, { ...common, invoiceId }) : recordOpeningReceipt(tx, { ...common, customerId: openingCustomerId });
     }, TX_OPTS);
     return NextResponse.json(r, { status: r.replayed ? 200 : 201 });
   } catch (err) {

@@ -11,7 +11,7 @@ import { Sec } from "../../_components/tools-ui";
 
 type S = {
   invoicePrefix: string; creditNotePrefix: string; debitNotePrefix: string; invoicingPoint: "MANUAL" | "ON_DELIVERY"; defaultTermsDays: number;
-  address: Record<string, string | null>; sellerReady: boolean; seller: { name: string | null; vatNumber: string | null }; can: { edit: boolean };
+  address: Record<string, string | null>; stored?: { qoyodPilotUntil?: string | null }; sellerReady: boolean; seller: { name: string | null; vatNumber: string | null }; can: { edit: boolean };
 };
 const ADDR: [string, string, string][] = [["sellerBuildingNo", "رقم المبنى", "Building no."], ["sellerStreet", "الشارع", "Street"], ["sellerDistrict", "الحي", "District"], ["sellerCity", "المدينة", "City"], ["sellerPostalCode", "الرمز البريدي", "Postal code"], ["sellerAdditionalNo", "الرقم الإضافي", "Additional no."]];
 
@@ -25,7 +25,7 @@ export function InvoiceDocumentsSettings() {
     fetch("/api/sales/invoices/settings", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((j: S | null) => {
       if (!j) return;
       setS(j);
-      setForm({ invoicePrefix: j.invoicePrefix, creditNotePrefix: j.creditNotePrefix, debitNotePrefix: j.debitNotePrefix, invoicingPoint: j.invoicingPoint, defaultTermsDays: String(j.defaultTermsDays), ...Object.fromEntries(Object.entries(j.address).map(([k, v]) => [k, v ?? ""])) });
+      setForm({ invoicePrefix: j.invoicePrefix, creditNotePrefix: j.creditNotePrefix, debitNotePrefix: j.debitNotePrefix, invoicingPoint: j.invoicingPoint, defaultTermsDays: String(j.defaultTermsDays), qoyodPilotUntil: j.stored?.qoyodPilotUntil ?? "", ...Object.fromEntries(Object.entries(j.address).map(([k, v]) => [k, v ?? ""])) });
     }).catch(() => undefined);
   }, []);
   if (!s) return null;
@@ -55,7 +55,10 @@ export function InvoiceDocumentsSettings() {
             <option value="ON_DELIVERY">{L("عند التسليم (تُفتح مسودة تلقائيًا)", "On delivery (a draft opens automatically)")}</option>
           </Select></label>
         {f("defaultTermsDays", "مدة السداد الافتراضية (يوم)", "Default payment terms (days)", true)}
+        <label className="hr-field"><span className="hr-label">{L("نهاية فترة التجربة مع قيود", "Qoyod pilot ends on")}</span>
+          <input type="date" className="hr-input" value={form.qoyodPilotUntil ?? ""} disabled={!s.can.edit} onChange={(e) => setForm({ ...form, qoyodPilotUntil: e.target.value })} data-testid="inv-setting-pilot" /></label>
       </div>
+      <p className="tl-sub">{L("أثناء التجربة: كل فاتورة تصدر هنا قبل هذا التاريخ نسخة داخلية للدفاتر (عليها «ليست فاتورة ضريبية» وبدون QR)، والفاتورة الضريبية للعميل هي فاتورة قيود المرفقة. اتركه فاضي لإيقاف وضع التجربة.", "During the pilot every document issued here before this date is an internal copy (marked «not a tax invoice», no QR); the customer's tax invoice is Qoyod's, attached to it. Leave empty for no pilot.")}</p>
       <p className="tl-sub">{L("الرقم يُعطى عند الإصدار بالتسلسل دون فجوات لكل بادئة (INV-000001). تغيير البادئة يبدأ سلسلة جديدة.", "Numbers are given at issue, gapless per prefix (INV-000001). A new prefix starts a new series.")}</p>
       <h3 style={{ margin: "8px 0 0", fontSize: 14 }}>{L("العنوان الوطني للمنشأة", "Seller national address")}</h3>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>{ADDR.map(([k, ar, en]) => <span key={k}>{f(k, ar, en, k !== "sellerStreet" && k !== "sellerDistrict" && k !== "sellerCity")}</span>)}</div>

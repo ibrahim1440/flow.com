@@ -482,7 +482,9 @@ export async function approveCollection(
             "Ask another member of Finance.",
         };
   }
-  if (accountant && row.customerId) {
+  // An invoice's receipt belongs to Sales when the customer has a deal; an opening-balance receipt (no invoice: the old
+  // books' debt, ../invoicing/ar.ts) is the accountant's whatever deals are open — no deal ever owned that debt.
+  if (accountant && row.customerId && row.invoiceId) {
     const open = await customerOpenDeal(tx, row.customerId);
     if (open) throw bi("CUSTOMER_HAS_OPEN_DEAL", 409, `للعميل صفقة مفتوحة («${open.title}»)؛ يُسجّل التحصيل من المبيعات على الصفقة.`, `The customer has an open deal ("${open.title}"); Sales records the collection on the deal.`);
   }

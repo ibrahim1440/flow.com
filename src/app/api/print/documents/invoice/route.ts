@@ -8,6 +8,8 @@ import { loadDocument } from "@/lib/services/invoicing/service";
 import { sellerSnapshot } from "@/lib/services/invoicing/settings";
 import { astTimestamp, phase1QrPayload } from "@/lib/services/invoicing/qr";
 import { invError } from "@/lib/services/invoicing/refusals";
+import { isInternalCopy } from "@/lib/services/invoicing/qoyod-math";
+import { qoyodPilotUntil } from "@/lib/services/invoicing/qoyod-copy";
 
 export const dynamic = "force-dynamic";
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -40,7 +42,11 @@ export async function GET(request: Request) {
     const ze = doc.zatcaXmlRef ? await prisma.zatcaDocument.findUnique({ where: { id: doc.zatcaXmlRef }, select: { environment: true, status: true, flow: true, icv: true } }) : null;
     const cleared = !!ze && ["CLEARED", "CLEARED_WITH_WARNINGS"].includes(ze.status);
     const notShareable = !!ze && ze.flow === "CLEARANCE" && !cleared;
-    if (doc.status === "ISSUED" && doc.issueDate && doc.issueTime && !notShareable) {
+    // «وضع التجربة مع قيود»: a document issued here before the pilot's end is an internal copy — the customer's tax
+    // invoice is Qoyod's. No QR (it would read as a tax invoice), a watermark, and Qoyod's number when attached.
+    const internalCopy = isInternalCopy(doc, await qoyodPilotUntil());
+    const qoyod = internalCopy ? await prisma.salesInvoiceQoyod.findUnique({ where: { invoiceId: doc.id }, select: { qoyodNumber: true } }) : null;
+    if (doc.status === "ISSUED" && doc.issueDate && doc.issueTime && !notShareable && !internalCopy) {
       qr = doc.zatcaQr ?? phase1QrPayload({
         sellerName: String(seller.name ?? ""), vatNumber: String(seller.vatNumber ?? ""),
         timestamp: astTimestamp(json.issueDate!, doc.issueTime), total: json.totals.grand, vat: json.totals.tax,
@@ -48,7 +54,7 @@ export async function GET(request: Request) {
     }
     const order = doc.orderId ? await prisma.order.findUnique({ where: { id: doc.orderId }, select: { orderNumber: true } }) : null;
     const zatca = ze ? { environment: ze.environment, status: ze.status, flow: ze.flow, icv: ze.icv.toString(), cleared, notShareable, testCopy: ze.environment !== "PRODUCTION" } : null;
-    return NextResponse.json({ ...json, seller, qr, qrPhase: doc.zatcaQr && !notShareable ? 2 : qr ? 1 : null, zatca, orderNumber: order?.orderNumber ?? null }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ ...json, seller, qr, qrPhase: doc.zatcaQr && !notShareable && !internalCopy ? 2 : qr ? 1 : null, zatca, orderNumber: order?.orderNumber ?? null, internal: internalCopy ? { qoyodNumber: qoyod?.qoyodNumber ?? null } : null }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     return invError(err);
   }

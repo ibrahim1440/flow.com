@@ -5,13 +5,16 @@
 //   debit items  — ISSUED invoices and debit notes; open = total − Σ APPLIED applications (receipts + credits);
 //   credit items — APPROVED receipts not (fully) applied (customer credit / advance) and ISSUED credit notes not
 //                  (fully) applied (their credit); unapplied = amount − Σ APPLIED applications from it;
+//   the opening  — the customer's balance carried in from the old books at the go-live date (the OPENING entry's AR
+//                  line for this party): a debit item due on the go-live date, paid by the part of each receipt that
+//                  settled it (./ar.ts openingAr); a credit balance in the old books is a credit item;
 //   balance      = Σ open debit items − Σ unapplied credits  (= Σ invoices + debit notes − credit notes − receipts).
 // The general ledger agrees by construction (POSTING-CONTRACT §4): AR holds invoices − credit notes − applied
 // receipts, CUSTOMER_ADVANCES the unapplied receipts.
 import { Decimal, ZERO } from "@/lib/accounting/money";
 
-export type DebitItem = { id: string; kind: "INVOICE" | "DEBIT_NOTE"; number: string; issueDate: string; dueDate: string | null; total: Decimal; applied: Decimal };
-export type CreditItem = { id: string; kind: "RECEIPT" | "CREDIT_NOTE"; ref: string; date: string; amount: Decimal; applied: Decimal };
+export type DebitItem = { id: string; kind: "INVOICE" | "DEBIT_NOTE" | "OPENING"; number: string; issueDate: string; dueDate: string | null; total: Decimal; applied: Decimal };
+export type CreditItem = { id: string; kind: "RECEIPT" | "CREDIT_NOTE" | "OPENING"; ref: string; date: string; amount: Decimal; applied: Decimal };
 
 export const openOf = (d: { total: Decimal; applied: Decimal }) => d.total.minus(d.applied);
 export const unappliedOf = (c: { amount: Decimal; applied: Decimal }) => c.amount.minus(c.applied);
@@ -84,7 +87,7 @@ export function applicationRefusal(amount: Decimal, source: { amount: Decimal; a
   return null;
 }
 
-export type StatementMove = { date: string; at: string; kind: "INVOICE" | "DEBIT_NOTE" | "CREDIT_NOTE" | "RECEIPT" | "RECEIPT_REVERSED"; ref: string; id: string; debit: Decimal; credit: Decimal; memo?: string | null };
+export type StatementMove = { date: string; at: string; kind: "INVOICE" | "DEBIT_NOTE" | "CREDIT_NOTE" | "RECEIPT" | "RECEIPT_REVERSED" | "OPENING"; ref: string; id: string; debit: Decimal; credit: Decimal; memo?: string | null };
 
 /** The statement of account: the balance before `from`, the moves in [from, to] with a running balance, the closing. */
 export function statementOf(moves: StatementMove[], from: string | null, to: string | null) {
@@ -102,4 +105,38 @@ export function statementOf(moves: StatementMove[], from: string | null, to: str
   const totalDebit = rows.reduce((s, r) => s.plus(r.debit), ZERO);
   const totalCredit = rows.reduce((s, r) => s.plus(r.credit), ZERO);
   return { opening, rows, totalDebit, totalCredit, closing: opening.plus(totalDebit).minus(totalCredit) };
+}
+
+/** The id of a customer's opening item (not a document: never applied to, never linked as an invoice). */
+export const openingItemId = (customerId: string) => `opening:${customerId}`;
+export const isOpeningItem = (id: string) => id.startsWith("opening:");
+export const OPENING_REF = "رصيد افتتاحي";
+
+/**
+ * A customer's opening balance as AR items: a debit balance is a debit item due on the go-live date, `paid` by the
+ * receipts that settled it; a credit balance (the customer was owed) is a credit item. Zero: nothing.
+ */
+export function openingArItems(customerId: string, goLive: string, balance: Decimal, paid: Decimal): { debit: DebitItem | null; credit: CreditItem | null; move: StatementMove | null } {
+  if (balance.isZero()) return { debit: null, credit: null, move: null };
+  const id = openingItemId(customerId);
+  const at = `${goLive}T00:00:00.000Z`;
+  if (balance.greaterThan(0)) {
+    return {
+      debit: { id, kind: "OPENING", number: OPENING_REF, issueDate: goLive, dueDate: goLive, total: balance, applied: paid },
+      credit: null,
+      move: { date: goLive, at, kind: "OPENING", ref: OPENING_REF, id, debit: balance, credit: ZERO },
+    };
+  }
+  const amount = balance.negated();
+  return {
+    debit: null,
+    credit: { id, kind: "OPENING", ref: OPENING_REF, date: goLive, amount, applied: ZERO },
+    move: { date: goLive, at, kind: "OPENING", ref: OPENING_REF, id, debit: ZERO, credit: amount },
+  };
+}
+
+/** The part of a receipt that pays the customer's opening balance: what is left after its invoices, up to what the opening still owes. */
+export function openingShare(rest: Decimal, outstanding: Decimal): Decimal {
+  if (rest.lessThanOrEqualTo(0) || outstanding.lessThanOrEqualTo(0)) return ZERO;
+  return Decimal.min(rest, outstanding);
 }

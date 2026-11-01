@@ -142,6 +142,45 @@ export async function recordAccountantReceipt(tx: Tx, input: AccountantReceiptIn
   return { collectionId: created.id, replayed: false };
 }
 
+// ── the accountant's receipt for a customer's OPENING balance (go-live from the old books) ─────────────────────────
+
+export type OpeningReceiptInput = Omit<AccountantReceiptInput, "invoiceId"> & { customerId: string };
+
+/**
+ * Record a receipt for what the customer owed in the old books at the go-live date (the opening balance: no invoice in
+ * this system). PENDING until confirmed, like an invoice receipt; bounded by what the opening still owes less the
+ * pending opening receipts (the customer row is locked so two receipts cannot both read the same room). The VAT of an
+ * opening balance was accounted in the old books: the receipt carries none. At confirmation the part its invoices do
+ * not take pays the opening first (../invoicing/ar.ts onCollectionApproved).
+ */
+export async function recordOpeningReceipt(tx: Tx, input: OpeningReceiptInput) {
+  const existing = await tx.salesCollection.findUnique({ where: { submittedById_idempotencyKey: { submittedById: input.submittedById, idempotencyKey: input.idempotencyKey } }, select: { id: true } });
+  if (existing) return { collectionId: existing.id, replayed: true };
+  if (input.amountGross.lessThanOrEqualTo(0)) throw bi("AMOUNT", 400, "المبلغ يجب أن يكون موجبًا.", "The amount must be positive.");
+  if (!(PAYMENT_METHODS as string[]).includes(input.paymentMethod)) throw bi("BAD_INPUT", 400, "طريقة الدفع غير معروفة.", "Unknown payment method.");
+  const rows = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Customer" WHERE "id" = ${input.customerId} FOR UPDATE`;
+  if (!rows.length) throw bi("NOT_FOUND", 404, "العميل غير موجود.", "Customer not found.");
+  const { customerOpeningOutstanding } = await import("../invoicing/ar");
+  const owed = new Decimal((await customerOpeningOutstanding(tx, input.customerId)).toString());
+  const pending = await tx.salesCollection.aggregate({ where: { customerId: input.customerId, source: "ACCOUNTANT", invoiceId: null, status: "PENDING_VERIFICATION" }, _sum: { amountGross: true } });
+  const room = roundMoney(owed.minus(new Decimal((pending._sum.amountGross ?? 0).toString())));
+  if (room.lessThanOrEqualTo(0)) throw bi("NO_OPENING_BALANCE", 409, "لا رصيد افتتاحي مستحق على هذا العميل (أو السندات المعلّقة تغطيه).", "This customer owes no opening balance (or pending receipts cover it).");
+  if (input.amountGross.greaterThan(room)) throw bi("OVER_OPENING", 409, `المتبقي من الرصيد الافتتاحي بعد السندات المعلّقة ${room.toFixed(2)} فقط.`, `Only ${room.toFixed(2)} of the opening balance is left after the pending receipts.`);
+  const created = await tx.salesCollection.create({
+    data: {
+      source: "ACCOUNTANT", opportunityId: null, quoteId: null, orderId: null, customerId: input.customerId, invoiceId: null,
+      idempotencyKey: input.idempotencyKey, referenceNumber: input.referenceNumber?.trim() || null,
+      amountGross: input.amountGross.toFixed(2), amountTax: "0.00", amountNet: input.amountGross.toFixed(2), currency: "SAR",
+      paymentMethod: input.paymentMethod, collectedAt: input.collectedAt, note: input.note?.trim() || "سداد من الرصيد الافتتاحي",
+      submittedById: input.submittedById, replacesCollectionId: input.replacesCollectionId ?? null,
+      branchId: await defaultBranchForActor(tx, input.submittedById),
+    },
+    select: { id: true },
+  });
+  await emitAutomationEvent(tx, { eventType: "sales.collection_status_changed", subjectType: "SalesCollection", subjectId: created.id, payload: { from: null, to: "PENDING_VERIFICATION" }, actorId: input.submittedById });
+  return { collectionId: created.id, replayed: false };
+}
+
 // ── «نسخ وتصحيح» ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 export type CorrectionEdits = { amountGross?: Decimal; collectedAt?: Date; paymentMethod?: PaymentMethodValue; referenceNumber?: string | null; note?: string | null };
@@ -168,7 +207,7 @@ export async function copyAndCorrect(tx: Tx, input: { collectionId: string; acto
     idempotencyKey: input.idempotencyKey, submittedById: input.actorId, replacesCollectionId: old.id,
   };
   const r = old.source === "ACCOUNTANT"
-    ? await recordAccountantReceipt(tx, { ...base, invoiceId: old.invoiceId! })
+    ? old.invoiceId ? await recordAccountantReceipt(tx, { ...base, invoiceId: old.invoiceId }) : await recordOpeningReceipt(tx, { ...base, customerId: old.customerId! })
     : await submitCollection(tx, { ...base, opportunityId: old.opportunityId!, currency: old.currency });
   if (!r.replayed && old.evidence.length) {
     await tx.collectionEvidence.createMany({

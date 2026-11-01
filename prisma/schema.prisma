@@ -58,6 +58,8 @@ model Employee {
   collectionsDecided       SalesCollection[]         @relation("CollectionDecider")
   collectionsReversed      SalesCollection[]         @relation("CollectionReverser")
   evidenceUploaded         CollectionEvidence[]      @relation("EvidenceUploader")
+  qoyodCopiesUploaded      SalesInvoiceQoyod[]       @relation("QoyodCopyUploader")
+  qoyodCopiesSent          SalesInvoiceQoyod[]       @relation("QoyodCopySender")
 
   // Native HR (additive). The HR person this login belongs to, if any. A login account is
   // never required to be an HR person and an HR person never requires a login.
@@ -1041,6 +1043,9 @@ model CuppingScore {
 model SystemConfig {
   id         String  @id @default("singleton")
   logoBase64 String? @db.Text
+  /// «وضع التجربة مع قيود» (20261211090000_qoyod_pilot_invoices): a sales document issued before this day is an internal
+  /// copy — the customer's tax invoice is Qoyod's PDF (SalesInvoiceQoyod). NULL = no pilot.
+  qoyodPilotUntil DateTime? @db.Date
 
   // ─── Quotations (additive, migration 20261021090000_sales_quotes) ─────────────────────
   /// Discount (percent of the subtotal) above which issuing a quotation needs approval by a
@@ -4331,6 +4336,33 @@ model CollectionEvidence {
   @@index([collectionId])
 }
 
+/// «فاتورة قيود» (owner's pilot, 20261211090000_qoyod_pilot_invoices): the tax invoice Qoyod issued for an ISSUED sales
+/// document of this system, as its PDF and number. One per document; a replacement bumps `version`. The rep sends it to
+/// the customer (WhatsApp file + e-mail attachment, through the automation queues: test mode, opt-out, archive).
+model SalesInvoiceQoyod {
+  id           String       @id @default(cuid())
+  invoiceId    String       @unique
+  invoice      SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  qoyodNumber  String
+  filename     String
+  /// Always application/pdf, proven by the file's own signature (CHECK).
+  mimeType     String
+  byteSize     Int
+  /// SHA-256 (hex) of the bytes.
+  checksum     String
+  content      Bytes
+  version      Int          @default(1)
+  uploadedById String
+  uploadedBy   Employee     @relation("QoyodCopyUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+  uploadedAt   DateTime     @default(now())
+  sendCount    Int          @default(0)
+  lastSentAt   DateTime?
+  lastSentById String?
+  lastSentBy   Employee?    @relation("QoyodCopySender", fields: [lastSentById], references: [id], onDelete: SetNull)
+
+  @@index([qoyodNumber])
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Finance — Cash Management, Receipt Allocation, Monthly Cash Budget (additive)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -5275,6 +5307,9 @@ model WhatsAppMessage {
   body              String
   /// Every message row names its channel (20261207090000_email_channel); always "whatsapp" here (CHECK).
   channel           String                @default("whatsapp")
+  /// A file sent with the message (20261211090000_qoyod_pilot_invoices): "qoyod_pdf" (SalesInvoiceQoyod id) or null (CHECK).
+  attachmentKind    String?
+  attachmentRefId   String?
   /// Set when the daily job moved `body` (older than 180 days) to MessageArchive; `body` is then "".
   bodyArchivedAt    DateTime?
   status            WhatsAppMessageStatus @default(QUEUED)
@@ -7597,6 +7632,8 @@ model SalesInvoice {
   branch   FinBranch? @relation("SalesInvoiceBranch", fields: [branchId], references: [id], onDelete: Restrict)
   /// «سند قبض» of an invoice with no deal (20261127090000_customer_receipts, source ACCOUNTANT).
   accountantReceipts SalesCollection[]  @relation("CollectionInvoice")
+  /// «فاتورة قيود» (20261211090000_qoyod_pilot_invoices): Qoyod's tax-invoice PDF of this issued document.
+  qoyodCopy          SalesInvoiceQoyod?
 
   @@unique([tenantId, number])
   @@unique([tenantId, channel, externalOrderRef])
@@ -10066,7 +10103,7 @@ model EmailMessage {
   /// The plain-text part as sent. Moved to MessageArchive after 180 days ("" then, bodyArchivedAt set).
   bodyText          String             @default("")
   bodyArchivedAt    DateTime?
-  /// "quote_pdf" or null (CHECK).
+  /// "quote_pdf", "qoyod_pdf" (20261211090000) or null (CHECK).
   attachmentKind    String?
   attachmentRefId   String?
   /// sha256 (hex) of the PDF bytes sent, so the same PDF can be regenerated and proven.

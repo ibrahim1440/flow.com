@@ -12,11 +12,11 @@ type AddrField = (typeof SELLER_ADDRESS_FIELDS)[number];
 export type InvoiceSettings = {
   invoicePrefix: string; creditNotePrefix: string; debitNotePrefix: string;
   invoicingPoint: InvoicingPoint; defaultTermsDays: number;
-  stored: { invoicePrefix: string | null; creditNotePrefix: string | null; debitNotePrefix: string | null; invoicingPoint: string | null; invoiceDefaultTermsDays: number | null };
+  stored: { invoicePrefix: string | null; creditNotePrefix: string | null; debitNotePrefix: string | null; invoicingPoint: string | null; invoiceDefaultTermsDays: number | null; qoyodPilotUntil: string | null };
   address: Record<AddrField, string | null>;
 };
 
-type Row = Partial<Record<"invoicePrefix" | "creditNotePrefix" | "debitNotePrefix" | "invoicingPoint" | AddrField, string | null>> & { invoiceDefaultTermsDays?: number | null };
+type Row = Partial<Record<"invoicePrefix" | "creditNotePrefix" | "debitNotePrefix" | "invoicingPoint" | AddrField, string | null>> & { invoiceDefaultTermsDays?: number | null; qoyodPilotUntil?: Date | null };
 type Db = { systemConfig: { findUnique(args: { where: { id: string } }): Promise<unknown> } };
 
 export function settingsFromRow(row: Row | null | undefined): InvoiceSettings {
@@ -25,7 +25,7 @@ export function settingsFromRow(row: Row | null | undefined): InvoiceSettings {
     invoicePrefix: r.invoicePrefix || "INV", creditNotePrefix: r.creditNotePrefix || "CN", debitNotePrefix: r.debitNotePrefix || "DN",
     invoicingPoint: r.invoicingPoint === "ON_DELIVERY" ? "ON_DELIVERY" : "MANUAL",
     defaultTermsDays: r.invoiceDefaultTermsDays ?? DEFAULT_TERMS_DAYS,
-    stored: { invoicePrefix: r.invoicePrefix ?? null, creditNotePrefix: r.creditNotePrefix ?? null, debitNotePrefix: r.debitNotePrefix ?? null, invoicingPoint: r.invoicingPoint ?? null, invoiceDefaultTermsDays: r.invoiceDefaultTermsDays ?? null },
+    stored: { invoicePrefix: r.invoicePrefix ?? null, creditNotePrefix: r.creditNotePrefix ?? null, debitNotePrefix: r.debitNotePrefix ?? null, invoicingPoint: r.invoicingPoint ?? null, invoiceDefaultTermsDays: r.invoiceDefaultTermsDays ?? null, qoyodPilotUntil: r.qoyodPilotUntil ? r.qoyodPilotUntil.toISOString().slice(0, 10) : null },
     address: Object.fromEntries(SELLER_ADDRESS_FIELDS.map((k) => [k, r[k] ?? null])) as Record<AddrField, string | null>,
   };
 }
@@ -34,7 +34,7 @@ export async function readInvoiceSettings(db: Db): Promise<InvoiceSettings> {
   return settingsFromRow((await db.systemConfig.findUnique({ where: { id: "singleton" } })) as Row | null);
 }
 
-export type SettingsPatch = Partial<{ invoicePrefix: string | null; creditNotePrefix: string | null; debitNotePrefix: string | null; invoicingPoint: string | null; invoiceDefaultTermsDays: number | null } & Record<AddrField, string | null>>;
+export type SettingsPatch = Partial<{ invoicePrefix: string | null; creditNotePrefix: string | null; debitNotePrefix: string | null; invoicingPoint: string | null; invoiceDefaultTermsDays: number | null; qoyodPilotUntil: Date | null } & Record<AddrField, string | null>>;
 
 /** PUT body → the columns to write, or the field that is wrong. */
 export function parseSettingsPatch(b: Record<string, unknown>): { ok: true; data: SettingsPatch } | { ok: false; field: string; ar: string; en: string } {
@@ -61,6 +61,13 @@ export function parseSettingsPatch(b: Record<string, unknown>): { ok: true; data
       if (!Number.isInteger(n) || n < 0 || n > 365) return { ok: false, field: "defaultTermsDays", ar: "مدة السداد أيام صحيحة من 0 إلى 365.", en: "Payment terms are 0 to 365 whole days." };
       data.invoiceDefaultTermsDays = n;
     }
+  }
+  // «وضع التجربة مع قيود»: documents issued before this day are internal copies (the customer's invoice is Qoyod's).
+  if ("qoyodPilotUntil" in b) {
+    const v = b.qoyodPilotUntil;
+    if (v === null || v === "") data.qoyodPilotUntil = null;
+    else if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`))) data.qoyodPilotUntil = new Date(`${v}T00:00:00Z`);
+    else return { ok: false, field: "qoyodPilotUntil", ar: "نهاية فترة التجربة تاريخ بصيغة سنة-شهر-يوم.", en: "The pilot's end is a date (YYYY-MM-DD)." };
   }
   for (const k of SELLER_ADDRESS_FIELDS) {
     if (!(k in b)) continue;

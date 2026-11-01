@@ -9,7 +9,8 @@ import { Decimal } from "@/lib/services/commissions/engine";
 /**
  * GET /api/accounting/receipts/eligible?q= — the issued invoices a receipt with no deal may be recorded against: open
  * (what is applied and what is pending deducted), each with whether its customer has an open deal (then Sales records the
- * collection on the deal — the form says so and offers nothing). The accountant's record duty only.
+ * collection on the deal — the form says so and offers nothing) — and the customers' OPENING balances still owed (carried
+ * in from the old books at go-live, less what receipts paid and what is pending: `openings`). The accountant's record duty only.
  */
 export async function GET(request: Request) {
   const { user, error } = await requireModule("accounting");
@@ -44,7 +45,24 @@ export async function GET(request: Request) {
       if (!deals.has(i.customerId)) deals.set(i.customerId, await customerOpenDeal(prisma, i.customerId));
       out.push({ id: i.id, number: i.number, issueDate: i.issueDate?.toISOString().slice(0, 10) ?? null, dueDate: i.dueDate?.toISOString().slice(0, 10) ?? null, total: new Decimal(i.grandTotal.toString()).toFixed(2), open: open.toFixed(2), currency: i.currency, customer: customers.get(i.customerId) ?? { id: i.customerId, name: "—", nameAr: null }, openDeal: deals.get(i.customerId) ?? null });
     }
-    return NextResponse.json({ invoices: out });
+    // The opening balances: no deal rule (no deal ever owned that debt — collections.ts approveCollection).
+    const { openingAr } = await import("@/lib/services/invoicing/ar");
+    const op = invoiceId ? null : await openingAr(prisma, q ? byName : null);
+    const openings: { customerId: string; customer: { id: string; name: string; nameAr: string | null }; open: string }[] = [];
+    if (op && op.balance.size) {
+      const ids = [...op.balance.keys()];
+      const [pend, names] = await Promise.all([
+        prisma.salesCollection.groupBy({ by: ["customerId"], where: { customerId: { in: ids }, source: "ACCOUNTANT", invoiceId: null, status: "PENDING_VERIFICATION" }, _sum: { amountGross: true } }),
+        prisma.customer.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, nameAr: true } }),
+      ]);
+      for (const [cust, bal] of op.balance) {
+        const owed = new Decimal(bal.toString()).minus(new Decimal((op.paid.get(cust) ?? 0).toString())).minus(new Decimal((pend.find((p) => p.customerId === cust)?._sum.amountGross ?? 0).toString()));
+        if (owed.lessThanOrEqualTo(0)) continue;
+        openings.push({ customerId: cust, customer: names.find((c) => c.id === cust) ?? { id: cust, name: "—", nameAr: null }, open: owed.toFixed(2) });
+      }
+      openings.sort((a, b) => (a.customer.nameAr || a.customer.name).localeCompare(b.customer.nameAr || b.customer.name, "ar"));
+    }
+    return NextResponse.json({ invoices: out, openings });
   } catch (err) {
     return handleDomainError(err);
   }

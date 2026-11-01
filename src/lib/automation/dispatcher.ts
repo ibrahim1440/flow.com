@@ -19,7 +19,8 @@ import "server-only";
  */
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import { getConnectionState, sendText } from "@/lib/whatsapp/evolution";
+import { getConnectionState, sendDocument, sendText } from "@/lib/whatsapp/evolution";
+import { qoyodAttachmentFor } from "@/lib/services/invoicing/qoyod-attachment";
 import { getEvent, type Lang } from "./catalog";
 import { firstFailingCondition } from "./conditions";
 import { employeeMessageLangs, employeeRecipient, resolveEventContext, type EventContext, type Person, type StoredEvent } from "./context";
@@ -419,7 +420,7 @@ async function recipientsOf(tx: Tx, to: Recipient, ctx: EventContext): Promise<P
 
 // ─── 4. Sending ────────────────────────────────────────────────────────────────
 
-type Claimed = { id: string; phone: string | null; intendedPhone: string | null; body: string; attempts: number; statusNote: string | null };
+type Claimed = { id: string; phone: string | null; intendedPhone: string | null; body: string; attempts: number; statusNote: string | null; attachmentKind: string | null; attachmentRefId: string | null; subjectType: string | null; subjectId: string | null };
 
 async function sendDueMessages(report: DispatchReport, deadline: number, maxSends: number) {
   const settings = await readSettings();
@@ -456,7 +457,7 @@ async function sendDueMessages(report: DispatchReport, deadline: number, maxSend
       LIMIT ${maxSends}
       FOR UPDATE SKIP LOCKED
     )
-    RETURNING id, phone, "intendedPhone", body, attempts, "statusNote"`;
+    RETURNING id, phone, "intendedPhone", body, attempts, "statusNote", "attachmentKind", "attachmentRefId", "subjectType", "subjectId"`;
 
   for (let i = 0; i < claimed.length; i++) {
     const msg = claimed[i];
@@ -479,9 +480,21 @@ async function sendDueMessages(report: DispatchReport, deadline: number, maxSend
       continue;
     }
 
+    // «فاتورة قيود»: the PDF is read now and must still be the one the message names, on the message's own invoice.
+    let doc: Awaited<ReturnType<typeof qoyodAttachmentFor>> = null;
+    if (msg.attachmentKind) {
+      doc = msg.attachmentKind === "qoyod_pdf" ? await qoyodAttachmentFor(msg.attachmentRefId, msg.subjectType, msg.subjectId) : null;
+      if (!doc) {
+        await prisma.whatsAppMessage.update({ where: { id: msg.id }, data: { status: "FAILED", lockedAt: null, statusNote: "The attached file is no longer available for this document." } });
+        continue;
+      }
+    }
+
     const attemptNo = msg.attempts + 1;
     const started = Date.now();
-    const result = await sendText(phone, msg.body);
+    const result = doc
+      ? await sendDocument(phone, { base64: doc.content.toString("base64"), fileName: doc.filename, mimeType: doc.mimeType, caption: msg.body })
+      : await sendText(phone, msg.body);
     const durationMs = Date.now() - started;
 
     await prisma.whatsAppSendAttempt.create({

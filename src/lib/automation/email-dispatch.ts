@@ -21,6 +21,7 @@ import { recipientFor } from "@/lib/notify/recipients";
 import { companyInfoFrom } from "@/lib/notify/templates/demo";
 import type { CompanyInfo } from "@/lib/notify/templates/types";
 import { sellerSnapshot } from "@/lib/services/invoicing/settings";
+import { qoyodAttachmentFor } from "@/lib/services/invoicing/qoyod-attachment";
 import { appBaseUrl, newEmailLinkId, unsubscribeToken } from "./email-links";
 import { EMAIL_NOTES, effectiveEmailMode, emailSendTarget, finalEmailGuard, type EffectiveEmailMode } from "./email-mode";
 import { quoteEmailInput, renderQuoteEmail, renderTextEmail, wrapHtml, wrapSubject, wrapText } from "./email-render";
@@ -123,7 +124,9 @@ async function sendTimeRefusal(msg: Claimed, mode: Exclude<EffectiveEmailMode, {
   // Transactional only (phase 1, PDPL): an automated e-mail must come from a system event of the catalogue (an order,
   // a quotation, a payment…). Nothing else — no campaign, no bulk send — goes out through this sender.
   if (!msg.eventType || !getEvent(msg.eventType)) return { status: "FAILED", note: EMAIL_NOTES.notTransactional };
-  if (msg.subjectType === "SalesInvoice") {
+  // «فاتورة قيود» (owner's pilot): the attachment IS the tax invoice — Qoyod's, cleared there — so this system's
+  // e-invoicing lock does not apply to it. Only the Qoyod PDF passes; this system's own invoice stays locked.
+  if (msg.subjectType === "SalesInvoice" && msg.attachmentKind !== "qoyod_pdf") {
     const inv = msg.subjectId ? await prisma.salesInvoice.findUnique({ where: { id: msg.subjectId }, select: { zatcaStatus: true } }) : null;
     if (!inv || !["CLEARED", "REPORTED"].includes(inv.zatcaStatus ?? "")) return { status: "SKIPPED", note: EMAIL_NOTES.invoiceLocked };
   }
@@ -159,6 +162,14 @@ async function contentOf(msg: Claimed, company: CompanyInfo, replyable: boolean)
     const subject = msg.subject?.trim() && !msg.subject.includes("{{") ? msg.subject : r.subject;
     return { subject, html: r.html, text: r.text, attachments: r.attachments, sha256: r.pdfSha256 || null };
   }
+  if (msg.attachmentKind === "qoyod_pdf") {
+    // The message's own invoice, its own customer, the PDF as it is now (a replacement is sent as the new version).
+    const doc = await qoyodAttachmentFor(msg.attachmentRefId, msg.subjectType, msg.subjectId);
+    if (!doc || !msg.customerId || doc.customerId !== msg.customerId) return { refused: EMAIL_NOTES.attachmentOther };
+    const r = renderTextEmail({ subject: msg.subject, bodyText: msg.bodyText, company });
+    return { subject: r.subject, html: r.html, text: r.text, attachments: [{ filename: doc.filename, contentBase64: doc.content.toString("base64"), contentType: doc.mimeType }], sha256: doc.checksum };
+  }
+  if (msg.attachmentKind) return { refused: EMAIL_NOTES.attachmentMissing };
   const r = renderTextEmail({ subject: msg.subject, bodyText: msg.bodyText, company });
   return { subject: r.subject, html: r.html, text: r.text, sha256: null };
 }

@@ -79,7 +79,7 @@ function Reports() {
       <div className="acct-row">
         <div className="acct-seg" role="group" aria-label={L("التقرير", "Report")}>
           <button type="button" aria-pressed={view === "tb"} onClick={() => go({ view: null })} data-testid="view-tb">{L("ميزان المراجعة", "Trial balance")}</button>
-          <button type="button" aria-pressed={view === "ledger"} onClick={() => go({ view: "ledger" })} data-testid="view-ledger">{L("دفتر الأستاذ", "General ledger")}</button>
+          <button type="button" aria-pressed={view === "ledger"} onClick={() => go({ view: "ledger" })} data-testid="view-ledger">{L("كشف حساب", "Account statement")}</button>
           <button type="button" aria-pressed={view === "income"} onClick={() => go({ view: "income" })} data-testid="view-income">{L("قائمة الدخل", "Income statement")}</button>
           <button type="button" aria-pressed={view === "balance"} onClick={() => go({ view: "balance" })} data-testid="view-balance">{L("المركز المالي", "Balance sheet")}</button>
           <button type="button" aria-pressed={view === "cashflow"} onClick={() => go({ view: "cashflow" })} data-testid="view-cashflow">{L("التدفقات النقدية", "Cash flow")}</button>
@@ -165,10 +165,10 @@ function Reports() {
                 </tbody>
               </table>
             </div>
-            <p className="acct-hint">{L("صف الحساب يفتح دفتر الأستاذ للفترة نفسها. القيود غير المرحّلة لا تدخل التقرير أبدًا.", "A row opens the account's ledger for the same range. Unposted entries never enter the report.")}</p>
+            <p className="acct-hint">{L("صف الحساب يفتح كشف حسابه للفترة نفسها. القيود غير المرحّلة لا تدخل التقرير أبدًا.", "A row opens the account's statement for the same range. Unposted entries never enter the report.")}</p>
           </>
         )
-      ) : !accountId ? <p className="acct-hint">{L("اختر حسابًا لعرض دفتر الأستاذ.", "Choose an account to see its ledger.")}</p> : gl.error ? <p role="alert" className="hr-err">{gl.error}</p> : !gl.data ? <OpsLoading /> : (
+      ) : !accountId ? <p className="acct-hint">{L("اختر الحساب (المخزون، البنك، الأصول…) لعرض كشف حسابه: الرصيد الافتتاحي، الحركات، والرصيد بعد كل حركة.", "Choose the account (inventory, bank, assets…) to see its statement: opening balance, movements and the running balance.")}</p> : gl.error ? <p role="alert" className="hr-err">{gl.error}</p> : !gl.data ? <OpsLoading /> : (
         <>
           <p className="acct-hint"><Link href={`${path}?from=${from}&to=${to}`}>→ {L(`رجوع إلى ميزان المراجعة · ${from} – ${to}`, `Back to the trial balance · ${from} – ${to}`)}</Link> · {gl.data.account.normalBalance === "CREDIT" ? L("دائن بطبيعته", "Credit-normal") : L("مدين بطبيعته", "Debit-normal")}{gl.data.account.controlType ? L(" · حساب مراقبة", " · control account") : ""}</p>
           <div className="hr-tablewrap">

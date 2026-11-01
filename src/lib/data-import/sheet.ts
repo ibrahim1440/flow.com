@@ -1,6 +1,7 @@
-// «استيراد البيانات من Excel» — the file in and the template out. An .xlsx (Excel, or Qoyod's export saved as Excel) or
-// a .csv (UTF-8, comma / semicolon / tab) becomes a table of trimmed text cells; the template is an .xlsx with the
-// data sheet (headers only — an example row left in a data sheet would be imported) and an instructions sheet.
+// «استيراد البيانات من Excel / قيود» — the file in and the template out. An .xlsx (Qoyod's customers / vendors export,
+// or any Excel) or a .csv (Qoyod's products export: UTF-8, comma / semicolon / tab) becomes a table of trimmed text
+// cells; the template is Qoyod's own layout — its sheet name, its headers in its order (headers only: an example row
+// left in a data sheet would be imported) — then an instructions sheet.
 import ExcelJS from "exceljs";
 import { COLUMNS, ENTITY_LABEL, type ImportEntity } from "./spec";
 
@@ -78,38 +79,46 @@ export async function readTable(buf: Buffer, fileName: string): Promise<string[]
 export type TemplateLists = { locations: { code: string; nameAr: string }[]; materialCategories: { nameAr: string; nameEn: string | null }[] };
 
 /** The template workbook: the data sheet (bold headers, required ones marked «*», text columns formatted as text). */
+/** Qoyod's sheet name for each export (the template reads like the file Qoyod gives). */
+const QOYOD_SHEET: Record<ImportEntity, string> = { customers: "Customers", suppliers: "Vendors", products: "Products" };
+
+/**
+ * The template workbook: Qoyod's columns in Qoyod's order and words (required ones darker), text columns formatted as
+ * text; the products template adds our three optional columns after Qoyod's (unit, site, pack weight).
+ */
 export async function templateXlsx(entity: ImportEntity, lists: TemplateLists): Promise<Buffer> {
-  const cols = COLUMNS[entity];
+  const cols = COLUMNS[entity].filter((c) => !c.extra || entity === "products");
   const wb = new ExcelJS.Workbook();
   wb.creator = "Hiqbah";
   wb.created = new Date();
-  const ws = wb.addWorksheet(DATA_SHEET, { views: [{ rightToLeft: true, state: "frozen", ySplit: 1 }] });
-  ws.columns = cols.map((c) => ({ header: c.required ? `${c.ar} *` : c.ar, key: c.key, width: Math.max(14, c.ar.length + 6), style: c.text ? { numFmt: "@" } : undefined }));
+  const ws = wb.addWorksheet(QOYOD_SHEET[entity], { views: [{ rightToLeft: true, state: "frozen", ySplit: 1 }] });
+  ws.columns = cols.map((c) => ({ header: c.ar, key: c.key, width: Math.max(14, c.ar.length + 4), style: c.text ? { numFmt: "@" } : undefined }));
   const head = ws.getRow(1);
   head.font = { bold: true, color: { argb: "FFFFFFFF" } };
   head.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
   head.height = 28;
   cols.forEach((c, i) => {
-    head.getCell(i + 1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: c.required ? "FF4C4B2F" : "FF7A7A5C" } };
+    head.getCell(i + 1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: c.required ? "FF4C4B2F" : c.extra ? "FFA39E7A" : "FF7A7A5C" } };
   });
 
   const help = wb.addWorksheet(HELP_SHEET, { views: [{ rightToLeft: true }] });
   help.columns = [{ width: 26 }, { width: 10 }, { width: 70 }, { width: 26 }];
   help.addRow([`قالب استيراد ${ENTITY_LABEL[entity].ar}`]).font = { bold: true, size: 14 };
-  help.addRow(["املأ ورقة «البيانات»: صف لكل سجل" + (entity === "products" ? " (صف لكل عبوة)" : "") + ". لا تغيّر عناوين الأعمدة. الأعمدة المعلّمة بـ * مطلوبة، والباقي اختياري ويمكن حذفه."]);
-  help.addRow(["يُفحص الملف كاملًا قبل الحفظ، ويُستورد كله أو لا شيء. السجل الموجود مسبقًا (بالاسم أو الرمز) يُتخطّى ولا يتكرر، فإعادة رفع الملف نفسه آمنة."]);
+  help.addRow([`الأعمدة بترتيب ملف قيود وأسمائه نفسها: يمكن رفع ملف التصدير من قيود كما هو. صف لكل سجل، والأعمدة الداكنة مطلوبة.`]);
+  if (entity === "products") help.addRow(["الأعمدة الثلاثة الأخيرة (الوحدة، الموقع، الوزن) ليست في ملف قيود: أضفها عند الحاجة بعد أعمدته."]);
+  help.addRow(["يُفحص الملف كاملًا قبل الحفظ، ويُستورد كله أو لا شيء. السجل الموجود مسبقًا (بالاسم أو الرقم التسلسلي) يُتخطّى ولا يتكرر، فإعادة رفع الملف نفسه آمنة."]);
   help.addRow([]);
   const th = help.addRow(["العمود", "مطلوب", "الوصف", "مثال"]);
   th.font = { bold: true };
-  for (const c of cols) help.addRow([c.ar, c.required ? "نعم" : "", c.hint ?? "", c.example]);
-  if (entity === "green" || entity === "materials") {
+  for (const c of cols) help.addRow([c.ar, c.required ? "نعم" : "", c.ignore ? "من ملف قيود — لا يحفظه النظام" : c.hint ?? "", c.example]);
+  if (entity === "products") {
     help.addRow([]);
     help.addRow(["رموز المواقع"]).font = { bold: true };
     for (const l of lists.locations) help.addRow([l.code, "", l.nameAr]);
   }
-  if (entity === "materials") {
+  if (entity === "products") {
     help.addRow([]);
-    help.addRow(["التصنيفات المتاحة"]).font = { bold: true };
+    help.addRow(["تصنيفات المواد في النظام"]).font = { bold: true };
     for (const c of lists.materialCategories) help.addRow([c.nameAr, "", c.nameEn ?? ""]);
   }
   help.getColumn(3).alignment = { wrapText: true };

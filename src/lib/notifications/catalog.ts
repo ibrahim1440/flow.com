@@ -287,6 +287,20 @@ export const EVENTS: NotificationEventDef[] = [
       link: `/dashboard/sales/invoices/${enc(s(f.invoiceId))}`,
     }),
   },
+  {
+    // «وضع التجربة مع قيود»: the accountant attached Qoyod's tax-invoice PDF; the rep sends it to the customer.
+    key: "sales.qoyod_invoice_ready", category: "sales", severity: "info",
+    label: { ar: "فاتورة قيود جاهزة للإرسال للعميل", en: "Qoyod's invoice is ready to send to the customer" },
+    recipients: [{ person: "requester" }, { person: "orderOwner" }, { person: "customerOwner" }], requires: [MOD("sales")],
+    trigger: "uploadQoyodCopy (lib/services/invoicing/qoyod-copy.ts): the accountant attached or replaced Qoyod's PDF",
+    render: (f) => ({
+      titleAr: `فاتورة قيود ${s(f.qoyodNumber)} جاهزة للإرسال`,
+      titleEn: `Qoyod invoice ${s(f.qoyodNumber)} is ready to send`,
+      bodyAr: [s(f.customerName), s(f.amount)].filter(Boolean).join(" · ") + " · افتحها واضغط «إرسال» للعميل.",
+      bodyEn: [sEn(f, "customerName"), s(f.amount)].filter(Boolean).join(" · ") + " · Open it and press «Send» to the customer.",
+      link: `/dashboard/sales/invoices/${enc(s(f.invoiceId))}`,
+    }),
+  },
   // ── Finance ──
   {
     key: "finance.collection_pending", category: "finance", severity: "warning",

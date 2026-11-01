@@ -12,7 +12,7 @@ export const maxDuration = 300;
 /**
  * «استيراد البيانات من Excel» (Settings for the admin role; «المحاسبة» for a holder of accounting › data_import — the gate
  * is requireDataImport, src/lib/data-import/gate.ts). GET: what the system holds now. POST
- * `{ entity, fileName, fileBase64, apply? }`: without `apply` the file is checked and previewed (nothing written);
+ * `{ entity, fileName, fileBase64, apply?, greenUnit? }`: without `apply` the file is checked and previewed (nothing written);
  * with `apply: true` it is imported — all or nothing, step-up (admin role or holder alike) — and a file with any error is refused with its preview.
  */
 export async function GET() {
@@ -28,7 +28,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const { user, error } = await requireDataImport();
   if (error) return error;
-  let body: { entity?: unknown; fileName?: unknown; fileBase64?: unknown; apply?: unknown };
+  let body: { entity?: unknown; fileName?: unknown; fileBase64?: unknown; apply?: unknown; greenUnit?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -41,12 +41,14 @@ export async function POST(request: Request) {
   if (typeof body.fileBase64 !== "string" || !body.fileBase64) return NextResponse.json({ error: "اختر ملفًا.", errorEn: "Choose a file." }, { status: 400 });
   if (body.fileBase64.length > Math.ceil(IMPORT_MAX_BYTES / 3) * 4 + 8) return NextResponse.json({ error: "حجم الملف أكبر من 5 ميغابايت.", errorEn: "The file is larger than 5 MB." }, { status: 413 });
   const fileName = (typeof body.fileName === "string" ? body.fileName : "file").slice(0, 200);
+  // Qoyod keeps green coffee in grams unless the owner set it up in kilos (the products file only).
+  const options = { greenUnit: body.greenUnit === "kg" ? ("kg" as const) : ("g" as const) };
   try {
     const buf = Buffer.from(body.fileBase64, "base64");
     const table = await readTable(buf, fileName);
     const checksum = fileChecksum(buf);
-    if (!apply) return NextResponse.json({ preview: await previewImport(body.entity, table, checksum) });
-    const r = await commitImport(body.entity, table, { checksum, fileName }, { id: user.id, name: user.name }, auditFromRequest(request, user.id, `data import ${body.entity}`));
+    if (!apply) return NextResponse.json({ preview: await previewImport(body.entity, table, checksum, options) });
+    const r = await commitImport(body.entity, table, { checksum, fileName }, { id: user.id, name: user.name }, auditFromRequest(request, user.id, `data import ${body.entity}`), options);
     return NextResponse.json({ ...r, counts: await importCounts() }, { status: 201 });
   } catch (err) {
     if (err instanceof SheetError) return NextResponse.json({ error: err.ar, errorEn: err.en, code: "IMPORT_FILE_UNREADABLE" }, { status: 400 });

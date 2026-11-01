@@ -18,6 +18,7 @@ import { Section } from "@/components/chrome";
 import { useAccountantView } from "../../../accounting/_ui/qoyod-pages";
 import { Banner, IssueConfirm, RequestHistory, ReturnDialog, SplitButton, fmtAt, type HistoryRow } from "../_ui/request-ui";
 import { RETURN_REASON_LABEL, type ReturnReason } from "@/lib/services/invoicing/request-math";
+import { QoyodPanel } from "../_ui/qoyod-panel";
 
 type Line = { id: string; description: string; skuCode: string | null; quantity: string; unit: "UNIT" | "KG"; unitPrice: string; discountPercent: string; discountAmount: string; taxCategory: "S" | "Z" | "E" | "O"; taxRatePercent: string; exemptionReasonCode: string | null; exemptionReason: string | null; lineNet: string; lineTax: string; lineTotal: string; orderItemId: string | null; productSkuId: string | null; originalLineId: string | null; deliveryId: string | null;
   kind?: "ITEM" | "FIXED_ASSET_SALE"; fixedAssetId?: string | null; disposalKind?: "SALE" | "SCRAP" | null;
@@ -189,6 +190,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
         )}
         <ZatcaPanel invoiceId={d.id} uuid={d.uuid} key={`${d.id}:${d.status}`} />
       </div>
+      {d.status === "ISSUED" ? <QoyodPanel invoiceId={d.id} status={d.status} key={`qoyod:${d.id}`} /> : null}
 
       {d.status === "DRAFT" && canEditDraft && lines && buyer ? (
         <>

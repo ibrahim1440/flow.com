@@ -10,6 +10,7 @@
  * Every event in the catalogue must have a resolver below; tests/automation/catalog.test.ts
  * checks the list.
  */
+import { isInternalCopy } from "@/lib/services/invoicing/qoyod-math";
 import type { Prisma } from "@/generated/prisma/client";
 import { buildDefaultPermissions, hasSubPrivilege, parsePermissions } from "@/lib/auth-shared";
 import type { DynamicRecipient, Lang } from "./catalog";
@@ -480,9 +481,13 @@ const RESOLVERS: Record<string, Resolver> = {
   "sales.invoice_status_changed": async (db, e, lang, actor) => {
     const inv = await db.salesInvoice.findUnique({
       where: { id: e.subjectId },
-      select: { kind: true, number: true, grandTotal: true, currency: true, dueDate: true, customerId: true, orderId: true },
+      select: { kind: true, number: true, grandTotal: true, currency: true, dueDate: true, customerId: true, orderId: true, status: true, issueDate: true },
     });
     if (!inv) return null;
+    // «وضع التجربة مع قيود»: this system's own document is an internal copy while the pilot runs — the customer's tax
+    // invoice is Qoyod's (sent with «إرسال»). Its number is never messaged to the customer; the staff are still told.
+    const pilot = await db.systemConfig.findUnique({ where: { id: "singleton" }, select: { qoyodPilotUntil: true } });
+    const internal = isInternalCopy(inv, pilot?.qoyodPilotUntil ?? null);
     const [customer, order] = await Promise.all([
       db.customer.findUnique({ where: { id: inv.customerId }, select: CUSTOMER_SELECT }),
       inv.orderId ? db.order.findUnique({ where: { id: inv.orderId }, select: { orderNumber: true, owner: { select: EMPLOYEE_SELECT } } }) : Promise.resolve(null),
@@ -498,7 +503,7 @@ const RESOLVERS: Record<string, Resolver> = {
         ...common(e, actor),
       },
       people: {
-        customer: customerPerson(customer, lang),
+        customer: internal ? [] : customerPerson(customer, lang),
         order_owner: employeePerson(order?.owner),
         actor: employeePerson(actor),
       },

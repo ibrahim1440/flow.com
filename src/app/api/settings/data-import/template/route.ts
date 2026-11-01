@@ -7,7 +7,7 @@ import { isTransitLocation } from "@/lib/inventory/locations";
 import { isImportEntity } from "@/lib/data-import/spec";
 import { templateXlsx } from "@/lib/data-import/sheet";
 
-/** The .xlsx template of one kind of data (?entity=customers|suppliers|green|materials|products), for the admin role or a holder of accounting › data_import (requireDataImport). */
+/** The .xlsx template of one kind of data (?entity=customers|suppliers|products — Qoyod's layout), for the admin role or a holder of accounting › data_import (requireDataImport). */
 export async function GET(request: Request) {
   const { error } = await requireDataImport();
   if (error) return error;
@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     return new Response(new Uint8Array(buf), {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": `attachment; filename="hiqbah-import-${entity}.xlsx"`,
+        "Content-Disposition": `attachment; filename="qoyod-format-${entity}.xlsx"`,
         "Cache-Control": "no-store",
       },
     });

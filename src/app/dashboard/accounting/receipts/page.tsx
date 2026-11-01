@@ -37,7 +37,7 @@ type Detail = {
   entries: { id: string; status: string; sourceEvent: string; type: string }[];
   can: { confirm: boolean; reject: boolean; reverse: boolean; editVoucher: boolean; selfRecorded: boolean; selfWouldBypass: boolean; selfConfirm?: "ALLOWED" | "NEEDS_OTHER" | null };
 };
-type Eligible = { invoices: { id: string; number: string; issueDate: string; dueDate: string | null; total: string; open: string; currency: string; customer: { id: string; name: string; nameAr: string | null }; openDeal: { id: string; title: string } | null }[] };
+type Eligible = { invoices: { id: string; number: string; issueDate: string; dueDate: string | null; total: string; open: string; currency: string; customer: { id: string; name: string; nameAr: string | null }; openDeal: { id: string; title: string } | null }[]; openings?: { customerId: string; customer: { id: string; name: string; nameAr: string | null }; open: string }[] };
 
 const METHOD: Record<string, [string, string]> = { BANK_TRANSFER: ["تحويل بنكي", "Bank transfer"], CASH: ["نقدًا", "Cash"], CHEQUE: ["شيك", "Cheque"], POS_CARD: ["بطاقة (مدى)", "Card (mada)"], OTHER: ["أخرى", "Other"] };
 const VIEWS: [string, string, string][] = [["pending", "بانتظار التأكيد", "Awaiting confirmation"], ["confirmed", "سندات القبض", "Receipts"], ["returned", "معادة للتصحيح", "Returned"], ["rejected", "مرفوضة", "Rejected"], ["reversed", "معكوسة", "Reversed"], ["all", "الكل", "All"]];
@@ -262,25 +262,31 @@ function NewReceipt({ onClose, onCreated }: { onClose: () => void; onCreated: (i
   const [form, setForm] = useState({ invoiceId: "", amountGross: "", collectedAt: todayRiyadh(), paymentMethod: "BANK_TRANSFER", referenceNumber: "", note: "" });
   const [idem] = useState(key);
   const picked = el.data?.invoices.find((i) => i.id === form.invoiceId) ?? null;
+  // «رصيد افتتاحي»: a customer's balance carried in from the old books (value "opening:<customerId>").
+  const pickedOpening = form.invoiceId.startsWith("opening:") ? el.data?.openings?.find((o) => `opening:${o.customerId}` === form.invoiceId) ?? null : null;
   async function save() {
-    const r = await w.run<{ collectionId: string }>("save", "/api/accounting/receipts", "POST", { ...form, idempotencyKey: idem }, L("سُجّل السند وينتظر تأكيد شخص آخر.", "Recorded; it awaits another person's confirmation."));
+    const { invoiceId, ...rest } = form;
+    const target = pickedOpening ? { forOpening: true, customerId: pickedOpening.customerId } : { invoiceId };
+    const r = await w.run<{ collectionId: string }>("save", "/api/accounting/receipts", "POST", { ...rest, ...target, idempotencyKey: idem }, L("سُجّل السند وينتظر تأكيد شخص آخر.", "Recorded; it awaits another person's confirmation."));
     if (r) onCreated(r.collectionId);
   }
   return (
-    <Dialog open title={L("سند قبض لفاتورة بلا صفقة", "Receipt for an invoice with no deal")} onClose={onClose}
-      actions={<><Btn onClick={onClose}>{L("إلغاء", "Cancel")}</Btn><Btn variant="primary" busy={w.busy === "save"} disabled={!picked || !!picked.openDeal || !(Number(form.amountGross) > 0)} onClick={save} data-testid="rct-new-save">{L("حفظ وإرسال للتأكيد", "Save and send for confirmation")}</Btn></>}>
+    <Dialog open title={L("سند قبض", "Receipt")} onClose={onClose}
+      actions={<><Btn onClick={onClose}>{L("إلغاء", "Cancel")}</Btn><Btn variant="primary" busy={w.busy === "save"} disabled={!(pickedOpening || (picked && !picked.openDeal)) || !(Number(form.amountGross) > 0)} onClick={save} data-testid="rct-new-save">{L("حفظ وإرسال للتأكيد", "Save and send for confirmation")}</Btn></>}>
       <Msg error={w.error ?? el.error} />
       <div className="hr-stack" data-testid="rct-new-form">
-        <p className="hr-caption">{L("لفواتير لا صفقة خلفها (يدوية أو متكررة) ولعميل بلا صفقة مفتوحة. لا عمولة عليه، ويؤكده شخص آخر.", "For invoices with no deal behind them (manual or recurring), for a customer with no open deal. No commission; another person confirms it.")}</p>
+        <p className="hr-caption">{L("لفواتير لا صفقة خلفها (يدوية أو متكررة) ولعميل بلا صفقة مفتوحة، أو لسداد رصيد افتتاحي مرحَّل من النظام السابق. لا عمولة عليه، ويؤكده شخص آخر.", "For invoices with no deal behind them (manual or recurring), for a customer with no open deal, or to settle an opening balance carried in from the old books. No commission; another person confirms it.")}</p>
         <form role="search" className="acct-row" onSubmit={(e) => { e.preventDefault(); setSearch(q.trim()); }}>
-          <label className="hr-field"><span className="hr-label">{L("ابحث عن الفاتورة", "Find the invoice")}</span><input className="hr-input" value={q} onChange={(e) => setQ(e.target.value)} placeholder={L("رقم الفاتورة أو العميل", "Invoice no. or customer")} data-testid="rct-new-q" /></label>
+          <label className="hr-field"><span className="hr-label">{L("ابحث عن الفاتورة أو العميل", "Find the invoice or customer")}</span><input className="hr-input" value={q} onChange={(e) => setQ(e.target.value)} placeholder={L("رقم الفاتورة أو العميل", "Invoice no. or customer")} data-testid="rct-new-q" /></label>
           <Btn type="submit">{L("بحث", "Search")}</Btn>
         </form>
-        <label className="hr-field"><span className="hr-label">{L("الفاتورة", "Invoice")}</span>
-          <Select value={form.invoiceId} onChange={(e) => { const i = el.data?.invoices.find((x) => x.id === e.target.value); setForm({ ...form, invoiceId: e.target.value, amountGross: i ? i.open : form.amountGross }); }} data-testid="rct-new-invoice">
-            <option value="">{el.loading ? L("جارٍ التحميل…", "Loading…") : L("اختر الفاتورة", "Choose the invoice")}</option>
+        <label className="hr-field"><span className="hr-label">{L("الفاتورة أو الرصيد الافتتاحي", "Invoice or opening balance")}</span>
+          <Select value={form.invoiceId} onChange={(e) => { const v = e.target.value; const i = el.data?.invoices.find((x) => x.id === v); const o = el.data?.openings?.find((x) => `opening:${x.customerId}` === v); setForm({ ...form, invoiceId: v, amountGross: i ? i.open : o ? o.open : form.amountGross }); }} data-testid="rct-new-invoice">
+            <option value="">{el.loading ? L("جارٍ التحميل…", "Loading…") : L("اختر الفاتورة أو الرصيد الافتتاحي", "Choose the invoice or opening balance")}</option>
             {(el.data?.invoices ?? []).map((i) => <option key={i.id} value={i.id}>{i.number} · {ar ? i.customer.nameAr || i.customer.name : i.customer.name} · {L("المتبقي", "open")} {money(i.open)}</option>)}
+            {(el.data?.openings ?? []).map((o) => <option key={o.customerId} value={`opening:${o.customerId}`}>{L("رصيد افتتاحي", "Opening balance")} · {ar ? o.customer.nameAr || o.customer.name : o.customer.name} · {L("المتبقي", "open")} {money(o.open)}</option>)}
           </Select></label>
+        {pickedOpening ? <Notice tone="info"><span data-testid="rct-new-opening">{L("سداد من الرصيد المرحَّل من النظام السابق: يخفّض ذمة العميل مباشرة، ولا ضريبة عليه (احتُسبت في النظام السابق).", "A payment against the balance carried in from the old books: it reduces the customer's receivable directly, with no VAT (accounted in the old books).")}</span></Notice> : null}
         {picked?.openDeal ? <Notice tone="warning"><span data-testid="rct-new-open-deal">{L(`للعميل صفقة مفتوحة («${picked.openDeal.title}») — يسجّل المندوب التحصيل على الصفقة.`, `The customer has an open deal ("${picked.openDeal.title}") — the rep records the collection on the deal.`)}</span></Notice> : null}
         <div className="acct-row">
           <label className="hr-field"><span className="hr-label">{L("المبلغ (شامل الضريبة) ر.س", "Amount (incl. VAT) SAR")}</span><input className="hr-input" inputMode="decimal" dir="ltr" value={form.amountGross} onChange={(e) => setForm({ ...form, amountGross: e.target.value })} data-testid="rct-new-amount" /></label>

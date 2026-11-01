@@ -85,19 +85,25 @@ export function receiptRole(method: string): "CASH" | "BANK" | "CARD_CLEARING" {
   return "BANK";
 }
 
-export function receiptEntryLines(r: { amount: Decimal; appliedAtReceipt: Decimal; method: string; customerId: string; depositAccountId?: string | null }): PostingLineInput[] {
+/**
+ * The RECEIVED entry: Dr the deposit account; Cr AR for what the receipt settles now — the invoices it was applied to
+ * at approval plus `toOpening`, the part that pays the customer's opening balance (./ar.ts) — and Cr customer
+ * advances for the rest.
+ */
+export function receiptEntryLines(r: { amount: Decimal; appliedAtReceipt: Decimal; toOpening?: Decimal; method: string; customerId: string; depositAccountId?: string | null }): PostingLineInput[] {
   const party = { type: "CUSTOMER" as const, id: r.customerId };
-  const rest = r.amount.minus(r.appliedAtReceipt);
+  const toAr = r.appliedAtReceipt.plus(r.toOpening ?? 0);
+  const rest = r.amount.minus(toAr);
   // «سند قبض» (BATCH22 WP-D): the deposit account the accountant chose at confirmation, else the method's role account.
   const cash: PostingLineInput = r.depositAccountId ? { accountId: r.depositAccountId, debit: r.amount, dims: { party } } : { role: receiptRole(r.method), debit: r.amount, dims: { party } };
   return [
     cash,
-    ...(r.appliedAtReceipt.greaterThan(0) ? [{ role: "AR", credit: r.appliedAtReceipt, dims: { party } }] : []),
+    ...(toAr.greaterThan(0) ? [{ role: "AR", credit: toAr, dims: { party } }] : []),
     ...(rest.greaterThan(0) ? [{ role: "CUSTOMER_ADVANCES", credit: rest, dims: { party } }] : []),
   ];
 }
 
-export async function postReceiptReceived(tx: Tx, r: { collectionId: string; amount: Decimal; appliedAtReceipt: Decimal; method: string; depositAccountId?: string | null; customerId: string; date: string; ref: string; memo?: string | null; sodBypass?: boolean; branchId?: string | null }, actorId: string) {
+export async function postReceiptReceived(tx: Tx, r: { collectionId: string; amount: Decimal; appliedAtReceipt: Decimal; toOpening?: Decimal; method: string; depositAccountId?: string | null; customerId: string; date: string; ref: string; memo?: string | null; sodBypass?: boolean; branchId?: string | null }, actorId: string) {
   return postEntry(tx, {
     defaultBranchId: r.branchId ?? null,
     source: { module: "sales", type: "COLLECTION", id: r.collectionId, event: "RECEIVED" },

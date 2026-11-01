@@ -1,27 +1,34 @@
-// «استيراد البيانات من Excel» — the master data carried in from Qoyod (or typed into the template) before go-live:
-// customers, suppliers, green coffee, materials (packaging / café stock) and products with their SKUs. Pure: the
-// column definitions, the header matching and the cell parsers, so the rules are asserted without a database.
-//
-// One row per record (per SKU for products). Headers in Arabic or English, Qoyod's export words accepted as aliases;
-// a column the importer does not know is ignored with a warning (a Qoyod export carries columns such as balances that
-// have their own path — the opening balances), never silently mapped.
-// No server import: the settings page reads the entity names and labels from here too.
+// «استيراد البيانات من Excel / قيود» — the master data carried in from Qoyod before go-live, in QOYOD'S OWN FILE
+// FORMATS (the owner's rule: the import matches Qoyod's exports column for column, so an export is uploaded as it is):
+//   · customers — Qoyod «العملاء» export (customers.xlsx), its 26 columns in Qoyod's order;
+//   · suppliers — Qoyod «الموردون» export (vendors.xlsx), its 14 columns;
+//   · products  — Qoyod «المنتجات» export (Products-YYYY-MM-DD.csv), its 14 columns; each row is routed by Qoyod's
+//     «النوع» and «صنف المنتج» to green coffee, a material (packaging / café stock) or a sellable SKU, and expenses /
+//     services are skipped. Three optional columns may follow Qoyod's (الوحدة · الموقع · الوزن (غرام)): Qoyod's export
+//     carries no unit, site or pack weight.
+// Pure: the column definitions, the header matching and the cell parsers, so the rules are asserted without a database.
+// A Qoyod column the system does not keep is recognised and ignored (listed once in the preview); a column nobody knows
+// is ignored with a warning, never silently mapped. No server import: the settings page reads the labels from here too.
 
-export const IMPORT_ENTITIES = ["customers", "suppliers", "green", "materials", "products"] as const;
+export const IMPORT_ENTITIES = ["customers", "suppliers", "products"] as const;
 export type ImportEntity = (typeof IMPORT_ENTITIES)[number];
 export const isImportEntity = (v: unknown): v is ImportEntity => typeof v === "string" && (IMPORT_ENTITIES as readonly string[]).includes(v);
 
 export const IMPORT_MAX_ROWS = 2000;
 
-export type Column = { key: string; required: boolean; ar: string; en: string; aliases: string[]; hint?: string; example: string; text?: boolean };
+/**
+ * A column: `qoyod` columns make the template, in this order, with Qoyod's own header; `ignore` columns are Qoyod's but
+ * not kept by the system; `extra` columns are ours, accepted after Qoyod's (never in Qoyod's export).
+ */
+export type Column = { key: string; required: boolean; ar: string; en: string; aliases: string[]; hint?: string; example: string; text?: boolean; ignore?: boolean; extra?: boolean };
 const col = (key: string, required: boolean, ar: string, en: string, aliases: string[], example: string, hint?: string, text?: boolean): Column => ({ key, required, ar, en, aliases, example, hint, text });
+const ign = (key: string, ar: string, en: string): Column => ({ key, required: false, ar, en, aliases: [], example: "", ignore: true });
+const extra = (c: Column): Column => ({ ...c, extra: true });
 
 export const ENTITY_LABEL: Record<ImportEntity, { ar: string; en: string }> = {
   customers: { ar: "العملاء", en: "Customers" },
   suppliers: { ar: "الموردون", en: "Suppliers" },
-  green: { ar: "البن الأخضر", en: "Green coffee" },
-  materials: { ar: "المواد والمستلزمات", en: "Materials & supplies" },
-  products: { ar: "المنتجات", en: "Products" },
+  products: { ar: "المنتجات والمخزون", en: "Products & stock" },
 };
 
 export const SEGMENT_WORDS: Record<string, "WHOLESALE" | "RETAIL" | "CAFE" | "DISTRIBUTOR" | "OTHER"> = {
@@ -33,92 +40,90 @@ export const SUPPLIER_KIND_WORDS: Record<string, "GOODS_SERVICES" | "CUSTOMS" | 
   goods_services: "GOODS_SERVICES", goods: "GOODS_SERVICES", services: "GOODS_SERVICES", "بضائع": "GOODS_SERVICES", "خدمات": "GOODS_SERVICES", "بضائع وخدمات": "GOODS_SERVICES", "مورد": "GOODS_SERVICES",
   customs: "CUSTOMS", "جمارك": "CUSTOMS", "الجمارك": "CUSTOMS", clearing_agent: "CLEARING_AGENT", "مخلص جمركي": "CLEARING_AGENT", "مخلص": "CLEARING_AGENT",
 };
-export const UNIT_WORDS: Record<string, "UNIT" | "KG" | "GRAM" | "PIECE" | "LITER"> = {
-  unit: "UNIT", "وحدة": "UNIT", "عبوة": "UNIT", "كيس": "UNIT", kg: "KG", "كيلو": "KG", "كغ": "KG", "كجم": "KG", "كيلوجرام": "KG", "كيلوغرام": "KG",
-  gram: "GRAM", g: "GRAM", "غرام": "GRAM", "جرام": "GRAM", "جم": "GRAM", piece: "PIECE", pcs: "PIECE", "حبة": "PIECE", "قطعة": "PIECE", "حبه": "PIECE",
-  liter: "LITER", litre: "LITER", l: "LITER", "لتر": "LITER",
+
+/**
+ * Qoyod's quantity units → the system's unit and the factor a Qoyod quantity is multiplied by (the unit cost is divided
+ * by it). Qoyod keeps green coffee in grams and café liquids in millilitres; the system keeps kg and litres.
+ */
+export const QOYOD_UNITS: Record<string, { unit: "UNIT" | "KG" | "GRAM" | "PIECE" | "LITER"; factor: number }> = {
+  "حبة": { unit: "PIECE", factor: 1 }, "حبه": { unit: "PIECE", factor: 1 }, "قطعة": { unit: "PIECE", factor: 1 }, piece: { unit: "PIECE", factor: 1 }, pcs: { unit: "PIECE", factor: 1 },
+  "وحدة": { unit: "UNIT", factor: 1 }, "عبوة": { unit: "UNIT", factor: 1 }, unit: { unit: "UNIT", factor: 1 },
+  "كيلو": { unit: "KG", factor: 1 }, "كغ": { unit: "KG", factor: 1 }, "كجم": { unit: "KG", factor: 1 }, kg: { unit: "KG", factor: 1 },
+  "غرام": { unit: "GRAM", factor: 1 }, "جرام": { unit: "GRAM", factor: 1 }, "جم": { unit: "GRAM", factor: 1 }, g: { unit: "GRAM", factor: 1 }, gram: { unit: "GRAM", factor: 1 },
+  "لتر": { unit: "LITER", factor: 1 }, l: { unit: "LITER", factor: 1 }, liter: { unit: "LITER", factor: 1 }, litre: { unit: "LITER", factor: 1 },
+  "مل": { unit: "LITER", factor: 0.001 }, "ملل": { unit: "LITER", factor: 0.001 }, ml: { unit: "LITER", factor: 0.001 },
 };
-export const PRODUCT_CATEGORY_WORDS: Record<string, "ROASTED_COFFEE" | "GREEN_COFFEE" | "MERCHANDISE" | "OTHER"> = {
-  roasted_coffee: "ROASTED_COFFEE", "بن محمص": "ROASTED_COFFEE", "قهوة محمصة": "ROASTED_COFFEE", "محمص": "ROASTED_COFFEE",
-  green_coffee: "GREEN_COFFEE", "بن أخضر": "GREEN_COFFEE", "بن اخضر": "GREEN_COFFEE",
-  merchandise: "MERCHANDISE", "منتجات": "MERCHANDISE", "بضائع": "MERCHANDISE", "أدوات": "MERCHANDISE", other: "OTHER", "أخرى": "OTHER", "اخرى": "OTHER",
-};
+/** Green coffee's quantity unit in Qoyod (grams unless the importer is told kilos): grams become kg. */
+export const GREEN_UNITS = { g: 0.001, kg: 1 } as const;
+export type GreenUnit = keyof typeof GREEN_UNITS;
+
 const YES = new Set(["yes", "y", "true", "1", "نعم", "صح", "✓"]);
 const NO = new Set(["no", "n", "false", "0", "لا", ""]);
 
-const NAME = ["الاسم", "الإسم", "name"];
-const QTY_HINT = "الكمية في المخزون في تاريخ القطع (اتركها فارغة إن لم يوجد)";
-const LOC_HINT = "رمز الموقع: RST المصنع، WH المستودع، CAFE المقهى (فارغ = الموقع الافتراضي)";
-
 export const COLUMNS: Record<ImportEntity, Column[]> = {
+  // Qoyod «العملاء» export, column for column.
   customers: [
-    col("name", true, "الاسم", "Name", ["اسم العميل", "العميل", "الاسم التجاري", "customer", "customer name", ...NAME], "مقهى الريف", "يجب أن يطابق اسم العميل في قيود حرفيًا (تُطابَق عليه الأرصدة الافتتاحية)"),
-    col("name_ar", false, "الاسم بالعربية", "Arabic name", ["الاسم العربي", "name ar"], "مقهى الريف"),
-    col("phone", false, "الجوال", "Phone", ["رقم الجوال", "الهاتف", "رقم الهاتف", "جوال", "mobile", "phone number"], "0501234567", "اجعل العمود «نص» في Excel حتى لا يضيع الصفر الأول", true),
-    col("email", false, "البريد الإلكتروني", "Email", ["البريد", "الايميل", "الإيميل", "e-mail"], "info@example.com"),
-    col("address", false, "العنوان", "Address", ["العنوان الوطني", "address line"], "حي النخيل، شارع الملك فهد"),
-    col("city", false, "المدينة", "City", [], "الرياض"),
-    col("vat_number", false, "الرقم الضريبي", "VAT number", ["رقم التسجيل الضريبي", "الرقم الضريبي للعميل", "vat", "tax number"], "300000000000003", "15 رقمًا يبدأ وينتهي بـ 3", true),
-    col("commercial_reg_no", false, "السجل التجاري", "Commercial registration", ["رقم السجل التجاري", "cr", "cr number"], "1010000000", "10 أرقام", true),
-    col("segment", false, "الفئة", "Segment", ["فئة العميل", "نوع العميل", "التصنيف"], "مقهى", "جملة · تجزئة · مقهى · موزع · أخرى"),
-    col("payment_terms_days", false, "شروط الدفع (يوم)", "Payment terms (days)", ["مدة السداد", "شروط الدفع", "أيام السداد", "payment terms"], "30", "من 0 إلى 365"),
-    col("credit_limit", false, "حد الائتمان", "Credit limit", ["الحد الائتماني", "credit limit"], "5000", "بالريال"),
+    col("name", true, "اسم الجهة", "Name", ["الاسم", "اسم العميل", "العميل", "customer", "customer name", "name"], "مقهى الريف", "يُطابَق عليه رصيد العميل الافتتاحي لاحقًا"),
+    col("ref", false, "الرقم المرجعي", "Reference", ["المرجع", "reference"], "CUS001", "رقم العميل في قيود (يظهر في المعاينة، لا يُحفظ)"),
+    ign("legal_name", "اسم المنشأة", "Company name"), ign("website", "الموقع الالكتروني", "Website"),
+    col("phone", false, "رقم الاتصال الأساسي", "Phone", ["الجوال", "رقم الجوال", "الهاتف", "رقم الهاتف", "mobile", "phone"], "0501234567", undefined, true),
+    ign("phone2", "رقم الاتصال الثانوي", "Secondary phone"),
+    col("email", false, "البريد الإلكتروني الأساسي", "Email", ["البريد الإلكتروني", "البريد", "email", "e-mail"], "info@example.com"),
+    ign("email2", "البريد الإلكتروني الثانوي", "Secondary email"),
+    col("status", false, "الحالة", "Status", ["status"], "Active", "Active / Inactive"),
+    col("vat_number", false, "الرقم الضريبي", "VAT number", ["رقم التسجيل الضريبي", "vat", "tax number"], "300000000000003", "15 رقمًا يبدأ وينتهي بـ 3", true),
+    ign("pos", "عميل نقاط بيع", "POS customer"),
+    col("address", false, "عنوان الفوترة", "Billing address", ["العنوان", "address"], "6435, حي الشروفية, 36342"),
+    col("ship_address", false, "عنوان الشحن", "Shipping address", [], "", "يُستخدم عنوانًا إن خلا عنوان الفوترة"),
+    col("balance", false, "الرصيد الختامي (ر.س)", "Closing balance (SAR)", ["الرصيد", "الرصيد (ر.س)", "balance"], "0", "للعلم فقط: يدخل لاحقًا في الأرصدة الافتتاحية"),
+    ign("tax_group", "رقم المجموعة الضريبية", "Tax group number"), ign("national_id", "الهوية الوطنية", "National ID"), ign("iqama", "رقم الإقامة", "Iqama"),
+    ign("distinct_vat", "الرقم الضريبي المميز", "Distinct VAT number"), ign("n700", "رقم 700", "700 number"),
+    col("commercial_reg_no", false, "رقم السجل التجاري", "Commercial registration", ["السجل التجاري", "cr", "cr number"], "7036227788", "10 أرقام", true),
+    ign("lic_momra", "ترخيص وزارة الشؤون البلدية والقروية", "MOMRA licence"), ign("lic_hrsd", "ترخيص وزارة الموارد البشرية والتنمية الاجتماعية", "HRSD licence"),
+    ign("lic_sagia", "ترخيص الهيئة العامة للاستثمار", "SAGIA licence"), ign("gcc_id", "الهوية الخليجية", "GCC ID"), ign("passport", "رقم جواز السفر", "Passport"), ign("other_id", "معرف آخر", "Other ID"),
+    extra(col("segment", false, "الفئة", "Segment", ["فئة العميل", "نوع العميل"], "مقهى", "جملة · تجزئة · مقهى · موزع · أخرى")),
+    extra(col("payment_terms_days", false, "شروط الدفع (يوم)", "Payment terms (days)", ["مدة السداد", "شروط الدفع"], "30", "من 0 إلى 365")),
+    extra(col("credit_limit", false, "حد الائتمان", "Credit limit", ["الحد الائتماني"], "5000")),
+    extra(col("city", false, "المدينة", "City", [], "الرياض")),
   ],
+  // Qoyod «الموردون» export, column for column.
   suppliers: [
-    col("name", true, "الاسم", "Name", ["اسم المورد", "المورد", "supplier", "supplier name", ...NAME], "شركة البن العالمية", "يجب أن يطابق اسم المورد في قيود حرفيًا (تُطابَق عليه الأرصدة الافتتاحية)"),
-    col("contact", false, "جهة الاتصال", "Contact", ["اسم المسؤول", "المسؤول", "contact person"], "أحمد"),
-    col("phone", false, "الجوال", "Phone", ["رقم الجوال", "الهاتف", "رقم الهاتف", "mobile"], "0501234567", "اجعل العمود «نص» في Excel", true),
-    col("email", false, "البريد الإلكتروني", "Email", ["البريد", "الايميل", "الإيميل", "e-mail"], "sales@example.com"),
-    col("vat_number", false, "الرقم الضريبي", "VAT number", ["رقم التسجيل الضريبي", "vat", "tax number"], "300000000000003", "15 رقمًا يبدأ وينتهي بـ 3 (فارغ لغير المسجّل)", true),
-    col("payment_terms_days", false, "شروط الدفع (يوم)", "Payment terms (days)", ["مدة السداد", "شروط الدفع", "payment terms"], "30", "من 0 إلى 365"),
-    col("kind", false, "نوع المورد", "Supplier kind", ["النوع", "kind"], "بضائع وخدمات", "بضائع وخدمات · جمارك · مخلص جمركي"),
-    col("non_resident", false, "غير مقيم", "Non-resident", ["مورد خارجي", "خارج المملكة", "non resident"], "لا", "نعم / لا"),
+    col("name", true, "اسم الجهة", "Name", ["الاسم", "اسم المورد", "المورد", "supplier", "supplier name", "name"], "شركة البن العالمية", "يُطابَق عليه رصيد المورد الافتتاحي لاحقًا"),
+    col("ref", false, "الرقم المرجعي", "Reference", ["المرجع", "reference"], "VND001", "رقم المورد في قيود (يظهر في المعاينة، لا يُحفظ)"),
+    ign("legal_name", "اسم المنشأة", "Company name"), ign("website", "الموقع الالكتروني", "Website"),
+    col("phone", false, "رقم الاتصال الأساسي", "Phone", ["الجوال", "رقم الجوال", "الهاتف", "mobile", "phone"], "0501234567", undefined, true),
+    col("phone2", false, "رقم الاتصال الثانوي", "Secondary phone", [], "", undefined, true),
+    col("email", false, "البريد الإلكتروني الأساسي", "Email", ["البريد الإلكتروني", "البريد", "email"], "sales@example.com"),
+    ign("email2", "البريد الإلكتروني الثانوي", "Secondary email"),
+    col("status", false, "الحالة", "Status", ["status"], "Active", "Active / Inactive"),
+    col("vat_number", false, "الرقم الضريبي", "VAT number", ["رقم التسجيل الضريبي", "vat", "tax number"], "300000000000003", "15 رقمًا يبدأ وينتهي بـ 3", true),
+    ign("pos", "عميل نقاط بيع", "POS customer"),
+    col("address", false, "عنوان الفوترة", "Billing address", ["العنوان", "address"], ""),
+    ign("ship_address", "عنوان الشحن", "Shipping address"),
+    col("balance", false, "الرصيد (ر.س)", "Balance (SAR)", ["الرصيد", "الرصيد الختامي (ر.س)", "balance"], "0", "للعلم فقط: يدخل لاحقًا في الأرصدة الافتتاحية"),
+    extra(col("payment_terms_days", false, "شروط الدفع (يوم)", "Payment terms (days)", ["مدة السداد", "شروط الدفع"], "30", "من 0 إلى 365")),
+    extra(col("kind", false, "نوع المورد", "Supplier kind", [], "بضائع وخدمات", "بضائع وخدمات · جمارك · مخلص جمركي")),
+    extra(col("non_resident", false, "غير مقيم", "Non-resident", ["مورد خارجي"], "لا", "نعم / لا")),
   ],
-  green: [
-    col("serial_number", true, "رمز اللوط", "Lot code", ["الرمز", "رقم اللوط", "رمز الصنف", "كود الصنف", "code", "sku", "serial"], "GB-ETH-001", "فريد لكل لوط؛ إعادة الاستيراد تتخطى الرمز الموجود", true),
-    col("name_en", false, "الاسم بالإنجليزية", "English name", ["bean type", "name en", "name"], "Ethiopia Guji"),
-    col("name_ar", false, "الاسم بالعربية", "Arabic name", ["الاسم", "اسم الصنف", "اسم البن"], "إثيوبيا قوجي", "اسم واحد على الأقل (عربي أو إنجليزي)"),
-    col("country", false, "الدولة", "Country", ["بلد المنشأ", "المنشأ", "origin"], "Ethiopia"),
-    col("country_ar", false, "الدولة بالعربية", "Country (Arabic)", ["المنشأ بالعربية"], "إثيوبيا"),
-    col("region", false, "المنطقة", "Region", ["region"], "Guji"),
-    col("variety", false, "السلالة", "Variety", ["الصنف النباتي", "variety"], "Heirloom"),
-    col("process", false, "المعالجة", "Process", ["طريقة المعالجة", "process"], "Washed"),
-    col("altitude", false, "الارتفاع", "Altitude", ["altitude"], "1900-2100"),
-    col("quantity_kg", false, "الكمية (كغ)", "Quantity (kg)", ["الكمية", "الرصيد", "الكمية الحالية", "quantity", "qty"], "120.5", QTY_HINT),
-    col("unit_cost", false, "تكلفة الكيلو", "Cost per kg", ["التكلفة", "متوسط التكلفة", "تكلفة الوحدة", "unit cost", "cost"], "42.50", "متوسط تكلفة الكيلو في قيود (يدخل في تقييم المخزون الافتتاحي)"),
-    col("location", false, "الموقع", "Location", ["المستودع", "المخزن", "warehouse"], "WH", LOC_HINT),
-    col("sack_count", false, "عدد الأكياس", "Sack count", [], "2"),
-    col("sack_weight_kg", false, "وزن الكيس (كغ)", "Sack weight (kg)", [], "60"),
-  ],
-  materials: [
-    col("code", true, "رمز الصنف", "Item code", ["الرمز", "كود الصنف", "رقم الصنف", "code", "sku"], "BAG-250", "فريد لكل صنف؛ إعادة الاستيراد تتخطى الرمز الموجود", true),
-    col("name", true, "الاسم", "Name", ["اسم الصنف", "name en", ...NAME], "كيس 250 غ بصمام"),
-    col("name_ar", false, "الاسم بالعربية", "Arabic name", ["الاسم العربي"], "كيس 250 غ بصمام"),
-    col("category", false, "التصنيف", "Category", ["تصنيف الصنف", "الفئة", "category"], "أكياس وتغليف", "اسم تصنيف من «المخزون › التصنيفات» (فارغ = أكياس وتغليف)"),
-    col("unit", false, "الوحدة", "Unit", ["وحدة القياس", "unit of measure", "uom"], "حبة", "حبة · وحدة · كيلو · غرام · لتر (فارغ = وحدة التصنيف)"),
-    col("quantity", false, "الكمية", "Quantity", ["الرصيد", "الكمية الحالية", "quantity", "qty"], "500", QTY_HINT),
-    col("unit_cost", false, "تكلفة الوحدة", "Unit cost", ["التكلفة", "متوسط التكلفة", "unit cost", "cost"], "1.25", "متوسط التكلفة في قيود (يدخل في تقييم المخزون الافتتاحي)"),
-    col("location", false, "الموقع", "Location", ["المستودع", "المخزن", "warehouse"], "WH", LOC_HINT),
-    col("reorder_point", false, "حد إعادة الطلب", "Reorder point", ["الحد الأدنى", "reorder point"], "100"),
-    col("notes", false, "ملاحظات", "Notes", ["الوصف", "notes", "description"], ""),
-  ],
+  // Qoyod «المنتجات» export (CSV), column for column; then our three optional columns.
   products: [
-    col("product_name_en", true, "اسم المنتج بالإنجليزية", "Product name (English)", ["product", "product name", "اسم المنتج"], "Ethiopia Guji", "صف لكل عبوة؛ العبوات التي تحمل الاسم نفسه تُجمع تحت منتج واحد"),
-    col("product_name_ar", false, "اسم المنتج بالعربية", "Product name (Arabic)", ["المنتج"], "إثيوبيا قوجي"),
-    col("country_en", true, "بلد المنشأ", "Country", ["الدولة", "المنشأ", "country", "origin"], "Ethiopia", "لغير القهوة اكتب بلد الصنع"),
-    col("country_ar", false, "بلد المنشأ بالعربية", "Country (Arabic)", ["الدولة بالعربية"], "إثيوبيا"),
-    col("region", false, "المنطقة", "Region", [], "Guji"),
-    col("variety", false, "السلالة", "Variety", [], "Heirloom"),
-    col("process", false, "المعالجة", "Process", [], "Washed"),
-    col("cup_notes_ar", false, "النكهات", "Cup notes (Arabic)", ["ملاحظات التذوق"], "توت، ياسمين"),
-    col("expected_roast_loss", false, "نسبة فقد التحميص %", "Expected roast loss %", ["فقد التحميص"], "15", "من 0 إلى 50 (فارغ = 15)"),
-    col("sku_code", true, "رمز العبوة", "SKU code", ["رمز المنتج", "الرمز", "كود المنتج", "sku", "code"], "ETH-GUJ-250", "فريد لكل عبوة؛ إعادة الاستيراد تتخطى الرمز الموجود", true),
-    col("sku_name_ar", false, "اسم العبوة", "SKU name (Arabic)", ["اسم الصنف", "الاسم"], "إثيوبيا قوجي 250 غ"),
-    col("weight_grams", true, "الوزن (غرام)", "Weight (g)", ["الوزن", "الحجم", "weight"], "250", "صافي وزن العبوة بالغرام"),
-    col("price", false, "السعر", "Price", ["سعر البيع", "price", "selling price"], "65", "سعر البيع بالريال"),
-    col("barcode", false, "الباركود", "Barcode", ["barcode", "ean"], "6281234567890", "فريد إن وُجد", true),
-    col("category", false, "الفئة", "Category", ["نوع المنتج", "category"], "بن محمص", "بن محمص · بن أخضر · منتجات · أخرى"),
-    col("unit", false, "الوحدة", "Unit", ["وحدة القياس", "uom"], "وحدة", "وحدة · حبة · كيلو · غرام (فارغ = وحدة)"),
+    col("serial", true, "الرقم التسلسلي", "Serial", ["الرمز", "رمز الصنف", "sku", "code"], "20029", "رمز الصنف في قيود: يصبح رمزه في النظام", true),
+    col("name", true, "الاسم", "Name", ["اسم الصنف", "name"], "اندونسيا وانوجا محصول اخضر"),
+    col("name_en", false, "الاسم الانجليزي", "English name", ["الاسم بالإنجليزية", "name en"], "Indonesia Wanoja green"),
+    col("description", false, "الوصف", "Description", ["description"], ""),
+    col("type", true, "النوع", "Type", ["type"], "مادة أولية", "مادة أولية · منتج · منتج مجمع · مصروف · خدمة"),
+    col("barcode", false, "الباركود", "Barcode", ["barcode"], "", undefined, true),
+    col("category", false, "صنف المنتج", "Product category", ["التصنيف", "category"], "بن القهوة الخضراء"),
+    ign("buyable", "يُشتَرى", "Purchasable"),
+    col("buy_price", false, "سعر الشراء", "Purchase price", ["التكلفة", "cost"], "0.062", "تكلفة الوحدة بوحدة قيود (البن الأخضر: للغرام)"),
+    ign("sellable", "يُبَاع", "Sellable"),
+    col("sell_price", false, "سعر البيع", "Selling price", ["السعر", "price"], "85"),
+    col("quantity", false, "الكمية", "Quantity", ["الرصيد", "quantity", "qty"], "713608.77", "الكمية في تاريخ القطع بوحدة قيود"),
+    col("stocked", false, "مخزون؟", "Stocked?", [], "نعم"),
+    ign("pos", "منتج نقاط بيع", "POS product"),
+    extra(col("unit", false, "الوحدة", "Unit", ["وحدة القياس", "uom"], "غرام", "وحدة الكمية في قيود: حبة · غرام · كيلو · مل · لتر (للمواد بكمية غير الأكياس والاستيكرات والأكواب)")),
+    extra(col("location", false, "الموقع", "Location", ["المستودع", "warehouse"], "RST", "رمز الموقع: RST المصنع، WH المستودع، CAFE المقهى")),
+    extra(col("weight_grams", false, "الوزن (غرام)", "Weight (g)", ["الوزن"], "250", "وزن العبوة للبيع إن لم يكن في اسمها")),
   ],
 };
 

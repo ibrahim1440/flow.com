@@ -5,8 +5,8 @@ import { linkedNumberFrom } from "./owner";
  * The WhatsApp server client (Evolution API 2.x), for exactly one instance.
  *
  * ── What this can do, and what it deliberately cannot ──
- * Six calls: ask for a QR or pairing code, read the connection state, read the linked phone's
- * number (read-only), send a text, log the phone out, restart. There is no call to delete or create an instance and there must never
+ * Seven calls: ask for a QR or pairing code, read the connection state, read the linked phone's
+ * number (read-only), send a text, send a document (a PDF file), log the phone out, restart. There is no call to delete or create an instance and there must never
  * be one: deleting the instance is irreversible on the server side and the number cannot be
  * recreated from here. The key is also scoped to this one instance on the server.
  *
@@ -155,6 +155,22 @@ export async function connect(number?: string): Promise<ConnectResult | CallFail
 
 export async function sendText(number: string, text: string): Promise<{ ok: true; messageId: string | null } | CallFailure> {
   const r = await call("POST", `/message/sendText/${inst()}`, { number, text });
+  if (!r.ok) return r;
+  const id = (r.body as { key?: { id?: unknown } } | null)?.key?.id;
+  return { ok: true, messageId: typeof id === "string" ? id : null };
+}
+
+/**
+ * Send a document (a PDF) as a WhatsApp file, with the message as its caption (Evolution API 2.x sendMedia, base64
+ * media). The bytes travel in this one server-side request only; nothing here logs them.
+ */
+export async function sendDocument(
+  number: string,
+  doc: { base64: string; fileName: string; mimeType: string; caption: string },
+): Promise<{ ok: true; messageId: string | null } | CallFailure> {
+  const r = await call("POST", `/message/sendMedia/${inst()}`, {
+    number, mediatype: "document", mimetype: doc.mimeType, media: doc.base64, fileName: doc.fileName, caption: doc.caption,
+  });
   if (!r.ok) return r;
   const id = (r.body as { key?: { id?: unknown } } | null)?.key?.id;
   return { ok: true, messageId: typeof id === "string" ? id : null };
