@@ -382,7 +382,8 @@ const RESOLVERS: Record<string, Resolver> = {
       },
     });
     if (!q) return null;
-    const customer = q.customer ?? q.opportunity.customer;
+    // «مسار المحاسب»: a quotation with no deal has its own customer and no deal owner.
+    const customer = q.customer ?? q.opportunity?.customer ?? null;
     return {
       vars: {
         "quote.number": q.quoteNumber,
@@ -390,14 +391,14 @@ const RESOLVERS: Record<string, Resolver> = {
         "quote.total": moneyText(q.grandTotal, q.currency),
         "quote.validUntil": riyadhDate(q.validUntil),
         "quote.reason": q.rejectionNote ?? "",
-        "deal.title": q.opportunity.title,
+        "deal.title": q.opportunity?.title ?? "",
         "customer.name": customerName(customer, lang),
-        "owner.name": q.opportunity.owner.name,
+        "owner.name": q.opportunity?.owner.name ?? "",
         ...common(e, actor),
       },
       people: {
         customer: customerPerson(customer, lang),
-        deal_owner: employeePerson(q.opportunity.owner),
+        deal_owner: q.opportunity ? employeePerson(q.opportunity.owner) : [],
         actor: employeePerson(actor),
       },
     };

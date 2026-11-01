@@ -85,7 +85,7 @@ type Quote = {
   issuedSnapshot: Snapshot | null;
   customerNotes: string | null;
   customer: ({ id: string } & DocCustomer) | null;
-  opportunity: { id: string; title: string; owner: { id: string; name: string } | null };
+  opportunity: { id: string; title: string; owner: { id: string; name: string } | null } | null;
 };
 type QuoteResponse = {
   quote: Quote;

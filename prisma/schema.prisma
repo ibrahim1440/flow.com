@@ -62,6 +62,8 @@ model Employee {
   qoyodCopiesSent          SalesInvoiceQoyod[]       @relation("QoyodCopySender")
   /// «رابط تفعيل الحساب» (20261212090000_account_activation).
   activations              AccountActivation[]
+  quoteCommissionReps      Quote[]                   @relation("QuoteCommissionRep")
+  quoteCommissionDecisions Quote[]                   @relation("QuoteCommissionDecider")
 
   // Native HR (additive). The HR person this login belongs to, if any. A login account is
   // never required to be an HR person and an HR person never requires a login.
@@ -3597,10 +3599,22 @@ model Quote {
   supersedes   Quote?  @relation("QuoteRevision", fields: [supersedesId], references: [id])
   supersededBy Quote?  @relation("QuoteRevision")
 
-  opportunityId String
-  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
+  /// NULL on an ACCOUNTING quotation («مسار المحاسب», 20261213090000_quote_without_deal): no deal, the customer is its own.
+  opportunityId String?
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
   customerId    String?
   customer      Customer?   @relation(fields: [customerId], references: [id])
+  /// SALES (on a deal; reps, commissions) | ACCOUNTING (no deal, a customer; never in the pipeline or commissions) — CHECK.
+  channel       String      @default("SALES")
+  /// «عمولة عرض المحاسب» (20261214090000_accounting_quote_commission): NULL (no rep) | PENDING | ASSIGNED | NONE (CHECK).
+  /// ASSIGNED moves the quotation onto the rep's deal (channel SALES); NONE keeps it the accounting section's.
+  commissionDecision    String?
+  commissionRepId       String?
+  commissionRep         Employee? @relation("QuoteCommissionRep", fields: [commissionRepId], references: [id], onDelete: SetNull)
+  commissionDecidedById String?
+  commissionDecidedBy   Employee? @relation("QuoteCommissionDecider", fields: [commissionDecidedById], references: [id], onDelete: SetNull)
+  commissionDecidedAt   DateTime?
+  commissionReason      String?
 
   status     QuoteStatus @default(DRAFT)
   currency   String      @default("SAR")

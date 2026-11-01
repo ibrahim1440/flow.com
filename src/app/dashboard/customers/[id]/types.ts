@@ -51,6 +51,11 @@ export type Quote = {
   opportunity: { id: string; title: string };
 };
 
+export type AccountingQuote = {
+  id: string; quoteNumber: string; revision: number; status: string; grandTotal: string; validUntil: string | null; issuedAt: string | null;
+  commissionDecision: string | null; commissionRep: { name: string } | null; issuerName: string | null;
+};
+
 export type Sample = {
   id: string; description: string | null; quantity: string; unit: string; status: string; sentAt: string | null;
   feedbackScore: number | null; createdAt: string;
@@ -151,6 +156,8 @@ export type Account = {
   stages: Stage[] | null;
   deals: Deal[] | null;
   quotes: Quote[] | null;
+  /** «عمولة عرض المحاسب»: the accountant's quotations (no deal) for this customer. */
+  accountingQuotes?: AccountingQuote[] | null;
   samples: Sample[] | null;
   orders: Order[] | null;
   collections: Collection[] | null;

@@ -186,12 +186,16 @@ export type AcceptedDocument = {
   taxTotal: Decimal;
 };
 
-/** One accepted document per deal: the highest revision, as `eligibleDocument` chooses it. */
-export function acceptedDocumentPerDeal<T extends { opportunityId: string; revision: number }>(quotes: T[]): T[] {
-  const best = new Map<string, T>();
+/**
+ * One accepted document per deal: the highest revision, as `eligibleDocument` chooses it. A quotation with no deal
+ * («مسار المحاسب», channel ACCOUNTING) is not a deal document and is left out (the callers' deal figures are deals').
+ */
+export function acceptedDocumentPerDeal<T extends { opportunityId: string | null; revision: number }>(quotes: T[]): (T & { opportunityId: string })[] {
+  const best = new Map<string, T & { opportunityId: string }>();
   for (const q of quotes) {
+    if (!q.opportunityId) continue;
     const cur = best.get(q.opportunityId);
-    if (!cur || q.revision > cur.revision) best.set(q.opportunityId, q);
+    if (!cur || q.revision > cur.revision) best.set(q.opportunityId, q as T & { opportunityId: string });
   }
   return [...best.values()];
 }

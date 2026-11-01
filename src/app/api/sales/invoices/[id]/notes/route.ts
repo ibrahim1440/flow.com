@@ -1,6 +1,7 @@
+import { requireInvoiceDuty } from "@/lib/services/invoicing/guard";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
-import { requireSub } from "@/lib/auth-server";
+
 import { auditFromRequest } from "@/lib/accounting/audit";
 import { jsonBody } from "@/lib/accounting/http";
 import { inScope } from "@/lib/services/invoicing/http";
@@ -12,7 +13,7 @@ const notFound = () => NextResponse.json({ error: "غير موجود.", errorEn:
 
 /** GET — what is still creditable on each line of the issued invoice (the credit note form). */
 export async function GET(_request: Request, { params }: Ctx) {
-  const { user, error } = await requireSub("sales", "invoices_credit_note");
+  const { user, error } = await requireInvoiceDuty("invoices_credit_note");
   if (error) return error;
   const { id } = await params;
   const head = await prisma.salesInvoice.findUnique({ where: { id }, select: { customerId: true } });
@@ -29,7 +30,7 @@ export async function GET(_request: Request, { params }: Ctx) {
  * reason, full?: true | lines: [{ originalLineId, quantity, unitPrice, discountPercent }] }. sales › invoices_credit_note.
  */
 export async function POST(request: Request, { params }: Ctx) {
-  const { user, error } = await requireSub("sales", "invoices_credit_note");
+  const { user, error } = await requireInvoiceDuty("invoices_credit_note");
   if (error) return error;
   const { id } = await params;
   const head = await prisma.salesInvoice.findUnique({ where: { id }, select: { customerId: true } });

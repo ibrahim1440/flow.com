@@ -137,6 +137,8 @@ async function discountItems(actor: WsActor): Promise<ApprovalItem[]> {
   const out: ApprovalItem[] = [];
   for (const q of drafts) {
     if (discountApprovalState(q, threshold) !== "PENDING" || q.lines.length === 0) continue;
+    // «مسار المحاسب»: a quotation with no deal needs no discount approval by Sales.
+    if (!q.opportunity) continue;
     if (!isSimpleMode() && q.createdById === actor.id) continue;
     const priced = priceQuote(q.lines.map((l) => ({ quantity: l.quantity, unitPrice: l.unitPrice, discountPercent: l.discountPercent, taxRatePercent: l.taxRatePercent })));
     const pct = priced.effectiveDiscountPercent.toDecimalPlaces(2).toString();

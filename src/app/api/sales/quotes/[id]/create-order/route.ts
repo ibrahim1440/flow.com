@@ -1,6 +1,7 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
-import { requireSub } from "@/lib/auth-server";
+import { forbidden, privilegedGate, requireAuth, requireSub } from "@/lib/auth-server";
+import { canQuoteWithoutDeal } from "@/lib/services/sales/quote-access";
 import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { seesAllSales, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
@@ -25,9 +26,21 @@ type Params = { params: Promise<{ id: string }> };
  * order already exists" rather than left wondering whether they have made two.
  */
 export async function POST(request: Request, { params }: Params) {
+  const { id } = await params;
+  // «مسار المحاسب»: an accepted quotation with no deal (channel ACCOUNTING) is turned into an order by the accounting
+  // section (accounting › quotes_issue) as well as by orders › create; nothing to scope by deal.
+  const auth = await requireAuth();
+  if (auth.error) return auth.error;
+  if (!hasSubPrivilege(auth.user.permissions, "orders", "create") && canQuoteWithoutDeal(auth.user.permissions)) {
+    const q = await prisma.quote.findUnique({ where: { id }, select: { channel: true } });
+    if (!q) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });
+    if (q.channel !== "ACCOUNTING") return forbidden();
+    const refused = await privilegedGate(auth.user, "accounting", "quotes_issue");
+    if (refused) return refused;
+    return convert(request, id, auth.user);
+  }
   const { user, error } = await requireSub("orders", "create");
   if (error) return error;
-  const { id } = await params;
 
   // Read access to the sales module as well, so this endpoint cannot be used to reach a
   // quotation the caller could not otherwise open.
@@ -39,6 +52,10 @@ export async function POST(request: Request, { params }: Params) {
     if (!readable) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });
   }
 
+  return convert(request, id, user, { scoped: !seesAllSales(user.permissions) });
+}
+
+async function convert(request: Request, id: string, user: { id: string; name: string }, opts: { scoped?: boolean } = {}) {
   let body: unknown = {};
   try {
     body = await request.json();
@@ -49,7 +66,7 @@ export async function POST(request: Request, { params }: Params) {
 
   try {
     const visible = await prisma.quote.findFirst({
-      where: { id, ...(seesAllSales(user.permissions) ? {} : { opportunity: { ownerId: user.id } }) },
+      where: { id, ...(opts.scoped ? { opportunity: { ownerId: user.id } } : {}) },
       select: { id: true },
     });
     if (!visible) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });

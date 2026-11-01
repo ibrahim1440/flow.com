@@ -457,6 +457,28 @@ export type SaveLinesResult = {
  * Totals are computed HERE, from the lines, and never accepted from the client. A quote
  * whose grand total arrives in the request body is a quote whose price the browser decides.
  */
+/**
+ * «مسار المحاسب» (owner, 1 Nov 2026): a draft quotation from the accounting section on a CUSTOMER, with no deal
+ * (channel ACCOUNTING, opportunityId NULL) — nothing of it reaches the pipeline or the commissions. Refused while the
+ * customer's sales are on hold, like every new quotation. Lines, when given, are priced as any draft's.
+ */
+export async function createAccountingQuote(tx: Tx, input: { customerId: string; actorId: string; validUntil?: Date | null; lines?: ReturnType<typeof parseLineInputs>; threshold: Decimal }) {
+  const { assertSalesAllowed } = await import("../customers/credit-db");
+  const customer = await tx.customer.findUnique({ where: { id: input.customerId }, select: { id: true } });
+  if (!customer) throw { _appCode: 404, message: "العميل غير موجود.", errorEn: "Customer not found.", code: "NOT_FOUND" };
+  await assertSalesAllowed(tx, customer.id);
+  const quoteNumber = await nextQuoteNumber(tx, new Date());
+  const created = await tx.quote.create({
+    data: { quoteNumber, revision: 1, opportunityId: null, customerId: customer.id, channel: "ACCOUNTING", status: "DRAFT", currency: QUOTE_CURRENCY, validUntil: input.validUntil ?? null, createdById: input.actorId },
+    select: { id: true, quoteNumber: true, revision: true },
+  });
+  if (input.lines && input.lines.length > 0) {
+    const saved = await saveQuoteLines(tx, { quoteId: created.id, lines: input.lines, threshold: input.threshold, actorId: input.actorId });
+    return { quote: created, priced: saved.priced };
+  }
+  return { quote: created, priced: null };
+}
+
 export async function saveQuoteLines(
   tx: Tx,
   input: { quoteId: string; lines: LineInput[]; threshold?: Decimal; actorId?: string | null },
@@ -547,14 +569,16 @@ export async function saveQuoteLines(
   // feat/notifications: a draft whose discount newly needs approval («اعتمادك مطلوب») is announced to
   // the discount approvers — once per set of figures (saving the same figures again adds nothing).
   if (needsDiscountApproval && figuresChanged) {
-    const q = await tx.quote.findUnique({ where: { id: input.quoteId }, select: { quoteNumber: true, opportunity: { select: { ownerId: true, customer: { select: { name: true, nameAr: true, accountOwnerId: true } } } } } });
+    const q = await tx.quote.findUnique({ where: { id: input.quoteId }, select: { quoteNumber: true, customer: { select: { name: true, nameAr: true, accountOwnerId: true } }, opportunity: { select: { ownerId: true, customer: { select: { name: true, nameAr: true, accountOwnerId: true } } } } } });
     if (q) {
+      // An ACCOUNTING quotation has no deal: its own customer.
+      const qc = q.opportunity?.customer ?? q.customer;
       const { notify } = await import("@/lib/notifications/notify");
       await notify(tx, {
         event: "sales.discount_pending", dedupeKey: `${input.quoteId}:${priced.grandTotal.toFixed(2)}:${priced.discountTotal.toFixed(2)}`,
         actorId: input.actorId ?? null, entity: { type: "Quote", id: input.quoteId },
-        facts: { quoteNumber: q.quoteNumber, percent: priced.effectiveDiscountPercent.toDecimalPlaces(2).toString(), customerName: q.opportunity.customer ? q.opportunity.customer.nameAr || q.opportunity.customer.name : "", quoteId: input.quoteId },
-        scopeOwners: [q.opportunity.ownerId, q.opportunity.customer?.accountOwnerId],
+        facts: { quoteNumber: q.quoteNumber, percent: priced.effectiveDiscountPercent.toDecimalPlaces(2).toString(), customerName: qc ? qc.nameAr || qc.name : "", quoteId: input.quoteId },
+        scopeOwners: [q.opportunity?.ownerId, qc?.accountOwnerId],
       });
     }
   }
@@ -817,7 +841,7 @@ export async function reviseQuote(
   const original = await tx.quote.findUniqueOrThrow({
     where: { id: input.quoteId },
     select: {
-      opportunityId: true, customerId: true, currency: true, revision: true, validUntil: true,
+      opportunityId: true, customerId: true, currency: true, revision: true, validUntil: true, channel: true,
       opportunity: { select: { customerId: true } },
       lines: {
         orderBy: { position: "asc" },
@@ -831,7 +855,7 @@ export async function reviseQuote(
 
   // «إيقاف البيع» (feat/credit-hold): a revision is a new quotation — refused while the customer's
   // sales are on hold (409 CUSTOMER_SALES_HOLD).
-  await assertSalesAllowed(tx, original.customerId ?? original.opportunity.customerId, at);
+  await assertSalesAllowed(tx, original.customerId ?? original.opportunity?.customerId ?? null, at);
 
   const quoteNumber = await nextQuoteNumber(tx, at);
   const created = await tx.quote.create({
@@ -841,6 +865,7 @@ export async function reviseQuote(
       supersedesId: input.quoteId,
       opportunityId: original.opportunityId,
       customerId: original.customerId,
+      channel: original.channel,
       status: "DRAFT",
       currency: original.currency,
       validUntil: original.validUntil,

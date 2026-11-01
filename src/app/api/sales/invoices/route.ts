@@ -1,7 +1,8 @@
+import { requireInvoiceDuty } from "@/lib/services/invoicing/guard";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
-import { forbidden, requireAuth, requireSub } from "@/lib/auth-server";
+import { forbidden, requireAuth } from "@/lib/auth-server";
 import { auditFromRequest } from "@/lib/accounting/audit";
 import { jsonBody } from "@/lib/accounting/http";
 import { abilities, canSellAssets, canViewInvoices } from "@/lib/services/invoicing/access";
@@ -106,7 +107,7 @@ export async function POST(request: Request) {
   let body: Record<string, unknown>;
   try { body = await jsonBody(request); } catch (err) { return invError(err); }
   const issueNow = body.issue === true;
-  const { user, error } = issueNow ? await requireSub("sales", "invoices_issue") : await requireSub("sales", "invoices_create");
+  const { user, error } = issueNow ? await requireInvoiceDuty("invoices_issue") : await requireInvoiceDuty("invoices_create");
   if (error) return error;
   try {
     const customerId = typeof body.customerId === "string" ? body.customerId : "";

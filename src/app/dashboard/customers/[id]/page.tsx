@@ -467,7 +467,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
     { id: "orders", text: L("الطلبات", "Orders"), n: data.orders?.length, disabled: sections.orders ? undefined : L("يتطلب صلاحية الطلبات", "Needs the orders permission") },
     { id: "invoices", text: L("الفواتير", "Invoices"), n: issued?.items.length ? issued.items.length : sections.orders ? invoiced : null, disabled: sections.orders || sections.sales ? undefined : L("يتطلب صلاحية الطلبات أو المبيعات", "Needs the orders or sales permission") },
     { id: "deals", text: L("الصفقات", "Deals"), n: data.deals?.length, disabled: sections.sales ? undefined : L("يتطلب صلاحية المبيعات", "Needs the sales permission") },
-    { id: "quotes", text: L("عروض الأسعار", "Quotations"), n: data.quotes?.length, disabled: sections.sales ? undefined : L("يتطلب صلاحية المبيعات", "Needs the sales permission") },
+    { id: "quotes", text: L("عروض الأسعار", "Quotations"), n: (data.quotes?.length ?? 0) + (data.accountingQuotes?.length ?? 0) || null, disabled: sections.sales || data.accountingQuotes ? undefined : L("يتطلب صلاحية المبيعات", "Needs the sales permission") },
     { id: "samples", text: L("العينات", "Samples"), n: data.samples?.length, disabled: sections.sales ? undefined : L("يتطلب صلاحية المبيعات", "Needs the sales permission") },
     { id: "files", text: L("الملفات", "Files"), n: data.files.length || null },
   ];
@@ -876,11 +876,17 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
       ))}</tbody>
     </table></div>
   );
-  const quotesTab = !data.quotes ? empty(L("لا تملك صلاحية المبيعات.", "No access to sales.")) : data.quotes.length === 0 ? empty(L("لا عروض أسعار.", "No quotations.")) : (
+  const COMMISSION_WORD: Record<string, [string, string]> = { PENDING: ["بانتظار قرار العمولة", "Commission pending"], ASSIGNED: ["العمولة للمندوب", "Commission to the rep"], NONE: ["بدون عمولة", "No commission"] };
+  const allQuotes = [
+    ...(data.quotes ?? []).map((q) => ({ key: q.id, id: q.id, quoteNumber: q.quoteNumber, revision: q.revision, status: q.status, grandTotal: q.grandTotal, validUntil: q.validUntil, issuedAt: q.issuedAt, source: <bdi>{q.opportunity?.title ?? ""}</bdi> })),
+    ...(data.accountingQuotes ?? []).map((q) => ({ key: `acc-${q.id}`, id: q.id, quoteNumber: q.quoteNumber, revision: q.revision, status: q.status, grandTotal: q.grandTotal, validUntil: q.validUntil, issuedAt: q.issuedAt,
+      source: <span data-testid="quote-from-accounting">{L("صادر من المحاسبة", "Issued by accounting")}{q.issuerName ? <> · <bdi>{q.issuerName}</bdi></> : null}{q.commissionDecision ? <span className="sm"> · {L(COMMISSION_WORD[q.commissionDecision]?.[0] ?? "", COMMISSION_WORD[q.commissionDecision]?.[1] ?? "")}{q.commissionDecision === "ASSIGNED" && q.commissionRep ? <> (<bdi>{q.commissionRep.name}</bdi>)</> : null}</span> : null}</span> })),
+  ];
+  const quotesTab = !data.quotes && !data.accountingQuotes ? empty(L("لا تملك صلاحية المبيعات.", "No access to sales.")) : allQuotes.length === 0 ? empty(L("لا عروض أسعار.", "No quotations.")) : (
     <div className="acc-scroll"><table className="t" data-testid="quotes-table">
-      <thead><tr><th>{L("العرض", "Quotation")}</th><th>{L("الصفقة", "Deal")}</th><th>{L("الحالة", "Status")}</th><th className="num">{L("الإجمالي · ريال", "Total · SAR")}</th><th>{L("صالح حتى", "Valid until")}</th><th>{L("أُصدر", "Issued")}</th></tr></thead>
-      <tbody>{data.quotes.map((q) => (
-        <tr key={q.id}><td><Link href={`/dashboard/sales/quotes/${q.id}`}><bdi className="id">{q.quoteNumber}</bdi></Link> <span className="sm">{L("م", "rev")} {q.revision}</span></td><td><bdi>{q.opportunity.title}</bdi></td>
+      <thead><tr><th>{L("العرض", "Quotation")}</th><th>{L("الصفقة / المصدر", "Deal / source")}</th><th>{L("الحالة", "Status")}</th><th className="num">{L("الإجمالي · ريال", "Total · SAR")}</th><th>{L("صالح حتى", "Valid until")}</th><th>{L("أُصدر", "Issued")}</th></tr></thead>
+      <tbody>{allQuotes.map((q) => (
+        <tr key={q.key}><td><Link href={`/dashboard/sales/quotes/${q.id}`}><bdi className="id">{q.quoteNumber}</bdi></Link> <span className="sm">{L("م", "rev")} {q.revision}</span></td><td>{q.source}</td>
           <td><span className={`st ${QUOTE_TONE[q.status] ?? ""}`}>{pick(QUOTE_STATUS_SPECS, q.status, lang)}</span></td><td className="num">{money2(q.grandTotal)}</td>
           <td>{q.validUntil ? shortDate(q.validUntil, lang) : "—"}</td><td>{q.issuedAt ? shortDate(q.issuedAt, lang) : "—"}</td></tr>
       ))}</tbody>

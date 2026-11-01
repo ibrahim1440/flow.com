@@ -45,7 +45,8 @@ type Quote = {
   createdAt: string;
   discountApproval: "NOT_NEEDED" | "PENDING" | "APPROVED" | "REJECTED";
   customer: { id: string; name: string; nameAr: string | null } | null;
-  opportunity: { id: string; title: string; outcome: string; owner: { id: string; name: string } | null };
+  /** NULL on a quotation from the accounting section with no deal («مسار المحاسب»). */
+  opportunity: { id: string; title: string; outcome: string; owner: { id: string; name: string } | null } | null;
   _count: { lines: number; orderLinks: number };
 };
 type Payload = {
@@ -431,7 +432,7 @@ export default function QuotesPage() {
                   <div className="r2">
                     <span className="id" style={{ fontSize: 12 }}>{q.quoteNumber}</span>
                     <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      <bdi>{q.opportunity.title}</bdi>{rev && <> · {rev}</>}
+                      <bdi>{q.opportunity?.title ?? (ar ? "بدون صفقة · قسم المحاسبة" : "No deal · accounting")}</bdi>{rev && <> · {rev}</>}
                     </span>
                     <span className="n" style={{ color: "var(--text-primary)", fontSize: 13.5 }}>{formatMoney(q.grandTotal)}</span>
                   </div>
@@ -510,7 +511,7 @@ export default function QuotesPage() {
               <tbody>
                 {rows.map((q) => {
                   const rev = revisionText(q);
-                  const owner = q.opportunity.owner;
+                  const owner = q.opportunity?.owner ?? null;
                   return (
                     <tr key={q.id} data-testid={`quote-row-${q.quoteNumber}`} className={selected === q.id ? "sel" : undefined}>
                       <td>
@@ -523,7 +524,7 @@ export default function QuotesPage() {
                       <td style={{ whiteSpace: "normal", paddingBlock: 3 }}>
                         <span className="who" style={{ display: "block", lineHeight: "22px" }}><bdi>{customerName(q)}</bdi></span>
                         <span className="sm" style={{ display: "block", lineHeight: "18px" }}>
-                          {accountingBase ? <bdi>{q.opportunity.title}</bdi> : <Link href={`/dashboard/sales/deals/${q.opportunity.id}`}><bdi>{q.opportunity.title}</bdi></Link>}
+                          {!q.opportunity ? <bdi>{(ar ? "بدون صفقة · قسم المحاسبة" : "No deal · accounting")}</bdi> : accountingBase ? <bdi>{q.opportunity.title}</bdi> : <Link href={`/dashboard/sales/deals/${q.opportunity.id}`}><bdi>{q.opportunity.title}</bdi></Link>}
                           {rev && <> · {rev}</>}
                         </span>
                       </td>

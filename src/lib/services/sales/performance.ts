@@ -284,7 +284,7 @@ export async function performanceSummary(db: Db, opts: {
     for (const k of byEmployee.keys()) ids.add(k);
     for (const t of targets) ids.add(t.employeeId);
     for (const d of [...won, ...lost, ...open, ...leads]) ids.add(d.ownerId);
-    for (const q of quotes) ids.add(q.opportunity.ownerId);
+    for (const q of quotes) if (q.opportunity) ids.add(q.opportunity.ownerId);
     for (const k of accrued.keys()) ids.add(k);
   }
   const people = ids.size
@@ -301,7 +301,8 @@ export async function performanceSummary(db: Db, opts: {
   const figures = (id: string | null): Figures => {
     const is = <T extends { ownerId: string }>(r: T) => id === null || r.ownerId === id;
     const w = won.filter(is), l = lost.filter(is), o = open.filter(is), ld = leads.filter(is);
-    const q = quotes.filter((x) => id === null || x.opportunity.ownerId === id);
+    // «مسار المحاسب»: a quotation with no deal is not Sales' work (no rep, no commission).
+    const q = quotes.filter((x) => !!x.opportunity && (id === null || x.opportunity.ownerId === id));
     const issued = q.filter((x) => x.issuedAt && x.issuedAt >= start && x.issuedAt < end);
     const accepted = q.filter((x) => x.status === "ACCEPTED" && x.acceptedAt && x.acceptedAt >= start && x.acceptedAt < end);
     const tg = targets.filter((t) => id === null || t.employeeId === id);

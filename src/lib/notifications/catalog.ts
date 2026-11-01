@@ -79,6 +79,9 @@ export type NotificationEventDef = {
   trigger: string;
   /** The e-mail choice of a person who never set one for the category (overrides EMAIL_DEFAULT for this event). */
   emailDefault?: boolean;
+  /** E-mail always (when a provider and the person's address exist), whatever the person chose for the category — for
+   *  the few decisions the owner wants in every inbox (e.g. the commission on a quotation the accountant issued). */
+  emailForce?: boolean;
   /** What the e-mail shows instead of the stored row (e.g. free text clipped); the in-app notification is unchanged. */
   emailView?: (r: { titleAr: string; titleEn: string; bodyAr: string; bodyEn: string }) => { titleAr: string; titleEn: string; bodyAr: string; bodyEn: string };
   render(f: Facts): Rendered;
@@ -299,6 +302,69 @@ export const EVENTS: NotificationEventDef[] = [
       bodyAr: [s(f.customerName), s(f.amount)].filter(Boolean).join(" · ") + " · افتحها واضغط «إرسال» للعميل.",
       bodyEn: [sEn(f, "customerName"), s(f.amount)].filter(Boolean).join(" · ") + " · Open it and press «Send» to the customer.",
       link: `/dashboard/sales/invoices/${enc(s(f.invoiceId))}`,
+    }),
+  },
+  // «عمولة عرض المحاسب» (owner decision, 1 Nov 2026): the accountant quoted a customer that belongs to a sales rep. The
+  // supervisors (sales › lead_assign, accounting › supervise) and the owner decide whether the rep earns the commission;
+  // the rep is told. E-mail always (emailForce). One row per person: someone who supervises both gets one.
+  {
+    key: "sales.accounting_quote_commission", category: "sales", severity: "warning", emailForce: true,
+    label: { ar: "عرض سعر من المحاسب لعميل مندوب — قرار العمولة", en: "Accountant's quotation for a rep's customer — commission decision" },
+    recipients: [{ perm: [{ module: "sales", sub: "lead_assign" }, { module: "accounting", sub: "supervise" }] }, { person: "admins" }],
+    requires: [MOD("sales"), MOD("accounting")],
+    trigger: "onAccountingQuoteIssued (lib/services/sales/accounting-quote-commission.ts): an ACCOUNTING quotation issued for a customer with an account owner",
+    render: (f) => ({
+      titleAr: `أصدر المحاسب ${s(f.issuerName)} عرض سعر ${s(f.quoteNumber)} بقيمة ${s(f.amount)} للعميل ${s(f.customerName)}، والعميل تابع للمندوب ${s(f.repName)}. هل تُسند العمولة للمندوب؟`,
+      titleEn: `The accountant \u2068${sEn(f, "issuerName")}\u2069 issued quotation ${s(f.quoteNumber)} (${s(f.amount)}) to \u2068${sEn(f, "customerName")}\u2069, a customer of \u2068${sEn(f, "repName")}\u2069. Assign the commission to the rep?`,
+      bodyAr: "افتح عرض السعر واختر «إسناد العمولة للمندوب» أو «بدون عمولة». حتى القرار لا عمولة عليه.",
+      bodyEn: "Open the quotation and choose «Assign the commission to the rep» or «No commission». Until then it carries no commission.",
+      link: `${f.via === "accounting" ? "/dashboard/accounting/quotes/" : "/dashboard/sales/quotes/"}${enc(s(f.quoteId))}`,
+    }),
+  },
+  {
+    key: "sales.accounting_quote_for_rep", category: "sales", severity: "info", emailForce: true,
+    label: { ar: "أصدر المحاسب عرض سعر لعميلك", en: "The accountant quoted your customer" },
+    recipients: [{ person: "rep" }], requires: [MOD("sales")],
+    trigger: "onAccountingQuoteIssued (lib/services/sales/accounting-quote-commission.ts): told to the customer's rep",
+    render: (f) => ({
+      titleAr: `أصدر المحاسب ${s(f.issuerName)} عرض سعر ${s(f.quoteNumber)} بقيمة ${s(f.amount)} لعميلك ${s(f.customerName)}`,
+      titleEn: `The accountant \u2068${sEn(f, "issuerName")}\u2069 issued quotation ${s(f.quoteNumber)} (${s(f.amount)}) to your customer \u2068${sEn(f, "customerName")}\u2069`,
+      bodyAr: "المشرف يقرر هل تُسند لك العمولة عليه، ويوصلك القرار.",
+      bodyEn: "A supervisor decides whether its commission is yours; you will be told.",
+      link: `${f.via === "accounting" ? "/dashboard/accounting/quotes/" : "/dashboard/sales/quotes/"}${enc(s(f.quoteId))}`,
+    }),
+  },
+  {
+    key: "sales.accounting_quote_decided", category: "sales", severity: "info", emailForce: true,
+    label: { ar: "قرار عمولة عرض المحاسب", en: "Commission decision on an accountant's quotation" },
+    recipients: [{ person: "rep" }, { person: "issuer" }, { perm: [{ module: "sales", sub: "lead_assign" }, { module: "accounting", sub: "supervise" }] }, { person: "admins" }],
+    requires: [MOD("sales"), MOD("accounting")],
+    trigger: "decideAccountingQuoteCommission (lib/services/sales/accounting-quote-commission.ts)",
+    render: (f) => ({
+      severity: f.decision === "ASSIGNED" ? "success" : "info",
+      titleAr: f.decision === "ASSIGNED"
+        ? `أُسندت عمولة عرض السعر ${s(f.quoteNumber)} (${s(f.customerName)}) للمندوب ${s(f.repName)}`
+        : `عرض السعر ${s(f.quoteNumber)} (${s(f.customerName)}) بدون عمولة`,
+      titleEn: f.decision === "ASSIGNED"
+        ? `The commission on quotation ${s(f.quoteNumber)} (\u2068${sEn(f, "customerName")}\u2069) goes to \u2068${sEn(f, "repName")}\u2069`
+        : `Quotation ${s(f.quoteNumber)} (\u2068${sEn(f, "customerName")}\u2069) carries no commission`,
+      bodyAr: `قرار ${s(f.deciderName)}: ${s(f.reason)}${f.decision === "ASSIGNED" ? " — صار على صفقة المندوب، ويُسجَّل تحصيله على الصفقة." : ""}`,
+      bodyEn: `Decided by \u2068${sEn(f, "deciderName")}\u2069: \u2068${s(f.reason)}\u2069${f.decision === "ASSIGNED" ? " — it is now on the rep's deal; its collection is recorded on the deal." : ""}`,
+      link: `${f.via === "accounting" ? "/dashboard/accounting/quotes/" : "/dashboard/sales/quotes/"}${enc(s(f.quoteId))}`,
+    }),
+  },
+  {
+    key: "sales.accounting_quote_reminder", category: "sales", severity: "warning", emailForce: true,
+    label: { ar: "تذكير: قرار عمولة عرض المحاسب معلّق", en: "Reminder: a commission decision is pending" },
+    recipients: [{ perm: [{ module: "sales", sub: "lead_assign" }, { module: "accounting", sub: "supervise" }] }, { person: "admins" }],
+    requires: [MOD("sales"), MOD("accounting")],
+    trigger: "accountingQuoteReminders (lib/services/sales/accounting-quote-commission.ts), daily: GET /api/cron/hr-document-expiry — PENDING after 3 Riyadh business days",
+    render: (f) => ({
+      titleAr: `تذكير: عرض السعر ${s(f.quoteNumber)} للعميل ${s(f.customerName)} (المندوب ${s(f.repName)}) ينتظر قرار العمولة منذ ${s(f.days)} أيام عمل`,
+      titleEn: `Reminder: quotation ${s(f.quoteNumber)} for \u2068${sEn(f, "customerName")}\u2069 (rep \u2068${sEn(f, "repName")}\u2069) has waited ${s(f.days)} business days for the commission decision`,
+      bodyAr: "اختر «إسناد العمولة للمندوب» أو «بدون عمولة». بعد تسجيل أول تحصيل عليه ما يمديك تُسند العمولة.",
+      bodyEn: "Choose «Assign the commission to the rep» or «No commission». Once a payment is recorded the commission can no longer be assigned.",
+      link: `${f.via === "accounting" ? "/dashboard/accounting/quotes/" : "/dashboard/sales/quotes/"}${enc(s(f.quoteId))}`,
     }),
   },
   // ── Finance ──

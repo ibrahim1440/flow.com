@@ -23,13 +23,13 @@ type OrderFacts = {
   lines: { orderItemId: string; description: string; skuCode: string | null; unit: "UNIT" | "KG"; ordered: string; delivered: string; drafted: string; issued: string; remaining: string; deliveredNotInvoiced: string; price: { source: "QUOTE" | "SKU" | "NONE"; unitPrice: string } }[];
   invoices: { id: string; number: string | null; status: string; grandTotal: string }[];
 };
-type Search = { orderId?: string };
+type Search = { orderId?: string; q?: string };
 const NO_SEARCH: Promise<Search> = Promise.resolve({});
 const newKey = () => `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 
 export default function NewInvoicePage({ searchParams = NO_SEARCH }: { searchParams?: Promise<Search> }) {
   const sp = use(searchParams);
-  return sp.orderId ? <FromOrder orderId={sp.orderId} /> : <Manual />;
+  return sp.orderId ? <FromOrder orderId={sp.orderId} /> : <Manual initialQ={sp.q} />;
 }
 
 function FromOrder({ orderId }: { orderId: string }) {
@@ -98,11 +98,12 @@ function FromOrder({ orderId }: { orderId: string }) {
 
 const blankBuyer = (): Buyer => ({ name: "", vatNumber: "", crNumber: "", city: "", district: "", street: "", buildingNo: "", postalCode: "" });
 
-function Manual() {
+function Manual({ initialQ }: { initialQ?: string }) {
   const { L } = useLang();
   const router = useRouter();
   const w = useWrite();
-  const [q, setQ] = useState("");
+  // «العملاء» of the accountant: «فاتورة» opens here with the customer's name already searched (?q=).
+  const [q, setQ] = useState(initialQ ?? "");
   const custs = useApi<{ items: Customer[] }>(`/api/sales/invoices/customers?q=${encodeURIComponent(q)}`);
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [family, setFamily] = useState<"STANDARD" | "SIMPLIFIED">("STANDARD");

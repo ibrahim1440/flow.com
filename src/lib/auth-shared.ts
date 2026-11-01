@@ -272,7 +272,14 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "receipts_confirm", label: "Confirm customer receipts (from Sales collections) and record receipts for invoices with no deal" },
     // BATCH22 WP-E: «إصدار عروض الأسعار من قسم المحاسبة» — create, edit and issue a quotation on an existing open deal from
     // the accounting section (not privileged: a quote is not a ledger or tax document). adminOnly in the backfill.
-    { key: "quotes_issue", label: "Issue quotations from the accounting section (on an existing open deal)" },
+    { key: "quotes_issue", label: "Issue quotations from the accounting section (on an existing open deal, or with no deal)" },
+    // «مسار المحاسب» (owner, 1 Nov 2026): the accountant creates and issues tax invoices and credit / debit notes from the
+    // accounting section without the sales module (no commissions, no deals). Issuing and notes step up as on the Sales side.
+    // adminOnly in the backfill.
+    { key: "invoices_issue", label: "Create and issue tax invoices and credit / debit notes from the accounting section" },
+    // «الإشراف على المحاسبة» (owner, 1 Nov 2026): told when the accountant quotes a rep's customer, and decides whether the
+    // commission goes to the rep (with the sales supervisors, holders of sales › lead_assign). adminOnly in the backfill.
+    { key: "supervise", label: "Supervise the accounting section (decide the commission on quotations the accountant issues for a rep's customer)" },
     // «استيراد البيانات من Excel / قيود» (owner: the accountant may be given the go-live import): the master data —
     // customers, suppliers, green coffee, materials and products — carried in from Qoyod or the template. Privileged (the
     // accounting module); the import itself steps up, like the admin path (src/lib/data-import/gate.ts). A new capability

@@ -8,17 +8,21 @@
 //   cancel     sales › invoices_cancel (a DRAFT only; an issued document is corrected by a note);
 //   notes      sales › invoices_credit_note — privileged + step-up; four-eyes: the preparer does not issue it;
 //   AR         accounting › ar (the accounting module is privileged as a whole: verified individual).
+//   accountant accounting › invoices_issue («مسار المحاسب»): create / issue / cancel / notes without the sales module —
+//              the same gates (issue and notes step up), the whole customer scope (the accounting module sees all).
 import { hasModuleAccess, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 import { seesAllSales } from "@/lib/services/sales/scope";
 
 type P = Permissions | Record<string, unknown>;
 const sub = (p: P, m: string, s: string) => hasSubPrivilege(p as Permissions, m, s);
 
-export const canViewInvoices = (p: P) => sub(p, "sales", "invoices_view") || canAr(p);
-export const canCreateInvoices = (p: P) => sub(p, "sales", "invoices_create");
-export const canIssueInvoices = (p: P) => sub(p, "sales", "invoices_issue");
-export const canCancelInvoices = (p: P) => sub(p, "sales", "invoices_cancel");
-export const canCreditNote = (p: P) => sub(p, "sales", "invoices_credit_note");
+export const canViewInvoices = (p: P) => sub(p, "sales", "invoices_view") || canAr(p) || viaAccounting(p);
+/** «مسار المحاسب»: the accounting module with accounting › invoices_issue does every invoice duty (no sales module). */
+export const viaAccounting = (p: P) => hasModuleAccess(p as Permissions, "accounting") && sub(p, "accounting", "invoices_issue");
+export const canCreateInvoices = (p: P) => sub(p, "sales", "invoices_create") || viaAccounting(p);
+export const canIssueInvoices = (p: P) => sub(p, "sales", "invoices_issue") || viaAccounting(p);
+export const canCancelInvoices = (p: P) => sub(p, "sales", "invoices_cancel") || viaAccounting(p);
+export const canCreditNote = (p: P) => sub(p, "sales", "invoices_credit_note") || viaAccounting(p);
 /** «بيع أصل ثابت» (BATCH 22 WP-F): a line selling a fixed asset needs accounting › fixed_assets (with invoices_create / issue). */
 export const canSellAssets = (p: P) => hasModuleAccess(p as Permissions, "accounting") && sub(p, "accounting", "fixed_assets");
 export const canAr = (p: P) => hasModuleAccess(p as Permissions, "accounting") && sub(p, "accounting", "ar");
@@ -28,7 +32,7 @@ export const canAr = (p: P) => hasModuleAccess(p as Permissions, "accounting") &
  * (the admin role's template holds lead_assign, and SIMPLE MODE gives the admin every permission).
  */
 export function seesAllInvoices(p: P): boolean {
-  return seesAllSales(p) || canAr(p);
+  return seesAllSales(p) || canAr(p) || viaAccounting(p);
 }
 
 export function abilities(p: P) {

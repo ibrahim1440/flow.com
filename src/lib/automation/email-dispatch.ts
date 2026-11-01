@@ -91,7 +91,7 @@ export async function replyToFor(customerId: string | null, companyReplyTo: stri
   const repOf = async (): Promise<string | null> => {
     if (subject.type === "Quote" && subject.id) {
       const q = await prisma.quote.findUnique({ where: { id: subject.id }, select: { opportunity: { select: { ownerId: true } } } });
-      if (q?.opportunity.ownerId) return q.opportunity.ownerId;
+      if (q?.opportunity?.ownerId) return q.opportunity.ownerId;
     }
     if (!customerId) return null;
     return (await prisma.customer.findUnique({ where: { id: customerId }, select: { accountOwnerId: true } }))?.accountOwnerId ?? null;
@@ -152,12 +152,12 @@ async function contentOf(msg: Claimed, company: CompanyInfo, replyable: boolean)
     // EXPIRED, was REJECTED or SUPERSEDED (or is a DRAFT) is never attached — the e-mail is refused with that said.
     if (q.status !== "ISSUED" && q.status !== "ACCEPTED") return { refused: EMAIL_NOTES.quoteNotCurrent };
     // Only the event's own quotation, and only to its own customer — re-checked now, never trusted from the row.
-    const owner = q.customerId ?? q.opportunity.customerId;
+    const owner = q.customerId ?? q.opportunity?.customerId ?? null;
     if (!msg.customerId || owner !== msg.customerId || (msg.subjectType === "Quote" && msg.subjectId !== q.id)) return { refused: EMAIL_NOTES.attachmentOther };
     const input = quoteEmailInput(q, company, null);
     if (!input) return { refused: EMAIL_NOTES.attachmentMissing };
     input.replyable = replyable;
-    input.repName = q.opportunity.owner?.name ?? null;
+    input.repName = q.opportunity?.owner?.name ?? null;
     const r = renderQuoteEmail(input);
     const subject = msg.subject?.trim() && !msg.subject.includes("{{") ? msg.subject : r.subject;
     return { subject, html: r.html, text: r.text, attachments: r.attachments, sha256: r.pdfSha256 || null };

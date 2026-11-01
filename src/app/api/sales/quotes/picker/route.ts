@@ -1,7 +1,7 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireQuoteWrite } from "@/lib/services/sales/quote-guard";
-import { quotesSeeAll } from "@/lib/services/sales/quote-access";
+import { canQuoteWithoutDeal, quotesSeeAll } from "@/lib/services/sales/quote-access";
 import { handleDomainError } from "@/lib/api-error";
 import { hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
 
@@ -24,7 +24,9 @@ export async function GET(request: Request) {
   const customerId = url.searchParams.get("customerId");
 
   const scopeAll = quotesSeeAll(user.permissions);
-  const hasCustomers = hasModuleAccess(user.permissions, "customers");
+  // «مسار المحاسب»: the accounting section quotes any customer directly (no deal), so it is offered every customer.
+  const noDeal = canQuoteWithoutDeal(user.permissions);
+  const hasCustomers = hasModuleAccess(user.permissions, "customers") || noDeal;
   const dealScope = scopeAll ? {} : { ownerId: user.id };
 
   try {
@@ -59,7 +61,9 @@ export async function GET(request: Request) {
       customers: customers.map(({ opportunities, ...c }) => ({ ...c, deals: opportunities })),
       can: {
         // Opening a deal for an existing customer: the rules of POST /api/customers/[id]/deals.
-        createDeal: hasSubPrivilege(user.permissions, "sales", "lead_convert") && hasCustomers,
+        createDeal: hasSubPrivilege(user.permissions, "sales", "lead_convert") && hasModuleAccess(user.permissions, "customers"),
+        // A quotation with no deal (accounting › quotes_issue).
+        noDeal,
       },
     });
   } catch (err) {

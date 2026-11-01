@@ -1,6 +1,7 @@
+import { requireInvoiceDuty } from "@/lib/services/invoicing/guard";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
-import { requireSub } from "@/lib/auth-server";
+
 import { auditFromRequest } from "@/lib/accounting/audit";
 import { jsonBody } from "@/lib/accounting/http";
 import { inScope } from "@/lib/services/invoicing/http";
@@ -13,7 +14,7 @@ import { invError, refuseInv } from "@/lib/services/invoicing/refusals";
  * priced from the order's quotation (else the SKU's price). sales › invoices_create.
  */
 export async function POST(request: Request) {
-  const { user, error } = await requireSub("sales", "invoices_create");
+  const { user, error } = await requireInvoiceDuty("invoices_create");
   if (error) return error;
   try {
     const body = await jsonBody(request);

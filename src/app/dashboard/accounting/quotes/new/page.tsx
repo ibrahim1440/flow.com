@@ -1,7 +1,8 @@
 "use client";
 
 // «+ عرض سعر» from the accounting section (BATCH22 WP-E): with a deal (?opportunityId, from the picker) the Sales editor
-// raises the draft; without one, the list opens its picker — the accountant chooses an existing open deal.
+// raises the draft; without one, the list opens its picker — the accountant chooses a customer (a quotation with no deal,
+// «مسار المحاسب») or an existing open deal.
 import { Suspense, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import SalesNewQuote from "../../../sales/quotes/new/page";

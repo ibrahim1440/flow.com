@@ -22,6 +22,7 @@ import { useAccountantView } from "../../../accounting/_ui/qoyod-pages";
 import { useQuotesBase } from "../base";
 import { IssueOutcome, SentMessagesLine } from "@/components/automation/SentMessages";
 import { useUser } from "../../../user-context";
+import { CommissionPanel, type CommissionInfo } from "./CommissionPanel";
 
 /**
  * The quotation — editor while it is a draft (GX A-10, Figma 1230:121651 / EN 1230:147423,
@@ -60,7 +61,7 @@ type Line = {
   taxRatePercent: string;
 };
 
-type Quote = {
+type Quote = CommissionInfo & {
   id: string;
   quoteNumber: string;
   revision: number;
@@ -85,7 +86,8 @@ type Quote = {
   supersedes: { id: string; quoteNumber: string; revision: number } | null;
   supersededBy: { id: string; quoteNumber: string; revision: number; status: string } | null;
   customer: { id: string; name: string; nameAr: string | null } | null;
-  opportunity: { id: string; title: string; outcome: string; owner: { id: string; name: string } | null };
+  /** NULL on a quotation from the accounting section with no deal («مسار المحاسب»). */
+  opportunity: { id: string; title: string; outcome: string; owner: { id: string; name: string } | null } | null;
   lines: {
     id: string;
     productSkuId: string | null;
@@ -105,7 +107,7 @@ type Quote = {
 };
 
 type State = { editable: boolean; revisable: boolean; expired: boolean; orderable: boolean };
-type Can = { write: boolean; approveDiscount: boolean; approveThisDiscount: boolean; createOrder: boolean; close: boolean; viaAccounting?: boolean; reject?: boolean };
+type Can = { decideCommission?: boolean; write: boolean; approveDiscount: boolean; approveThisDiscount: boolean; createOrder: boolean; close: boolean; viaAccounting?: boolean; reject?: boolean };
 type DiscountInfo = { state: "NOT_NEEDED" | "PENDING" | "APPROVED" | "REJECTED"; approvedBy: string | null; rejectedBy: string | null };
 /** The lines as frozen at issue (`issuedSnapshot.lines`): the names the customer was sent. */
 type SnapLine = { position: number; name: string | null; nameAr: string | null; description: string | null };
@@ -167,7 +169,9 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   // issued — accepting, rejecting, the discount decision and the order stay with Sales.
   const readOnly = useAccountantView();
   const { base, accounting: accountingBase } = useQuotesBase();
-  const can = canRaw && (readOnly || accountingBase) ? { ...canRaw, close: false, createOrder: false, approveThisDiscount: false, ...(canRaw.viaAccounting ? { reject: false } : {}) } : canRaw;
+  // «مسار المحاسب»: a quotation with NO deal is the accounting section's own — its whole lifecycle stays available here.
+  const noDeal = !!quote && !quote.opportunity;
+  const can = canRaw && (readOnly || accountingBase) && !noDeal ? { ...canRaw, close: false, createOrder: false, approveThisDiscount: false, ...(canRaw.viaAccounting ? { reject: false } : {}) } : canRaw;
   const [threshold, setThreshold] = useState("10");
   const [discount, setDiscount] = useState<DiscountInfo | null>(null);
   const [notes, setNotes] = useState("");
@@ -206,6 +210,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
    * first `await` precedes any state write. Saving, issuing and revising bump this to refresh;
    * none of them consumed the loader's completion, so nothing is lost by not awaiting it.
    */
+  const [issuer, setIssuer] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const reload = () => setReloadToken((t) => t + 1);
 
@@ -213,11 +218,12 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
     let cancelled = false;
     (async () => {
     const res = await api<{
-      quote: Quote; state: State; can: Can; discountThresholdPercent: string; discount: DiscountInfo;
+      quote: Quote; state: State; can: Can; discountThresholdPercent: string; discount: DiscountInfo; issuer?: { name: string } | null;
     }>(`/api/sales/quotes/${id}`);
     if (cancelled) return;
     if (res.ok) {
       setQuote(res.data.quote);
+      setIssuer(res.data.issuer?.name ?? null);
       setState(res.data.state);
       setCan(res.data.can);
       setThreshold(res.data.discountThresholdPercent);
@@ -277,7 +283,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   useD21Phone({
     title: ar ? "عرض السعر" : "Quotation",
     sub: quote
-      ? `${quote.quoteNumber} · ${editable ? `${ar ? "المراجعة" : "revision"} ${quote.revision}` : (customerName ?? quote.opportunity.title)}`
+      ? `${quote.quoteNumber} · ${editable ? `${ar ? "المراجعة" : "revision"} ${quote.revision}` : (customerName ?? quote.opportunity?.title ?? "")}`
       : undefined,
     back: base,
     ownBar: phoneBar,
@@ -399,7 +405,8 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   const SCREEN_AR: Record<string, string> = { KG: "كجم", UNIT: "عبوة", GRAM: "جرام" };
   const unitLabel = (u: string) => (UNIT_LABELS[u] ? (ar ? SCREEN_AR[u] ?? UNIT_LABELS[u].ar : UNIT_LABELS[u].en) : u);
   const pct = (v: string | number) => <bdi>{`${num(Number(v), lang)}%`}</bdi>;
-  const dealSub = splitTitle(quote.opportunity.title, customerName).sub || (customerName ? "" : quote.opportunity.title);
+  const dealTitle = quote.opportunity?.title ?? (ar ? "بدون صفقة · قسم المحاسبة" : "No deal · accounting");
+  const dealSub = quote.opportunity ? splitTitle(dealTitle, customerName).sub || (customerName ? "" : dealTitle) : dealTitle;
   const revisionText = (n: number) => `${ar ? "المراجعة" : "Revision"} ${n}`;
 
   // ── The figures: the local preview while lines are unsaved, otherwise the server's. ──
@@ -441,7 +448,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   // ── The facts under the title, each its own element so the bidi algorithm cannot move a
   //    separator between two numerals. ──
   // A deal page is Sales': from the accounting section the deal is named, not linked (the route guard would refuse it).
-  const dealHref = accountingBase ? base : `/dashboard/sales/deals/${quote.opportunity.id}`;
+  const dealHref = accountingBase || !quote.opportunity ? base : `/dashboard/sales/deals/${quote.opportunity.id}`;
   const meta: React.ReactNode[] = [
     <span key="st" className={`st ${STATUS_DOT[quote.status] ?? ""}`} data-testid="quote-status">{statusLabel(quote.status)}</span>,
     <span key="who">
@@ -845,6 +852,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       </dl>
       {previewNote}
       {quote.status !== "DRAFT" ? <SentMessagesLine subjectType="Quote" subjectId={quote.id} ar={ar} isAdmin={viewerIsAdmin} reloadKey={justIssued ? 1 : 0} /> : null}
+      <CommissionPanel quoteId={quote.id} info={quote} issuer={issuer} canDecide={!!canRaw?.decideCommission} ar={ar} onDone={reload} />
     </div>
   );
 
@@ -858,8 +866,8 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         <dt>{ar ? "العميل" : "Customer"}</dt><dd><bdi>{customerName ?? "—"}</bdi></dd>
         <dt>{ar ? "الصفقة" : "Deal"}</dt>
         <dd>
-          <Link href={dealHref} style={{ color: "inherit" }}><bdi>{quote.opportunity.title}</bdi></Link>
-          {quote.opportunity.owner && <> · {quote.opportunity.owner.name}</>}
+          {quote.opportunity ? <Link href={dealHref} style={{ color: "inherit" }}><bdi>{quote.opportunity.title}</bdi></Link> : <bdi>{dealTitle}</bdi>}
+          {quote.opportunity?.owner && <> · {quote.opportunity.owner.name}</>}
         </dd>
         <dt>{ar ? "تاريخ العرض" : "Quote date"}</dt><dd><bdi className="n">{formatDay(quote.createdAt ?? null, lang)}</bdi></dd>
         <dt>{ar ? "العملة" : "Currency"}</dt><dd>{ar ? "ريال سعودي (SAR) فقط" : "Saudi riyal (SAR) only"}</dd>
@@ -1036,6 +1044,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         {previewNote}
         {issuedNote}
         {quote.status !== "DRAFT" ? <SentMessagesLine subjectType="Quote" subjectId={quote.id} ar={ar} isAdmin={viewerIsAdmin} reloadKey={justIssued ? 1 : 0} /> : null}
+      <CommissionPanel quoteId={quote.id} info={quote} issuer={issuer} canDecide={!!canRaw?.decideCommission} ar={ar} onDone={reload} />
         {chain && <div style={{ marginTop: 20 }}>{chain}</div>}
         <p className="q-band">
           {editable

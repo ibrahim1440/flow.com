@@ -31,7 +31,7 @@ type Detail = {
     subtotal: string; discountTotal: string; taxTotal: string; grandTotal: string;
     discountRejectionNote: string | null;
     customer: { name: string; nameAr: string | null } | null;
-    opportunity: { id: string; title: string; owner: { name: string } | null };
+    opportunity: { id: string; title: string; owner: { name: string } | null } | null;
     lines: Line[];
   };
   state: { editable: boolean };
@@ -133,12 +133,12 @@ export function QuotePane({
           <p className="lbl" role="status" style={{ fontWeight: 400 }}>{ar ? "جارٍ التحميل…" : "Loading…"}</p>
         ) : (
           <>
-            <h2 ref={head} tabIndex={-1} className="pane-t"><bdi>{customer ?? q.opportunity.title}</bdi></h2>
+            <h2 ref={head} tabIndex={-1} className="pane-t"><bdi>{customer ?? q.opportunity?.title ?? ""}</bdi></h2>
             <div className="meta" style={{ marginTop: 0, marginBottom: 20 }}>
               <span className={`st ${DOT[q.status] ?? ""}`}>{pick(QUOTE_STATUS_SPECS, q.status, lang)}</span>
               <span>
-                {ar ? "صفقة " : "Deal "}<bdi>{q.opportunity.title}</bdi>
-                {q.opportunity.owner && <> · {q.opportunity.owner.name}</>}
+                {q.opportunity ? <>{ar ? "صفقة " : "Deal "}<bdi>{q.opportunity.title}</bdi></> : <bdi>{ar ? "بدون صفقة · قسم المحاسبة" : "No deal · accounting"}</bdi>}
+                {q.opportunity?.owner && <> · {q.opportunity.owner.name}</>}
               </span>
             </div>
             {error && <p className="notice er" role="alert" style={{ marginBottom: 12 }}>{error}</p>}

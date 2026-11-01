@@ -1,6 +1,7 @@
+import { requireInvoiceDuty } from "@/lib/services/invoicing/guard";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
-import { requireAuth, requireSub } from "@/lib/auth-server";
+import { requireAuth } from "@/lib/auth-server";
 import { auditFromRequest } from "@/lib/accounting/audit";
 import { jsonBody } from "@/lib/accounting/http";
 import { inScope } from "@/lib/services/invoicing/http";
@@ -21,7 +22,7 @@ export async function POST(request: Request, { params }: Ctx) {
   if (auth.error) return auth.error;
   const head = await prisma.salesInvoice.findUnique({ where: { id }, select: { kind: true, customerId: true } });
   if (!head) return notFound();
-  const { user, error } = head.kind === "INVOICE" ? await requireSub("sales", "invoices_issue") : await requireSub("sales", "invoices_credit_note");
+  const { user, error } = head.kind === "INVOICE" ? await requireInvoiceDuty("invoices_issue") : await requireInvoiceDuty("invoices_credit_note");
   if (error) return error;
   if (!(await inScope(user, head.customerId))) return notFound();
   try {

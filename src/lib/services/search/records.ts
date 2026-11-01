@@ -132,7 +132,7 @@ export async function searchRecords(db: Db, viewer: SearchViewer, rawQ: string, 
     const num = toNumberQuery(rawQ);
     jobs.push(db.$queryRaw<{ id: string; quoteNumber: string; status: string; customerId: string | null; cName: string | null; cNameAr: string | null }[]>(Prisma.sql`
       SELECT q."id", q."quoteNumber", q."status"::text AS "status", q."customerId", c."name" AS "cName", c."nameAr" AS "cNameAr"
-        FROM "Quote" q JOIN "Opportunity" o ON o."id" = q."opportunityId" LEFT JOIN "Customer" c ON c."id" = q."customerId"
+        FROM "Quote" q LEFT JOIN "Opportunity" o ON o."id" = q."opportunityId" LEFT JOIN "Customer" c ON c."id" = q."customerId"
        WHERE ${scope} AND q."status" <> 'SUPERSEDED'
          AND (strpos(lower(q."quoteNumber"), ${num}) > 0 OR ${has(Prisma.sql`c."name"`)} OR ${has(Prisma.sql`c."nameAr"`)})
        ORDER BY (strpos(lower(q."quoteNumber"), ${num}) > 0) DESC, q."updatedAt" DESC

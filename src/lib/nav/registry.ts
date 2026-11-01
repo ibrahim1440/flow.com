@@ -428,7 +428,8 @@ export const NAV: NavNode[] = [
         // AR pages belong to it, with its audience unchanged (access parity); each page's API decides what is shown
         // (sales › invoices_view, scoped for a rep, or accounting › ar).
         alsoMatches: ["/dashboard/sales/invoices", "/dashboard/sales/receivables"],
-        anyOf: [sales(), ...DECIDES_COLLECTIONS],
+        // «مسار المحاسب»: the accountant who issues invoices (accounting › invoices_issue, no sales module) opens them too.
+        anyOf: [sales(), ...DECIDES_COLLECTIONS, { module: "accounting", sub: "invoices_issue" }],
         shell: {
           ar: "الفواتير والتحصيل", en: "Invoices & collections", icon: "invoice",
           own: { ar: "التحصيل", en: "Collections", unlessAny: DECIDES_COLLECTIONS },

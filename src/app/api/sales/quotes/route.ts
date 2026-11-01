@@ -3,12 +3,12 @@ import { lockDealForQuote, prefillLines, reusableDraft } from "@/lib/services/sa
 import { assertSalesAllowed } from "@/lib/services/customers/credit-db";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireQuoteView, requireQuoteWrite, dealNotOpen } from "@/lib/services/sales/quote-guard";
-import { canWriteQuotes, quotesSeeAll, writesViaAccounting } from "@/lib/services/sales/quote-access";
+import { canQuoteWithoutDeal, canWriteQuotes, quotesSeeAll, writesViaAccounting } from "@/lib/services/sales/quote-access";
 import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege, hasModuleAccess } from "@/lib/auth-shared";
 
 import {
-  nextQuoteNumber, saveQuoteLines, parseLineInputs, validateLines, QUOTE_CURRENCY, type SkuFacts,
+  nextQuoteNumber, saveQuoteLines, parseLineInputs, validateLines, QUOTE_CURRENCY, createAccountingQuote, type SkuFacts,
 } from "@/lib/services/sales/quotes";
 import { readQuoteSettings, discountThreshold } from "@/lib/services/sales/quote-settings";
 import { Decimal } from "@/lib/services/commissions/engine";
@@ -22,7 +22,7 @@ const CSV_MAX_ROWS = 5000;
 const ROW_SELECT = {
   id: true, quoteNumber: true, revision: true, status: true, currency: true,
   validUntil: true, subtotal: true, discountTotal: true, taxTotal: true, grandTotal: true,
-  issuedAt: true, acceptedAt: true, createdAt: true, supersedesId: true,
+  issuedAt: true, acceptedAt: true, createdAt: true, supersedesId: true, channel: true,
   discountApprovedById: true, discountApprovedAt: true, discountApprovedPercent: true,
   discountRejectedAt: true,
   customer: { select: { id: true, name: true, nameAr: true } },
@@ -126,7 +126,7 @@ export async function GET(request: Request) {
       const day = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
       const body = all.map((r) => [
         r.quoteNumber, r.revision, r.status, r.customer ? (r.customer.nameAr ?? r.customer.name) : "",
-        r.opportunity.title, r.opportunity.owner?.name ?? "", r.subtotal.toFixed(2), r.discountTotal.toFixed(2),
+        r.opportunity?.title ?? "قسم المحاسبة", r.opportunity?.owner?.name ?? "", r.subtotal.toFixed(2), r.discountTotal.toFixed(2),
         r.taxTotal.toFixed(2), r.grandTotal.toFixed(2), r.currency, day(r.validUntil), day(r.issuedAt), day(r.createdAt),
         stateOf.get(r.id) ?? (r.discountApprovedById ? "APPROVED" : ""),
       ]);
@@ -219,7 +219,13 @@ export async function POST(request: Request) {
   const b = (body ?? {}) as Record<string, unknown>;
 
   const opportunityId = typeof b.opportunityId === "string" ? b.opportunityId : "";
-  if (!opportunityId) {
+  // «مسار المحاسب» (owner, 1 Nov 2026): the accounting section quotes a CUSTOMER directly — no deal, so nothing of it
+  // reaches the pipeline or the commissions (channel ACCOUNTING). Only through accounting › quotes_issue.
+  const accountingCustomerId = !opportunityId && typeof b.customerId === "string" && b.customerId ? b.customerId : "";
+  if (accountingCustomerId && !canQuoteWithoutDeal(user.permissions)) {
+    return NextResponse.json({ error: "عرض السعر بدون صفقة من قسم المحاسبة فقط.", errorEn: "A quotation without a deal is issued from the accounting section only.", code: "DEAL_REQUIRED" }, { status: 403 });
+  }
+  if (!opportunityId && !accountingCustomerId) {
     return NextResponse.json({ error: "A quotation belongs to a deal." }, { status: 400 });
   }
   if (typeof b.currency === "string" && b.currency !== QUOTE_CURRENCY) {
@@ -240,6 +246,20 @@ export async function POST(request: Request) {
   const rawLines = Array.isArray(b.lines) ? b.lines : [];
   if (rawLines.length > 100) {
     return NextResponse.json({ error: "A quotation may carry at most 100 lines." }, { status: 400 });
+  }
+
+  if (accountingCustomerId) {
+    try {
+      const lines = parseLineInputs(rawLines);
+      const result = await prisma.$transaction(async (tx) => createAccountingQuote(tx, { customerId: accountingCustomerId, actorId: user.id, validUntil, lines, threshold: await discountThreshold(tx) }), TX_OPTS);
+      return NextResponse.json({
+        quote: result.quote,
+        totals: result.priced ? { subtotal: result.priced.subtotal.toFixed(2), discountTotal: result.priced.discountTotal.toFixed(2), taxTotal: result.priced.taxTotal.toFixed(2), grandTotal: result.priced.grandTotal.toFixed(2), effectiveDiscountPercent: result.priced.effectiveDiscountPercent.toString() } : null,
+        needsDiscountApproval: false, reused: false,
+      }, { status: 201 });
+    } catch (err) {
+      return handleDomainError(err);
+    }
   }
 
   try {

@@ -79,6 +79,9 @@ async function quotesToFollow(actor: WsActor, until: Date) {
     orderBy: { issuedAt: "asc" }, take: 50,
   });
   return rows.flatMap((q) => {
+    // «مسار المحاسب»: a quotation with no deal is the accounting section's, not a rep's follow-up.
+    if (!q.opportunity) return [];
+    const opp = q.opportunity;
     const issued = q.issuedAt ?? new Date();
     const byAge = issued.getTime() + QUOTE_FOLLOW_UP_DAYS * DAY;
     const byExpiry = q.validUntil ? q.validUntil.getTime() - 2 * DAY : Infinity;
@@ -86,8 +89,8 @@ async function quotesToFollow(actor: WsActor, until: Date) {
     if (due > until) return [];
     return [{
       id: q.id, quoteNumber: q.quoteNumber, dueAt: due.toISOString(), validUntil: q.validUntil?.toISOString() ?? null,
-      record: q.opportunity.customer?.nameAr ?? q.opportunity.customer?.name ?? q.opportunity.title,
-      recordEn: q.opportunity.customer?.name ?? q.opportunity.title, deal: q.opportunity.title,
+      record: opp.customer?.nameAr ?? opp.customer?.name ?? opp.title,
+      recordEn: opp.customer?.name ?? opp.title, deal: opp.title,
       openUrl: `/dashboard/sales/quotes/${q.id}`,
     }];
   });

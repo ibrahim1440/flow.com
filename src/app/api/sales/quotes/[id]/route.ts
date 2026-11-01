@@ -1,7 +1,8 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireQuoteView, requireQuoteWrite } from "@/lib/services/sales/quote-guard";
-import { canWriteQuotes, quotesSeeAll, writesViaAccounting } from "@/lib/services/sales/quote-access";
+import { canQuoteWithoutDeal, canWriteQuotes, quotesSeeAll, writesViaAccounting } from "@/lib/services/sales/quote-access";
+import { canDecideCommission } from "@/lib/services/sales/accounting-quote-commission";
 import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
@@ -26,7 +27,9 @@ export async function GET(_request: Request, { params }: Params) {
 
   try {
     const quote = await prisma.quote.findFirst({
-      where: { id, ...(quotesSeeAll(user.permissions) ? {} : { opportunity: { ownerId: user.id } }) },
+      // A rep sees their deals' quotations — and («عمولة عرض المحاسب») the accountant's quotation for their own customer,
+      // which they are told about (read only: every write keeps its own gate).
+      where: { id, ...(quotesSeeAll(user.permissions) ? {} : { OR: [{ opportunity: { ownerId: user.id } }, { channel: "ACCOUNTING", customer: { accountOwnerId: user.id } }] }) },
       select: {
         id: true, quoteNumber: true, revision: true, status: true, currency: true,
         validUntil: true, subtotal: true, discountTotal: true, taxTotal: true, grandTotal: true,
@@ -34,7 +37,9 @@ export async function GET(_request: Request, { params }: Params) {
         rejectionNote: true, discountApprovedById: true, discountApprovedAt: true,
         discountApprovedPercent: true, discountRejectedById: true, discountRejectedAt: true,
         discountRejectionNote: true, customerNotes: true, createdById: true,
-        supersedesId: true, createdAt: true, updatedAt: true,
+        supersedesId: true, createdAt: true, updatedAt: true, channel: true,
+        commissionDecision: true, commissionReason: true, commissionDecidedAt: true,
+        commissionRep: { select: { id: true, name: true } }, commissionDecidedBy: { select: { id: true, name: true } },
         supersededBy: { select: { id: true, quoteNumber: true, revision: true, status: true } },
         supersedes: { select: { id: true, quoteNumber: true, revision: true } },
         customer: {
@@ -80,6 +85,11 @@ export async function GET(_request: Request, { params }: Params) {
       : [];
     const nameOf = (id: string | null) => (id ? deciders.find((d) => d.id === id)?.name ?? null : null);
     const canApproveDiscount = hasSubPrivilege(user.permissions, "sales", "quote_approve_discount");
+    // «مسار المحاسب»: a quotation with no deal — the accounting section runs it end to end (no deal to close, no discount
+    // approval by Sales); its order is found by the quotation number (no deal–order link).
+    const noDeal = quote.channel === "ACCOUNTING" || !quote.opportunity;
+    const ownOrder = noDeal ? await prisma.order.findFirst({ where: { quotationNumber: quote.quoteNumber }, select: { id: true, orderNumber: true, status: true } }) : null;
+    const ownsNoDeal = noDeal && canQuoteWithoutDeal(user.permissions);
 
     return NextResponse.json({
       quote,
@@ -89,20 +99,25 @@ export async function GET(_request: Request, { params }: Params) {
         editable: isEditable(status),
         revisable: isRevisable(status),
         expired: hasExpired(quote, now),
-        orderable: status === "ACCEPTED" && quote.orderLinks.length === 0,
+        orderable: status === "ACCEPTED" && quote.orderLinks.length === 0 && !ownOrder,
+        noDeal,
+        order: ownOrder,
       },
       can: {
         write: canWriteQuotes(user.permissions),
-        viaAccounting: writesViaAccounting(user.permissions),
+        viaAccounting: writesViaAccounting(user.permissions) && !noDeal,
         approveDiscount: canApproveDiscount,
         // SIMPLE MODE off: an approver does not approve a discount on a quotation they raised.
         approveThisDiscount: canApproveDiscount && (isSimpleMode() || quote.createdById !== user.id),
         // Accepting closes the deal Won, so the accept control follows the deal-close privilege.
-        close: hasSubPrivilege(user.permissions, "sales", "deal_close"),
-        createOrder: hasSubPrivilege(user.permissions, "orders", "create"),
+        close: noDeal ? ownsNoDeal || hasSubPrivilege(user.permissions, "sales", "deal_close") : hasSubPrivilege(user.permissions, "sales", "deal_close"),
+        createOrder: hasSubPrivilege(user.permissions, "orders", "create") || ownsNoDeal,
+        // «عمولة عرض المحاسب»: the supervisors' decision on an accountant's quotation for a rep's customer.
+        decideCommission: quote.commissionDecision === "PENDING" && canDecideCommission(user.permissions),
       },
+      issuer: quote.createdById ? await prisma.employee.findUnique({ where: { id: quote.createdById }, select: { id: true, name: true } }) : null,
       discount: {
-        state: discountApprovalState(quote, threshold),
+        state: noDeal ? "NOT_NEEDED" : discountApprovalState(quote, threshold),
         approvedBy: nameOf(quote.discountApprovedById),
         rejectedBy: nameOf(quote.discountRejectedById),
       },

@@ -31,6 +31,8 @@ export function QuotePicker({ lang, onClose }: { lang: "ar" | "en"; onClose: () 
   const [q, setQ] = useState("");
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [canCreateDeal, setCanCreateDeal] = useState(false);
+  // «مسار المحاسب»: from the accounting section a customer is quoted directly — no deal.
+  const [canNoDeal, setCanNoDeal] = useState(false);
   const [chosen, setChosen] = useState<Customer | null>(null);
   const [title, setTitle] = useState("");
   const [loading, setLoading] = useState(true);
@@ -40,11 +42,11 @@ export function QuotePicker({ lang, onClose }: { lang: "ar" | "en"; onClose: () 
   useEffect(() => {
     let cancelled = false;
     const t = setTimeout(async () => {
-      const res = await api<{ customers: Customer[]; can: { createDeal: boolean } }>(
+      const res = await api<{ customers: Customer[]; can: { createDeal: boolean; noDeal?: boolean } }>(
         `/api/sales/quotes/picker?q=${encodeURIComponent(q.trim())}`,
       );
       if (cancelled) return;
-      if (res.ok) { setCustomers(res.data.customers); setCanCreateDeal(res.data.can.createDeal); setError(""); }
+      if (res.ok) { setCustomers(res.data.customers); setCanCreateDeal(res.data.can.createDeal); setCanNoDeal(!!res.data.can.noDeal); setError(""); }
       else setError(res.data.error ?? (ar ? "تعذّر التحميل." : "Could not load."));
       setLoading(false);
     }, q ? 250 : 0);
@@ -53,6 +55,16 @@ export function QuotePicker({ lang, onClose }: { lang: "ar" | "en"; onClose: () 
 
   const nameOf = (c: Customer) => (ar ? (c.nameAr ?? c.name) : c.name);
   const goToEditor = (opportunityId: string) => router.push(`${base}/new?opportunityId=${encodeURIComponent(opportunityId)}`);
+
+  async function quoteWithoutDeal() {
+    if (!chosen || busy) return;
+    setBusy(true);
+    setError("");
+    const res = await api<{ quote: { id: string } }>("/api/sales/quotes", { method: "POST", body: { customerId: chosen.id, lines: [] } });
+    setBusy(false);
+    if (!res.ok) { setError(res.data.error ?? (ar ? "تعذّر إنشاء العرض." : "Could not create the quotation.")); return; }
+    router.push(`${base}/${encodeURIComponent(res.data.quote.id)}`);
+  }
 
   async function newDeal() {
     if (!chosen || busy) return;
@@ -72,7 +84,9 @@ export function QuotePicker({ lang, onClose }: { lang: "ar" | "en"; onClose: () 
       {!chosen ? (
         <>
           <p className="lbl" style={{ fontWeight: 400, margin: 0 }}>
-            {ar ? "١ · اختر العميل. العرض يُنشأ على صفقة مفتوحة له." : "1 · Choose the customer. The quotation is raised on one of its open deals."}
+            {accounting && canNoDeal
+              ? (ar ? "١ · اختر العميل. العرض يصدر من قسم المحاسبة بدون صفقة ولا عمولة." : "1 · Choose the customer. The quotation is issued by accounting, with no deal and no commission.")
+              : ar ? "١ · اختر العميل. العرض يُنشأ على صفقة مفتوحة له." : "1 · Choose the customer. The quotation is raised on one of its open deals."}
           </p>
           <label className="search" style={{ width: "100%" }}>
             <Ico name="search" small />
@@ -106,7 +120,14 @@ export function QuotePicker({ lang, onClose }: { lang: "ar" | "en"; onClose: () 
             </button>
             {" · "}<b style={{ color: "var(--text-primary)" }}><bdi>{nameOf(chosen)}</bdi></b>
           </p>
-          <p className="lbl" style={{ fontWeight: 400, margin: 0 }}>{ar ? "٢ · اختر الصفقة المفتوحة:" : "2 · Choose the open deal:"}</p>
+          {accounting && canNoDeal ? (
+            <button type="button" className="btn p" disabled={busy} onClick={quoteWithoutDeal} data-testid="picker-no-deal">
+              {ar ? "عرض سعر لهذا العميل (بدون صفقة)" : "Quote this customer (no deal)"}
+            </button>
+          ) : null}
+          {chosen.deals.length > 0 || !(accounting && canNoDeal) ? (
+            <p className="lbl" style={{ fontWeight: 400, margin: 0 }}>{accounting && canNoDeal ? (ar ? "أو على صفقة مفتوحة للمبيعات:" : "Or on an open Sales deal:") : ar ? "٢ · اختر الصفقة المفتوحة:" : "2 · Choose the open deal:"}</p>
+          ) : null}
           <ul className="q-pick" data-testid="picker-deals">
             {chosen.deals.map((d) => (
               <li key={d.id}>
@@ -120,11 +141,11 @@ export function QuotePicker({ lang, onClose }: { lang: "ar" | "en"; onClose: () 
                 </button>
               </li>
             ))}
-            {chosen.deals.length === 0 && (
+            {chosen.deals.length === 0 && !(accounting && canNoDeal) && (
               <li className="lbl" style={{ fontWeight: 400, padding: "8px 0" }}>{ar ? "لا توجد صفقة مفتوحة لهذا العميل." : "This customer has no open deal."}</li>
             )}
           </ul>
-          {accounting && chosen.deals.length === 0 ? (
+          {accounting && canNoDeal ? null : accounting && chosen.deals.length === 0 ? (
             <p className="lbl" style={{ fontWeight: 400, margin: 0 }} data-testid="picker-no-open-deal">
               {ar ? "لا توجد صفقة مفتوحة — اطلب من المبيعات فتح صفقة." : "There is no open deal — ask Sales to open one."}
             </p>

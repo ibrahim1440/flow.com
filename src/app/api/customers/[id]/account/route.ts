@@ -265,7 +265,7 @@ export async function GET(_request: Request, { params }: Params) {
       }
       const st = statementOfAccount(
         accepted.map((q) => ({
-          opportunityId: q.opportunityId, dealTitle: q.opportunity.title, quoteId: q.id, quoteNumber: q.quoteNumber, revision: q.revision,
+          opportunityId: q.opportunityId, dealTitle: q.opportunity?.title ?? "", quoteId: q.id, quoteNumber: q.quoteNumber, revision: q.revision,
           at: q.acceptedAt ?? q.issuedAt ?? q.createdAt, grandTotal: new Decimal(q.grandTotal.toString()), firstDeliveryAt: firstDelivery.get(q.id) ?? null,
         })),
         approved.map((c) => ({ id: c.id, opportunityId: c.opportunityId ?? "", at: c.collectedAt, amountGross: new Decimal(c.amountGross.toString()), method: c.paymentMethod, orderNumber: c.order?.orderNumber ?? null, reference: c.referenceNumber })),
@@ -424,6 +424,19 @@ export async function GET(_request: Request, { params }: Params) {
         stage: d.stage, owner: d.owner, _count: d._count,
       })) ?? null,
       quotes: quotes?.map((q) => ({ ...q, grandTotal: q.grandTotal.toFixed(2), taxTotal: q.taxTotal.toFixed(2) })) ?? null,
+      // «عمولة عرض المحاسب»: the accountant's quotations for this customer (no deal), beside the deal quotations — for a
+      // viewer of the sales or the accounting module. Kept apart from `quotes`, which the deal figures above are built from.
+      accountingQuotes: sales || hasModuleAccess(p, "accounting")
+        ? (await prisma.quote.findMany({
+            where: { customerId: id, channel: "ACCOUNTING" },
+            orderBy: { createdAt: "desc" }, take: 100,
+            select: { id: true, quoteNumber: true, revision: true, status: true, grandTotal: true, validUntil: true, issuedAt: true, createdById: true, commissionDecision: true, commissionRep: { select: { name: true } } },
+          }).then(async (rows) => {
+            const ids = [...new Set(rows.map((r) => r.createdById).filter((x): x is string => !!x))];
+            const names = new Map((ids.length ? await prisma.employee.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }) : []).map((e) => [e.id, e.name]));
+            return rows.map(({ createdById, grandTotal, ...r }) => ({ ...r, grandTotal: grandTotal.toFixed(2), issuerName: createdById ? names.get(createdById) ?? null : null }));
+          }))
+        : null,
       samples: samples?.map((s) => ({ ...s, quantity: s.quantity.toString() })) ?? null,
       orders: orderRows?.map((o) => ({
         id: o.id, orderNumber: o.orderNumber, createdAt: o.createdAt, status: o.status, approvalStatus: o.approvalStatus,

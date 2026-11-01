@@ -24,7 +24,8 @@ type Tx = PrismaNS.TransactionClient;
 export type ConversionResult = {
   orderId: string;
   orderNumber: number;
-  linkId: string;
+  /** NULL for a quotation with no deal («مسار المحاسب»): no deal, so no deal–order link. */
+  linkId: string | null;
   isFirstOrder: boolean;
   /** True when this call found an existing order instead of creating one. */
   replayed: boolean;
@@ -88,6 +89,14 @@ export async function createOrderFromQuote(
     };
   }
 
+  // «مسار المحاسب»: a quotation with no deal has no deal–order link; its order is found by the quotation number it
+  // carries (one order per quotation, serialised by the lock above).
+  const head = await tx.quote.findUniqueOrThrow({ where: { id: input.quoteId }, select: { opportunityId: true, quoteNumber: true } });
+  if (!head.opportunityId) {
+    const prior = await tx.order.findFirst({ where: { quotationNumber: head.quoteNumber }, select: { id: true, orderNumber: true } });
+    if (prior) return { orderId: prior.id, orderNumber: prior.orderNumber, linkId: null, isFirstOrder: false, replayed: true };
+  }
+
   if (locked[0].status !== "ACCEPTED") {
     throw {
       _appCode: 409,
@@ -113,7 +122,7 @@ export async function createOrderFromQuote(
     },
   });
 
-  const customerId = quote.customerId ?? quote.opportunity.customerId;
+  const customerId = quote.customerId ?? quote.opportunity?.customerId;
   if (!customerId) {
     throw {
       _appCode: 409,
@@ -157,20 +166,26 @@ export async function createOrderFromQuote(
       notes: input.notes?.trim() || null,
       // The quotation's owner — the rep who made the sale — owns the order, falling back to
       // whoever converted it when that account is no longer active (fix/order-owner).
-      ownerId: ownerForConvertedOrder(quote.opportunity, input.actorId),
+      ownerId: ownerForConvertedOrder(quote.opportunity ?? { ownerId: null }, input.actorId),
     },
     resolved,
   );
 
+  // No deal: no link, nothing for attribution (there is no rep and no commission on it).
+  if (!quote.opportunityId) {
+    return { orderId: order.id, orderNumber: order.orderNumber, linkId: null, isFirstOrder: false, replayed: false };
+  }
+  const opportunityId = quote.opportunityId;
+
   // First order on the deal, or repeat business? The attribution policy may treat them
   // differently, so it is recorded rather than re-derived later from dates.
   const priorOrders = await tx.opportunityOrder.count({
-    where: { opportunityId: quote.opportunityId },
+    where: { opportunityId },
   });
 
   const link = await tx.opportunityOrder.create({
     data: {
-      opportunityId: quote.opportunityId,
+      opportunityId,
       quoteId: quote.id,
       orderId: order.id,
       isFirstOrder: priorOrders === 0,

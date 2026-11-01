@@ -1,6 +1,7 @@
+import { requireInvoiceDuty } from "@/lib/services/invoicing/guard";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
-import { forbidden, requireAuth, requireSub } from "@/lib/auth-server";
+import { forbidden, requireAuth } from "@/lib/auth-server";
 import { auditFromRequest } from "@/lib/accounting/audit";
 import { jsonBody } from "@/lib/accounting/http";
 import { postingRef } from "@/lib/accounting/posting-engine";
@@ -59,8 +60,8 @@ export async function PATCH(request: Request, { params }: Ctx) {
   // «طلب فاتورة ضريبية» (Q-F3): a requested draft is corrected by the issuer only (compliance fields; step-up like the
   // issue), never by its requester (REQUEST_LOCKED: withdraw it first).
   const requested = !!head.requestedAt;
-  const { user, error } = head.kind !== "INVOICE" ? await requireSub("sales", "invoices_credit_note")
-    : requested && canIssueInvoices(auth.user.permissions) ? await requireSub("sales", "invoices_issue") : await requireSub("sales", "invoices_create");
+  const { user, error } = head.kind !== "INVOICE" ? await requireInvoiceDuty("invoices_credit_note")
+    : requested && canIssueInvoices(auth.user.permissions) ? await requireInvoiceDuty("invoices_issue") : await requireInvoiceDuty("invoices_create");
   if (error) return error;
   if (!(await inScope(user, head.customerId))) return notFound();
   try {

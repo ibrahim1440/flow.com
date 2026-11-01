@@ -34,6 +34,8 @@ function appBaseUrl(): string | null {
 
 /** The e-mail choice of a person for a category, defaults applied (an event may default to e-mail — `emailDefault`). Pure. */
 export function wantsEmail(own: Map<string, Map<string, boolean>>, employeeId: string, category: string, kind?: string): boolean {
+  // An event the owner wants in every inbox ignores the person's category choice (the address and provider still decide).
+  if (kind && eventDef(kind)?.emailForce) return true;
   const v = own.get(employeeId)?.get(category);
   if (v !== undefined) return v;
   const ev = kind ? eventDef(kind)?.emailDefault : undefined;

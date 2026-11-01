@@ -102,7 +102,7 @@ export async function notifyFromAutomationEvent(tx: Tx, e: Input): Promise<void>
       const to = str(p.to);
       if (to === "ISSUED" && p.byAccounting === true) {
         const q = await tx.quote.findUnique({ where: { id: e.subjectId }, select: { id: true, quoteNumber: true, opportunity: { select: { ownerId: true, customer: { select: { name: true, nameAr: true } } } } } });
-        if (!q) return;
+        if (!q || !q.opportunity) return;
         await notify(tx, {
           event: "sales.quote_issued_by_accounting", dedupeKey: `${q.id}:ISSUED`, actorId, entity,
           facts: { quoteNumber: q.quoteNumber, customerName: custName(q.opportunity.customer), quoteId: q.id },
@@ -111,8 +111,13 @@ export async function notifyFromAutomationEvent(tx: Tx, e: Input): Promise<void>
         return;
       }
       if (to !== "ACCEPTED" && to !== "REJECTED" && to !== "EXPIRED") return;
-      const q = await tx.quote.findUnique({ where: { id: e.subjectId }, select: { id: true, quoteNumber: true, opportunity: { select: { ownerId: true, customerId: true, customer: { select: { name: true, nameAr: true } } } } } });
+      const q = await tx.quote.findUnique({ where: { id: e.subjectId }, select: { id: true, quoteNumber: true, customerId: true, opportunity: { select: { ownerId: true, customerId: true, customer: { select: { name: true, nameAr: true } } } } } });
       if (!q) return;
+      // «مسار المحاسب»: a quotation with no deal has no rep to tell; the credit standing is still re-read on acceptance.
+      if (!q.opportunity) {
+        if (to === "ACCEPTED" && q.customerId) checkCreditStandingLater([q.customerId]);
+        return;
+      }
       await notify(tx, {
         event: "sales.quote_decided", dedupeKey: `${q.id}:${to}`, actorId, entity,
         facts: { quoteNumber: q.quoteNumber, status: to, customerName: custName(q.opportunity.customer), quoteId: q.id },

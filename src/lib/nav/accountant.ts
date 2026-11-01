@@ -41,6 +41,8 @@ export type AcctItem = {
   reserved?: boolean;
   /** Also required (any one), beyond the registry's offer of the route — narrows only. */
   anyOf?: Ability[];
+  /** Not shown to a viewer holding any of these (a sibling item serves them instead) — narrows only. */
+  unlessAnyOf?: Ability[];
   /** The «+» quick-new: the page's own create entry, for the same audience its own button has. */
   create?: AcctCreate;
   /** Extra path prefixes this item lights for (detail pages of its list). */
@@ -57,14 +59,18 @@ export const ACCOUNTANT_NAV: AcctGroup[] = [
   {
     id: "acct.sales", term: "sales", icon: "deal",
     children: [
-      { id: "acct.sales.customers", term: "customers", href: "/dashboard/customers", create: { href: "/dashboard/customers?new=customer", editOf: "customers" } },
+      // «العملاء» of the accountant (owner decision, 1 Nov 2026): the accounting view of every customer (particulars,
+      // balance, overdue, credit limit, the rep read-only) with accounting › ar — no customers module needed. A holder of
+      // the customers module without ar keeps the Sales list.
+      { id: "acct.sales.customers", term: "customers", href: "/dashboard/accounting/customers", anyOf: [A("accounting", "ar")], alsoMatches: ["/dashboard/customers"], create: { href: "/dashboard/accounting/customers?new=1", can: (p) => hasModuleAccess(p, "accounting") && hasSubPrivilege(p, "accounting", "ar") && canEdit(p, "accounting") } },
+      { id: "acct.sales.customersSales", term: "customers", href: "/dashboard/customers", anyOf: [A("customers")], unlessAnyOf: [A("accounting", "ar")], create: { href: "/dashboard/customers?new=customer", editOf: "customers" } },
       // Read-only for the accountant by default (Sales owns quotes; QOYOD-REF §5.1; owner answer 3). «+ عرض سعر» only with
       // `canWriteQuotes` (sales › quote_write, or accounting › quotes_issue — BATCH22 WP-E): on an existing open deal.
       { id: "acct.sales.quotes", term: "quotes", href: "/dashboard/accounting/quotes", alsoMatches: ["/dashboard/sales/quotes"], create: { href: "/dashboard/accounting/quotes/new", can: canWriteQuotes } },
-      { id: "acct.sales.invoices", term: "salesInvoices", href: "/dashboard/sales/invoices", anyOf: [A("sales", "invoices_view"), A("accounting", "ar")], create: { href: "/dashboard/sales/invoices/new", anyOf: [A("sales", "invoices_create")] } },
+      { id: "acct.sales.invoices", term: "salesInvoices", href: "/dashboard/sales/invoices", anyOf: [A("sales", "invoices_view"), A("accounting", "ar"), A("accounting", "invoices_issue")], create: { href: "/dashboard/sales/invoices/new", anyOf: [A("sales", "invoices_create"), A("accounting", "invoices_issue")] } },
       // «طلبات الفواتير» (BATCH 22 WP-C): the queue of requested drafts, for the issuers (a badge counts them).
-      { id: "acct.sales.requests", term: "invoiceRequests", href: "/dashboard/sales/invoices?view=requests", anyOf: [A("sales", "invoices_issue")] },
-      { id: "acct.sales.notes", term: "creditNotes", href: "/dashboard/sales/invoices?tab=notes", anyOf: [A("sales", "invoices_view"), A("accounting", "ar")] },
+      { id: "acct.sales.requests", term: "invoiceRequests", href: "/dashboard/sales/invoices?view=requests", anyOf: [A("sales", "invoices_issue"), A("accounting", "invoices_issue")] },
+      { id: "acct.sales.notes", term: "creditNotes", href: "/dashboard/sales/invoices?tab=notes", anyOf: [A("sales", "invoices_view"), A("accounting", "ar"), A("accounting", "invoices_issue")] },
       // «سندات العملاء» (BATCH22 WP-D): the receipts the accountant confirms («سند قبض»), and «+» records a receipt for an
       // invoice with no deal (accounting › receipts_confirm or ar).
       { id: "acct.sales.receipts", term: "collections", href: "/dashboard/accounting/receipts", alsoMatches: ["/dashboard/sales/collections"], create: { href: "/dashboard/accounting/receipts?new=1", anyOf: [A("accounting", "receipts_confirm"), A("accounting", "ar")] } },
@@ -215,6 +221,7 @@ function itemFor(v: Viewer, i: AcctItem, lang: string, pruned: NavNode[]): Shown
   if (!isLive(i)) return { id: i.id, label, href: null, state: "soon", create: null, matches: [] };
   if (!offeredByRegistry(v, i.href!, pruned)) return null;
   if (i.anyOf && i.anyOf.length > 0 && !i.anyOf.some((a) => holds(v, a))) return null;
+  if (i.unlessAnyOf && i.unlessAnyOf.some((a) => holds(v, a))) return null;
   const c = i.create;
   const canCreate = !!c && offeredByRegistry(v, c.href, pruned)
     && ((c.anyOf ?? []).some((a) => holds(v, a)) || (!!c.editOf && canEdit(v.permissions, c.editOf)) || (!!c.can && c.can(v.permissions)));

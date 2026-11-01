@@ -10,6 +10,7 @@ import { advanceToQuotationStage, winOnAcceptedQuote } from "@/lib/services/sale
 import { issueQuote, decideQuote } from "@/lib/services/sales/quotes";
 import { emitAutomationEvent } from "@/lib/automation/emit";
 import { discountThreshold } from "@/lib/services/sales/quote-settings";
+import { onAccountingQuoteIssued } from "@/lib/services/sales/accounting-quote-commission";
 import { isSimpleMode } from "@/lib/simple-mode";
 
 type Params = { params: Promise<{ id: string }> };
@@ -52,52 +53,58 @@ export async function POST(request: Request, { params }: Params) {
   // collected on. Refused before any read or write, so nothing is half-applied.
   // BATCH22 WP-E: from the accounting section a quotation is only ISSUED; accepting / rejecting it stays with Sales.
   const viaAccounting = writesViaAccounting(user.permissions);
-  if (viaAccounting && to !== "ISSUED") {
-    return NextResponse.json(
-      { error: "قبول عرض السعر أو رفضه أو إنهاؤه يبقى لدى المبيعات.", errorEn: "Accepting, rejecting or expiring a quotation stays with Sales.", code: "SALES_ONLY" },
-      { status: 403 },
-    );
-  }
-  if (to === "ACCEPTED" && !hasSubPrivilege(user.permissions, "sales", "deal_close")) {
-    return NextResponse.json(
-      { error: "Recording a quotation as accepted closes the deal, and needs the deal-close permission." },
-      { status: 403 },
-    );
-  }
 
   try {
     // Scoped before anything else. Reaching another rep's quotation by editing the id in the
     // URL is the first thing anybody tries, and this is where it stops.
     const visible = await prisma.quote.findFirst({
       where: { id, ...(quotesSeeAll(user.permissions) ? {} : { opportunity: { ownerId: user.id } }) },
-      select: { id: true, opportunityId: true, opportunity: { select: { outcome: true } } },
+      select: { id: true, opportunityId: true, channel: true, opportunity: { select: { outcome: true } } },
     });
     if (!visible) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });
-    if (viaAccounting && visible.opportunity.outcome !== "OPEN") {
+    // «مسار المحاسب»: a quotation with no deal (channel ACCOUNTING) is the accounting section's whole lifecycle — issue,
+    // accept, reject, expire — with no deal to close, no stage to move and no discount approval by Sales (the accountant
+    // prices it; nothing of it reaches commissions).
+    const noDeal = visible.channel === "ACCOUNTING" || !visible.opportunityId;
+    if (viaAccounting && !noDeal && to !== "ISSUED") {
+      return NextResponse.json(
+        { error: "قبول عرض السعر أو رفضه أو إنهاؤه يبقى لدى المبيعات.", errorEn: "Accepting, rejecting or expiring a quotation stays with Sales.", code: "SALES_ONLY" },
+        { status: 403 },
+      );
+    }
+    if (to === "ACCEPTED" && !noDeal && !hasSubPrivilege(user.permissions, "sales", "deal_close")) {
+      return NextResponse.json(
+        { error: "Recording a quotation as accepted closes the deal, and needs the deal-close permission." },
+        { status: 403 },
+      );
+    }
+    if (viaAccounting && !noDeal && visible.opportunity?.outcome !== "OPEN") {
       return NextResponse.json({ error: "لا توجد صفقة مفتوحة — اطلب من المبيعات فتح صفقة.", errorEn: "There is no open deal — ask Sales to open one.", code: "DEAL_NOT_OPEN" }, { status: 409 });
     }
 
-    const canApproveDiscount = hasSubPrivilege(user.permissions, "sales", "quote_approve_discount");
+    const canApproveDiscount = noDeal || hasSubPrivilege(user.permissions, "sales", "quote_approve_discount");
 
     const result = await prisma.$transaction(async (tx) => {
       if (to === "ISSUED") {
         const issued = await issueQuote(tx, {
           quoteId: id, actorId: user.id, canApproveDiscount,
-          onDiscountApproval: () => assertPrivilegedGate(user, "sales", "quote_approve_discount"),
+          onDiscountApproval: noDeal ? undefined : () => assertPrivilegedGate(user, "sales", "quote_approve_discount"),
           // The owner's threshold (Settings), else the built-in one — read in the same transaction.
           threshold: await discountThreshold(tx),
           // SIMPLE MODE: the one admin may approve the discount on a quotation they raised.
-          forbidSelfApproval: !isSimpleMode(),
+          forbidSelfApproval: !isSimpleMode() && !noDeal,
         });
         // Issuing a quotation IS the deal reaching the quotation stage. Leaving the board to
-        // be updated by hand is how a pipeline stops describing the work.
-        const advance = await advanceToQuotationStage(tx, visible.opportunityId, user.id);
+        // be updated by hand is how a pipeline stops describing the work. (No deal: nothing to move.)
+        const advance = visible.opportunityId ? await advanceToQuotationStage(tx, visible.opportunityId, user.id) : { moved: false, reason: null };
+        // «عمولة عرض المحاسب»: a quotation with no deal for a rep's customer waits for the supervisors' commission decision.
+        const commission = noDeal ? await onAccountingQuoteIssued(tx, id, user.id) : { pending: false };
         await emitAutomationEvent(tx, {
           eventType: "sales.quote_status_changed",
           subjectType: "Quote",
           subjectId: id,
           // The deal owner is told when a quotation went out from the accounting section (sales.quote_issued_by_accounting).
-          payload: { to: "ISSUED", ...(viaAccounting ? { byAccounting: true } : {}) },
+          payload: { to: "ISSUED", ...(viaAccounting && !noDeal ? { byAccounting: true } : {}) },
           actorId: user.id,
         });
         return {
@@ -106,10 +113,11 @@ export async function POST(request: Request, { params }: Params) {
           grandTotal: issued.grandTotal.toFixed(2),
           discountApproved: issued.discountApproved,
           stageAdvanced: advance.moved,
+          commissionPending: commission.pending,
           // Reported rather than swallowed: "the quotation went out but the board did not
           // move, because no Quotation stage is configured" is something the person needs
           // to know, and is not a reason to have refused the quotation.
-          stageNotMovedBecause: advance.moved ? null : advance.reason,
+          stageNotMovedBecause: advance.moved || noDeal ? null : advance.reason,
         };
       }
 
@@ -132,7 +140,7 @@ export async function POST(request: Request, { params }: Params) {
       // A REJECTED quotation deliberately does NOT close the deal. A revision may still be
       // issued, and closing Lost stays an explicit act with a required reason.
       let wonNow = false;
-      if (to === "ACCEPTED") {
+      if (to === "ACCEPTED" && visible.opportunityId) {
         await tx.opportunityStageEvent.create({
           data: {
             opportunityId: visible.opportunityId,
