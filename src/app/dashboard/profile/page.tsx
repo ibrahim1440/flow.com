@@ -39,7 +39,7 @@ type SignIn = { at: string; method: string; device: DeviceInfo } | null;
 type Security = {
   account: { name: string; username: string | null; role: string; createdAt: string; hasPassword: boolean; passwordChangedAt: string | null; pinChangedAt: string | null; mfaEnrolledAt: string | null; phoneNumber: string; preferredLanguage: "ar" | "en"; whatsappLanguage?: "ar" | "en" | null; pinResetRequired?: boolean };
   currentSignIn: SignIn; previousSignIn: SignIn;
-  sessions: Session[]; devices: Device[]; activity: Activity[]; activityMore: boolean;
+  sessions: Session[]; devices: Device[]; activity: Activity[]; activityMore: boolean; canSeeLog?: boolean;
 };
 type TabKey = "overview" | "security" | "devices" | "activity" | "notifications";
 const TABS: TabKey[] = ["overview", "security", "devices", "activity", "notifications"];
@@ -93,6 +93,8 @@ export default function ProfilePage() {
   // Owner language decision 3: the language automation WhatsApp messages reach me in.
   const [waLang, setWaLang] = useState<"system" | "ar" | "en">("system");
   // «صفحتي الرئيسية» (council fix round 1, P0-15): a sales persona picks «يومي» or the old home; saved at once.
+  // Owner decision (1 Nov 2026): the sign-in log is shown to the administrator only (the API also returns none).
+  const canSeeLog = user?.role === "admin";
   const salesHome = !!user && isSalesPersona({ role: user.role, permissions: user.permissions });
   const [classic, setClassic] = useState<boolean>(!!(user as { classicHome?: boolean } | null)?.classicHome);
   const homeLocked = !!(user as { homeSetByAdmin?: boolean } | null)?.homeSetByAdmin;
@@ -364,7 +366,7 @@ export default function ProfilePage() {
             </div>
           </div>
           <div className="pf-actions">
-            <Btn onClick={() => setTab("activity")} data-testid="pf-open-log">{L("سجل نشاط الدخول", "Sign-in activity")}</Btn>
+            {canSeeLog ? <Btn onClick={() => setTab("activity")} data-testid="pf-open-log">{L("سجل نشاط الدخول", "Sign-in activity")}</Btn> : null}
             <Btn className="pf-danger" disabled={!data || others === 0} title={data && others === 0 ? L("لا توجد جلسات أخرى", "No other sessions") : undefined} onClick={() => setConfirm({ kind: "others" })} data-testid="pf-end-others">
               {L("إنهاء الجلسات الأخرى", "End other sessions")}
             </Btn>
@@ -379,7 +381,8 @@ export default function ProfilePage() {
             { key: "overview", label: L("نظرة عامة", "Overview") },
             { key: "security", label: L("الأمان", "Security") },
             { key: "devices", label: L("الأجهزة والجلسات", "Devices & sessions"), count: data ? data.sessions.length : undefined },
-            { key: "activity", label: L("سجل الدخول", "Sign-in log") },
+            // Owner decision: the sign-in log is the administrator's only.
+            ...(canSeeLog ? [{ key: "activity" as TabKey, label: L("سجل الدخول", "Sign-in log") }] : []),
             // feat/notifications: «التنبيهات» — the e-mail choice per category.
             { key: "notifications", label: L("التنبيهات", "Notifications") },
           ]}
@@ -446,7 +449,7 @@ export default function ProfilePage() {
                 </div>
               </form>
             </div>
-            {block("pf-recent", L("النشاط الأخير", "Recent activity"), null, <button type="button" className="pf-link" onClick={() => setTab("activity")}>{L("السجل الكامل", "Full log")}</button>,
+            {canSeeLog && block("pf-recent", L("النشاط الأخير", "Recent activity"), null, <button type="button" className="pf-link" onClick={() => setTab("activity")}>{L("السجل الكامل", "Full log")}</button>,
               data.activity.length ? activityList(data.activity) : noActivity)}
           </div>
         ) : null}
@@ -583,7 +586,7 @@ export default function ProfilePage() {
 
         {tab === "notifications" ? <NotificationPrefs /> : null}
 
-        {data && tab === "activity" ? (
+        {data && canSeeLog && tab === "activity" ? (
           <div className="pf-tabbody" data-testid="pf-log">
             {block("pf-log-h", L("سجل نشاط الدخول", "Sign-in activity"), L("آخر 50 حدثًا: الدخول وتأكيد الهوية وتسجيل الخروج وتغييرات الأمان", "The last 50 events: sign-ins, identity confirmations, sign-outs and security changes"), null,
               data.activity.length ? activityList(data.activity) : noActivity)}
