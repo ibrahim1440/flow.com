@@ -58,6 +58,8 @@ type Customer = {
   email: string | null;
   address: string | null;
   whatsappOptOut?: boolean;
+  /** The rep the account belongs to (absent for a viewer without the contact record). */
+  accountOwnerId?: string | null;
   _count: { orders: number; roastPreferences: number };
   roastPreferences: RoastPreference[];
 };
@@ -142,6 +144,21 @@ export default function CustomersPage() {
     targetDeltaMin: "", targetDeltaMax: "",
   });
   const [savingProfile, setSavingProfile] = useState(false);
+
+  // «إسناد العملاء لمندوب» (owner request, 2 Nov 2026): the manager selects customers and assigns them to one rep.
+  const [assign, setAssign] = useState<{ can: boolean; owners: { id: string; name: string }[] } | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [assignTo, setAssignTo] = useState("");
+  const [noOwnerOnly, setNoOwnerOnly] = useState(false);
+  const [confirmAssign, setConfirmAssign] = useState<"assign" | "unassign" | null>(null);
+  const [assigning, setAssigning] = useState(false);
+  useEffect(() => {
+    let off = false;
+    fetch("/api/customers/assign-owner", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((j) => { if (!off && j) setAssign(j); }).catch(() => undefined);
+    return () => { off = true; };
+  }, []);
+  const canAssign = !!assign?.can && view === "book";
+  const ownerName = (id: string | null | undefined) => (id ? assign?.owners.find((o) => o.id === id)?.name ?? null : null);
 
   // Toast messages
   const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" } | null>(null);
@@ -318,7 +335,8 @@ export default function CustomersPage() {
   // ── Filtering ──────────────────────────────────────────────────────────────
   const filteredCustomers = useMemo(() => {
     const q = search.toLowerCase();
-    const base = lateOnly && lateIds ? customers.filter((c) => lateIds.has(c.id)) : customers;
+    const late = lateOnly && lateIds ? customers.filter((c) => lateIds.has(c.id)) : customers;
+    const base = noOwnerOnly ? late.filter((c) => !c.accountOwnerId) : late;
     if (!q) return base;
     return base.filter((c) =>
       c.name.toLowerCase().includes(q) ||
@@ -326,7 +344,7 @@ export default function CustomersPage() {
       (c.phone && c.phone.includes(q)) ||
       (c.email && c.email.toLowerCase().includes(q))
     );
-  }, [customers, search, lateOnly, lateIds]);
+  }, [customers, search, lateOnly, lateIds, noOwnerOnly]);
 
   // Beans not yet assigned a profile for this customer
   const availableBeans = useMemo(() => {
@@ -545,6 +563,40 @@ export default function CustomersPage() {
 
   const num = (n: number) => <span className="n">{n}</span>;
 
+  const allPicked = filteredCustomers.length > 0 && filteredCustomers.every((c) => picked.has(c.id));
+  const togglePick = (id: string) => setPicked((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const toggleAll = () => setPicked(allPicked ? new Set() : new Set(filteredCustomers.map((c) => c.id)));
+  async function runAssign(kind: "assign" | "unassign") {
+    setAssigning(true);
+    try {
+      const res = await fetch("/api/customers/assign-owner", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ customerIds: [...picked], ownerId: kind === "assign" ? assignTo : null }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { showToast(localizeApiError(j) ?? (ar ? j.error : j.errorEn) ?? `HTTP ${res.status}`, "err"); return; }
+      const n = (j.changed ?? []).length;
+      showToast(kind === "assign" ? L(`أُسند ${n} عميل إلى ${j.ownerName ?? ""}.`, `${n} customer(s) assigned to ${j.ownerName ?? ""}.`) : L(`أُلغي إسناد ${n} عميل.`, `${n} customer(s) unassigned.`));
+      setPicked(new Set());
+      await loadData();
+    } finally { setAssigning(false); setConfirmAssign(null); }
+  }
+  const noOwnerChip = canAssign ? (
+    <button type="button" className={`btn sm${noOwnerOnly ? " p" : ""}`} aria-pressed={noOwnerOnly} onClick={() => setNoOwnerOnly((v) => !v)} data-testid="customers-filter-no-owner">
+      {L("بدون مندوب", "No rep")} <span className="n">({customers.filter((c) => !c.accountOwnerId).length})</span>
+    </button>
+  ) : null;
+  const assignBar = canAssign && picked.size > 0 ? (
+    <div className="cu-assign-bar" role="region" aria-label={L("إسناد العملاء المحددين", "Assign the selected customers")} data-testid="customers-assign-bar"
+      style={{ position: "sticky", top: 0, zIndex: 3, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", padding: "10px 12px", marginBottom: 10, background: "var(--surface-raised, #fff)", border: "1px solid var(--border-default, #ddd)", borderRadius: 10 }}>
+      <b>{L(`تم تحديد ${picked.size} عميل`, `${picked.size} selected`)}</b>
+      <Select className="hr-select" value={assignTo} onChange={(e) => setAssignTo(e.target.value)} aria-label={L("المندوب", "Rep")} data-testid="customers-assign-owner" style={{ minWidth: 180 }}>
+        <option value="">{L("اختر المندوب…", "Choose the rep…")}</option>
+        {assign!.owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+      </Select>
+      <button type="button" className="btn sm p" disabled={!assignTo || assigning} onClick={() => setConfirmAssign("assign")} data-testid="customers-assign-go">{L("إسناد", "Assign")}</button>
+      <button type="button" className="btn sm" disabled={assigning} onClick={() => setConfirmAssign("unassign")} data-testid="customers-unassign-go">{L("إلغاء الإسناد", "Unassign")}</button>
+      <button type="button" className="btn sm" onClick={() => setPicked(new Set())}>{L("إلغاء التحديد", "Clear")}</button>
+    </div>
+  ) : null;
+
   return (
     <HrRoot>
       <div className={`split${pane ? " has-pane" : ""} cu-split`}>
@@ -553,13 +605,15 @@ export default function CustomersPage() {
           {phone ? (
             <>
               <div style={{ marginBottom: 10 }}><SectionPages className="cu-ctx" /></div>
-              {viewTabs || lateChip ? <div style={{ marginBottom: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>{viewTabs}{lateChip}</div> : null}
+              {viewTabs || lateChip || noOwnerChip ? <div style={{ marginBottom: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>{viewTabs}{lateChip}{noOwnerChip}</div> : null}
               <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>{searchBox}{addButton}</div>
+              {assignBar}
               {empty ?? (
                 <div data-testid="customers-table">
                   {filteredCustomers.map((c) => (
                     <div key={c.id} className={`mrow rowlink${selected?.id === c.id ? " cu-sel" : ""}`} data-testid={`customer-${c.id}`}>
-                      <div style={{ minWidth: 0 }}>
+                      <div style={{ minWidth: 0, display: "flex", gap: 8, alignItems: "center" }}>
+                        {canAssign ? <input type="checkbox" checked={picked.has(c.id)} onChange={() => togglePick(c.id)} aria-label={`${L("تحديد", "Select")} · ${nameOf(c)}`} data-testid={`pick-customer-${c.id}`} /> : null}
                         <Link href={`/dashboard/customers/${c.id}`} className="who open cu-open" data-testid={`open-customer-${c.id}`}>{nameOf(c)}</Link>
                       </div>
                       <span className="sm cu-orders">{num(c._count.orders)} {L("طلب", c._count.orders === 1 ? "order" : "orders")}</span>
@@ -594,15 +648,18 @@ export default function CustomersPage() {
               <div className="tool" style={{ marginBottom: 8 }}>
                 {viewTabs}
                 {lateChip}
+                {noOwnerChip}
                 {searchBox}
                 <span className="sp" />
                 <span className="sort-note">{L("بالاسم", "By name")}</span>
               </div>
+              {assignBar}
               {empty ?? (
                 <>
                   <table className="t leads cu-table" data-testid="customers-table">
                     <thead>
                       <tr>
+                        {canAssign ? <th scope="col" style={{ width: 36 }}><input type="checkbox" checked={allPicked} onChange={toggleAll} aria-label={L("تحديد الكل", "Select all")} data-testid="pick-all-customers" /></th> : null}
                         <th scope="col">{L("العميل", "Customer")}</th>
                         <th scope="col">{t("customerPhone")}</th>
                         <th scope="col" className="xl">{t("customerEmail")}</th>
@@ -620,11 +677,13 @@ export default function CustomersPage() {
                     <tbody>
                       {filteredCustomers.map((c) => (
                         <tr key={c.id} data-testid={`customer-${c.id}`} className={selected?.id === c.id ? "sel" : undefined}>
+                          {canAssign ? <td><input type="checkbox" checked={picked.has(c.id)} onChange={() => togglePick(c.id)} aria-label={`${L("تحديد", "Select")} · ${nameOf(c)}`} data-testid={`pick-customer-${c.id}`} /></td> : null}
                           <td className="cu-name">
                             <Link href={`/dashboard/customers/${c.id}`} className="who cu-open" data-testid={`account-link-${c.id}`}>{nameOf(c)}</Link>
                             {(otherName(c) || c.address) && (
                               <span className="sm cu-namesub">{[otherName(c), c.address?.split("\n")[0]].filter(Boolean).join(" · ")}</span>
                             )}
+                            {canAssign ? <span className="sm cu-namesub" data-testid={`customer-owner-${c.id}`}>{ownerName(c.accountOwnerId) ? L(`المندوب: ${ownerName(c.accountOwnerId)}`, `Rep: ${ownerName(c.accountOwnerId)}`) : L("بدون مندوب", "No rep")}</span> : null}
                             {badges[c.id] && <span className="cu-badges-cell" data-testid={`customer-credit-${c.id}`}><CreditBadges ar={ar} s={badges[c.id]} compact /></span>}
                           </td>
                           <td>{c.phone ? <bdi dir="ltr" className="n">{c.phone}</bdi> : <span className="sm">—</span>}</td>
@@ -652,6 +711,17 @@ export default function CustomersPage() {
         </div>
         {pane}
       </div>
+
+      {/* «إسناد العملاء لمندوب»: confirmation. */}
+      <Dialog open={!!confirmAssign} title={confirmAssign === "assign" ? L("تأكيد الإسناد", "Confirm the assignment") : L("تأكيد إلغاء الإسناد", "Confirm unassigning")} onClose={() => setConfirmAssign(null)} testId="customers-assign-confirm"
+        actions={<>
+          <button type="button" className="hr-btn is-primary" disabled={assigning} onClick={() => confirmAssign && runAssign(confirmAssign)} data-testid="customers-assign-confirm-go">{assigning ? t("saving") : L("تأكيد", "Confirm")}</button>
+          <button type="button" className="hr-btn" onClick={() => setConfirmAssign(null)}>{t("cancel")}</button>
+        </>}>
+        <p>{confirmAssign === "assign"
+          ? L(`إسناد ${picked.size} عميل إلى ${ownerName(assignTo) ?? ""}؟ يصيرون في «عملائي» عنده، وتنحسب عمولته على تحصيلاتهم حسب خطته.`, `Assign ${picked.size} customer(s) to ${ownerName(assignTo) ?? ""}? They move to the rep's «My customers».`)
+          : L(`إلغاء إسناد ${picked.size} عميل؟ يصيرون بدون مندوب.`, `Unassign ${picked.size} customer(s)? They will have no rep.`)}</p>
+      </Dialog>
 
       {/* ── Customer form ── */}
       <Dialog open={showCustomerForm} title={editingCustomer ? t("editCustomer") : t("addCustomer")} onClose={() => setShowCustomerForm(false)} testId="customer-form"

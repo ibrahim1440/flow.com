@@ -367,6 +367,20 @@ export const EVENTS: NotificationEventDef[] = [
       link: `${f.via === "accounting" ? "/dashboard/accounting/quotes/" : "/dashboard/sales/quotes/"}${enc(s(f.quoteId))}`,
     }),
   },
+  {
+    // «إسناد العملاء لمندوب» (owner request, 2 Nov 2026): the manager assigned customers to this rep in one action.
+    key: "sales.customers_assigned", category: "sales", severity: "info",
+    label: { ar: "أُسند إليك عملاء جدد", en: "Customers were assigned to you" },
+    recipients: [{ person: "recipient" }], requires: [MOD("sales")],
+    trigger: "assignCustomersOwner (lib/services/customers/assign-owner.ts): POST /api/customers/assign-owner",
+    render: (f) => ({
+      titleAr: `أُسند إليك ${Number(f.count) || 0} عميل`,
+      titleEn: `${Number(f.count) || 0} customer(s) were assigned to you`,
+      bodyAr: f.actorName ? `أسندهم ${s(f.actorName)}. تجدهم في «عملائي».` : "تجدهم في «عملائي».",
+      bodyEn: f.actorName ? `Assigned by ${s(f.actorName)}. Find them under «My customers».` : "Find them under «My customers».",
+      link: "/dashboard/customers",
+    }),
+  },
   // ── Finance ──
   {
     key: "finance.collection_pending", category: "finance", severity: "warning",
