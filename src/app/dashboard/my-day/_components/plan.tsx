@@ -20,7 +20,7 @@ type Who = { id: string; name: string };
 export type PlanItem = {
   id: string; source: "ADMIN" | "SELF"; kind: "GOAL" | "CHECK" | "ACTION"; metric: Metric | null; label: string | null; target: number | null;
   done: number | null; checked: boolean; setBy: string | null; customer: Who | null; plannedDay: string | null; doneAt: string | null;
-  doneOutcome: string | null; doneBody: string | null;
+  doneOutcome: string | null; doneBody: string | null; weekStart: string | null;
 };
 type Off = { id: string; metric: AMetric; customer: Who | null; title: string | null; at: string; outcome: string | null; body: string | null };
 export type Plan = {
@@ -54,6 +54,29 @@ const dayName = (iso: string, ar: boolean) => (ar ? WD_AR : WD_EN)[wd(iso)];
 const weekOf = (iso: string) => addDays(iso, -wd(iso));
 /** The week new items go to: the week shown, or (on «اليوم» / «الشهر») this week. */
 const addWeek = (p: { period: Period; weekStart: string; today: string }) => (p.period === "WEEK" ? p.weekStart : weekOf(p.today));
+/**
+ * The days «خطّط بند» offers, from the period on screen: «اليوم» → today; «الأسبوع» → the days left in the week;
+ * «الشهر» → the days left in the month, week by week. Working days (Sunday–Thursday); a past period offers this week.
+ */
+function pickDays(p: { period: Period; start: string; end: string; today: string }): { week: string; days: string[] }[] {
+  let from = p.start > p.today ? p.start : p.today;
+  let to = p.period === "DAY" ? addDays(p.start, 1) : p.end;
+  if (from >= to) { from = p.today; to = addDays(weekOf(p.today), 7); }
+  const out: { week: string; days: string[] }[] = [];
+  for (let d = from; d < to; d = addDays(d, 1)) {
+    if (wd(d) > 4 && d !== p.today) continue;
+    const w = weekOf(d);
+    const g = out.find((x) => x.week === w);
+    if (g) g.days.push(d); else out.push({ week: w, days: [d] });
+  }
+  return out;
+}
+const weekLabel = (w: string, today: string, ar: boolean) => {
+  const cur = weekOf(today);
+  if (w === cur) return ar ? "هالأسبوع" : "This week";
+  if (w === addDays(cur, 7)) return ar ? "الأسبوع الجاي" : "Next week";
+  return ar ? `أسبوع ${dayNum(w)}–${dayNum(addDays(w, 6))}` : `Week of ${dayNum(w)}`;
+};
 const riyadhDay = (at: string) => new Date(Date.parse(at) + 3 * 3_600_000).toISOString().slice(0, 10);
 const timeText = (at: string, ar: boolean) => new Date(at).toLocaleTimeString(ar ? "ar-SA-u-nu-latn" : "en-GB", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Riyadh" });
 const fmt = (v: number) => v.toLocaleString("en-US", { maximumFractionDigits: 0 });
@@ -102,7 +125,8 @@ function groupsOf(plan: Plan): Group[] {
     const goal = gs.find((g) => g.source === "ADMIN") ?? gs[0] ?? null;
     const acts = plan.items.filter((i) => i.kind === "ACTION" && i.metric === m);
     const off = plan.offPlan.filter((o) => o.metric === m);
-    if (!goal && !acts.length && !off.length) continue;
+    // Visits and calls always have their card (fixed frames); the other kinds appear when they have something.
+    if (!goal && !acts.length && !off.length && m !== "VISITS" && m !== "CALLS") continue;
     const done = plan.counts[m] ?? 0;
     const open = acts.filter((a) => !a.checked).length;
     const missing = goal?.target ? Math.max(0, Math.ceil(goal.target - done - open)) : 0;
@@ -126,12 +150,14 @@ function Bar({ g }: { g: Group }) {
 
 type Acts = {
   readOnly: boolean; admin: boolean;
+  onOpen: (x: { it?: PlanItem; off?: Off }) => void;
   onTick: (it: PlanItem) => void; onCheck: (it: PlanItem) => void; onRemove: (it: PlanItem) => void;
   onPlan: (m: AMetric | "CHECK", customer?: Who) => void; onTarget: (m: Exclude<Metric, "CUSTOM">, g: PlanItem | null) => void; onBump: (it: PlanItem) => void;
   suggest: (m: AMetric) => Who[]; onSuggest: (m: AMetric, c: Who) => void;
 };
 
 function Circle({ done, onClick, label }: { done: boolean; onClick?: () => void; label: string }) {
+  if (done && onClick) return <button type="button" className="pl-c on" onClick={onClick} aria-label={label} data-testid="plan-tick"><Ico name="tick" small /></button>;
   if (done) return <span className="pl-c on" role="img" aria-label={label}><Ico name="tick" small /></span>;
   if (!onClick) return <span className="pl-c" role="img" aria-label={label} />;
   return <button type="button" className="pl-c" onClick={onClick} aria-label={label} data-testid="plan-tick" />;
@@ -141,19 +167,19 @@ function ItemRow({ it, ar, a }: { it: PlanItem; ar: boolean; a: Acts }) {
   const k = it.metric && it.metric !== "CUSTOM" ? KIND[it.metric] : null;
   const name = it.kind === "CHECK" ? it.label ?? "" : it.customer?.name ?? "";
   const done = it.checked;
-  const canAct = !a.readOnly && !done;
+  const canAct = !a.readOnly && (!done || it.kind === "CHECK");
   const sub = done ? (it.kind === "CHECK" ? (ar ? "تمت" : "Done") : doneLine(it.doneOutcome, it.doneBody, it.doneAt, ar)) : it.kind === "ACTION" ? (it.label ?? (ar && k && !a.readOnly ? k.hint : null)) : null;
   const mayRemove = !done && (a.admin ? it.source === "ADMIN" : !a.readOnly && it.source === "SELF");
   return (
     <li className={`pl-it${done ? " done" : ""}`} data-testid="plan-item">
-      <Circle done={done} label={done ? (ar ? "تمت" : "Done") : ar ? "سجّلها" : "Record it"}
+      <Circle done={done} label={done ? (it.kind === "CHECK" && canAct ? (ar ? "رجّعها مفتوحة" : "Reopen") : ar ? "تمت" : "Done") : ar ? "سجّلها" : "Record it"}
         onClick={canAct ? () => (it.kind === "CHECK" ? a.onCheck(it) : a.onTick(it)) : undefined} />
       {k ? <Ico name={k.icon} small className="pl-it-ico" /> : <Ico name="note" small className="pl-it-ico" />}
-      <span className="pl-it-t">
+      <button type="button" className="pl-it-t" onClick={() => a.onOpen({ it })} data-testid="plan-item-open">
         <b>{name}</b>
         {it.source === "ADMIN" ? <FromBoss name={it.setBy} ar={ar} /> : null}
         {sub ? <small className={done ? "ok" : undefined}>{sub}</small> : null}
-      </span>
+      </button>
       <span className="pl-it-end">
         <span className="pl-day">{it.plannedDay ? dayName(it.plannedDay, ar) : ar ? "هالأسبوع" : "This week"}</span>
         {mayRemove ? <button type="button" className="pl-x" onClick={() => a.onRemove(it)} aria-label={ar ? "شيله من الخطة" : "Remove from the plan"}><Ico name="close" small /></button> : null}
@@ -162,12 +188,12 @@ function ItemRow({ it, ar, a }: { it: PlanItem; ar: boolean; a: Acts }) {
   );
 }
 
-function OffRow({ o, ar }: { o: Off; ar: boolean }) {
+function OffRow({ o, ar, a }: { o: Off; ar: boolean; a: Acts }) {
   return (
     <li className="pl-it done" data-testid="plan-off">
       <Circle done label={ar ? "تمت" : "Done"} />
       <Ico name={KIND[o.metric].icon} small className="pl-it-ico" />
-      <span className="pl-it-t"><b>{o.customer?.name ?? o.title ?? (ar ? "بدون عميل" : "No customer")}</b><small className="ok">{doneLine(o.outcome, o.body, null, ar)}</small></span>
+      <button type="button" className="pl-it-t" onClick={() => a.onOpen({ off: o })}><b>{o.customer?.name ?? o.title ?? (ar ? "بدون عميل" : "No customer")}</b><small className="ok">{doneLine(o.outcome, o.body, o.at, ar)}</small></button>
       <span className="pl-it-end"><span className="pl-tag">{ar ? "خارج الخطة" : "Unplanned"}</span><span className="pl-day">{dayName(riyadhDay(o.at), ar)}</span></span>
     </li>
   );
@@ -181,7 +207,7 @@ function GroupCard({ g, ar, a }: { g: Group; ar: boolean; a: Acts }) {
   const offShown = [...g.off].sort((x, y) => y.at.localeCompare(x.at)).slice(0, 3);
   const offMore = g.off.length - offShown.length;
   const rows = [...g.acts.map((x) => ({ key: x.plannedDay ?? "9", el: <ItemRow key={x.id} it={x} ar={ar} a={a} /> })),
-    ...offShown.map((o) => ({ key: riyadhDay(o.at), el: <OffRow key={o.id} o={o} ar={ar} /> }))].sort((x, y) => x.key.localeCompare(y.key));
+    ...offShown.map((o) => ({ key: riyadhDay(o.at), el: <OffRow key={o.id} o={o} ar={ar} a={a} /> }))].sort((x, y) => x.key.localeCompare(y.key));
   const canPlan = !a.readOnly && (ACTIONS as string[]).includes(g.metric);
   const canTarget = !a.readOnly && !a.admin && !admGoal;
   const sugg = canPlan && g.missing > 0 ? a.suggest(g.metric as AMetric) : [];
@@ -196,7 +222,8 @@ function GroupCard({ g, ar, a }: { g: Group; ar: boolean; a: Acts }) {
       </div>
       {t ? <><Bar g={g} />
         <span className="pl-leg"><i className="d" />{ar ? `تمت ${fmt(g.done)}` : `Done ${fmt(g.done)}`}<i className="p" />{ar ? `مخطط ${g.open}` : `Planned ${g.open}`}<i className="m" />{ar ? `بدون خطة ${g.missing}` : `Not planned ${g.missing}`}</span></> : null}
-      {rows.length ? <ul className="pl-list">{rows.map((r) => r.el)}</ul> : null}
+      {rows.length ? <ul className="pl-list">{rows.map((r) => r.el)}</ul>
+        : !(canPlan && g.missing > 0) ? <p className="pl-g-empty">{a.readOnly ? (ar ? "ما فيه شي هنا." : "Nothing here.") : ar ? `ما خططت ${k.title[0]} — ابدأ من الزر تحت.` : `Nothing planned — start below.`}</p> : null}
       {offMore > 0 ? <small className="pl-offmore">{ar ? `و${offMore} غيرها خارج الخطة` : `and ${offMore} more unplanned`}</small> : null}
       {canPlan && g.missing > 0 ? (
         <div className="pl-gap" data-testid="plan-gap">
@@ -225,11 +252,57 @@ function CustomCard({ it, ar, a }: { it: PlanItem; ar: boolean; a: Acts }) {
   );
 }
 
+type Entry = { id: string; day: string | null; week: string; done: boolean; metric: Metric | null; name: string; off: boolean; it?: PlanItem; o?: Off };
+/** Every planned item and unplanned record of the plan, with its day and its week. */
+function entriesOf(plan: Plan): Entry[] {
+  return [
+    ...plan.items.filter((i) => i.kind !== "GOAL").map((i) => ({ id: i.id, day: i.plannedDay, week: i.plannedDay ? weekOf(i.plannedDay) : i.weekStart ?? plan.weekStart,
+      done: i.checked, metric: i.metric, name: i.kind === "CHECK" ? i.label ?? "" : i.customer?.name ?? "", off: false, it: i })),
+    ...plan.offPlan.map((o) => ({ id: o.id, day: riyadhDay(o.at), week: weekOf(riyadhDay(o.at)), done: true, metric: o.metric as Metric, name: o.customer?.name ?? o.title ?? "", off: true, o })),
+  ];
+}
+
+function AgendaRow({ x, ar, a }: { x: Entry; ar: boolean; a: Acts }) {
+  return (
+    <button type="button" className="pl-ar" onClick={() => a.onOpen(x.it ? { it: x.it } : { off: x.o })}>
+      <span className={`pl-c sm${x.done ? " on" : ""}`} aria-hidden>{x.done ? <Ico name="tick" small /> : null}</span>
+      <Ico name={x.metric && x.metric !== "CUSTOM" ? KIND[x.metric].icon : "note"} small className="pl-it-ico" />
+      <span className={`pl-ar-t${x.done ? " mut" : ""}`}>{x.name}</span>
+      {x.off ? <span className="pl-tag">{ar ? "خارج الخطة" : "Unplanned"}</span> : null}
+    </button>
+  );
+}
+
+/** «شهري أسبوع بأسبوع»: the side column of the month — each week of the month with what was planned and done. */
+function MonthSide({ plan, ar, a }: { plan: Plan; ar: boolean; a: Acts }) {
+  const all = entriesOf(plan);
+  const weeks: string[] = [];
+  for (let w = weekOf(plan.start); w < plan.end; w = addDays(w, 7)) weeks.push(w);
+  const cur = weekOf(plan.today);
+  return (
+    <section className="md-card pl-agenda month" aria-labelledby="pl-month-h" data-testid="plan-month">
+      <div className="md-h"><h2 id="pl-month-h"><Ico name="cal" small className="md-h-ico2" />{ar ? "شهري أسبوع بأسبوع" : "My month, week by week"}</h2></div>
+      {weeks.map((w, n) => {
+        const xsAll = all.filter((x) => x.week === w);
+        const xs = xsAll.slice(0, 4);
+        const last = addDays(w, 6);
+        return (
+          <div key={w} className={`pl-ad${w === cur ? " on" : ""}`}>
+            <span className="pl-ad-h"><b>{ar ? `الأسبوع ${n + 1} · ${dayNum(w < plan.start ? plan.start : w)}–${dayNum(last >= plan.end ? addDays(plan.end, -1) : last)}` : `Week ${n + 1}`}{w === cur ? (ar ? " · هالأسبوع" : " · this week") : ""}</b>
+              {xsAll.length ? <small>{ar ? `تم ${xsAll.filter((x) => x.done).length} من ${xsAll.length}` : `${xsAll.filter((x) => x.done).length} of ${xsAll.length}`}</small> : null}</span>
+            {xs.length ? xs.map((x) => <AgendaRow key={x.id} x={x} ar={ar} a={a} />) : <span className="pl-ad-none">{w < cur ? "—" : ar ? "ما فيه شي مخطط" : "Nothing planned"}</span>}
+            {xsAll.length > xs.length ? <span className="pl-ad-none">{ar ? `+${xsAll.length - xs.length} غيرها` : `+${xsAll.length - xs.length} more`}</span> : null}
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
 /** The week, day by day: the desktop side column, and the strip of days on a phone. */
-function Week({ plan, ar }: { plan: Plan; ar: boolean }) {
+function Week({ plan, ar, a }: { plan: Plan; ar: boolean; a: Acts }) {
   const ws = plan.weekStart;
-  const all = [...plan.items.filter((i) => i.kind !== "GOAL").map((i) => ({ day: i.plannedDay, done: i.checked, metric: i.metric, name: i.kind === "CHECK" ? i.label ?? "" : i.customer?.name ?? "", off: false, id: i.id })),
-    ...plan.offPlan.map((o) => ({ day: riyadhDay(o.at), done: true, metric: o.metric as Metric, name: o.customer?.name ?? o.title ?? "", off: true, id: o.id }))];
+  const all = entriesOf(plan);
   const days = [0, 1, 2, 3, 4, 5, 6].map((n) => addDays(ws, n)).filter((d) => wd(d) <= 4 || all.some((x) => x.day === d));
   const undated = all.filter((x) => !x.day);
   return (
@@ -256,19 +329,14 @@ function Week({ plan, ar }: { plan: Plan; ar: boolean }) {
             <div key={d} className={`pl-ad${d === plan.today ? " on" : ""}`}>
               <b>{dayName(d, ar)} {dayNum(d)}{d === plan.today ? (ar ? " · اليوم" : " · today") : ""}</b>
               {xs.length ? xs.map((x) => (
-                <span key={x.id} className="pl-ar">
-                  <span className={`pl-c sm${x.done ? " on" : ""}`} aria-hidden>{x.done ? <Ico name="tick" small /> : null}</span>
-                  <Ico name={x.metric && x.metric !== "CUSTOM" ? KIND[x.metric].icon : "note"} small className="pl-it-ico" />
-                  <span className={x.done ? "mut" : undefined}>{x.name}</span>
-                  {x.off ? <span className="pl-tag">{ar ? "خارج الخطة" : "Unplanned"}</span> : null}
-                </span>
+                <AgendaRow key={x.id} x={x} ar={ar} a={a} />
               )) : <span className="pl-ad-none">—</span>}
               {xsAll.length > xs.length ? <span className="pl-ad-none">{ar ? `+${xsAll.length - xs.length} غيرها` : `+${xsAll.length - xs.length} more`}</span> : null}
             </div>
           );
         })}
         {undated.length ? <div className="pl-ad"><b>{ar ? "هالأسبوع (بدون يوم)" : "This week (no day)"}</b>
-          {undated.map((x) => <span key={x.id} className="pl-ar"><span className={`pl-c sm${x.done ? " on" : ""}`} aria-hidden>{x.done ? <Ico name="tick" small /> : null}</span><span className={x.done ? "mut" : undefined}>{x.name}</span></span>)}</div> : null}
+          {undated.map((x) => <AgendaRow key={x.id} x={x} ar={ar} a={a} />)}</div> : null}
         <p className="pl-tip"><Ico name="bell" small />{ar ? "البند اللي له يوم يطلع في «جدول اليوم» في يومه." : "An item with a day shows in «Today's schedule» that day."}</p>
       </section>
     </>
@@ -303,10 +371,13 @@ export function PlanView({ ar, rep, date, defaultPeriod = "WEEK", onChanged }: {
   const [adding, setAdding] = useState<null | { metric: AMetric | "CHECK" | null; customer?: Who }>(null);
   const [logging, setLogging] = useState<PlanItem | null>(null);
   const [target, setTarget] = useState<null | { metric: Exclude<Metric, "CUSTOM">; goal: PlanItem | null }>(null);
+  const [detail, setDetail] = useState<null | { it?: PlanItem; off?: Off }>(null);
   const [err, setErr] = useState("");
   const act = async (p: Promise<{ ok: boolean; error?: string }>) => { const r = await p; if (!r.ok) setErr(r.error ?? ""); else { setErr(""); bump(); } };
   const a: Acts = {
     readOnly, admin,
+    // Tapping an item: an open planned visit or call goes straight to recording it; anything else shows what it is.
+    onOpen: (x) => (x.it && x.it.kind === "ACTION" && !x.it.checked && !readOnly ? setLogging(x.it) : setDetail(x)),
     onTick: (it) => setLogging(it),
     onCheck: (it) => act(send(`/api/sales/plan/items/${it.id}`, "PATCH", { checked: !it.checked })),
     onRemove: (it) => act(send(admin ? `/api/sales/team-goals/items/${it.id}` : `/api/sales/plan/items/${it.id}`, "DELETE")),
@@ -367,9 +438,11 @@ export function PlanView({ ar, rep, date, defaultPeriod = "WEEK", onChanged }: {
           </>
         )}
       </section>
-      {plan && period !== "MONTH" ? <Week plan={plan} ar={ar} /> : null}
+      {plan ? (period === "MONTH" ? <MonthSide plan={plan} ar={ar} a={a} /> : <Week plan={plan} ar={ar} a={a} />)
+        : <section className="md-card pl-agenda" aria-busy><p className="md-empty-line">{ar ? "جارٍ التحميل…" : "Loading…"}</p></section>}
       {adding && plan ? <AddSheet ar={ar} plan={plan} preset={adding.metric} rep={rep} onClose={() => setAdding(null)} onSaved={() => { setAdding(null); bump(); }} /> : null}
       {logging && plan ? <LogSheet ar={ar} plan={plan} it={logging} group={groups.find((g) => g.metric === logging.metric) ?? null} onClose={() => setLogging(null)} onSaved={() => { setLogging(null); bump(); }} /> : null}
+      {detail && plan ? <DetailSheet ar={ar} x={detail} a={a} onClose={() => setDetail(null)} onMove={async (d) => { if (detail.it) { await act(send(`/api/sales/plan/items/${detail.it.id}`, "PATCH", { plannedDay: d })); } setDetail(null); }} plan={plan} /> : null}
       {target && plan ? <TargetDialog ar={ar} plan={plan} metric={target.metric} goal={target.goal} onClose={() => setTarget(null)} onSaved={() => { setTarget(null); bump(); }} /> : null}
     </div>
   );
@@ -381,7 +454,7 @@ function AddSheet({ ar, plan, preset, rep, onClose, onSaved }: { ar: boolean; pl
   const [q, setQ] = useState("");
   const [who, setWho] = useState<Who | null>(null);
   const [text, setText] = useState("");
-  const [day, setDay] = useState<string | null>(null);
+  const [day, setDay] = useState<string | null>(plan.period === "DAY" && plan.start >= plan.today ? plan.start : null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [customers, setCustomers] = useState<(Who & { owner: string | null })[] | null>(null);
@@ -404,7 +477,7 @@ function AddSheet({ ar, plan, preset, rep, onClose, onSaved }: { ar: boolean; pl
   // With no search: the suggested customers first, then the rest of the book — so a pick never needs typing.
   const list = q.trim() ? found.map((c) => ({ ...c, why: "", tone: "" }))
     : [...suggested, ...pool.filter((c) => !suggested.some((x) => x.id === c.id)).map((c) => ({ ...c, why: "", tone: "" }))].slice(0, 6);
-  const days = [0, 1, 2, 3, 4, 5, 6].map((n) => addDays(addWeek(plan), n)).filter((d) => wd(d) <= 4 && (rep ? true : d >= plan.today));
+  const dayGroups = pickDays(plan);
   const tiles: { m: AMetric | "CHECK"; icon: D21IconName; t: [string, string] }[] = [
     { m: "VISITS", icon: "pin", t: ["زيارة", "Visit"] }, { m: "CALLS", icon: "phone", t: ["مكالمة", "Call"] }, { m: "QUOTES", icon: "quote", t: ["عرض سعر", "Quotation"] },
     { m: "COLLECTION", icon: "wallet", t: ["تحصيل", "Collection"] }, { m: "SAMPLES", icon: "cup", t: ["عيّنة", "Sample"] }, { m: "CHECK", icon: "note", t: ["بند آخر", "Other"] },
@@ -448,8 +521,16 @@ function AddSheet({ ar, plan, preset, rep, onClose, onSaved }: { ar: boolean; pl
           </>
         )}
         <b className="pl-q">{ar ? "3 · أي يوم؟ (اختياري)" : "3 · Which day? (optional)"}</b>
-        <div className="pl-days">
-          {days.map((d) => <button key={d} type="button" aria-pressed={day === d} onClick={() => setDay(day === d ? null : d)}>{dayName(d, ar)}</button>)}
+        <div className="pl-daypick" data-testid="plan-days">
+          {dayGroups.map((g) => (
+            <div key={g.week} className="pl-dayweek">
+              {dayGroups.length > 1 ? <small>{weekLabel(g.week, plan.today, ar)}</small> : null}
+              <div className="pl-days">
+                {g.days.map((d) => <button key={d} type="button" aria-pressed={day === d} onClick={() => setDay(day === d ? null : d)}>{dayName(d, ar)} <span className="num">{dayNum(d)}</span>{d === plan.today ? (ar ? " · اليوم" : " · today") : ""}</button>)}
+              </div>
+            </div>
+          ))}
+          <div className="pl-days"><button type="button" aria-pressed={day === null} onClick={() => setDay(null)}>{ar ? "بدون يوم (خلال هالأسبوع)" : "No day (this week)"}</button></div>
         </div>
         {what !== "CHECK" ? <p className="pl-note"><Ico name="tick" small />{ar ? `بينحسب في «${KIND[what].title[0]}» أول ما تسجّل ${KIND[what].one[0] === "عرض سعر" ? "عرض السعر" : KIND[what].one[0] === "تحصيل" ? "التحصيل" : `ال${KIND[what].one[0]}`}.` : `Counts toward «${KIND[what].title[1]}» once recorded.`}</p> : null}
         {err ? <p className="pl-err" role="alert">{err}</p> : null}
@@ -550,6 +631,47 @@ function LogSheet({ ar, plan, it, group, onClose, onSaved }: { ar: boolean; plan
           {err ? <p className="pl-err" role="alert">{err}</p> : null}
         </div>
       )}
+    </D21Dialog>
+  );
+}
+
+/** Tapping any item that is not an open planned visit or call: what it is, what happened, and what can be done with it. */
+function DetailSheet({ ar, x, a, plan, onClose, onMove }: { ar: boolean; x: { it?: PlanItem; off?: Off }; a: Acts; plan: Plan; onClose: () => void; onMove: (d: string | null) => void }) {
+  const it = x.it, o = x.off;
+  const [moving, setMoving] = useState(false);
+  const metric = (it?.metric ?? o?.metric ?? null) as Metric | null;
+  const k = metric && metric !== "CUSTOM" ? KIND[metric] : null;
+  const name = it ? (it.kind === "CHECK" ? it.label ?? "" : it.customer?.name ?? "") : o?.customer?.name ?? o?.title ?? "";
+  const customer = it?.customer ?? o?.customer ?? null;
+  const done = it ? it.checked : true;
+  const status = !done ? (ar ? "مخطط — ما انسجّل للحين" : "Planned — not recorded yet")
+    : it?.kind === "CHECK" ? (ar ? "تمت" : "Done") : doneLine(it?.doneOutcome ?? o?.outcome ?? null, it?.doneBody ?? o?.body ?? null, it?.doneAt ?? o?.at ?? null, ar);
+  const why = o ? (ar ? "ما كانت في خطتك، لكنها انحسبت لأنك سجّلتها." : "Not in your plan, but it counts — you recorded it.")
+    : it?.kind === "ACTION" && done ? (ar ? `انشطبت لحالها لأنك سجّلت ${k?.one[0] ?? ""} لهذا العميل.` : "Ticked itself when you recorded it.") : null;
+  const mayRemove = !!it && !done && (a.admin ? it.source === "ADMIN" : !a.readOnly && it.source === "SELF");
+  const days = pickDays(plan).flatMap((g) => g.days).filter((d) => d !== it?.plannedDay).slice(0, 8);
+  return (
+    <D21Dialog lang={ar ? "ar" : "en"} title={name} sub={k ? (ar ? k.one[0] : k.one[1]) : ar ? "بند آخر" : "Other item"} onClose={onClose} width={420} testId="plan-detail"
+      actions={<>
+        {it?.kind === "CHECK" && !a.readOnly ? <button type="button" className="btn p" onClick={() => { a.onCheck(it); onClose(); }}>{it.checked ? (ar ? "رجّعها مفتوحة" : "Reopen") : ar ? "تمت ✓" : "Done ✓"}</button> : null}
+        {customer ? <Link className={`btn${it?.kind === "CHECK" ? "" : " p"}`} href={`/dashboard/customers/${customer.id}`}>{ar ? "افتح صفحة العميل" : "Open the customer"}</Link> : null}
+        <button type="button" className="btn" onClick={onClose}>{ar ? "إغلاق" : "Close"}</button></>}>
+      <div className="pl-sheet">
+        <dl className="pl-dl">
+          <div><dt>{ar ? "الحالة" : "Status"}</dt><dd className={done ? "ok" : undefined}>{status}</dd></div>
+          <div><dt>{ar ? "اليوم" : "Day"}</dt><dd>{it?.plannedDay ? `${dayName(it.plannedDay, ar)} ${dayNum(it.plannedDay)}` : o ? `${dayName(riyadhDay(o.at), ar)} ${dayNum(riyadhDay(o.at))}` : ar ? "خلال الأسبوع (بدون يوم)" : "This week (no day)"}</dd></div>
+          {it?.source === "ADMIN" ? <div><dt>{ar ? "من" : "From"}</dt><dd><FromBoss name={it.setBy} ar={ar} /></dd></div> : null}
+        </dl>
+        {why ? <p className="pl-note"><Ico name="tick" small />{why}</p> : null}
+        {it && !done && !a.readOnly ? (moving ? (
+          <>
+            <b className="pl-q">{ar ? "أي يوم تبيها؟" : "Which day?"}</b>
+            <div className="pl-days">{days.map((d) => <button key={d} type="button" onClick={() => onMove(d)}>{dayName(d, ar)} <span className="num">{dayNum(d)}</span></button>)}
+              <button type="button" onClick={() => onMove(null)}>{ar ? "بدون يوم" : "No day"}</button></div>
+          </>
+        ) : <button type="button" className="pl-more" onClick={() => setMoving(true)}><Ico name="cal" small />{ar ? "غيّر اليوم" : "Change the day"}</button>) : null}
+        {mayRemove ? <button type="button" className="pl-more er" onClick={() => { a.onRemove(it!); onClose(); }}><Ico name="close" small />{ar ? "شيله من الخطة" : "Remove from the plan"}</button> : null}
+      </div>
     </D21Dialog>
   );
 }

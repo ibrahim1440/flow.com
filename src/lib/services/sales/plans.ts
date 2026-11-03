@@ -156,6 +156,8 @@ export type PlanItem = {
   id: string; source: "ADMIN" | "SELF"; kind: "GOAL" | "CHECK" | "ACTION"; metric: Metric | null; label: string | null;
   target: number | null; done: number | null; checked: boolean; position: number; setBy: string | null;
   customer: { id: string; name: string } | null; plannedDay: string | null; doneAt: string | null; doneOutcome: string | null; doneBody: string | null;
+  /** The week (its Sunday) an action or free item belongs to; null for a number. */
+  weekStart: string | null;
 };
 export type OffPlan = { id: string; metric: ActionMetric; customer: { id: string; name: string } | null; title: string | null; at: string; outcome: string | null; body: string | null };
 
@@ -208,7 +210,7 @@ export async function loadPlan(db: Db, employeeId: string, period: Period, start
       target: r.target === null ? null : Number(r.target),
       done: r.metric === "CUSTOM" ? Number(r.manualDone ?? 0) : counts[r.metric as keyof Counts] ?? 0,
       checked: false, position: r.position, setBy: r.source === "ADMIN" ? r.createdBy?.name ?? null : null,
-      customer: null, plannedDay: null, doneAt: null, doneOutcome: null, doneBody: null,
+      customer: null, plannedDay: null, doneAt: null, doneOutcome: null, doneBody: null, weekStart: null,
     })),
     ...inView.map((r) => {
       const rec = done.get(r.id);
@@ -217,7 +219,7 @@ export async function loadPlan(db: Db, employeeId: string, period: Period, start
         target: null, done: null, checked: r.kind === "CHECK" ? !!r.checkedAt : !!rec, position: r.position,
         setBy: r.source === "ADMIN" ? r.createdBy?.name ?? null : null, customer: name(r.customer), plannedDay: isoDay(r.plannedDay),
         doneAt: rec ? rec.at.toISOString() : r.kind === "CHECK" && r.checkedAt ? r.checkedAt.toISOString() : null,
-        doneOutcome: rec?.outcome ?? null, doneBody: rec?.body ?? null,
+        doneOutcome: rec?.outcome ?? null, doneBody: rec?.body ?? null, weekStart: isoDay(r.periodStart),
       };
     }),
   ];
