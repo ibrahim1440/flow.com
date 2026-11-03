@@ -111,7 +111,7 @@ export function usePlan(period: Period, reload: number, rep?: string, date?: str
 
 /** «من المشرف · أحمد» — directly under the title of whatever the supervisor set or sent. */
 function FromBoss({ name, ar }: { name: string | null; ar: boolean }) {
-  return <span className="pl-boss" data-testid="plan-from-boss"><Ico name="lock" small />{ar ? "من المشرف" : "From your supervisor"}{name ? ` · ${name}` : ""}</span>;
+  return <span className="pl-boss" data-testid="plan-from-boss"><Ico name="lock" small />{ar ? "من المشرف" : "From your supervisor"}{name ? ` · ${name.trim().split(/\s+/)[0]}` : ""}</span>;
 }
 
 /** One card's figures: done, the open planned items, what is not planned yet. */

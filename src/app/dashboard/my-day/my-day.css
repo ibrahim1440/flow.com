@@ -315,9 +315,14 @@
 
 /* «خطة الأسبوع v2» (owner-approved Figma page 07 «خيار ب», 3 Nov 2026). */
 .d21 .md-today-row > .md-card { min-height: 0 }
-.d21 .pl-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; margin-bottom: 16px }
+.d21 .pl-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: stretch; margin-bottom: 16px }
 .d21 .pl-wrap.adm { grid-template-columns: minmax(0, 1fr) 320px; margin: 0 }
-.d21 .pl-main { gap: 14px }
+/* The page's card rule pads only its header; the plan's two frames carry their own padding, same on every side. */
+.d21 .pl-main { gap: 14px; padding: 20px 22px; align-content: start }
+.d21 .pl-main > * { margin-inline: 0 } .d21 .pl-main > :last-child { margin-bottom: 0 }
+.d21 .pl-agenda { padding: 0 0 18px; align-content: start; min-width: 0 }
+.d21 .pl-agenda > .md-h { padding: 18px 20px 6px }
+.d21 .pl-agenda > :not(.md-h) { margin-inline: 20px }
 .d21 .pl-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap }
 .d21 .pl-head-t { display: grid; gap: 2px }
 .d21 .pl-head-t h2 { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 700 }
@@ -337,7 +342,7 @@
 .d21 .pl-g-h { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px }
 .d21 .pl-g-t { display: grid; gap: 2px; min-width: 0 }
 .d21 .pl-g-t > b { font-size: 16px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px }
-.d21 .pl-boss { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--status-info) }
+.d21 .pl-boss { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--status-info); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis }
 .d21 .pl-boss .ico { width: 13px; height: 13px }
 .d21 .pl-g-n { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap }
 .d21 .pl-g-n > b { font-size: 26px; font-weight: 700; line-height: 1 }
@@ -383,12 +388,13 @@
 .d21 .pl-empty { justify-items: center; text-align: center; padding: 24px }
 /* The week, day by day (desktop) — and the strip of days (phone). */
 .d21 .pl-agenda { gap: 12px }
-.d21 .pl-ad { display: grid; gap: 6px; padding: 2px 0 }
+.d21 .pl-ad { display: grid; gap: 6px; padding: 2px 0; min-width: 0 }
 .d21 .pl-ad > b { font-size: 13px; color: var(--text-secondary) }
 .d21 .pl-ad.on { padding: 10px 12px; border-radius: 10px; background: var(--action-primary-tint) } .d21 .pl-ad.on > b { color: var(--action-primary) }
-.d21 .pl-ar { display: flex; align-items: center; gap: 8px; width: 100%; padding: 2px 0; border: 0; background: none; font: inherit; font-size: 13.5px; font-weight: 600; color: var(--text-primary); text-align: start; cursor: pointer }
+.d21 .pl-ar { display: flex; align-items: flex-start; gap: 8px; width: 100%; min-width: 0; box-sizing: border-box; padding: 2px 0; border: 0; background: none; font: inherit; font-size: 13.5px; font-weight: 600; color: var(--text-primary); text-align: start; cursor: pointer }
 .d21 .pl-ar:hover .pl-ar-t { text-decoration: underline; text-underline-offset: 3px }
-.d21 .pl-ar-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.d21 .pl-ar-t { flex: 1; min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.45 }
+.d21 .pl-ar > .pl-c, .d21 .pl-ar > .ico, .d21 .pl-ar > .pl-tag { flex: none; margin-top: 1px }
 .d21 .pl-ad-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px } .d21 .pl-ad-h b { font-size: 13px; color: var(--text-secondary) } .d21 .pl-ad-h small { font-size: 12px; color: var(--text-muted) }
 .d21 .pl-ad.on .pl-ad-h b { color: var(--action-primary) }
 .d21 .pl-ar .mut { color: var(--text-secondary); font-weight: 500 }
@@ -451,3 +457,6 @@
   .d21 .pl-x { opacity: 1 }
   .pl-in, .pl-cust { min-height: 48px }
 }
+/* Owner trial (3 Nov 2026): «يومي» — every tab — on a near-white beige (#FDFCFA), lighter than the side menu (#F8F5EE),
+   so the white cards read as cards. Only this page for now; the whole system after the owner compares. */
+.d21-sheet:has(.md[data-testid="md-page"]) { background: #fdfcfa }
