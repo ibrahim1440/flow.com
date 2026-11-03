@@ -243,9 +243,13 @@ function MyDay() {
             <GrowingCard d={data} lang={lang} />
           </div>
         </div>
-        <div className="md-grid3">
-          <TiersCard d={data} lang={lang} />
-          <CustomersCard d={data} lang={lang} />
+        {/* The bottom row follows the row above's columns (owner, Figma 3 Nov 2026): tiers + customers under the call list,
+            contracts under deals / growing. */}
+        <div className="md-grid2 md-row3">
+          <div className="md-pair">
+            <TiersCard d={data} lang={lang} />
+            <CustomersCard d={data} lang={lang} />
+          </div>
           <ContractsCard d={data} lang={lang} />
         </div>
       </div>
@@ -318,8 +322,9 @@ function Card({ title, link, testId, children }: { title: ReactNode; link?: Reac
   );
 }
 
-function Empty({ children, action }: { children: ReactNode; action?: ReactNode }) {
-  return <div className="md-empty" data-testid="md-empty">{children}{action}</div>;
+/** A card's empty state: centred in the card's fixed frame, its action centred under it (owner, Figma 3 Nov 2026). */
+function Empty({ children, action, icon }: { children: ReactNode; action?: ReactNode; icon?: "phone" }) {
+  return <div className="md-empty" data-testid="md-empty">{icon ? <span className="md-empty-ico" aria-hidden><Ico name={icon} small /></span> : null}<span>{children}</span>{action}</div>;
 }
 
 /**
@@ -509,7 +514,7 @@ function CallCard({ d, lang, items, total, all, onAll, ro, empty, filter, onFilt
       {empty ? <NoBook lang={lang} />
         : items.length === 0 ? (all && filter !== "ALL"
           ? <Empty>{ar ? "ما فيه أحد في هذا التصنيف اليوم." : "Nobody in this group today."}</Empty>
-          : <Empty action={<Link className="btn sm" href="/dashboard/customers">{ar ? "افتح عملائي" : "Open my customers"}</Link>}>{ar ? "ما فيه أحد لازم تكلمه اليوم. كل عملائك على موعدهم. تقدر تمر على عملائك أو تسجّل زيارة." : "Nobody needs a call today — every account is on track."}</Empty>)
+          : <Empty icon="phone" action={<Link className="btn sm" href="/dashboard/customers">{ar ? "افتح عملائي" : "Open my customers"}</Link>}>{ar ? "ما فيه أحد لازم تكلمه اليوم. كل عملائك على موعدهم. تقدر تمر على عملائك أو تسجّل زيارة." : "Nobody needs a call today — every account is on track."}</Empty>)
           : items.map((it) => phone
             ? <SwipeRow key={it.key} item={it} lang={lang} ro={ro} onDone={onDone} onSnooze={onSnooze} />
             : <CallRow key={it.key} item={it} lang={lang} ro={ro} onDone={onDone} onSnooze={onSnooze} />)}

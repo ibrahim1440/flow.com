@@ -225,3 +225,28 @@
 }
 .d21 .md-h-ico { color: var(--status-success); flex: none; align-self: center }
 .d21 .md-pill .ico { flex: none }
+
+/* ── Fixed frames and centred empty states (owner, Figma «يومي — حالة بدون بيانات», 3 Nov 2026) ───────────────────
+   Cards side by side share one height whatever they hold; an empty card's message sits in the middle of its frame with
+   its action centred under it; the counts are centred. The olive target band keeps its production layout. */
+.d21 .md-card { display: flex; flex-direction: column }
+.d21 .md-card > .md-h { flex: none }
+.d21 .md-grid2, .d21 .md-grid3 { align-items: stretch }
+.d21 .md-grid2 > .md-card { min-height: 360px }
+.d21 .md-stack { grid-auto-rows: 1fr }
+.d21 .md-grid3 > .md-card { min-height: 200px }
+.d21 .md-card > .md-empty { flex: 1; align-content: center; justify-items: center; text-align: center; padding: 20px 24px; margin-bottom: 16px }
+.d21 .md-card > .md-empty > span { max-width: 52ch }
+.d21 .md-card > .md-empty + .md-note { margin-top: -6px }
+.d21 .md-empty-ico { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--action-primary-tint); color: var(--action-primary) }
+.d21 .md-card > .md-empty-line { flex: 1; display: grid; place-items: center; text-align: center }
+.d21 .md-legend3 > div { justify-items: center; text-align: center; flex: 1 }
+.d21 .md-card > .md-legend3 + .md-note, .d21 .md-card .md-note { text-align: center }
+@media (max-width: 767.98px) {
+  .d21 .md-grid2 > .md-card, .d21 .md-grid3 > .md-card { min-height: 0 }
+  .d21 .md-stack { grid-auto-rows: auto }
+}
+.d21 .md-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; min-width: 0 }
+.d21 .md-row3 > .md-card, .d21 .md-pair > .md-card { min-height: 200px }
+@media (max-width: 1279.98px) { .d21 .md-pair { grid-template-columns: minmax(0, 1fr) } }
+@media (max-width: 767.98px) { .d21 .md-row3 > .md-card, .d21 .md-pair > .md-card { min-height: 0 } }
