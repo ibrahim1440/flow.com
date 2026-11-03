@@ -134,3 +134,92 @@
 .d21 .md-overdue:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }
 @media (max-width: 767.98px) { .d21 .md-overdue { height: 44px; padding: 0 14px; font-size: 13px } }
 @media (prefers-reduced-motion: reduce) { .d21 .md-overdue { transition: none } .d21 .md-overdue:active { transform: none } }
+
+/* ── Redesign (owner-approved Figma «04 · يومي المندوب — تصور مقترح», 3 Nov 2026) ─────────────────────────────────
+   The header with the day's summary and the three actions; the olive target band with the pace tick; the call rows with
+   an initial, a square reason chip and text-labelled actions; the book as one stacked bar. Tokens only. */
+.d21 .md { max-width: 1240px; gap: 20px }
+.d21 .md-hello { align-items: flex-end }
+.d21 .md-hello-main { display: grid; gap: 2px; min-width: 0 }
+.d21 .md-eyebrow { font-size: 12.5px; color: var(--text-muted) }
+.d21 .md-hello h1 { font: 700 26px/1.35 var(--f-ui) }
+.d21 .md-sum { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 4px 0 0; font-size: 14px; color: var(--text-secondary) }
+.d21 .md-dot { display: inline-flex; align-items: center; gap: 6px }
+.d21 .md-dot > i { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); flex: none }
+.d21 .md-dot.bad > i { background: var(--status-danger) }
+.d21 .md-dot.warn > i { background: var(--status-warning) }
+.d21 .md-dot.info > i { background: var(--status-info) }
+.d21 .md-dot.ok > i { background: var(--status-success) }
+.d21 .md-dot.pri > i { background: var(--action-primary) }
+.d21 .md-acts-top { display: inline-flex; gap: 8px; flex-wrap: wrap }
+
+/* Target band */
+.d21 .md-band { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: center; padding: 22px 24px; border-radius: 14px;
+  background: var(--brand-surface); color: var(--brand-on-surface) }
+.d21 .md-band-main { display: grid; gap: 6px; min-width: 0 }
+.d21 .md-band-lbl { font-size: 13px; color: var(--brand-on-surface-soft) }
+.d21 .md-band-fig { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 16px; color: var(--brand-on-surface-soft) }
+.d21 .md-band-fig > b { font: 700 34px/1.15 var(--f-num); color: var(--brand-on-surface); font-variant-numeric: tabular-nums }
+.d21 .md-band-pct { margin-inline-start: auto; font-weight: 600; font-size: 18px; color: var(--brand-on-surface) }
+.d21 .md-band-bar { position: relative; height: 12px; border-radius: 999px; background: rgb(235 226 203 / 0.22); margin-top: 22px }
+.d21 .md-band-bar > i { display: block; height: 100%; border-radius: 999px; background: var(--brand-signature) }
+.d21 .md-pace { position: absolute; top: -6px; bottom: -6px; width: 2px; background: var(--brand-on-surface); transform: translateX(50%) }
+[dir="ltr"].d21 .md-pace, .d21 [dir="ltr"] .md-pace { transform: translateX(-50%) }
+.d21 .md-pace > em { position: absolute; bottom: calc(100% + 2px); inset-inline-start: 50%; transform: translateX(50%); white-space: nowrap; font-style: normal; font-size: 11px; color: var(--brand-on-surface-soft) }
+[dir="ltr"].d21 .md-pace > em, .d21 [dir="ltr"] .md-pace > em { transform: translateX(-50%) }
+.d21 .md-band-hints { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 4px 0 0; font-size: 13px; color: var(--brand-on-surface-soft) }
+.d21 .md-band-hints b, .d21 .md-band-hints .num { color: var(--brand-on-surface) !important }
+.d21 .md-band-kpis { display: grid; gap: 10px }
+.d21 .md-kpi { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 10px; padding: 10px 14px; border-radius: 10px;
+  background: rgb(255 253 247 / 0.08); box-shadow: inset 0 0 0 1px var(--brand-line) }
+.d21 .md-kpi small { font-size: 13px; color: var(--brand-on-surface-soft) }
+.d21 .md-kpi > span { font-size: 12px; color: var(--brand-on-surface-soft); white-space: nowrap }
+.d21 .md-kpi > span b { font: 700 20px/1.2 var(--f-num); color: var(--brand-on-surface) }
+.d21 .md-kpi .md-kpi-note { grid-column: 1 / -1; font-size: 11.5px }
+
+/* Cards: a quiet header line, the count beside the title */
+.d21 .md-card { padding: 0; gap: 0; overflow: hidden }
+.d21 .md-card > .md-h { padding: 14px 16px 10px }
+.d21 .md-card > :not(.md-h) { margin-inline: 16px }
+.d21 .md-card > :last-child { margin-bottom: 14px }
+.d21 .md-card > .md-row { margin-inline: 0; padding-inline: 16px }
+.d21 .md-card > .md-swipe { margin-bottom: 8px }
+.d21 .md-h h2 { font: 700 16px/1.4 var(--f-ui); display: inline-flex; align-items: baseline; gap: 6px }
+.d21 .md-count { font: 500 12.5px/1 var(--f-num); color: var(--text-muted) }
+.d21 .md-chips { margin-bottom: 8px }
+.d21 .md-chip { height: 28px; font-size: 12.5px }
+.d21 .md-chip[aria-pressed="true"] { background: var(--action-primary-tint); border-color: var(--action-primary-tint); color: var(--action-primary-hover); font-weight: 600 }
+
+/* Call rows */
+.d21 .md-row { justify-content: flex-start; padding: 12px 0; gap: 12px }
+.d21 .md-card > .md-row:first-of-type { border-top: 1px solid var(--border-subtle) }
+.d21 .md-av { width: 34px; height: 34px; border-radius: 50%; flex: none; display: grid; place-items: center; background: var(--action-primary-tint); color: var(--action-primary-hover); font: 700 14px/1 var(--f-ui) }
+.d21 .md-row .md-who { flex: 1 }
+.d21 .md-meta { display: flex; gap: 6px 10px; align-items: center; flex-wrap: wrap }
+.d21 .md-pill.sq { border-radius: 6px; height: 22px; font-weight: 600 }
+.d21 .md-ic { width: 34px; height: 34px; color: var(--text-secondary) }
+.d21 .md-log { white-space: nowrap }
+
+/* «عملائي» stacked bar */
+.d21 .md-stack-bar { display: flex; gap: 2px; height: 10px; border-radius: 999px; overflow: hidden; background: var(--border-subtle) }
+.d21 .md-stack-bar > span.ok { background: var(--status-success) }
+.d21 .md-stack-bar > span.info { background: var(--status-info) }
+.d21 .md-stack-bar > span.warn { background: var(--status-warning) }
+.d21 .md-legend3 { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px }
+.d21 .md-legend3 > div { display: grid; gap: 2px }
+.d21 .md-legend3 .md-dot { font-size: 12px; color: var(--text-muted) }
+.d21 .md-legend3 b { font: 700 20px/1.2 var(--f-num) }
+
+@media (max-width: 1279.98px) { .d21 .md-band { grid-template-columns: minmax(0, 1fr) 260px } }
+@media (max-width: 767.98px) {
+  .d21 .md-hello { align-items: stretch }
+  .d21 .md-hello-side, .d21 .md-acts-top { width: 100% }
+  .d21 .md-acts-top > .btn { flex: 1 1 0; justify-content: center; min-height: 44px }
+  .d21 .md-hello h1 { font-size: 22px }
+  .d21 .md-band { grid-template-columns: minmax(0, 1fr); padding: 16px; gap: 14px }
+  .d21 .md-band-fig > b { font-size: 28px }
+  .d21 .md-band-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+  .d21 .md-kpi { grid-template-columns: 1fr }
+  .d21 .md-row .md-av { display: none }
+  .d21 .md-row .md-acts .md-log { flex: 1; min-height: 44px }
+}

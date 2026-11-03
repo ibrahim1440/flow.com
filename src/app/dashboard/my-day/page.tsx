@@ -19,6 +19,7 @@ import { useUser } from "../user-context";
 import { useD21Phone, useD21Title, usePhone } from "@/components/shell/page-context";
 import { HrRoot } from "@/components/hr/ui";
 import { ActivityDialog } from "../customers/[id]/dialogs";
+import { hasSubPrivilege } from "@/lib/auth-shared";
 import { filterCallList, callFilterOf, type CallFilter } from "@/lib/services/sales/my-day/filters";
 import {
   TIER_LABEL, days, greeting, streakText, monthName, n, reasonPill, telHref, todayLine, waNumber, whyLine,
@@ -160,20 +161,35 @@ function MyDay() {
     </div>
   ) : null;
 
+  // The day at a glance under the greeting (approved Figma «يومي — تصور», 3 Nov 2026): what kinds of calls wait today.
+  const kinds = summaryOf(data.callList);
+  const perms = user?.permissions;
+  const acts = !ro && perms ? [
+    hasSubPrivilege(perms, "orders", "create") ? { href: "/dashboard/orders?new=order", ar: "+ طلب جديد", en: "+ New order", p: true, id: "md-new-order" } : null,
+    hasSubPrivilege(perms, "sales", "quote_write") ? { href: "/dashboard/sales/quotes/new", ar: "عرض سعر", en: "Quotation", p: false, id: "md-new-quote" } : null,
+    hasSubPrivilege(perms, "sales", "collection_submit") ? { href: "/dashboard/sales/collections", ar: "تسجيل تحصيل", en: "Record a collection", p: false, id: "md-new-collection" } : null,
+  ].filter((x): x is NonNullable<typeof x> => x !== null) : [];
   const hello = (
     <div className="md-hello">
-      <div>
+      <div className="md-hello-main">
+        <span className="md-eyebrow">{ar ? "يومي" : "My day"} · {todayLine(now, lang)}</span>
         <h1 data-testid="md-greeting">{ro ? (ar ? <>يوم <bdi>{data.rep.name}</bdi></> : <><bdi>{data.rep.name}</bdi>&apos;s day</>) : greeting(now, firstName, lang)}</h1>
-        <p>{todayLine(now, lang)} · {callCount === 0
-          ? (ar ? "ما عندك اتصالات مهمة اليوم" : "no important calls today")
-          : ro ? (ar ? `${n(Math.min(callCount, TOP))} اتصالات مهمة اليوم` : `${n(Math.min(callCount, TOP))} important calls today`)
-            : ar ? `عندك ${n(Math.min(callCount, TOP))} اتصالات مهمة اليوم` : `${n(Math.min(callCount, TOP))} important calls today`}</p>
+        <p className="md-sum" data-testid="md-summary">
+          {callCount === 0
+            ? <span>{ar ? (ro ? "ما عنده اتصالات مهمة اليوم" : "ما عندك اتصالات مهمة اليوم") : "No important calls today"}</span>
+            : kinds.map((k) => <span key={k.en} className={`md-dot ${k.tone}`}><i aria-hidden />{ar ? k.ar : k.en}</span>)}
+        </p>
       </div>
-      <span className="md-hello-side">
+      <div className="md-hello-side">
         <Streak d={data} lang={lang} third={ro} />
         {/* The rep's own overdue tasks are «مساحة عملي»'s; this is the way there (never on a manager's read-only view). */}
         {!ro ? <OverdueTasksLink lang={lang} /> : null}
-      </span>
+        {acts.length ? (
+          <span className="md-acts-top">
+            {acts.map((a) => <Link key={a.id} className={`btn${a.p ? " p" : ""}`} href={a.href} data-testid={a.id}>{ar ? a.ar : a.en}</Link>)}
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 
@@ -262,12 +278,45 @@ function OverdueTasksLink({ lang }: { lang: Lang }) {
   );
 }
 
+/**
+ * The line under the greeting: the waiting calls grouped by colour (red late, amber due / quiet, blue samples, olive
+ * follow-ups), «كلّمته — بانتظار الطلب» rows left out as in the count beside them.
+ */
+function summaryOf(list: CallItem[]): { tone: "bad" | "warn" | "info" | "pri"; ar: string; en: string }[] {
+  const c = { late: 0, due: 0, quiet: 0, sample: 0, follow: 0 };
+  for (const i of list) {
+    const k = i.reason.code;
+    if (k === "LATE") c.late++; else if (k === "DUE" || k === "EXPECTED") c.due++; else if (k === "NO_CONTACT") c.quiet++;
+    else if (k === "SAMPLE") c.sample++; else if (k === "FOLLOW_UP") c.follow++;
+  }
+  const out: { tone: "bad" | "warn" | "info" | "pri"; ar: string; en: string }[] = [];
+  const cnt = (v: number, one: string, two: string, few: string) => (v === 1 ? one : v === 2 ? two : `${n(v)} ${few}`);
+  if (c.follow) out.push({ tone: "pri", ar: cnt(c.follow, "متابعة وحدة اليوم", "متابعتين اليوم", "متابعات اليوم"), en: `${n(c.follow)} follow-up${c.follow === 1 ? "" : "s"} today` });
+  if (c.late) out.push({ tone: "bad", ar: cnt(c.late, "عميل متأخر عن طلبه", "عميلين متأخرين عن طلبهم", "عملاء متأخرين عن طلبهم"), en: `${n(c.late)} late to reorder` });
+  if (c.due) out.push({ tone: "warn", ar: cnt(c.due, "عميل حان موعد طلبه", "عميلين حان موعد طلبهم", "عملاء حان موعد طلبهم"), en: `${n(c.due)} due to order` });
+  if (c.sample) out.push({ tone: "info", ar: cnt(c.sample, "عيّنة تنتظر رأيهم", "عيّنتين تنتظر رأيهم", "عيّنات تنتظر رأيهم"), en: `${n(c.sample)} sample${c.sample === 1 ? "" : "s"} awaiting feedback` });
+  if (c.quiet) out.push({ tone: "warn", ar: cnt(c.quiet, "عميل ما تواصلت معه من فترة", "عميلين ما تواصلت معهم من فترة", "عملاء ما تواصلت معهم من فترة"), en: `${n(c.quiet)} not contacted lately` });
+  return out;
+}
+
+const SVG = {
+  call: <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.8 2z" /></svg>,
+  wa: <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.5L3 21l2-5.6A8.5 8.5 0 1 1 21 11.5z" /></svg>,
+  later: <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="13" r="8" /><path d="M12 9v4l2 2M5 3 2 6M22 6l-3-3" /></svg>,
+};
+
+/** The round initial beside a customer's name (first letter, Arabic name first). */
+function Initial({ name }: { name: string }) {
+  const ch = Array.from(name.replace(/^(مقهى|مقهي|شركة|مؤسسة|محامص|محمصة|مطعم|مطاعم|سلسلة)\s+/, "").trim().replace(/^ال(?=\S{2})/, ""))[0] ?? "؟";
+  return <span className="md-av" aria-hidden>{ch}</span>;
+}
+
 // ── Cards ────────────────────────────────────────────────────────────────────────────────────
 
 function Card({ title, link, testId, children }: { title: ReactNode; link?: ReactNode; testId: string; children: ReactNode }) {
   return (
-    <section className="md-card" data-testid={testId} aria-label={typeof title === "string" ? title : undefined}>
-      <div className="md-h"><h2>{title}</h2>{link}</div>
+    <section className="md-card" data-testid={testId} aria-labelledby={`${testId}-h`}>
+      <div className="md-h"><h2 id={`${testId}-h`}>{title}</h2>{link}</div>
       {children}
     </section>
   );
@@ -328,46 +377,44 @@ function TargetCard({ d, lang, compact, who }: { d: Day; lang: Lang; compact?: b
       : <>SAR <b className="num">{n(remain)}</b> for <bdi>{who}</bdi> to go · {left} left</>)
     : ar ? <>باقي لك <b className="num" style={{ color: "var(--text-primary)" }}>{n(remain)}</b> ريال توصل الهدف · باقي {left}</>
       : <>SAR <b className="num">{n(remain)}</b> to go · {left} left</>;
-  if (compact) {
-    return (
-      <Card title={ar ? `هدف ${month}` : `${month} target`} testId="md-target" link={<span className="num" style={{ fontWeight: 600 }}>{n(pct, 0)}%</span>}>
-        <div className="md-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(width)} aria-label={title}><i style={{ width: `${width}%` }} /></div>
-        <p className="md-note">{ar ? <>باقي{third ? <> لـ<bdi>{who}</bdi></> : null} <b className="num" style={{ color: "var(--text-primary)" }}>{n(remain)}</b> ريال · باقي {left}</> : <>SAR {n(remain)} to go · {left} left</>}</p>
-        {t.commissionVisible ? (
-          <div className="md-kv2" data-testid="md-commission-phone">
-            <span data-testid="md-accrued">{ar ? (third ? "عمولته المستحقة" : "عمولتك المستحقة") : "Accrued"} <b className="num">{n(t.accrued ?? 0)}</b> {ar ? "ريال" : "SAR"}</span>
-            <span data-testid="md-estimate">{ar ? (third ? "متوقعة لو وصل الهدف" : "متوقعة لو وصلت الهدف") : third ? "If the target is reached" : "If you reach the target"} <b className="num">{t.estimate === null ? "—" : n(t.estimate)}</b>{t.estimate === null ? null : <> {ar ? "ريال" : "SAR"}</>} · <em>{ar ? "تقدير" : "estimate"}</em></span>
-          </div>
-        ) : null}
-      </Card>
-    );
-  }
+  // Where the month says you should be today (elapsed share of the month, Riyadh) — the white tick on the bar.
+  const [yy, mm] = t.month.split("-").map(Number);
+  const monthDays = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
+  const pace = Math.max(0, Math.min(100, ((monthDays - t.daysLeft) / monthDays) * 100));
+  const perDay = !t.met && t.daysLeft > 0 ? remain / t.daysLeft : null;
   return (
-    <section className="md-card" data-testid="md-target" aria-label={title}>
-      <div className="md-target">
-        <div style={{ display: "grid", gap: 8 }}>
-          <div className="md-h"><h2>{title}</h2><span className="num" style={{ fontWeight: 600, fontSize: 18 }} data-testid="md-target-pct">{n(pct, 0)}%</span></div>
-          <div className="md-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(width)} aria-label={title}><i style={{ width: `${width}%` }} /></div>
-          <p className="md-note">{sub}</p>
-          <p className="md-note">{ar ? <>{third ? <>حصّل <bdi>{who}</bdi></> : "حصّلت"} <bdi className="num">{n(t.achieved)}</bdi> من <bdi className="num">{n(t.target)}</bdi> ريال (قبل الضريبة)</> : <>Collected SAR {n(t.achieved)} of {n(t.target)} (before VAT)</>}</p>
+    <section className="md-band" data-testid="md-target" aria-label={title}>
+      <div className="md-band-main">
+        <span className="md-band-lbl">{ar ? `هدف ${month} · التحصيل قبل الضريبة` : `${month} target · collections before VAT`}</span>
+        <div className="md-band-fig">
+          <b className="num" data-testid="md-target-achieved">{n(t.achieved)}</b>
+          <span>{ar ? <>من <bdi className="num">{n(t.target)}</bdi> ر.س</> : <>of SAR <bdi className="num">{n(t.target)}</bdi></>}</span>
+          <span className="md-band-pct num" data-testid="md-target-pct">{n(pct, 0)}%</span>
         </div>
-        {t.commissionVisible ? (
-          <>
-            <div className="md-kv" data-testid="md-accrued">
-              <small>{ar ? "عمولة مستحقة" : "Accrued commission"}</small>
-              <span className="big">{n(t.accrued ?? 0)}</span>
-              <small>{ar ? (third ? "ريال، محسوبة على اللي حصّله" : "ريال، محسوبة على اللي حصّلته") : "SAR, on what was collected"}</small>
-            </div>
-            <div className="md-kv" data-testid="md-estimate">
-              <small>{ar ? (third ? "متوقعة لو وصل الهدف" : "متوقعة لو وصلت الهدف") : third ? "If the target is reached" : "If you reach the target"}</small>
-              <span className="big sig">{t.estimate === null ? "—" : n(t.estimate)}</span>
-              <small>{t.estimate === null
-                ? (ar ? (t.hasPlan ? "تقدير غير متاح" : "ما عندك خطة عمولة") : (t.hasPlan ? "Estimate unavailable" : "No commission plan"))
-                : ar ? `ريال، تقدير${t.estimateDiscretionary ? " · مكافأة الهدف تخضع لقرار الإدارة" : ""}` : `SAR, estimate${t.estimateDiscretionary ? " · the target bonus is a management decision" : ""}`}</small>
-            </div>
-          </>
-        ) : null}
+        <div className="md-band-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(width)} aria-label={title}>
+          <i style={{ width: `${width}%` }} />
+          {!t.met ? <span className="md-pace" style={{ insetInlineStart: `${pace}%` }} title={ar ? "المفروض توصل له اليوم" : "Where the month says you should be"}><em>{ar ? "المفروض اليوم" : "Pace today"}</em></span> : null}
+        </div>
+        <p className="md-band-hints">
+          <span>{sub}</span>
+          {perDay !== null ? <span>{ar ? <>تحتاج <bdi className="num">{n(Math.ceil(perDay))}</bdi> ر.س يوميًا</> : <>SAR <bdi className="num">{n(Math.ceil(perDay))}</bdi> a day</>}</span> : null}
+        </p>
       </div>
+      {t.commissionVisible ? (
+        <div className="md-band-kpis" data-testid={compact ? "md-commission-phone" : undefined}>
+          <div className="md-kpi" data-testid="md-accrued">
+            <small>{ar ? "عمولة مستحقة" : "Accrued commission"}</small>
+            <span><b className="num">{n(t.accrued ?? 0)}</b> {ar ? "ر.س" : "SAR"}</span>
+          </div>
+          <div className="md-kpi" data-testid="md-estimate">
+            <small>{ar ? (third ? "متوقعة لو وصل الهدف" : "المتوقع لو حققت الهدف") : third ? "If the target is reached" : "If you reach the target"}</small>
+            <span><b className="num">{t.estimate === null ? "—" : n(t.estimate)}</b> {t.estimate === null ? null : (ar ? "ر.س" : "SAR")}</span>
+            <small className="md-kpi-note">{t.estimate === null
+              ? (ar ? (t.hasPlan ? "تقدير غير متاح" : "ما عندك خطة عمولة") : (t.hasPlan ? "Estimate unavailable" : "No commission plan"))
+              : ar ? `تقدير${t.estimateDiscretionary ? " · مكافأة الهدف بقرار الإدارة" : ""}` : `estimate${t.estimateDiscretionary ? " · target bonus at management's discretion" : ""}`}</small>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -380,10 +427,10 @@ function CallActions({ item, lang, ro, onDone, onSnooze }: { item: CallItem; lan
   return (
     <div className="md-acts">
       {/* 📞 / 💬 call or open WhatsApp AND open the same log dialog as the customer page (council fix round 1). */}
-      {tel ? <a className="md-ic" href={tel} onClick={() => { if (!ro) onDone(item, "CALL"); }} aria-label={ar ? `اتصل بـ ${nm}` : `Call ${nm}`} title={ar ? "اتصال" : "Call"} data-testid="md-call">📞</a> : null}
-      {wa ? <a className="md-ic" href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" onClick={() => { if (!ro) onDone(item, "WHATSAPP"); }} aria-label={ar ? `واتساب ${nm}` : `WhatsApp ${nm}`} title={ar ? "واتساب" : "WhatsApp"} data-testid="md-wa">💬</a> : null}
-      {!ro && item.reason.code !== "CALLED" ? <button type="button" className="md-ic done" onClick={() => onDone(item)} aria-label={ar ? `سجّل التواصل مع ${nm}` : `Log contact with ${nm}`} title={ar ? "تم — سجّل" : "Done — log it"} data-testid="md-done">✓</button> : null}
-      {!ro && item.customerId && item.reason.code !== "CALLED" ? <button type="button" className="md-ic" onClick={() => onSnooze(item)} aria-label={ar ? `أجّل ${nm} لبكرة` : `Snooze ${nm} until tomorrow`} title={ar ? "أجّل لبكرة" : "Tomorrow"} data-testid="md-snooze">⏰</button> : null}
+      {tel ? <a className="md-ic" href={tel} onClick={() => { if (!ro) onDone(item, "CALL"); }} aria-label={ar ? `اتصل بـ ${nm}` : `Call ${nm}`} title={ar ? "اتصال" : "Call"} data-testid="md-call">{SVG.call}</a> : null}
+      {wa ? <a className="md-ic" href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" onClick={() => { if (!ro) onDone(item, "WHATSAPP"); }} aria-label={ar ? `واتساب ${nm}` : `WhatsApp ${nm}`} title={ar ? "واتساب" : "WhatsApp"} data-testid="md-wa">{SVG.wa}</a> : null}
+      {!ro && item.reason.code !== "CALLED" ? <button type="button" className="btn sm md-log" onClick={() => onDone(item)} aria-label={ar ? `سجّل نتيجة التواصل مع ${nm}` : `Log the outcome with ${nm}`} data-testid="md-done">{ar ? "سجّل النتيجة" : "Log outcome"}</button> : null}
+      {!ro && item.customerId && item.reason.code !== "CALLED" ? <button type="button" className="md-ic" onClick={() => onSnooze(item)} aria-label={ar ? `أجّل ${nm} لبكرة` : `Snooze ${nm} until tomorrow`} title={ar ? "أجّل لبكرة" : "Tomorrow"} data-testid="md-snooze">{SVG.later}</button> : null}
     </div>
   );
 }
@@ -395,9 +442,10 @@ function CallRow({ item, lang, ro, onDone, onSnooze, phone }: { item: CallItem; 
   const href = item.customerId ? `/dashboard/customers/${item.customerId}` : item.reason.code === "FOLLOW_UP" || item.reason.code === "SAMPLE" ? `/dashboard/sales/deals/${item.reason.dealId}` : null;
   return (
     <div className="md-row" data-testid="md-call-row" data-reason={item.reason.code}>
+      <Initial name={nm} />
       <div className="md-who">
-        <b>{href ? <Link href={href}><bdi>{nm}</bdi></Link> : <bdi>{nm}</bdi>} <span className={`md-pill ${pill.tone}`}>{pill.text}</span></b>
-        <span className="md-why">{whyLine(item, lang, ro)}</span>
+        <b>{href ? <Link href={href}><bdi>{nm}</bdi></Link> : <bdi>{nm}</bdi>}</b>
+        <span className="md-meta"><span className={`md-pill sq ${pill.tone}`}>{pill.text}</span><span className="md-why">{whyLine(item, lang, ro)}</span></span>
       </div>
       <CallActions item={item} lang={lang} ro={ro} onDone={onDone} onSnooze={onSnooze} phone={phone} />
     </div>
@@ -450,7 +498,7 @@ function CallCard({ d, lang, items, total, all, onAll, ro, empty, filter, onFilt
   const link = total > TOP ? <button type="button" className="lk" onClick={onAll} data-testid="md-call-all">{all ? (ar ? "أهم 5 فقط" : "Top 5 only") : (ar ? `الكل (${n(total)})` : `All (${n(total)})`)}</button> : null;
   const countOf = (f: CallFilter) => (f === "ALL" ? d.callList.length : d.callList.filter((i) => callFilterOf(i) === f).length);
   return (
-    <Card title={ar ? "كلّمهم اليوم" : "Call them today"} link={link} testId="md-calls">
+    <Card title={<>{ar ? "كلّمهم اليوم" : "Call them today"}{total ? <span className="md-count num">{n(total)}</span> : null}</>} link={link} testId="md-calls">
       {/* The swipe hint at the TOP of the list (seat 5 r2), before the rows it explains. */}
       {phone && items.length > 0 && !ro ? <p className="md-hint" data-testid="md-swipe-hint">{ar ? "اسحب البطاقة يمين = تم · يسار = أجّل لبكرة" : "Swipe right = done · left = tomorrow"}</p> : null}
       {all && !empty && total > 0 ? (
@@ -548,9 +596,17 @@ function CustomersCard({ d, lang }: { d: Day; lang: Lang }) {
     <Card title={ar ? "عملائي" : "My customers"} testId="md-customers" link={<Link className="lk" href="/dashboard/customers">{ar ? "الكل" : "All"}</Link>}>
       {c.total === 0 ? <NoBook lang={lang} /> : (
         <>
-          <div className="md-mini"><span>{ar ? "نشطين" : "Active"}</span><b className="num" data-testid="md-count-active">{n(c.active)}</b></div>
-          <div className="md-mini"><span>{ar ? "يتفاوضون" : "Negotiating"}</span><b className="num">{n(c.negotiating)}</b></div>
-          <div className="md-mini"><span>{ar ? "متوقفين" : "Stopped"}</span><b className="num" style={c.stopped ? { color: "var(--status-danger)" } : undefined}>{n(c.stopped)}</b></div>
+          {/* One bar, three parts: the shares of the book (approved Figma «عملائي»). Not every customer is in one of the three. */}
+          <div className="md-stack-bar" role="img" aria-label={ar ? `نشطين ${c.active}، يتفاوضون ${c.negotiating}، متوقفين ${c.stopped}` : `Active ${c.active}, negotiating ${c.negotiating}, stopped ${c.stopped}`}>
+            {c.active ? <span className="ok" style={{ flexGrow: c.active }} /> : null}
+            {c.negotiating ? <span className="info" style={{ flexGrow: c.negotiating }} /> : null}
+            {c.stopped ? <span className="warn" style={{ flexGrow: c.stopped }} /> : null}
+          </div>
+          <div className="md-legend3">
+            <div><span className="md-dot ok"><i aria-hidden />{ar ? "نشطين" : "Active"}</span><b className="num" data-testid="md-count-active">{n(c.active)}</b></div>
+            <div><span className="md-dot info"><i aria-hidden />{ar ? "يتفاوضون" : "Negotiating"}</span><b className="num">{n(c.negotiating)}</b></div>
+            <div><span className="md-dot warn"><i aria-hidden />{ar ? "متوقفين" : "Stopped"}</span><b className="num" style={c.stopped ? { color: "var(--status-danger)" } : undefined}>{n(c.stopped)}</b></div>
+          </div>
           <p className="md-note">{ar ? `من ${n(c.total)} عميل · النشط اللي طلب خلال 3 شهور أو ضعف عادته` : `of ${n(c.total)} · active = ordered within 3 months or twice their rhythm`}</p>
         </>
       )}
