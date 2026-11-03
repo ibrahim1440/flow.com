@@ -33,6 +33,11 @@ const PATHS = {
   flask: "<path d=\"M9 3h6M10 3v6L5 18a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3L14 9V3\"/><path d=\"M7.5 14h9\"/>",
   dl: "<path d=\"M12 4v11M7 10l5 5 5-5M5 20h14\"/>",
   note: "<path d=\"M5 4h14v12l-4 4H5z\"/><path d=\"M15 20v-4h4\"/>",
+  // From the Figma «Icons / 20px» set (file jyAGcllCPBYVsRQH80jRoN, page 02: Icon / trend 28:155, Icon / clock 28:202),
+  // rescaled 20 → 24; «chat» for WhatsApp in the same stroke style.
+  trend: "<path d=\"M21.5 7 13 15.5 8.5 11l-6 6\"/><path d=\"M15.5 7h6v6\"/>",
+  clock: "<circle cx=\"12\" cy=\"12\" r=\"8.5\"/><path d=\"M12 7.5V12l3 2\"/>",
+  chat: "<path d=\"M20 11.5a8 8 0 0 1-11.7 7.1L4 20l1.4-4.2A8 8 0 1 1 20 11.5z\"/>",
 } as const;
 
 export type D21IconName = keyof typeof PATHS;

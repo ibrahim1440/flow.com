@@ -223,3 +223,5 @@
   .d21 .md-row .md-av { display: none }
   .d21 .md-row .md-acts .md-log { flex: 1; min-height: 44px }
 }
+.d21 .md-h-ico { color: var(--status-success); flex: none; align-self: center }
+.d21 .md-pill .ico { flex: none }

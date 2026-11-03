@@ -20,6 +20,7 @@ import { useD21Phone, useD21Title, usePhone } from "@/components/shell/page-cont
 import { HrRoot } from "@/components/hr/ui";
 import { ActivityDialog } from "../customers/[id]/dialogs";
 import { hasSubPrivilege } from "@/lib/auth-shared";
+import { Ico } from "@/components/shell/icons";
 import { filterCallList, callFilterOf, type CallFilter } from "@/lib/services/sales/my-day/filters";
 import {
   TIER_LABEL, days, greeting, streakText, monthName, n, reasonPill, telHref, todayLine, waNumber, whyLine,
@@ -197,7 +198,7 @@ function MyDay() {
     <HrRoot>
       <ActivityDialog ar={ar} customerId={logFor.item.customerId} customerName={nameOf(logFor.item, ar)} deals={[]} initialKind={logFor.kind}
         defaultDealId={logFor.item.reason.code === "FOLLOW_UP" || logFor.item.reason.code === "SAMPLE" ? logFor.item.reason.dealId : null}
-        onClose={() => setLogFor(null)} onDone={() => { setLogFor(null); setFlash({ text: ar ? "تم التسجيل. ممتاز 👌" : "Logged." }); reload(); }} />
+        onClose={() => setLogFor(null)} onDone={() => { setLogFor(null); setFlash({ text: ar ? "تم التسجيل." : "Logged." }); reload(); }} />
     </HrRoot>
   ) : null;
 
@@ -299,11 +300,6 @@ function summaryOf(list: CallItem[]): { tone: "bad" | "warn" | "info" | "pri"; a
   return out;
 }
 
-const SVG = {
-  call: <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.8 2z" /></svg>,
-  wa: <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.5L3 21l2-5.6A8.5 8.5 0 1 1 21 11.5z" /></svg>,
-  later: <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="13" r="8" /><path d="M12 9v4l2 2M5 3 2 6M22 6l-3-3" /></svg>,
-};
 
 /** The round initial beside a customer's name (first letter, Arabic name first). */
 function Initial({ name }: { name: string }) {
@@ -346,9 +342,9 @@ function NoBook({ lang }: { lang: Lang }) {
 function Streak({ d, lang, third }: { d: Day; lang: Lang; third?: boolean }) {
   const ar = lang === "ar";
   if (d.target.streakWeeks >= 1) {
-    return <span className="md-pill sig" data-testid="md-streak">🔥 {streakText(d.target.streakWeeks, lang, third)}</span>;
+    return <span className="md-pill sig" data-testid="md-streak"><Ico name="flame" small />{streakText(d.target.streakWeeks, lang, third)}</span>;
   }
-  if (d.target.newBest) return <span className="md-pill ok" data-testid="md-best">🏆 {third ? (ar ? "هذا أفضل شهر له" : "Their best month yet") : ar ? "هذا أفضل شهر لك" : "Your best month yet"}</span>;
+  if (d.target.newBest) return <span className="md-pill ok" data-testid="md-best"><Ico name="check" small />{third ? (ar ? "هذا أفضل شهر له" : "Their best month yet") : ar ? "هذا أفضل شهر لك" : "Your best month yet"}</span>;
   return null;
 }
 
@@ -372,7 +368,7 @@ function TargetCard({ d, lang, compact, who }: { d: Day; lang: Lang; compact?: b
   const remain = Number(t.remaining ?? 0);
   const left = days(t.daysLeft, lang);
   const sub = t.met
-    ? (third ? (ar ? <>وصل <bdi>{who}</bdi> الهدف 👏</> : <><bdi>{who}</bdi> reached the target</>) : ar ? "وصلت الهدف 👏 كل ريال تحصّله الحين زيادة لك" : "Target reached — every riyal now is extra")
+    ? (third ? (ar ? <>وصل <bdi>{who}</bdi> الهدف</> : <><bdi>{who}</bdi> reached the target</>) : ar ? "وصلت الهدف — كل ريال تحصّله الحين زيادة لك" : "Target reached — every riyal now is extra")
     : third ? (ar ? <>باقي لـ<bdi>{who}</bdi> <b className="num" style={{ color: "var(--text-primary)" }}>{n(remain)}</b> ريال يوصل الهدف · باقي {left}</>
       : <>SAR <b className="num">{n(remain)}</b> for <bdi>{who}</bdi> to go · {left} left</>)
     : ar ? <>باقي لك <b className="num" style={{ color: "var(--text-primary)" }}>{n(remain)}</b> ريال توصل الهدف · باقي {left}</>
@@ -427,10 +423,10 @@ function CallActions({ item, lang, ro, onDone, onSnooze }: { item: CallItem; lan
   return (
     <div className="md-acts">
       {/* 📞 / 💬 call or open WhatsApp AND open the same log dialog as the customer page (council fix round 1). */}
-      {tel ? <a className="md-ic" href={tel} onClick={() => { if (!ro) onDone(item, "CALL"); }} aria-label={ar ? `اتصل بـ ${nm}` : `Call ${nm}`} title={ar ? "اتصال" : "Call"} data-testid="md-call">{SVG.call}</a> : null}
-      {wa ? <a className="md-ic" href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" onClick={() => { if (!ro) onDone(item, "WHATSAPP"); }} aria-label={ar ? `واتساب ${nm}` : `WhatsApp ${nm}`} title={ar ? "واتساب" : "WhatsApp"} data-testid="md-wa">{SVG.wa}</a> : null}
+      {tel ? <a className="md-ic" href={tel} onClick={() => { if (!ro) onDone(item, "CALL"); }} aria-label={ar ? `اتصل بـ ${nm}` : `Call ${nm}`} title={ar ? "اتصال" : "Call"} data-testid="md-call"><Ico name="phone" small /></a> : null}
+      {wa ? <a className="md-ic" href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" onClick={() => { if (!ro) onDone(item, "WHATSAPP"); }} aria-label={ar ? `واتساب ${nm}` : `WhatsApp ${nm}`} title={ar ? "واتساب" : "WhatsApp"} data-testid="md-wa"><Ico name="chat" small /></a> : null}
       {!ro && item.reason.code !== "CALLED" ? <button type="button" className="btn sm md-log" onClick={() => onDone(item)} aria-label={ar ? `سجّل نتيجة التواصل مع ${nm}` : `Log the outcome with ${nm}`} data-testid="md-done">{ar ? "سجّل النتيجة" : "Log outcome"}</button> : null}
-      {!ro && item.customerId && item.reason.code !== "CALLED" ? <button type="button" className="md-ic" onClick={() => onSnooze(item)} aria-label={ar ? `أجّل ${nm} لبكرة` : `Snooze ${nm} until tomorrow`} title={ar ? "أجّل لبكرة" : "Tomorrow"} data-testid="md-snooze">{SVG.later}</button> : null}
+      {!ro && item.customerId && item.reason.code !== "CALLED" ? <button type="button" className="md-ic" onClick={() => onSnooze(item)} aria-label={ar ? `أجّل ${nm} لبكرة` : `Snooze ${nm} until tomorrow`} title={ar ? "أجّل لبكرة" : "Tomorrow"} data-testid="md-snooze"><Ico name="clock" small /></button> : null}
     </div>
   );
 }
@@ -513,7 +509,7 @@ function CallCard({ d, lang, items, total, all, onAll, ro, empty, filter, onFilt
       {empty ? <NoBook lang={lang} />
         : items.length === 0 ? (all && filter !== "ALL"
           ? <Empty>{ar ? "ما فيه أحد في هذا التصنيف اليوم." : "Nobody in this group today."}</Empty>
-          : <Empty action={<Link className="btn sm" href="/dashboard/customers">{ar ? "افتح عملائي" : "Open my customers"}</Link>}>{ar ? "ما فيه أحد لازم تكلمه اليوم 👌 كل عملائك على موعدهم. تقدر تمر على عملائك أو تسجّل زيارة." : "Nobody needs a call today — every account is on track."}</Empty>)
+          : <Empty action={<Link className="btn sm" href="/dashboard/customers">{ar ? "افتح عملائي" : "Open my customers"}</Link>}>{ar ? "ما فيه أحد لازم تكلمه اليوم. كل عملائك على موعدهم. تقدر تمر على عملائك أو تسجّل زيارة." : "Nobody needs a call today — every account is on track."}</Empty>)
           : items.map((it) => phone
             ? <SwipeRow key={it.key} item={it} lang={lang} ro={ro} onDone={onDone} onSnooze={onSnooze} />
             : <CallRow key={it.key} item={it} lang={lang} ro={ro} onDone={onDone} onSnooze={onSnooze} />)}
@@ -540,7 +536,7 @@ function DealsCard({ d, lang }: { d: Day; lang: Lang }) {
 function GrowingCard({ d, lang }: { d: Day; lang: Lang }) {
   const ar = lang === "ar";
   return (
-    <Card title={ar ? "ينمون معك 📈" : "Growing with you 📈"} testId="md-growing">
+    <Card title={<><Ico name="trend" small className="md-h-ico" />{ar ? "ينمون معك" : "Growing with you"}</>} testId="md-growing">
       {d.counts.total === 0 ? <NoBook lang={lang} />
         : d.growing.length === 0 ? <Empty>{ar ? "ما فيه عميل ينمو بوضوح حاليًا. نحتاج طلبين على الأقل في كل فترة عشان نحكم." : "No customer is clearly growing right now (two orders per period are needed)."}</Empty>
           : d.growing.slice(0, 5).map((g) => (

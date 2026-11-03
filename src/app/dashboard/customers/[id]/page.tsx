@@ -6,7 +6,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useI18n } from "@/lib/i18n/context";
 import { Ico } from "@/components/shell/icons";
 import { useD21Title, usePhone, useD21Phone, useCreateRequest } from "@/components/shell/page-context";
-import { Bean, MessageCircle } from "lucide-react";
 import { contactKind, lastContact } from "@/lib/services/customers/facts";
 import { telHref, waNumber } from "@/lib/services/search/normalize";
 import { rememberRecent } from "@/components/shell/recent";
@@ -307,7 +306,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   // واتساب: wa.me in a new tab, and the dialog on «واتساب».
   const waBtn = mayLog && wa ? (
     <a className="btn" href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" data-testid="act-whatsapp" onClick={() => setDialog({ activity: "WHATSAPP" })}>
-      <MessageCircle size={16} strokeWidth={1.5} aria-hidden />{L("واتساب", "WhatsApp")}
+      <Ico name="chat" small />{L("واتساب", "WhatsApp")}
     </a>
   ) : null;
   const logBtn = mayLog ? (
@@ -317,7 +316,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   ) : null;
   const sampleBtn = mayLog ? (
     <button type="button" className="btn" data-testid="act-sample" disabled={quickBusy} onClick={() => startQuick("sample")}>
-      <Bean size={16} strokeWidth={1.5} aria-hidden />{L("عيّنة", "Sample")}
+      <Ico name="flask" small />{L("عيّنة", "Sample")}
     </button>
   ) : null;
   const quoteBtn = sections.sales && can.quote ? (
@@ -1036,13 +1035,13 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
             <div className="sticky-act acc-quickbar" data-acc-more data-testid="account-quickbar">
               {mayLog ? (tel ? <a className="btn" href={tel} aria-label={L("اتصال", "Call")} data-testid="act-call" onClick={() => setDialog({ activity: "CALL" })}><Ico name="phone" /></a>
                 : <button type="button" className="btn" disabled aria-label={L("لا يوجد رقم جوال", "No phone number")}><Ico name="phone" /></button>) : <span />}
-              {mayLog ? (wa ? <a className="btn" href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" aria-label={L("واتساب", "WhatsApp")} data-testid="act-whatsapp" onClick={() => setDialog({ activity: "WHATSAPP" })}><MessageCircle size={18} strokeWidth={1.5} aria-hidden /></a>
-                : <button type="button" className="btn" disabled aria-label={L("لا يوجد رقم واتساب", "No WhatsApp number")}><MessageCircle size={18} strokeWidth={1.5} aria-hidden /></button>) : <span />}
+              {mayLog ? (wa ? <a className="btn" href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" aria-label={L("واتساب", "WhatsApp")} data-testid="act-whatsapp" onClick={() => setDialog({ activity: "WHATSAPP" })}><Ico name="chat" /></a>
+                : <button type="button" className="btn" disabled aria-label={L("لا يوجد رقم واتساب", "No WhatsApp number")}><Ico name="chat" /></button>) : <span />}
               {mayLog ? <button type="button" className="btn" aria-label={L("سجّل نشاط", "Log activity")} data-testid="log-activity" onClick={() => setDialog({ activity: "CALL" })}><Ico name="note" /></button> : <span />}
               {/* «عيّنة» on the one bar too (seat 5 r2): a quotation keeps the wide primary slot. */}
-              {quoteBtn && mayLog ? <button type="button" className="btn" aria-label={L("عيّنة", "Sample")} data-testid="act-sample" disabled={quickBusy} onClick={() => startQuick("sample")}><Bean size={18} strokeWidth={1.5} aria-hidden /></button> : <span />}
+              {quoteBtn && mayLog ? <button type="button" className="btn" aria-label={L("عيّنة", "Sample")} data-testid="act-sample" disabled={quickBusy} onClick={() => startQuick("sample")}><Ico name="flask" /></button> : <span />}
               {quoteBtn ? <button type="button" className="btn p" data-testid="new-quote" disabled={quickBusy} onClick={() => startQuick("quote")}><Ico name="quote" small />{L("عرض سعر", "Quotation")}</button>
-                : mayLog ? <button type="button" className="btn p" data-testid="act-sample" disabled={quickBusy} onClick={() => startQuick("sample")}><Bean size={16} strokeWidth={1.5} aria-hidden />{L("عيّنة", "Sample")}</button> : <span />}
+                : mayLog ? <button type="button" className="btn p" data-testid="act-sample" disabled={quickBusy} onClick={() => startQuick("sample")}><Ico name="flask" small />{L("عيّنة", "Sample")}</button> : <span />}
             </div>
           ) : null}
           {dialogs}
