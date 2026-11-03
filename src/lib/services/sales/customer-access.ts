@@ -4,7 +4,7 @@
 // so an id cannot be used to confirm that another rep's customer or order exists.
 import { prisma } from "@/lib/db";
 import type { Permissions } from "@/lib/auth-shared";
-import { customersScopedToOwner, orderedByOrForWhere, ownedCustomerWhere } from "./scope";
+import { customersScopedToOwner, mayOrderUnassignedCustomers, orderedByOrForWhere, ownedCustomerWhere } from "./scope";
 
 type Viewer = { id: string; role?: string | null; permissions: Permissions | Record<string, unknown> };
 type Db = Pick<typeof prisma, "customer" | "order">;
@@ -19,4 +19,17 @@ export async function orderInScope(user: Viewer, orderId: string, db: Db = prism
   if (!customersScopedToOwner(user)) return true;
   const row = await db.order.findFirst({ where: { id: orderId, ...orderedByOrForWhere(user.id) }, select: { id: true } });
   return !!row;
+}
+
+/**
+ * May this viewer take an ORDER for this customer? "book": in their book (or they see every customer);
+ * "unassigned": a customer with no account owner, allowed only with orders.unassigned_customers (owner
+ * decision 3 Nov 2026) — the order neither assigns the customer nor opens its file; null: refused (another
+ * rep's customer, or a pool customer without the key, or no such customer — the same 404).
+ */
+export async function orderCustomerAccess(user: Viewer, customerId: string, db: Db = prisma): Promise<"book" | "unassigned" | null> {
+  if (await customerInScope(user, customerId, db)) return "book";
+  if (!mayOrderUnassignedCustomers(user.permissions)) return null;
+  const row = await db.customer.findFirst({ where: { id: customerId, accountOwnerId: null }, select: { id: true } });
+  return row ? "unassigned" : null;
 }

@@ -83,6 +83,7 @@ export const SUB_AR: Record<string, Record<string, string>> = {
   orders: {
     create: "إنشاء الطلبات", edit: "تعديل الطلبات", delete: "حذف الطلبات", approve: "اعتماد الطلبات أو رفضها",
     prepare_review: "قرارات مراجعة التجهيز", manage_status: "إيقاف الطلبات واستئنافها وإلغاؤها وإكمالها",
+    unassigned_customers: "إنشاء طلبات لعملاء غير مسندين له (الاسم فقط، بدون ملف العميل ولا عمولة)",
   },
   dispatch: { mark_delivered: "تأكيد التسليم" },
   labels: {

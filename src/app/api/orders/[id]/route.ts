@@ -20,7 +20,7 @@ import {
   type RequestedLine,
   type LiveLine,
 } from "@/lib/services/order-edit";
-import { orderInScope, customerInScope } from "@/lib/services/sales/customer-access";
+import { orderInScope, orderCustomerAccess } from "@/lib/services/sales/customer-access";
 
 /**
  * Structurally edit an existing order.
@@ -51,8 +51,9 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   const orderData: Record<string, unknown> = {};
   if (body.customerId !== undefined)        orderData.customerId        = body.customerId;
   // Moving the order to a customer outside the rep's book is refused the same way as reading one.
-  if (typeof body.customerId === "string" && !(await customerInScope(user, body.customerId))) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // An unassigned customer only with orders.unassigned_customers (owner decision 3 Nov 2026); never another rep's.
+  if (typeof body.customerId === "string" && !(await orderCustomerAccess(user, body.customerId))) {
+    return NextResponse.json({ error: "العميل غير موجود أو غير مسند لك.", errorEn: "Customer not found or not assigned to you.", code: "CUSTOMER_NOT_IN_BOOK" }, { status: 404 });
   }
   if (body.quotationNumber !== undefined)   orderData.quotationNumber   = body.quotationNumber ?? null;
   if (body.quotationSentDate !== undefined) {

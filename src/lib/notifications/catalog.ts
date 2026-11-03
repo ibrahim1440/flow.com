@@ -180,6 +180,22 @@ export const EVENTS: NotificationEventDef[] = [
     }),
   },
   {
+    // Owner decision (3 Nov 2026, accounting council): a rep holding orders.unassigned_customers took an order for a
+    // customer with no account owner. The supervisors see it and may assign the customer from the customers list.
+    key: "sales.unassigned_customer_order", category: "sales", severity: "info",
+    label: { ar: "طلب من مندوب لعميل غير مسند", en: "A rep's order for an unassigned customer" },
+    recipients: [{ perm: [{ module: "sales", sub: "lead_assign" }] }, { person: "admins" }],
+    requires: [MOD("orders")],
+    trigger: "POST /api/orders by a scoped rep with orders.unassigned_customers, for a customer with no account owner",
+    render: (f) => ({
+      titleAr: `${s(f.repName)} سوّى طلب لعميل غير مسند: ${s(f.customerName)}`,
+      titleEn: `\u2068${sEn(f, "repName")}\u2069 took an order for an unassigned customer: \u2068${sEn(f, "customerName")}\u2069`,
+      bodyAr: `الطلب #${s(f.orderNumber)} · العميل باقٍ بدون مندوب ولا عمولة عليه. للإسناد: العملاء ← «بدون مندوب».`,
+      bodyEn: `Order #${s(f.orderNumber)} · the customer stays unassigned, with no commission. To assign: Customers › «No rep».`,
+      link: "/dashboard/orders",
+    }),
+  },
+  {
     key: "sales.order_status", category: "sales", severity: "info",
     label: { ar: "تغيّرت حالة طلب عميلك (سُلِّم، جزئيًا، معلّق، ملغى، استُؤنف)", en: "Your customer's order delivered / part-delivered / held / cancelled / resumed" },
     recipients: [{ person: "orderOwner" }, { person: "customerOwner" }],

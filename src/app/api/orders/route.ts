@@ -12,7 +12,8 @@ import { autoPrepareOrder } from "@/lib/services/orders/preparation";
 import { orderPipelines } from "@/lib/services/orders/pipeline";
 import { parseBranchId } from "@/lib/accounting/locations";
 import { orderVisibilityWhere } from "@/lib/services/sales/scope";
-import { customerInScope } from "@/lib/services/sales/customer-access";
+import { orderCustomerAccess } from "@/lib/services/sales/customer-access";
+import { notifyUnassignedCustomerOrder } from "@/lib/services/orders/unassigned-order";
 
 export async function GET(request: Request) {
   // Production and Dispatch workers need to read orders to see what to roast / deliver
@@ -100,9 +101,11 @@ export async function POST(request: Request) {
     if (!Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: "An order must have at least one line." }, { status: 400 });
     }
-    // A scoped sales rep orders only for a customer in their own book.
-    if (!(await customerInScope(user, body.customerId))) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    // A scoped sales rep orders only for a customer in their own book — or, with orders.unassigned_customers, for a
+    // customer with no account owner (owner decision 3 Nov 2026); never for another rep's customer.
+    const access = await orderCustomerAccess(user, body.customerId);
+    if (!access) {
+      return NextResponse.json({ error: "العميل غير موجود أو غير مسند لك.", errorEn: "Customer not found or not assigned to you.", code: "CUSTOMER_NOT_IN_BOOK" }, { status: 404 });
     }
 
     // No stock gate here, deliberately (section 7).
@@ -145,6 +148,9 @@ export async function POST(request: Request) {
           canSeeCustomerContact(user.permissions),
         );
         await emitAutomationEvent(tx, { eventType: "order.created", subjectType: "Order", subjectId: created.id, actorId: user.id });
+        // The order does not assign the customer (accountOwnerId untouched) and opens no deal — no commission. The
+        // supervisors and the admins are told once per order.
+        if (access === "unassigned") await notifyUnassignedCustomerOrder(tx, { id: created.id, orderNumber: created.orderNumber, customerId: body.customerId as string }, { id: user.id, name: user.name });
         return created;
       },
       TX_OPTS,

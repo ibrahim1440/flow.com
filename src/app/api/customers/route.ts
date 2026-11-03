@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireAnyModule, requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
-import { customerVisibilityWhere } from "@/lib/services/sales/scope";
+import { customerVisibilityWhere, customersScopedToOwner } from "@/lib/services/sales/scope";
 
 export async function GET(request?: Request) {
   const { user, error } = await requireAnyModule("customers", "orders");
@@ -32,7 +32,7 @@ export async function GET(request?: Request) {
 }
 
 export async function POST(request: Request) {
-  const { error } = await requireEdit("customers");
+  const { user, error } = await requireEdit("customers");
   if (error) return error;
 
   try {
@@ -57,6 +57,9 @@ export async function POST(request: Request) {
         email,
         address: body.address?.trim() || null,
         whatsappOptOut: body.whatsappOptOut === true,
+        // Owner decision (3 Nov 2026): a rep's book no longer includes the unassigned pool, so a customer a scoped rep
+        // adds is theirs from the start (as a converted lead is) — it must not vanish from their own list.
+        ...(customersScopedToOwner(user) ? { accountOwnerId: user.id } : {}),
       },
     });
     return NextResponse.json(customer, { status: 201 });

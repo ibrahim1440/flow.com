@@ -159,6 +159,9 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "approve", label: "Approve / reject orders" },
     { key: "prepare_review", label: "Submit preparation review decisions" },
     { key: "manage_status", label: "Hold / resume / cancel / complete orders" },
+    // Owner decision (3 Nov 2026, accounting council): a rep sees only the customers assigned to them; this grants an
+    // ORDER (name only, no file, no deal, no commission) for a customer with no rep. Granted per user by the admin / GM.
+    { key: "unassigned_customers", label: "Create orders for unassigned customers" },
   ],
   production: [
     { key: "start_batch", label: "Start / continue roasting" },

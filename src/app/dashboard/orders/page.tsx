@@ -105,7 +105,7 @@ function lastActivityOf(order: Order): LifecycleActivity | null {
   return order.activities.length > 0 ? order.activities[order.activities.length - 1] : null;
 }
 
-type Customer = { id: string; name: string; phone?: string | null };
+type Customer = { id: string; name: string; phone?: string | null; unassigned?: boolean };
 type GreenBean = { id: string; serialNumber: string; beanType: string; quantityKg: number };
 type ProductSku = { id: string; skuCode: string; weightGrams: number; isBulk: boolean; price: number };
 type ProductSummary = { id: string; productNameEn: string; productNameAr: string | null; productSkus: ProductSku[] };
@@ -238,6 +238,15 @@ export default function OrdersPage() {
     setLoadError(false);
     setOrders(ordersJ);
     if (custJ) setCustomers(custJ);
+    // Owner decision (3 Nov 2026): a rep holding orders.unassigned_customers may also order for a customer with no
+    // rep — listed by name only, marked «غير مسند» (GET /api/orders/customer-options; [] for everyone else).
+    if (custJ && hasSubPrivilege(perms, "orders", "unassigned_customers")) {
+      const extra = await fetch("/api/orders/customer-options").then((r) => (r.ok ? r.json() : [])).catch(() => []) as Customer[];
+      if (extra.length) {
+        const seen = new Set((custJ as Customer[]).map((c) => c.id));
+        setCustomers([...(custJ as Customer[]), ...extra.filter((c) => !seen.has(c.id))]);
+      }
+    }
     if (beansJ) setBeans(beansJ);
     if (productsJ) setProducts(productsJ);
     if (catalogJ) setCatalog(catalogJ);
@@ -531,7 +540,7 @@ export default function OrdersPage() {
                     aria-label={t("customer")} data-testid="order-customer"
                     className="flex-1 px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required>
                     <option value="">{t("selectCustomer")}</option>
-                    {customers.map((c) => <option key={c.id} value={c.id} data-hint={c.phone || undefined}>{c.name}</option>)}
+                    {customers.map((c) => <option key={c.id} value={c.id} data-hint={c.unassigned ? (lang === "ar" ? "غير مسند" : "Unassigned") : c.phone || undefined}>{c.name}</option>)}
                   </Select>
                   {/* POST /api/customers is requireEdit("customers"): offered only to those who hold it. */}
                   {canAddCustomer && <button type="button" onClick={() => setShowNewCustomer(!showNewCustomer)}

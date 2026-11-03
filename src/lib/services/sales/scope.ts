@@ -141,25 +141,31 @@ export function customersScopedToOwner(user: { role?: string | null; permissions
 
 /**
  * A rep's book: the accounts they are responsible for («المسؤول»), plus any customer they hold a
- * deal or an order for — a lead converted by the rep creates the customer before anybody names
- * an account owner, and the rep must not lose sight of their own new customer meanwhile.
+ * deal for, plus a customer they hold an order for — but only while that customer HAS an account
+ * owner (a customer reassigned away keeps their past orders reachable to the rep who took them).
  *
- * And the unassigned pool: a customer with no account owner (walk-in and legacy customers). Nobody's
- * account is not another rep's account, and the order desk has always let any rep take such a
- * customer's order (the order-owner matrix, tests/ops/http/order-owner.test.ts). What other reps did
- * there stays theirs — deals, quotations, activities and collections keep their own owner scope.
- * A converted lead now gets its owner as account owner, so new customers never land in the pool;
- * assigning an owner to the legacy ones empties it (decision for the owner, docs/sales/RBAC_MATRIX.md).
+ * Owner decision (3 Nov 2026, accounting council): the unassigned pool (no account owner — the
+ * accountant's commission-free customers, walk-in and legacy ones) is NOT in a rep's book any more:
+ * a rep sees and serves only the customers the general manager / admin assigned to them, so no
+ * commission is earned on a customer the company never gave the rep, and the rep does not carry
+ * the whole customer list (least privilege). A rep holding `orders.unassigned_customers` may still
+ * take an ORDER for a pool customer (name only in the picker — orderCustomerAccess below); that
+ * order neither assigns the customer nor opens the customer's file, deals or quotations to them.
+ * A converted lead gets its owner as account owner, so a rep's new customers never land in the pool.
  */
 export function ownedCustomerWhere(userId: string) {
   return {
     OR: [
       { accountOwnerId: userId },
       { opportunities: { some: { ownerId: userId } } },
-      { orders: { some: { ownerId: userId } } },
-      { accountOwnerId: null },
+      { AND: [{ orders: { some: { ownerId: userId } } }, { accountOwnerId: { not: null } }] },
     ],
   };
+}
+
+/** «إنشاء طلبات لعملاء غير مسندين له» — a rep may take an order for a customer with no account owner. */
+export function mayOrderUnassignedCustomers(permissions: Permissions | Record<string, unknown>): boolean {
+  return hasSubPrivilege(permissions as Permissions, "orders", "unassigned_customers");
 }
 
 /**
@@ -177,9 +183,9 @@ export function customerVisibilityWhere(user: { id: string; role?: string | null
 }
 
 /**
- * The orders a rep sees: their own orders, and the orders of the customers they are responsible for or hold
- * a deal on. NOT every order of an unassigned (pool) customer — the pool lets any rep find and serve such a
- * customer, but another rep's order there stays theirs (the delivery-note rule, tests/print/http).
+ * The orders a rep sees: their own orders (also those for an unassigned customer, taken with
+ * orders.unassigned_customers), and the orders of the customers they are responsible for or hold a deal on.
+ * Never another rep's order for an unassigned customer (the delivery-note rule, tests/print/http).
  */
 export function orderedByOrForWhere(userId: string) {
   return {

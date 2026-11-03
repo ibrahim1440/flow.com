@@ -19,7 +19,8 @@ import type { Permissions } from "@/lib/auth-shared";
  * WHO (council fix round 1, H1): the deal belongs to the CUSTOMER'S ACCOUNT OWNER — commission follows the deal
  * owner, so a one-tap deal must never move a rep's customer to somebody else:
  *   · the caller may act only as the customer's account owner, as a team-view manager (`teamView`), or — for a
- *     customer with no account owner (the pool) — as any rep who has it in their book; anyone else is refused
+ *     customer with no account owner — as a caller who has it in their book (since the owner decision of 3 Nov 2026
+ *     the unassigned pool is no longer in a rep's book, so for a rep this means a customer they hold a deal on); anyone else is refused
  *     (`{ kind: "forbidden" }`, the route answers 403) and nothing is written;
  *   · the deals offered / used are the DEAL OWNER's open deals: the account owner's, or the caller's for a pool
  *     customer; a deal opened silently is owned by that same person;
