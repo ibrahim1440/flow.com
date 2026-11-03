@@ -24,8 +24,9 @@
 .inv .inv-split { position: relative; display: inline-flex; }
 .inv .inv-split .inv-split-main { border-start-end-radius: 0; border-end-end-radius: 0; }
 .inv .inv-split .inv-split-caret { border-start-start-radius: 0; border-end-start-radius: 0; border-inline-start: 1px solid var(--hr-surface); padding-inline: 10px; min-width: 36px; }
-.inv .inv-split-menu { position: absolute; bottom: calc(100% + 4px); inset-inline-end: 0; z-index: 40; min-width: 220px; display: flex; flex-direction: column; padding: 4px;
+.inv .inv-split-menu { position: absolute; top: calc(100% + 4px); inset-inline-end: 0; z-index: 40; min-width: 220px; display: flex; flex-direction: column; padding: 4px;
   background: var(--hr-surface); border: 1px solid var(--hr-border-strong); border-radius: var(--hr-r-md); }
+.inv .inv-split-menu.is-up { top: auto; bottom: calc(100% + 4px); }
 .inv .inv-split-menu button { appearance: none; border: 0; background: none; font: inherit; font-size: 13.5px; text-align: start; padding: 8px 10px; border-radius: var(--hr-r-sm); color: var(--hr-text); cursor: pointer; min-height: 36px; }
 .inv .inv-split-menu button:hover, .inv .inv-split-menu button:focus-visible { background: var(--hr-subtle); }
 .inv .inv-banner { border-radius: var(--hr-r-md); padding: 10px 14px; font-size: 14px; display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--hr-border-strong); }

@@ -19,7 +19,18 @@ export type MenuItem = { id: string; label: string; onSelect: () => void; testId
 export function SplitButton({ label, onPrimary, items, disabled, testId, hint }: { label: string; onPrimary: () => void; items: MenuItem[]; disabled?: boolean; testId: string; hint?: string }) {
   const { L } = useLang();
   const [open, setOpen] = useState(false);
+  // The menu opens downward, and upward only when the button sits near the bottom of the window (a footer bar) and there
+  // is more room above — it opened upward always, off the screen when the button is in the page header.
+  const [up, setUp] = useState(false);
   const box = useRef<HTMLSpanElement | null>(null);
+  const toggle = () => {
+    if (!open && box.current) {
+      const r = box.current.getBoundingClientRect();
+      const need = 48 * items.length + 16;
+      setUp(window.innerHeight - r.bottom < need && r.top > window.innerHeight - r.bottom);
+    }
+    setOpen((v) => !v);
+  };
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => { if (box.current && !box.current.contains(e.target as Node)) setOpen(false); };
@@ -33,10 +44,10 @@ export function SplitButton({ label, onPrimary, items, disabled, testId, hint }:
       <button type="button" className="hr-btn is-primary inv-split-main" disabled={disabled} onClick={onPrimary} data-testid={`${testId}-primary`} title={hint}>{label}</button>
       {items.length ? (
         <button type="button" className="hr-btn is-primary inv-split-caret" disabled={disabled} aria-haspopup="menu" aria-expanded={open}
-          aria-label={L("خيارات الحفظ الأخرى", "More save options")} onClick={() => setOpen((v) => !v)} data-testid={`${testId}-more`}>▾</button>
+          aria-label={L("خيارات الحفظ الأخرى", "More save options")} onClick={toggle} data-testid={`${testId}-more`}>▾</button>
       ) : null}
       {open ? (
-        <span className="inv-split-menu" role="menu">
+        <span className={`inv-split-menu${up ? " is-up" : ""}`} role="menu">
           {items.map((it) => (
             <button key={it.id} type="button" role="menuitem" onClick={() => { setOpen(false); it.onSelect(); }} data-testid={it.testId ?? `${testId}-${it.id}`}>{it.label}</button>
           ))}
