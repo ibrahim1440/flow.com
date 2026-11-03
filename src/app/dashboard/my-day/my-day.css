@@ -457,6 +457,3 @@
   .d21 .pl-x { opacity: 1 }
   .pl-in, .pl-cust { min-height: 48px }
 }
-/* Owner trial (3 Nov 2026): «يومي» — every tab — on a near-white beige (#FDFCFA), lighter than the side menu (#F8F5EE),
-   so the white cards read as cards. Only this page for now; the whole system after the owner compares. */
-.d21-sheet:has(.md[data-testid="md-page"]) { background: #fdfcfa }
