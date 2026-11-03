@@ -17,3 +17,9 @@
 .d21 .tg-foot { margin: 0; padding: 10px 16px; font-size: 12.5px; color: var(--text-muted); border-top: 1px solid var(--border-subtle) }
 .d21 .tg-how { padding: 12px 16px; border-radius: 12px; background: var(--status-info-tint); color: var(--text-secondary); font-size: 13px }
 .d21 .tg-how b { color: var(--status-info) } .d21 .tg-how ul { margin: 6px 0 0; padding-inline-start: 18px; display: grid; gap: 3px }
+/* «خطة الفريق» (Figma page 07): each rep's plan — done of planned, «خارج الخطة» — and the plan open under the row. */
+.d21 .tg-open { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; padding: 0; border: 0; background: none; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--action-primary); cursor: pointer }
+.d21 .tg-table td > b.met { color: var(--status-success) }
+.d21 .tg-table small.warn { color: var(--status-warning); font-weight: 600 }
+
+.d21 .tg-plan { min-width: 0; padding: 16px; border-radius: 12px; background: var(--surface-subtle) }

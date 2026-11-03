@@ -59,6 +59,9 @@
 .ws-row-main:focus-visible { outline: 2px solid var(--hr-primary); outline-offset: 2px; border-radius: var(--hr-r-xs); }
 .ws-row-title { font-size: 14.5px; font-weight: 600; color: var(--hr-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-row-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: 12.5px; color: var(--hr-text-2); }
+/* «خطة الأسبوع v2» (Figma page 07 «خيار ب»): who sent the task, directly under its title. */
+.ws-row-from { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--hr-info, #3b6385); }
+.ws-row-from .ico { width: 13px; height: 13px; }
 .ws-row-actions { display: flex; gap: 6px; flex: none; }
 .ws-row > .hr-btn, .ws-row > a.hr-btn { flex: none; }
 .ws-note { font-size: 12.5px; color: var(--hr-text-2); }

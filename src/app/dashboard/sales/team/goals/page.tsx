@@ -3,17 +3,19 @@
 // «أهداف الفريق» (owner-approved Figma 172:106, 3 Nov 2026): the supervisor (sales › lead_assign — the people who set the
 // monthly target) sets each rep's management goals for a week or a month. A number sets a goal, an empty box removes it;
 // every goal but a custom one is counted from the rep's own records (services/sales/plans.ts), shown beside the box.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useLang } from "../../_components/ui";
 import { PerfHeader, PerfLoading, PerfNotice } from "../../_components/perf";
 import { useUser } from "../../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
-import { METRIC_AR } from "../../../my-day/_components/plan";
+import { METRIC_AR, PlanView } from "../../../my-day/_components/plan";
+import { Ico } from "@/components/shell/icons";
+import "../../../my-day/my-day.css";
 import "./goals.css";
 
 type Metric = "VISITS" | "CALLS" | "QUOTES" | "COLLECTION" | "NEW_CUSTOMERS" | "SAMPLES" | "CUSTOM";
-type Rep = { id: string; name: string; customers: number; counts: Record<Exclude<Metric, "CUSTOM">, number>; goals: { id: string; metric: Metric; label: string | null; target: number; done: number | null }[] };
+type Rep = { id: string; name: string; customers: number; counts: Record<Exclude<Metric, "CUSTOM">, number>; plan: { planned: number; done: number; offPlan: number }; goals: { id: string; metric: Metric; label: string | null; target: number; done: number | null }[] };
 type Data = { period: "WEEK" | "MONTH"; start: string; end: string; reps: Rep[] };
 const COLS: Exclude<Metric, "CUSTOM">[] = ["VISITS", "CALLS", "QUOTES", "COLLECTION", "NEW_CUSTOMERS", "SAMPLES"];
 const shift = (iso: string, period: "WEEK" | "MONTH", dir: number) => {
@@ -35,6 +37,8 @@ export default function TeamGoalsPage() {
   const [customs, setCustoms] = useState<Record<string, { label: string; target: string }[]>>({});
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  // «خطط الفريق» (Figma page 07): one rep's plan open under their row, read-only — the supervisor may add to it.
+  const [open, setOpen] = useState<string | null>(null);
 
   const load = useCallback(async (p: "WEEK" | "MONTH", d: string | null) => {
     const r = await fetch(`/api/sales/team-goals?period=${p}${d ? `&date=${d}` : ""}`, { cache: "no-store" });
@@ -93,11 +97,11 @@ export default function TeamGoalsPage() {
   if (user && !may) return <div className="pg"><PerfNotice kind="error" ar={ar}>{ar ? "أهداف الفريق للمشرف فقط." : "Team goals are for the supervisor."}</PerfNotice></div>;
   return (
     <div className="pg tg" data-testid="team-goals">
-      <PerfHeader ar={ar} title={ar ? "أهداف الفريق" : "Team goals"} phoneTitle={ar ? "أهداف الفريق" : "Team goals"}
-        meta={[ar ? "تظهر للمندوب في خطته بقفل، وتنحسب تلقائيًا من نشاطه" : "Shown locked in each rep's plan, counted automatically"]}
+      <PerfHeader ar={ar} title={ar ? "خطة الفريق" : "Team plan"} phoneTitle={ar ? "خطة الفريق" : "Team plan"}
+        meta={[ar ? "الأرقام تظهر للمندوب في خطته «من المشرف»، وتنحسب تلقائيًا من نشاطه. افتح خطة أي مندوب وأضف له بنود." : "Shown in each rep's plan «from your supervisor», counted automatically. Open a rep's plan to add items."]}
         actions={<span className="tg-acts"><Link className="btn" href="/dashboard/sales/team">{ar ? "متابعة الفريق" : "Team overview"}</Link>
           <button type="button" className="btn" onClick={copyPrevious} disabled={!data}>{ar ? "انسخ من الفترة اللي فاتت" : "Copy the previous period"}</button>
-          <button type="button" className="btn p" onClick={save} disabled={!data || busy} data-testid="team-goals-save">{busy ? "…" : ar ? "حفظ الأهداف" : "Save goals"}</button></span>} />
+          <button type="button" className="btn p" onClick={save} disabled={!data || busy} data-testid="team-goals-save">{busy ? "…" : ar ? "حفظ الأرقام" : "Save the numbers"}</button></span>} />
       {msg ? <PerfNotice kind={msg.ok ? "success" : "error"} ar={ar} onDismiss={() => setMsg(null)}>{msg.text}</PerfNotice> : null}
       <div className="tg-bar">
         <span className="tg-seg" role="group">
@@ -112,11 +116,14 @@ export default function TeamGoalsPage() {
       {!data ? <PerfLoading ar={ar} /> : data.reps.length === 0 ? <p>{ar ? "ما فيه مندوبين." : "No reps."}</p> : (
         <div className="tg-scroll">
           <table className="t tg-table">
-            <thead><tr><th>{ar ? "المندوب" : "Rep"}</th>{COLS.map((m) => <th key={m}>{ar ? METRIC_AR[m] : m}{m === "COLLECTION" ? (ar ? " (ر.س)" : " (SAR)") : ""}</th>)}<th>{ar ? "أهداف خاصة" : "Custom goals"}</th></tr></thead>
+            <thead><tr><th>{ar ? "المندوب" : "Rep"}</th>{COLS.map((m) => <th key={m}>{ar ? METRIC_AR[m] : m}{m === "COLLECTION" ? (ar ? " (ر.س)" : " (SAR)") : ""}</th>)}<th>{ar ? "أهداف خاصة" : "Custom goals"}</th><th>{ar ? "الخطة" : "Plan"}</th><th>{ar ? "خارج الخطة" : "Unplanned"}</th></tr></thead>
             <tbody>
               {data.reps.map((r) => (
-                <tr key={r.id} data-testid={`tg-rep-${r.id}`}>
-                  <td><b>{r.name}</b><small>{ar ? `${r.customers} عميل` : `${r.customers} customers`}</small></td>
+                <Fragment key={r.id}>
+                <tr data-testid={`tg-rep-${r.id}`}>
+                  <td><b>{r.name}</b><small>{ar ? `${r.customers} عميل` : `${r.customers} customers`}</small>
+                    <button type="button" className="lk-inline tg-open" aria-expanded={open === r.id} onClick={() => setOpen(open === r.id ? null : r.id)} data-testid={`tg-open-${r.id}`}>
+                      <Ico name={open === r.id ? "chevd" : "chev"} small />{open === r.id ? (ar ? "إخفاء خطته" : "Hide the plan") : ar ? "شوف خطته" : "See the plan"}</button></td>
                   {COLS.map((m) => {
                     const v = vals[`${r.id}:${m}`] ?? "";
                     const target = Number(v.replace(/,/g, ""));
@@ -138,13 +145,18 @@ export default function TeamGoalsPage() {
                     ))}
                     <button type="button" className="lk-inline" onClick={() => setCustoms((x) => ({ ...x, [r.id]: [...(x[r.id] ?? []), { label: "", target: "" }] }))}>+ {ar ? "هدف خاص" : "Custom"}</button>
                   </td>
+                  <td><b className={`num${r.plan.planned && r.plan.done >= r.plan.planned ? " met" : ""}`}>{r.plan.planned ? (ar ? `${r.plan.done} من ${r.plan.planned}` : `${r.plan.done} of ${r.plan.planned}`) : "—"}</b>
+                    <small className={r.plan.planned ? undefined : "warn"}>{r.plan.planned ? (ar ? "بند" : "items") : ar ? "ما خطط" : "No plan"}</small></td>
+                  <td><b className="num">{r.plan.offPlan}</b><small>{ar ? "زيارة ومكالمة" : "visits & calls"}</small></td>
                 </tr>
+                </Fragment>
               ))}
             </tbody>
           </table>
           <p className="tg-foot">{ar ? "اترك الخانة فاضية إذا ما تبي تحدد هدف. المجموع: " : "Leave a box empty for no goal. Total: "}{COLS.filter((m) => totals[m]).map((m) => `${METRIC_AR[m]} ${n(totals[m]!)}`).join(" · ") || "—"}</p>
         </div>
       )}
+      {data && open ? (() => { const r = data.reps.find((x) => x.id === open); return r ? <section className="tg-plan" data-testid="tg-plan"><PlanView ar={ar} rep={{ id: r.id, name: r.name }} date={data.start} defaultPeriod={data.period} /></section> : null; })() : null}
       <div className="tg-how">
         <b>{ar ? "كيف ينحسب كل هدف تلقائيًا" : "How each goal is counted"}</b>
         <ul>

@@ -340,6 +340,8 @@ model Customer {
   reorderIntervalDays         Int?
 
   salesCallSnoozes SalesCallSnooze[]
+  /// «خطة الأسبوع v2» (20261216090000_sales_plan_actions): the plan items planned for this customer.
+  salesPlanItems   SalesPlanItem[]   @relation("SalesPlanItemCustomer")
   @@index([accountOwnerId])
 }
 
@@ -10249,6 +10251,10 @@ model SalesPlanItem {
   target      Decimal?  @db.Decimal(18, 2)
   manualDone  Decimal?  @db.Decimal(18, 2)
   checkedAt   DateTime?
+  /// «خطة الأسبوع v2» (20261216090000_sales_plan_actions): an ACTION's customer; the day an ACTION or CHECK is planned for.
+  customerId  String?
+  customer    Customer? @relation("SalesPlanItemCustomer", fields: [customerId], references: [id], onDelete: Cascade)
+  plannedDay  DateTime? @db.Date
   position    Int       @default(0)
   createdById String?
   createdBy   Employee? @relation("SalesPlanItemCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
@@ -10256,4 +10262,5 @@ model SalesPlanItem {
   updatedAt   DateTime  @updatedAt
 
   @@index([employeeId, period, periodStart], map: "SalesPlanItem_employee_period_idx")
+  @@index([customerId], map: "SalesPlanItem_customer_idx")
 }

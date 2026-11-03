@@ -38,6 +38,12 @@ const PATHS = {
   trend: "<path d=\"M21.5 7 13 15.5 8.5 11l-6 6\"/><path d=\"M15.5 7h6v6\"/>",
   clock: "<circle cx=\"12\" cy=\"12\" r=\"8.5\"/><path d=\"M12 7.5V12l3 2\"/>",
   chat: "<path d=\"M20 11.5a8 8 0 0 1-11.7 7.1L4 20l1.4-4.2A8 8 0 1 1 20 11.5z\"/>",
+  // «خطة الأسبوع v2» (Figma page 07, 3 Nov 2026), drawn in the same stroke style: a visit, «من المشرف», the plan, edit.
+  pin: "<path d=\"M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z\"/><circle cx=\"12\" cy=\"10\" r=\"2.3\"/>",
+  lock: "<rect x=\"5\" y=\"10.5\" width=\"14\" height=\"10\" rx=\"2\"/><path d=\"M8 10.5V8a4 4 0 0 1 8 0v2.5\"/>",
+  flag: "<path d=\"M6 21V4h11l-2 4 2 4H6\"/>",
+  edit: "<path d=\"M4 20h4L19 9l-4-4L4 16z\"/><path d=\"m13.5 6.5 4 4\"/>",
+  tick: "<path d=\"m6.5 12.5 3.5 3.5 7.5-8\"/>",
 } as const;
 
 export type D21IconName = keyof typeof PATHS;

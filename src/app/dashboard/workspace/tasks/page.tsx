@@ -8,6 +8,7 @@ import { Btn, FilterChip, OpsBanner, OpsEmpty, OpsError, OpsLoading, useL } from
 import { PRIORITY_LABEL, PRIORITIES, STATUS_LABEL } from "@/lib/workspace/rules";
 import { DueText, PriorityMark, StatusChip, TypeChip, WsPage, WsShell, recordOf, useNow, useSelection, useWs, wsFetch, type Task } from "../_components/kit";
 import { CreateTaskDialog, TaskPane } from "../_components/task-ui";
+import { Ico } from "@/components/shell/icons";
 
 type List = { items: Task[]; next: string | null };
 const BUCKETS: [string, string, string][] = [["OVERDUE", "متأخرة", "Overdue"], ["TODAY", "اليوم", "Today"], ["TOMORROW", "غدًا", "Tomorrow"], ["THIS_WEEK", "هذا الأسبوع", "This week"], ["LATER", "لاحقًا", "Later"], ["CLOSED", "مغلقة", "Closed"]];
@@ -113,6 +114,8 @@ function Tasks() {
                         <TypeChip type={t.kind} />
                         <button type="button" className="ws-row-main" onClick={() => setTaskId(t.id)} aria-current={taskId === t.id || undefined}>
                           <span className="ws-row-title">{t.title}</span>
+                          {/* «خطة الأسبوع v2» (Figma page 07 «خيار ب»): who sent it, directly under the title. */}
+                          {t.createdById !== t.assigneeId && t.createdBy ? <span className="ws-row-from"><Ico name="lock" small />{L("من", "From")} {t.createdBy.name}</span> : null}
                           <span className="ws-row-meta">
                             <StatusChip status={t.status} />
                             {recordOf(t) ? <span>{recordOf(t)}</span> : null}

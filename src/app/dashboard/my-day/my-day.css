@@ -292,7 +292,7 @@
 .d21 .md-sched-time { width: 64px; flex: none; font: 600 13px/1.3 var(--f-num); color: var(--text-secondary) }
 .d21 .md-sched-time.late { color: var(--status-danger); font-family: var(--f-ui) }
 .d21 .md-sched-bar { width: 4px; height: 36px; border-radius: 2px; flex: none; background: var(--action-primary) }
-.d21 .md-sched-bar.in { background: var(--status-info) } .d21 .md-sched-bar.warn { background: var(--status-warning) }
+.d21 .md-sched-bar.in { background: var(--status-info) } .d21 .md-sched-bar.warn { background: var(--status-warning) } .d21 .md-sched-bar.ok { background: var(--status-success) }
 .d21 .md-sched-what { flex: 1; min-width: 0; display: grid }
 .d21 .md-sched-what b { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .d21 .md-sched-what small { font-size: 12.5px; color: var(--text-muted) }
@@ -313,40 +313,128 @@
 .d21 .md-sched-late:hover { text-decoration: underline }
 .d21 .md-embed .hr-split, .d21 .md-embed .ws-root { min-height: 0 !important; height: auto !important }
 
-/* «خطتي» (owner-approved Figma 161:106 / 173:106). */
+/* «خطة الأسبوع v2» (owner-approved Figma page 07 «خيار ب», 3 Nov 2026). */
 .d21 .md-today-row > .md-card { min-height: 0 }
-.d21 .pl-goals, .d21 .pl-body { display: grid; gap: 12px; padding: 0 16px 14px }
-.d21 .pl-goal { display: grid; gap: 5px }
-.d21 .pl-goal-r { display: flex; justify-content: space-between; gap: 8px; align-items: baseline }
-.d21 .pl-goal-n { font-weight: 600; font-size: 14px }
-.d21 .pl-goal-v { font-weight: 700; font-size: 13.5px; color: var(--text-secondary) }
-.d21 .pl-goal-v.met { color: var(--status-success) }
-.d21 .pl-bar { display: block; height: 8px; border-radius: 999px; background: var(--action-primary-tint); overflow: hidden }
-.d21 .pl-bar > i { display: block; height: 100%; border-radius: 999px; background: var(--action-primary) }
-.d21 .pl-goal.adm .pl-bar > i { background: var(--status-info) }
-.d21 .pl-manual { justify-self: start; border: 0; background: none; padding: 0; font: inherit; font-size: 12.5px; color: var(--action-primary); font-weight: 600; cursor: pointer }
-.d21 .pl-section { margin-bottom: 4px }
-.d21 .pl-seg { display: inline-flex; gap: 4px; padding: 3px; border-radius: 9px; background: var(--action-primary-tint) }
-.d21 .pl-seg > button { min-height: 32px; padding: 0 14px; border: 0; border-radius: 7px; background: none; font: inherit; font-size: 13.5px; color: var(--text-secondary); cursor: pointer }
-.d21 .pl-seg > button[aria-pressed="true"] { background: var(--surface); color: var(--text-primary); font-weight: 700 }
-.d21 .pl-block { display: grid; gap: 10px; padding: 12px 14px; border-radius: 12px }
-.d21 .pl-block.adm { background: var(--status-info-tint) }
-.d21 .pl-block.mine { background: var(--action-primary-tint) }
-.d21 .pl-block-h { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: baseline }
-.d21 .pl-block-h b { display: inline-flex; align-items: center; gap: 6px; font-size: 14px }
-.d21 .pl-block.adm .pl-block-h b, .d21 .pl-block.adm .pl-block-h span { color: var(--status-info) }
-.d21 .pl-block-h span { font-size: 12px; color: var(--text-muted) }
-.d21 .pl-block .btn { justify-self: start }
-.d21 .pl-check { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 10px; border-radius: 9px; background: var(--surface); font-size: 14px; cursor: pointer }
-.d21 .pl-check input { width: 18px; height: 18px; accent-color: var(--action-primary) }
-.d21 .pl-check.on span { color: var(--text-muted); text-decoration: line-through }
-.pl-editor { display: grid; gap: 10px }
-.pl-ed-h { font-size: 14px; font-weight: 700; color: var(--text-primary) }
-.pl-ed-row { display: flex; gap: 8px; align-items: center }
-.pl-in { flex: 1; min-width: 0; min-height: 40px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--border-control); background: var(--surface); font: inherit; font-size: 14px; color: var(--text-primary) }
-.pl-num { flex: 0 0 90px; text-align: center }
-.pl-del { width: 36px; height: 36px; border: 0; border-radius: 8px; background: none; color: var(--text-muted); cursor: pointer; font-size: 15px }
-.pl-del:hover { background: var(--surface-hover) }
-.pl-ed-add { display: flex; gap: 8px }
+.d21 .pl-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; margin-bottom: 16px }
+.d21 .pl-wrap.adm { grid-template-columns: minmax(0, 1fr) 320px; margin: 0 }
+.d21 .pl-main { gap: 14px }
+.d21 .pl-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap }
+.d21 .pl-head-t { display: grid; gap: 2px }
+.d21 .pl-head-t h2 { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 700 }
+.d21 .pl-head-t small { font-size: 12.5px; color: var(--text-muted) }
+.d21 .pl-head-a { display: flex; gap: 8px; align-items: center; flex-wrap: wrap }
+.d21 .pl-head-a .btn, .d21 .pl-bump .btn { display: inline-flex; align-items: center; gap: 6px }
+.d21 .pl-seg { display: inline-flex; gap: 4px; padding: 3px; border-radius: 10px; background: var(--surface-subtle) }
+.d21 .pl-seg > button { min-height: 32px; padding: 0 14px; border: 0; border-radius: 8px; background: none; font: inherit; font-size: 13.5px; color: var(--text-secondary); cursor: pointer }
+.d21 .pl-seg > button[aria-pressed="true"] { background: var(--surface); color: var(--text-primary); font-weight: 700; box-shadow: 0 0 0 1px var(--border-subtle) }
+.d21 .pl-sum { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0; padding: 10px 14px; border-radius: 12px; background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle); font-size: 13px; color: var(--text-secondary) }
+.d21 .pl-sum b { font-size: 14px; margin-inline-start: 4px }
+.d21 .pl-sum b.ok { color: var(--status-success) } .d21 .pl-sum b.in { color: var(--status-info) } .d21 .pl-sum b.wa { color: var(--status-warning) }
+.d21 .pl-cards { columns: 2 320px; column-gap: 14px }
+.d21 .pl-g { break-inside: avoid; display: grid; gap: 10px; margin: 0 0 14px; padding: 16px; border-radius: 14px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-subtle) }
+.d21 .pl-g-h { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px }
+.d21 .pl-g-t { display: grid; gap: 2px; min-width: 0 }
+.d21 .pl-g-t > b { font-size: 16px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px }
+.d21 .pl-boss { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--status-info) }
+.d21 .pl-boss .ico { width: 13px; height: 13px }
+.d21 .pl-g-n { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap }
+.d21 .pl-g-n > b { font-size: 26px; font-weight: 700; line-height: 1 }
+.d21 .pl-g-n > small { font-size: 13px; color: var(--text-muted); font-weight: 500 }
+.d21 .pl-edit { align-self: center; width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 8px; background: none; color: var(--text-muted); cursor: pointer }
+.d21 .pl-edit:hover { background: var(--surface-hover); color: var(--text-primary) }
+.d21 .pl-tri { display: flex; gap: 2px; height: 10px; border-radius: 6px; overflow: hidden; background: var(--surface-subtle) }
+.d21 .pl-tri > i { display: block; height: 100% }
+.d21 .pl-tri > i.d, .d21 .pl-leg i.d { background: var(--status-success) }
+.d21 .pl-tri > i.p, .d21 .pl-leg i.p { background: color-mix(in srgb, var(--status-success) 38%, var(--surface)) }
+.d21 .pl-tri > i.m, .d21 .pl-leg i.m { background: var(--border-subtle) }
+.d21 .pl-leg { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 12px; color: var(--text-muted) }
+.d21 .pl-leg i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-inline-start: 6px }
+.d21 .pl-leg i:first-child { margin-inline-start: 0 }
+.d21 .pl-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px }
+.d21 .pl-it { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-subtle); min-width: 0 }
+.d21 .pl-it.done { background: color-mix(in srgb, var(--status-success) 5%, var(--surface)) }
+.d21 .pl-it-ico { flex: none; color: var(--text-muted) }
+.d21 .pl-it-t { flex: 1; min-width: 0; display: grid; gap: 1px }
+.d21 .pl-it-t > b { font-size: 14px; font-weight: 600; overflow-wrap: anywhere }
+.d21 .pl-it-t > small { font-size: 12px; color: var(--text-muted) }
+.d21 .pl-it-t > small.ok { color: var(--status-success) }
+.d21 .pl-it-end { flex: none; display: inline-flex; align-items: center; gap: 6px }
+.d21 .pl-day, .d21 .pl-tag { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 999px; font-size: 12px; font-weight: 500; background: var(--surface-subtle); color: var(--text-secondary); white-space: nowrap }
+.d21 .pl-tag { background: var(--status-info-tint); color: var(--status-info) }
+.d21 .pl-x { width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 7px; background: none; color: var(--text-muted); cursor: pointer; opacity: .55 }
+.d21 .pl-x:hover, .d21 .pl-x:focus-visible { opacity: 1; background: var(--surface-hover) }
+.d21 .pl-c { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; border: 1.5px solid var(--border-strong); background: var(--surface); padding: 0; cursor: default; color: #fff }
+.d21 button.pl-c { cursor: pointer } .d21 button.pl-c:hover { border-color: var(--status-success); background: color-mix(in srgb, var(--status-success) 8%, var(--surface)) }
+.d21 .pl-c.on { background: var(--status-success); border-color: var(--status-success); color: #fff }
+.d21 .pl-c.on .ico { stroke-width: 2.4 }
+.d21 .pl-c.sm { width: 18px; height: 18px } .d21 .pl-c.sm .ico { width: 12px; height: 12px }
+.d21 .pl-gap { display: grid; gap: 6px; padding: 12px; border-radius: 12px; background: var(--status-warning-tint); color: var(--status-warning); font-size: 12.5px }
+.d21 .pl-gap > b { font-size: 13px }
+.d21 .pl-chips { display: flex; flex-wrap: wrap; gap: 6px }
+.d21 .pl-chips > button { display: inline-flex; align-items: center; gap: 4px; min-height: 30px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--surface); color: var(--status-warning); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer }
+.d21 .pl-offmore { font-size: 12px; color: var(--text-muted) }
+.d21 .pl-more { justify-self: start; display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 2px 0; font: inherit; font-size: 13.5px; font-weight: 700; color: var(--action-primary); cursor: pointer }
+.d21 .pl-bump { display: flex; justify-content: space-between; align-items: center; gap: 10px } .d21 .pl-bump small { color: var(--text-muted); font-size: 12px }
+.d21 .pl-err { margin: 0; color: var(--status-danger); font-size: 13px }
+.d21 .pl-empty { justify-items: center; text-align: center; padding: 24px }
+/* The week, day by day (desktop) — and the strip of days (phone). */
+.d21 .pl-agenda { gap: 12px }
+.d21 .pl-ad { display: grid; gap: 6px; padding: 2px 0 }
+.d21 .pl-ad > b { font-size: 13px; color: var(--text-secondary) }
+.d21 .pl-ad.on { padding: 10px 12px; border-radius: 10px; background: var(--action-primary-tint) } .d21 .pl-ad.on > b { color: var(--action-primary) }
+.d21 .pl-ar { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600 }
+.d21 .pl-ar .mut { color: var(--text-secondary); font-weight: 500 }
+.d21 .pl-ad-none { color: var(--text-muted); font-size: 12px }
+.d21 .pl-tip { display: flex; gap: 6px; align-items: center; margin: 0; padding: 10px; border-radius: 10px; background: var(--surface-subtle); font-size: 12px; color: var(--text-muted) }
+.d21 .pl-strip { display: none }
+.d21 .pl-sd { flex: 1; display: grid; justify-items: center; gap: 2px; padding: 8px 0; border-radius: 12px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-subtle) }
+.d21 .pl-sd small { font-size: 11px; color: var(--text-muted) } .d21 .pl-sd b { font-size: 16px }
+.d21 .pl-sd.on { background: var(--action-primary); box-shadow: none } .d21 .pl-sd.on small, .d21 .pl-sd.on b { color: #fff }
+.d21 .pl-dots { display: flex; gap: 3px; min-height: 6px } .d21 .pl-dots i { width: 6px; height: 6px; border-radius: 50% }
+.d21 .pl-dots i.d { background: var(--status-success) } .d21 .pl-dots i.p { box-shadow: inset 0 0 0 1.2px var(--action-primary) }
+.d21 .pl-sd.on .pl-dots i.d { background: #fff } .d21 .pl-sd.on .pl-dots i.p { box-shadow: inset 0 0 0 1.2px #fff }
+/* «خطة هذا الأسبوع» on «اليوم». */
+.d21 .pl-mini { display: grid; gap: 12px }
+.d21 .pl-mini-r { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center }
+.d21 .pl-mini-r .pl-g-t > b { font-size: 14px; font-weight: 600 }
+.d21 .pl-mini-r .pl-tri { grid-column: 1 / -1; height: 8px }
+.d21 .pl-mini-v { font-weight: 700; font-size: 14px }
+/* The sheets: «خطّط بند», «سجّل الزيارة», the number. */
+.pl-sheet { display: grid; gap: 10px }
+.pl-q { font-size: 14px; font-weight: 700; color: var(--text-primary) }
+.pl-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px }
+.pl-tiles > button { display: grid; justify-items: center; gap: 4px; padding: 12px 4px; border-radius: 12px; border: 1px solid var(--border-subtle); background: var(--surface); font: inherit; font-size: 13.5px; color: var(--text-primary); cursor: pointer }
+.pl-tiles > button .ico { width: 22px; height: 22px; color: var(--text-secondary) }
+.pl-tiles > button.on { border: 2px solid var(--action-primary); background: var(--action-primary-tint); font-weight: 700 } .pl-tiles > button.on .ico { color: var(--action-primary) }
+.pl-search { display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border-control); background: var(--surface); color: var(--text-muted) }
+.pl-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font: inherit; font-size: 14px; color: var(--text-primary) }
+.pl-hint { font-size: 12px; color: var(--text-muted) }
+.pl-custs { display: grid; gap: 8px }
+.pl-cust { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--border-subtle); background: var(--surface); font: inherit; font-size: 14px; color: var(--text-primary); cursor: pointer; text-align: start }
+.pl-cust > b, .pl-cust-t { flex: 1; min-width: 0 } .pl-cust-t { display: grid; gap: 1px } .pl-cust-t small { font-size: 12px; color: var(--text-muted); font-weight: 400 }
+.pl-cust.on { border: 2px solid var(--action-primary); background: var(--action-primary-tint) }
+.pl-radio { flex: none; width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--border-strong); background: var(--surface) }
+.pl-cust.on .pl-radio { border: 6px solid var(--action-primary) }
+.pl-days { display: flex; flex-wrap: wrap; gap: 6px }
+.pl-days > button { flex: 1 0 auto; min-height: 38px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border-subtle); background: var(--surface); font: inherit; font-size: 13.5px; color: var(--text-primary); cursor: pointer }
+.pl-days > button[aria-pressed="true"] { background: var(--action-primary); border-color: var(--action-primary); color: #fff; font-weight: 700 }
+.pl-note { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--status-success-tint); color: var(--status-success); font-size: 13px; font-weight: 500 }
+.pl-note.wa { background: none; padding: 0; color: var(--text-muted) }
+.pl-note:empty { display: none }
+.pl-in { width: 100%; min-height: 42px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border-control); background: var(--surface); font: inherit; font-size: 14px; color: var(--text-primary); box-sizing: border-box }
+.pl-ta { padding: 10px 12px; min-height: 64px; resize: vertical }
+.pl-qty { display: flex; align-items: center; gap: 8px } .pl-qty .pl-in { flex: 1 } .pl-qty small { color: var(--text-muted) }
 .pl-err { margin: 0; color: var(--status-danger); font-size: 13px }
-@media (max-width: 767.98px) { .d21 .pl-seg { width: 100% } .d21 .pl-seg > button { flex: 1; min-height: 40px } .pl-in { min-height: 44px } }
+@media (max-width: 1099.98px) {
+  .d21 .pl-wrap, .d21 .pl-wrap.adm { grid-template-columns: minmax(0, 1fr) }
+  .d21 .pl-agenda { display: none }
+  .d21 .pl-strip { display: flex; gap: 6px; order: -1 }
+}
+@media (max-width: 767.98px) {
+  .d21 .pl-cards { columns: 1 }
+  .d21 .pl-seg { width: 100% } .d21 .pl-seg > button { flex: 1; min-height: 40px }
+  .d21 .pl-head-a { width: 100% } .d21 .pl-head-a .btn { flex: 1; justify-content: center; min-height: 44px }
+  .d21 .pl-it-end { flex-direction: column; align-items: flex-end }
+  .d21 .pl-x { opacity: 1 }
+  .pl-in, .pl-cust { min-height: 48px }
+}

@@ -14,7 +14,7 @@ import { LogActivityPicker } from "../../sales/activities/LogActivityPicker";
 export type HubTab = "today" | "tasks" | "calendar";
 export const HUB_TABS: { id: HubTab; ar: string; en: string; icon: D21IconName }[] = [
   { id: "today", ar: "اليوم", en: "Today", icon: "home" },
-  { id: "tasks", ar: "مهامي", en: "My tasks", icon: "check" },
+  { id: "tasks", ar: "مهامي وخطتي", en: "Tasks & plan", icon: "check" },
   { id: "calendar", ar: "التقويم", en: "Calendar", icon: "cal" },
 ];
 export const hubTabOf = (v: string | null): HubTab => (v === "tasks" || v === "calendar" ? v : "today");
@@ -86,7 +86,9 @@ type TodayData = {
   crm: { id: string; subject: string; dueAt: string; record: string | null; openUrl: string; type: string }[];
   schedule: { id: string; title: string; startAt: string; endAt: string; kind: string; customer: { name: string } | null; status: string }[];
 };
-type Item = { key: string; at: Date; time: string; title: string; sub: string | null; kind: "appt" | "task" | "follow"; late: boolean; href: string; done: boolean };
+type Item = { key: string; at: Date; time: string; title: string; sub: string | null; kind: "appt" | "task" | "follow" | "plan"; late: boolean; href: string; done: boolean };
+type PlanToday = { today: string; items: { id: string; kind: string; metric: string | null; label: string | null; checked: boolean; plannedDay: string | null; customer: { name: string } | null; setBy: string | null; source: string }[] };
+const PLAN_VERB: Record<string, string> = { VISITS: "زيارة", CALLS: "مكالمة", QUOTES: "عرض سعر", COLLECTION: "تحصيل", SAMPLES: "عيّنة" };
 
 const timeText = (d: Date, ar: boolean) => d.toLocaleTimeString(ar ? "ar-SA-u-nu-latn" : "en-GB", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Riyadh" });
 const riyadhDay = (d: Date) => new Date(d.getTime() + 3 * 3_600_000).toISOString().slice(0, 10);
@@ -95,9 +97,12 @@ const riyadhDay = (d: Date) => new Date(d.getTime() + 3 * 3_600_000).toISOString
 export function TodaySchedule({ ar, reloadKey }: { ar: boolean; reloadKey: number }) {
   const [data, setData] = useState<TodayData | null>(null);
   const [failed, setFailed] = useState(false);
+  const [plan, setPlan] = useState<PlanToday | null>(null);
   const load = useCallback(() => {
     fetch("/api/workspace/today", { cache: "no-store" }).then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then((j: TodayData) => { setData(j); setFailed(false); }).catch(() => setFailed(true));
+    // «خطة الأسبوع v2»: what the rep planned for today shows here, on its day.
+    fetch("/api/sales/plan?period=DAY", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((j: PlanToday | null) => setPlan(j)).catch(() => setPlan(null));
   }, []);
   useEffect(() => { load(); }, [load, reloadKey]);
   if (failed) return null;
@@ -124,8 +129,14 @@ export function TodaySchedule({ ar, reloadKey }: { ar: boolean; reloadKey: numbe
       items.push({ key: `c:${c.id}`, at, time: timeText(at, ar), title: c.subject, sub: c.record, kind: "follow", late: false, href: c.openUrl, done: false });
     }
   }
+  for (const p of plan?.items ?? []) {
+    if ((p.kind !== "ACTION" && p.kind !== "CHECK") || p.plannedDay !== plan?.today) continue;
+    const what = p.kind === "CHECK" ? p.label ?? "" : `${PLAN_VERB[p.metric ?? ""] ?? ""} ${p.customer?.name ?? ""}`.trim();
+    items.push({ key: `p:${p.id}`, at: new Date(`${p.plannedDay}T05:00:00Z`), time: ar ? "اليوم" : "Today", title: what, sub: p.source === "ADMIN" ? (ar ? `من المشرف${p.setBy ? ` · ${p.setBy}` : ""}` : "From your supervisor") : null,
+      kind: "plan", late: false, href: "/dashboard/my-day?tab=tasks#plan", done: p.checked });
+  }
   items.sort((x, y) => Number(y.late) - Number(x.late) || x.at.getTime() - y.at.getTime());
-  const KIND: Record<Item["kind"], [string, string, string]> = { appt: ["موعد", "Appointment", "in"], task: ["مهمة", "Task", "pri"], follow: ["متابعة", "Follow-up", "warn"] };
+  const KIND: Record<Item["kind"], [string, string, string]> = { appt: ["موعد", "Appointment", "in"], task: ["مهمة", "Task", "pri"], follow: ["متابعة", "Follow-up", "warn"], plan: ["من خطتك", "Planned", "ok"] };
   let nowShown = false;
   return (
     <section className="md-card md-sched" data-testid="md-schedule" aria-labelledby="md-schedule-h">
