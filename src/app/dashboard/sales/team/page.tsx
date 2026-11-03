@@ -150,7 +150,8 @@ function TeamPage() {
   return (
     <div className="pg" data-testid="team-overview">
       <PerfHeader ar={ar} title={ar ? "متابعة الفريق" : "Team overview"} phoneTitle={ar ? "متابعة الفريق" : "Team overview"}
-        meta={[monthText, ar ? "مرتّب حسب الاسم" : "Sorted by name"].filter(Boolean)} />
+        meta={[monthText, ar ? "مرتّب حسب الاسم" : "Sorted by name"].filter(Boolean)}
+        actions={<Link className="btn p" href="/dashboard/sales/team/goals" data-testid="team-goals-link">{ar ? "أهداف الفريق" : "Team goals"}</Link>} />
       <PerfNotice kind="error" ar={ar} onDismiss={() => setError("")}>{error}</PerfNotice>
       {body}
       {rows && rows.length > 0 && (

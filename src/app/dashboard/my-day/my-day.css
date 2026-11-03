@@ -312,3 +312,41 @@
 .d21 .md-sched-late { display: flex; align-items: center; gap: 6px; margin: 0 16px 8px; padding: 9px 12px; border-radius: 10px; background: var(--status-danger-tint); color: var(--status-danger); font-size: 13.5px; font-weight: 600; text-decoration: none }
 .d21 .md-sched-late:hover { text-decoration: underline }
 .d21 .md-embed .hr-split, .d21 .md-embed .ws-root { min-height: 0 !important; height: auto !important }
+
+/* «خطتي» (owner-approved Figma 161:106 / 173:106). */
+.d21 .md-today-row > .md-card { min-height: 0 }
+.d21 .pl-goals, .d21 .pl-body { display: grid; gap: 12px; padding: 0 16px 14px }
+.d21 .pl-goal { display: grid; gap: 5px }
+.d21 .pl-goal-r { display: flex; justify-content: space-between; gap: 8px; align-items: baseline }
+.d21 .pl-goal-n { font-weight: 600; font-size: 14px }
+.d21 .pl-goal-v { font-weight: 700; font-size: 13.5px; color: var(--text-secondary) }
+.d21 .pl-goal-v.met { color: var(--status-success) }
+.d21 .pl-bar { display: block; height: 8px; border-radius: 999px; background: var(--action-primary-tint); overflow: hidden }
+.d21 .pl-bar > i { display: block; height: 100%; border-radius: 999px; background: var(--action-primary) }
+.d21 .pl-goal.adm .pl-bar > i { background: var(--status-info) }
+.d21 .pl-manual { justify-self: start; border: 0; background: none; padding: 0; font: inherit; font-size: 12.5px; color: var(--action-primary); font-weight: 600; cursor: pointer }
+.d21 .pl-section { margin-bottom: 4px }
+.d21 .pl-seg { display: inline-flex; gap: 4px; padding: 3px; border-radius: 9px; background: var(--action-primary-tint) }
+.d21 .pl-seg > button { min-height: 32px; padding: 0 14px; border: 0; border-radius: 7px; background: none; font: inherit; font-size: 13.5px; color: var(--text-secondary); cursor: pointer }
+.d21 .pl-seg > button[aria-pressed="true"] { background: var(--surface); color: var(--text-primary); font-weight: 700 }
+.d21 .pl-block { display: grid; gap: 10px; padding: 12px 14px; border-radius: 12px }
+.d21 .pl-block.adm { background: var(--status-info-tint) }
+.d21 .pl-block.mine { background: var(--action-primary-tint) }
+.d21 .pl-block-h { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: baseline }
+.d21 .pl-block-h b { display: inline-flex; align-items: center; gap: 6px; font-size: 14px }
+.d21 .pl-block.adm .pl-block-h b, .d21 .pl-block.adm .pl-block-h span { color: var(--status-info) }
+.d21 .pl-block-h span { font-size: 12px; color: var(--text-muted) }
+.d21 .pl-block .btn { justify-self: start }
+.d21 .pl-check { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 10px; border-radius: 9px; background: var(--surface); font-size: 14px; cursor: pointer }
+.d21 .pl-check input { width: 18px; height: 18px; accent-color: var(--action-primary) }
+.d21 .pl-check.on span { color: var(--text-muted); text-decoration: line-through }
+.pl-editor { display: grid; gap: 10px }
+.pl-ed-h { font-size: 14px; font-weight: 700; color: var(--text-primary) }
+.pl-ed-row { display: flex; gap: 8px; align-items: center }
+.pl-in { flex: 1; min-width: 0; min-height: 40px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--border-control); background: var(--surface); font: inherit; font-size: 14px; color: var(--text-primary) }
+.pl-num { flex: 0 0 90px; text-align: center }
+.pl-del { width: 36px; height: 36px; border: 0; border-radius: 8px; background: none; color: var(--text-muted); cursor: pointer; font-size: 15px }
+.pl-del:hover { background: var(--surface-hover) }
+.pl-ed-add { display: flex; gap: 8px }
+.pl-err { margin: 0; color: var(--status-danger); font-size: 13px }
+@media (max-width: 767.98px) { .d21 .pl-seg { width: 100% } .d21 .pl-seg > button { flex: 1; min-height: 40px } .pl-in { min-height: 44px } }

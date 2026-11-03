@@ -22,6 +22,7 @@ import { ActivityDialog } from "../customers/[id]/dialogs";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { Ico } from "@/components/shell/icons";
 import { AddMenu, HubTabs, TodaySchedule, hubTabOf } from "./_components/hub";
+import { PlanCard, PlanSection } from "./_components/plan";
 import WsTasksPage from "../workspace/tasks/page";
 import WsCalendarPage from "../workspace/calendar/page";
 import ActivitiesPage from "../sales/activities/page";
@@ -206,6 +207,7 @@ function MyDay() {
           {flashBar}
           {hello}
           {tabsBar}
+          {tab === "tasks" ? <PlanSection ar={ar} /> : null}
           <div className="md-embed" data-testid={`md-embed-${tab}`}>{tab === "tasks" ? <WsTasksPage /> : <WsCalendarPage />}</div>
           {/* «أنشطتي» lives here now: the follow-ups with customers, under the tasks. */}
           {tab === "tasks" ? <div className="md-embed md-embed-acts" id="activities" data-testid="md-embed-activities"><ActivitiesPage /></div> : null}
@@ -235,6 +237,7 @@ function MyDay() {
           <TargetCard d={data} lang={lang} who={who} compact />
           <AttentionStrip d={data} lang={lang} ro={ro} />
           {!ro ? <TodaySchedule ar={ar} reloadKey={tick} /> : null}
+          {!ro ? <PlanCard ar={ar} /> : null}
           <CallCard d={data} lang={lang} items={shown} total={listed} all={full} onAll={() => setAll((v) => !v)} ro={ro} empty={empty}
             filter={filter} onFilter={setFilter} onDone={openLog} onSnooze={snooze} phone />
           <DealsCard d={data} lang={lang} />
@@ -260,7 +263,7 @@ function MyDay() {
         {empty ? <NoBookNotice lang={lang} /> : null}
         <TargetCard d={data} lang={lang} who={who} />
         <AttentionStrip d={data} lang={lang} ro={ro} />
-        {!ro ? <TodaySchedule ar={ar} reloadKey={tick} /> : null}
+        {!ro ? <div className="md-grid2 md-today-row"><TodaySchedule ar={ar} reloadKey={tick} /><PlanCard ar={ar} /></div> : null}
         <div className="md-grid2">
           <CallCard d={data} lang={lang} items={shown} total={listed} all={full} onAll={() => setAll((v) => !v)} ro={ro} empty={empty}
             filter={filter} onFilter={setFilter} onDone={openLog} onSnooze={snooze} />

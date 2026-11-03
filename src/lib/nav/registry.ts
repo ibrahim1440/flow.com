@@ -999,7 +999,7 @@ function meetsModule(v: Viewer, r: Requirement): boolean {
 
 /** A sales rep: the sales module, no `lead_assign` (the team's manager holds it), not the admin role. */
 function isRep(v: Viewer): boolean {
-  return v.role !== "admin" && holds(v, { module: "sales" }) && !holds(v, { module: "sales", sub: "lead_assign" });
+  return holds(v, { module: "sales" }) && !holds(v, { module: "sales", sub: "lead_assign" }) && !holds(v, { module: "sales", role: "admin" });
 }
 
 /** Whether this node itself is permitted, ignoring its children. */
