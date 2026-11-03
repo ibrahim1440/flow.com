@@ -191,3 +191,69 @@ button.acc-contact-name:hover { text-decoration: underline }
 .d21 .acc-file-cards .acc-file-act { display: flex; flex-wrap: wrap; gap: 8px }
 .d21 .acc-file-cards .acc-file-act .btn { min-height: 40px }
 .d21 .acc-file-cards .acc-file-act { white-space: normal; text-align: start } .d21 .acc-file-cards .acc-file-act > * + * { margin-inline-start: 0 }
+
+/* ── Redesign (owner-approved Figma «05 · صفحة العميل — معتمد», 3 Nov 2026) ───────────────────────────────────────
+   One header card (initial, name, meta, actions, ONE figures strip with centred cells, the tabs); the open deal and the
+   activity as cards; the side column as titled cards (terms, contacts, usual items, details, messages). Tokens only. */
+.d21 .acc-v2 { display: grid; gap: 20px }
+.d21 .acc-hero { background: var(--surface); border-radius: 14px; box-shadow: inset 0 0 0 1px var(--border-subtle); padding: 20px 24px 0; display: grid; gap: 16px; min-width: 0 }
+.d21 .acc-v2 .ph { margin-bottom: 0 }
+.d21 .acc-id { display: flex; align-items: center; gap: 14px; min-width: 0 }
+.d21 .acc-av { width: 56px; height: 56px; border-radius: 14px; flex: none; display: grid; place-items: center; background: var(--action-primary-tint); color: var(--action-primary-hover); font: 700 24px/1 var(--f-ui) }
+.d21 .acc-v2 h1 { font: 700 24px/1.3 var(--f-ui) }
+.d21 .acc-strip { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); margin: 0; border-radius: 10px; background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle) }
+.d21 .acc-strip > div { padding: 12px 14px; text-align: center; display: grid; gap: 2px; align-content: center; justify-items: center; min-width: 0; border-inline-start: 1px solid var(--border-subtle) }
+.d21 .acc-strip > div:first-child { border-inline-start: 0 }
+.d21 .acc-strip dt { font-size: 12.5px; color: var(--text-muted); margin: 0 }
+.d21 .acc-strip dd { margin: 0 }
+.d21 .acc-strip .mid { font: 700 20px/1.3 var(--f-ui); color: var(--text-primary) }
+.d21 .acc-strip .mid.n, .d21 .acc-strip .mid .n { font-family: var(--f-num) }
+.d21 .acc-strip .mid.acc-warn { color: var(--status-warning) }
+.d21 .acc-strip .d { font-size: 12px; color: var(--text-muted); line-height: 18px }
+.d21 .acc-strip > .contract-fact { border: 0; border-inline-start: 1px solid var(--border-subtle); border-radius: 0; background: none }
+.d21 .acc-hero .acc-tabs { margin: 0 -4px; padding: 0 4px }
+.d21 .acc-v2 .acc-cols { grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; margin-top: 0; align-items: start }
+.d21 .acc-main, .d21 .acc-side { display: grid; gap: 16px; align-content: start; min-width: 0 }
+.d21 .acc-card { background: var(--surface); border-radius: 12px; box-shadow: inset 0 0 0 1px var(--border-subtle); min-width: 0 }
+.d21 .acc-main-card { padding: 16px 18px }
+.d21 .acc-main-card > section { margin-bottom: 0 !important }
+.d21 .acc-main-card .acc .callout, .d21 .acc-main-card .callout { margin-bottom: 0 }
+.d21 .acc-main-card .acc-composer { margin-bottom: 12px }
+.d21 .acc-side-card { padding: 14px 16px }
+.d21 .acc-card-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px }
+.d21 .acc-card-h h2 { display: inline-flex; align-items: center; gap: 8px; margin: 0; font: 700 15px/1.4 var(--f-ui); color: var(--text-primary) }
+.d21 .acc-card-h h2 .ico { color: var(--text-muted) }
+.d21 .acc-card-sub { font-size: 12.5px; color: var(--text-muted) }
+.d21 .acc-kv { margin: 0; display: grid }
+.d21 .acc-kv > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border-subtle); font-size: 13.5px }
+.d21 .acc-kv dt { color: var(--text-muted) }
+.d21 .acc-kv dd { margin: 0; font-weight: 500; color: var(--text-primary); text-align: end; overflow-wrap: anywhere }
+.d21 .acc-kv dd.acc-warn { color: var(--status-warning); font-weight: 600 }
+.d21 .acc-kv dd.acc-bad { color: var(--status-danger); font-weight: 600 }
+.d21 .acc-side-card .acc-contacts { gap: 0 }
+.d21 .acc-side-card .acc-contacts > li { padding: 8px 0; border-top: 1px solid var(--border-subtle) }
+.d21 .acc-ic { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; color: var(--text-secondary); flex: none }
+.d21 .acc-ic:hover { background: var(--surface-hover) }
+.d21 .acc-ic:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }
+.d21 .acc-usual { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; font-size: 13.5px }
+.d21 .acc-usual > li { display: grid; gap: 4px }
+.d21 .acc-usual-r { display: flex; justify-content: space-between; gap: 8px }
+.d21 .acc-usual-bar { display: block; height: 6px; border-radius: 999px; background: var(--action-primary-tint); overflow: hidden }
+.d21 .acc-usual-bar > i { display: block; height: 100%; border-radius: 999px; background: var(--action-primary) }
+.d21 .acc-msg > * { margin: 0 }
+/* The stage track: names wrap between words, never letter by letter (the «التفاوض والاعتماد» break). */
+.d21 .acc-track .acc-step b { overflow-wrap: normal; word-break: normal }
+.d21 .acc-v2 .acc-deal { margin-bottom: 16px }
+.d21 .acc-v2 .acc-track { max-width: none }
+@media (min-width: 768px) and (max-width: 1279.98px) {
+  .d21 .acc-v2 .acc-cols { grid-template-columns: minmax(0, 1fr) !important }
+  .d21 .acc-strip { grid-auto-flow: row; grid-template-columns: repeat(3, minmax(0, 1fr)) }
+  .d21 .acc-strip > div:nth-child(4) { border-inline-start: 0 }
+  .d21 .acc-strip > div:nth-child(n+4) { border-top: 1px solid var(--border-subtle) }
+}
+/* Phone: the strip as 2 × 2 tiles, centred (owner's edit in Figma). */
+.d21 .acc-phone .acc-strip { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; background: none; box-shadow: none; margin-bottom: 14px }
+.d21 .acc-phone .acc-strip > div { border: 0; border-radius: 12px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-subtle); padding: 10px }
+.d21 .acc-phone .acc-strip > div:nth-child(5):last-child, .d21 .acc-phone .acc-strip > .contract-fact { grid-column: 1 / -1 }
+.d21 .acc-phone .acc-strip .mid { font-size: 16px }
+.d21 .acc-phone .acc-side-card, .d21 .acc-phone > .acc-card { margin-bottom: 12px }

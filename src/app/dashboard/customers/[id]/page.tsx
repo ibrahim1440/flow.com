@@ -11,7 +11,7 @@ import { telHref, waNumber } from "@/lib/services/search/normalize";
 import { rememberRecent } from "@/components/shell/recent";
 import { HrRoot } from "@/components/hr/ui";
 import { ACTIVITY_LABELS, OUTCOME_LABELS, initials, splitTitle } from "@/components/d21/labels";
-import { longDate, qtyText, dayCount, dayUnit, daysFromToday, dueText, money2, relativeDays, shortDate, whole } from "@/components/d21/format";
+import { longDate, qtyText, dayCount, daysFromToday, dueText, money2, relativeDays, shortDate, whole } from "@/components/d21/format";
 import { api, pick, QUOTE_STATUS_SPECS, LEAD_SOURCE_LABELS } from "../../sales/_components/ui";
 import { ActivityDialog, ContactDialog, DealPickDialog, DetailsDialog, FileDialog, FILE_CATEGORY_LABELS, SEGMENT_LABELS, type ActivityKind } from "./dialogs";
 import { MessagingCard } from "./_components/messaging";
@@ -243,10 +243,6 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
     const n = <span className={`n${big ? " acc-big" : ""}`}>{two ? money2(v) : whole(v)}</span>;
     return ar ? <>{n}<span className="unit">{cur}</span></> : <><span className="unit pre">{cur}</span>{n}</>;
   };
-  const monthName = (key: string) => {
-    const mm = Number(key.slice(5, 7)) - 1;
-    return ar ? AR_MONTHS[mm] : EN_MONTHS[mm];
-  };
   const since = new Date(c.createdAt);
   const sinceText = ar ? `${AR_MONTHS[since.getMonth()]} ${since.getFullYear()}` : `${EN_MONTHS[since.getMonth()]} ${since.getFullYear()}`;
   const segment = c.segment ? lx(SEGMENT_LABELS[c.segment]) : null;
@@ -383,57 +379,11 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   );
   // Whole days on the viewer's calendar (as every other date on the page), not the server's.
   const lastDays = m.lastOrder ? Math.max(0, -daysFromToday(m.lastOrder.createdAt)) : 0;
-  const monthly = m.monthly;
-  const complete = monthly ? monthly.filter((x) => !x.partial) : [];
-  const lastMonth = complete[complete.length - 1];
-  const running = monthly?.find((x) => x.partial);
-  const anyKg = complete.some((x) => x.kg > 0);
-  const maxKg = Math.max(1, ...complete.map((x) => x.kg));
-  const qtyFig = (
-    <div data-testid="metric-monthly">
-      <dt className="lbl">{L("الكمية الشهرية", "Monthly quantity")}</dt>
-      {!monthly ? <><dd className="mid">—</dd><dd className="d">{noAccess(L("الطلبات", "orders"))}</dd></> : <>
-        <dd className="acc-spark">
-          <svg viewBox="0 0 180 38" width="100%" height="38" role="img" style={{ direction: "ltr" }}
-            aria-label={complete.map((x) => `${monthName(x.month)} ${x.kg}`).join(", ")}>
-            {complete.map((x, i) => {
-              const bw = (180 - 11 * 4) / 12;
-              const h = x.kg > 0 ? Math.max(2, (x.kg / maxKg) * 34) : 0;
-              return <rect key={x.month} x={(i * (bw + 4)).toFixed(1)} y={(38 - h).toFixed(1)} width={bw.toFixed(1)} height={h.toFixed(1)} rx="1.5"
-                fill={i === complete.length - 1 ? "var(--action-primary)" : "var(--chart-3)"}><title>{`${monthName(x.month)}: ${x.kg}`}</title></rect>;
-            })}
-          </svg>
-        </dd>
-        <dd className="d">{monthKg
-          ? (ar ? <>متوسط <span className="n">{whole(monthKg)}</span> كجم/شهر · آخر 3 شهور</> : <>Average <span className="n">{whole(monthKg)}</span> kg/month · last 3 months</>)
-          : anyKg && lastMonth
-          ? (ar ? <><span className="n">{whole(lastMonth.kg)}</span> كجم في {monthName(lastMonth.month)}</> : <><span className="n">{whole(lastMonth.kg)}</span> kg in {monthName(lastMonth.month)}</>)
-          : running && running.kg > 0
-            ? (ar ? <><span className="n">{whole(running.kg)}</span> كجم في {monthName(running.month)} حتى الآن</> : <><span className="n">{whole(running.kg)}</span> kg in {monthName(running.month)} so far</>)
-            : L("لا طلبات في آخر 12 شهرًا", "No orders in the last 12 months")}</dd>
-      </>}
-    </div>
-  );
   const credit = m.credit;
-  const termsFig = (
-    <div data-testid="metric-terms">
-      <dt className="lbl">{L("شروط الدفع", "Payment terms")}</dt>
-      <dd className="mid acc-terms">{c.paymentTermsDays != null ? <><span className="n">{c.paymentTermsDays}</span> {dayUnit(c.paymentTermsDays, lang) === "يوم" && c.paymentTermsDays !== 1 ? "يومًا" : dayUnit(c.paymentTermsDays, lang)}</> : notSet}</dd>
-      <dd className="d" data-testid="metric-credit" title={credit && credit.scope === "all" ? (ar ? `المستخدم ${whole(credit.used)} · المتاح ${whole(credit.available)} ريال` : `Used ${whole(credit.used)} · available SAR ${whole(credit.available)}`) : undefined}>{c.creditLimit != null
-        ? (ar ? <>حد ائتمان <span className="n">{whole(c.creditLimit)}</span> ريال</> : <>Credit limit SAR <span className="n">{whole(c.creditLimit)}</span></>)
-        : L("حد الائتمان غير محدد", "No credit limit set")}
-        {credit?.over && <> · <span className="acc-warn" data-testid="credit-over">{L("متجاوز", "exceeded")}</span></>}</dd>
-    </div>
-  );
-
   // ── The facts row (batch 24 WP-A §3): آخر تواصل · يطلب عادةً · آخر طلب · عليه ──
   const contact = lastContact(data.timeline.flatMap((e) => (e.kind === "activity" ? [e.activity] : [])));
   const contactDays = contact?.completedAt ? Math.max(0, -daysFromToday(contact.completedAt)) : null;
   const ago = (n: number) => (n === 0 ? L("اليوم", "today") : ar ? `قبل ${dayCount(n, lang)}` : `${dayCount(n, lang)} ago`);
-  // «عليه»: ONE figure everywhere (FOLLOWUPS bugs 1–2) — the receivables balance once invoiced, else the
-  // accepted quotations not yet paid, and the label says which.
-  const owed = bal ? (bal.ar?.outstanding ?? bal.outstanding) : null;
-  const owedLabel = bal?.ar ? L("عليه", "Owes") : L("عليه (من العروض المقبولة)", "Owes (accepted quotations)");
   // The derived tier within the account owner's book (WP-B «يومي»: kg in the last 90 days), beside the name.
   const tierPill = data.tier ? (
     <span className={`acc-tier is-${data.tier.toLowerCase()}`} data-testid="account-tier" data-tier={data.tier}
@@ -441,19 +391,22 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
       {({ VIP: ["VIP", "VIP"], REGULAR: ["عادي", "Regular"], SMALL: ["صغير", "Small"], QUIET: ["بدون طلبات حديثة", "No recent orders"] } as const)[data.tier][ar ? 0 : 1]}
     </span>
   ) : null;
-  const facts = (
-    <dl className="acc-facts" data-testid="account-facts">
-      <div data-testid="fact-contact"><dt>{L("آخر تواصل", "Last contact")}</dt>
-        <dd>{!sections.sales ? "—" : contact && contactDays != null ? <>{ago(contactDays)} · {contactKind(contact, ar)}</> : L("ما فيه تواصل مسجّل", "No contact logged")}</dd></div>
-      <div data-testid="fact-rhythm"><dt>{L("يطلب عادةً", "Usually orders")}</dt>
-        <dd>{!sections.orders ? "—" : m.cadenceDays != null
-          ? <>{ar ? `كل ${dayCount(m.cadenceDays, lang)}` : `every ${dayCount(m.cadenceDays, lang)}`}{monthKg ? <> · <span className="n">{whole(monthKg)}</span> {L("كجم/شهر", "kg/month")}</> : null}</>
-          : monthKg ? <><span className="n">{whole(monthKg)}</span> {L("كجم/شهر", "kg/month")}</> : L("ما فيه طلبات كافية", "Not enough orders yet")}</dd></div>
-      <div data-testid="fact-last-order"><dt>{L("آخر طلب", "Last order")}</dt>
-        <dd>{!sections.orders ? "—" : m.lastOrder ? ago(lastDays) : L("ما طلب بعد", "No orders yet")}</dd></div>
-      <div data-testid="fact-owed"><dt>{owedLabel}</dt>
-        <dd className={owed != null && Number(owed) > 0 ? "warn" : undefined}>{owed == null ? "—" : ar ? <><bdi className="n">{whole(owed)}</bdi> ريال</> : <>SAR <bdi className="n">{whole(owed)}</bdi></>}</dd></div>
-      {/* WP-C's contract fact («العقد: ينتهي بعد X يوم»): a fifth fact only while a contract is in its notice window. */}
+  // The one figures strip (owner-approved Figma «05 · صفحة العميل — معتمد», 3 Nov 2026): sales · balance · last order ·
+  // rhythm · last contact — the same figures as before, one row instead of two (the balance is «عليه»).
+  const strip = (
+    <dl className="acc-strip" data-testid="account-facts">
+      {salesFig}
+      {balFig}
+      <div data-testid="fact-last-order"><dt className="lbl">{L("آخر طلب", "Last order")}</dt>
+        <dd className="mid">{!sections.orders ? "—" : m.lastOrder ? ago(lastDays) : L("ما طلب بعد", "No orders yet")}</dd>
+        {sections.orders && m.lastOrder ? <dd className="d">{ar ? <>طلب <bdi className="id">#{m.lastOrder.orderNumber}</bdi> · {shortDate(m.lastOrder.createdAt, lang)}</> : <><bdi className="id">#{m.lastOrder.orderNumber}</bdi> · {shortDate(m.lastOrder.createdAt, lang)}</>}</dd> : null}</div>
+      <div data-testid="fact-rhythm"><dt className="lbl">{L("يطلب عادةً", "Usually orders")}</dt>
+        <dd className="mid">{!sections.orders ? "—" : m.cadenceDays != null ? (ar ? `كل ${dayCount(m.cadenceDays, lang)}` : `every ${dayCount(m.cadenceDays, lang)}`) : L("ما فيه طلبات كافية", "Not enough orders")}</dd>
+        {sections.orders && monthKg ? <dd className="d">{ar ? <>≈ <span className="n">{whole(monthKg)}</span> كجم بالشهر</> : <>≈ <span className="n">{whole(monthKg)}</span> kg a month</>}</dd> : null}</div>
+      <div data-testid="fact-contact"><dt className="lbl">{L("آخر تواصل", "Last contact")}</dt>
+        <dd className="mid">{!sections.sales ? "—" : contact && contactDays != null ? ago(contactDays) : L("ما فيه تواصل", "None logged")}</dd>
+        {sections.sales && contact ? <dd className="d">{contactKind(contact, ar)}</dd> : null}</div>
+      {/* WP-C's contract fact («العقد: ينتهي بعد X يوم»): a sixth cell only while a contract is in its notice window. */}
       <ContractFact ar={ar} files={data.files ?? []} noticeDays={data.contractNoticeDays} />
     </dl>
   );
@@ -661,9 +614,9 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
 
   // ── Side column ──
   const contacts = (
-    <section data-testid="contacts" style={{ marginBottom: 28 }}>
-      <div className="lbl acc-side-h">{L("جهات الاتصال", "Contacts")}
-        {can.edit && <button type="button" className="lk-inline" onClick={() => setDialog({ contact: null })} data-testid="add-contact">{L("إضافة", "Add")}</button>}
+    <section data-testid="contacts" className="acc-card acc-side-card">
+      <div className="acc-card-h"><h2><Ico name="users" small />{L("جهات الاتصال", "Contacts")}</h2>
+        {can.edit && <button type="button" className="lk-inline" onClick={() => setDialog({ contact: null })} data-testid="add-contact">+ {L("إضافة", "Add")}</button>}
       </div>
       {c.contacts.length === 0 ? (
         <p className="acc-muted" style={{ margin: 0 }}>{L("لا جهات اتصال مسجلة.", "No contacts recorded.")}{c.phone && <> {L("هاتف العميل:", "Customer phone:")} {telHref(c.phone) ? <a href={telHref(c.phone)!} dir="ltr" className="n">{c.phone}</a> : <bdi dir="ltr" className="n">{c.phone}</bdi>}</>}</p>
@@ -677,6 +630,8 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
                 {(p.phone || p.email) && <div className="acc-contact-sub">{p.phone ? <a href={`tel:${p.phone.replace(/\s/g, "")}`} dir="ltr" className="n">{p.phone}</a> : <a href={`mailto:${p.email}`} dir="ltr">{p.email}</a>}</div>}
               </div>
               {p.role && <span className="acc-contact-role">{p.role}</span>}
+              {p.phone && telHref(p.phone) ? <a className="acc-ic" href={telHref(p.phone)!} aria-label={ar ? `اتصال بـ ${p.name}` : `Call ${p.name}`}><Ico name="phone" small /></a> : null}
+              {p.phone && waNumber(p.phone) ? <a className="acc-ic" href={`https://wa.me/${waNumber(p.phone)}`} target="_blank" rel="noopener noreferrer" aria-label={ar ? `واتساب ${p.name}` : `WhatsApp ${p.name}`}><Ico name="chat" small /></a> : null}
             </li>
           ))}
         </ul>
@@ -684,13 +639,21 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
     </section>
   );
   const usual = (
-    <section data-testid="usual-items" style={{ marginBottom: 28 }}>
-      <div className="lbl acc-side-h">{L("الأصناف المعتادة", "Usual items")}</div>
+    <section data-testid="usual-items" className="acc-card acc-side-card">
+      <div className="acc-card-h"><h2><Ico name="box" small />{L("الأصناف المعتادة", "Usual items")}</h2><span className="acc-card-sub">{L("آخر 6 شهور", "Last 6 months")}</span></div>
       {!m.usualItems ? <p className="acc-muted" style={{ margin: 0 }}>{noAccess(L("الطلبات", "orders"))}</p>
         : m.usualItems.length === 0 ? <p className="acc-muted" style={{ margin: 0 }}>{L("لا طلبات في آخر ستة أشهر.", "No orders in the last six months.")}</p>
-        : <table className="t dense acc-usual"><tbody>
-            {m.usualItems.map((u) => <tr key={u.name}><td><bdi>{(ar && u.nameAr) || u.name}</bdi></td><td className="num">{ar ? <><span className="n">{u.kgPerMonth}</span> كجم/شهر</> : <><span className="n">{u.kgPerMonth}</span> kg / month</>}</td></tr>)}
-          </tbody></table>}
+        : <ul className="acc-usual">
+            {m.usualItems.map((u) => {
+              const top = Math.max(...m.usualItems!.map((x) => x.kgPerMonth), 1);
+              return (
+                <li key={u.name}>
+                  <span className="acc-usual-r"><bdi>{(ar && u.nameAr) || u.name}</bdi><span className="acc-muted">{ar ? <><span className="n">{u.kgPerMonth}</span> كجم/شهر</> : <><span className="n">{u.kgPerMonth}</span> kg / month</>}</span></span>
+                  <span className="acc-usual-bar" aria-hidden><i style={{ width: `${Math.max(4, Math.round((u.kgPerMonth / top) * 100))}%` }} /></span>
+                </li>
+              );
+            })}
+          </ul>}
       {c.roastPreferences.length > 0 && (
         <div className="acc-profiles" data-testid="roast-profiles">
           <div className="lbl" style={{ margin: "14px 0 6px" }}>{L("مسارات التحميص", "Roast profiles")}</div>
@@ -707,15 +670,13 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
     ? (data.source.sourceNote || pick(LEAD_SOURCE_LABELS, data.source.source, lang))
     : null;
   const details = (
-    <section data-testid="details">
-      <div className="lbl acc-side-h">{L("التفاصيل", "Details")}
+    <section data-testid="details" className="acc-card acc-side-card">
+      <div className="acc-card-h"><h2><Ico name="invoice" small />{L("البيانات", "Details")}</h2>
         {can.edit && <button type="button" className="lk-inline" onClick={() => setDialog("details")} data-testid="edit-details">{L("تعديل", "Edit")}</button>}
       </div>
-      <dl className="props acc-props">
-        <dt>{L("الرقم الضريبي", "VAT number")}</dt><dd className="n" data-testid="detail-vat">{c.vatNumber ?? notSet}</dd>
-        <dt>{L("قائمة الأسعار", "Price list")}</dt><dd>{c.priceList ?? notSet}</dd>
-        <dt>{L("التوصيل", "Delivery")}</dt><dd style={{ whiteSpace: "pre-line" }}>{c.address ?? notSet}</dd>
-        <dt>{L("المصدر", "Source")}</dt><dd>{sourceText ?? (sections.sales ? L("أُضيف مباشرة", "Added directly") : "—")}</dd>
+      <dl className="acc-kv">
+        <div><dt>{L("الرقم الضريبي", "VAT number")}</dt><dd className="n" data-testid="detail-vat">{c.vatNumber ?? notSet}</dd></div>
+        <div><dt>{L("المصدر", "Source")}</dt><dd>{sourceText ?? (sections.sales ? L("أُضيف مباشرة", "Added directly") : "—")}</dd></div>
       </dl>
       {data.newClientCommission && (
         <label className="cb-check" style={{ marginTop: 10, display: "flex", alignItems: "flex-start" }} data-testid="new-client-exclusion">
@@ -738,6 +699,27 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
           </span>
         </label>
       )}
+    </section>
+  );
+
+  // «الشروط التجارية» (approved Figma): payment terms, the credit limit and how much of it is used (the account API's
+  // own figure, shown only where it is read for the whole account), the price list and the delivery address.
+  const terms = (
+    <section data-testid="metric-terms" className="acc-card acc-side-card">
+      <div className="acc-card-h"><h2><Ico name="wallet" small />{L("الشروط التجارية", "Commercial terms")}</h2>
+        {can.edit && <button type="button" className="lk-inline" onClick={() => setDialog("details")}>{L("تعديل", "Edit")}</button>}
+      </div>
+      <dl className="acc-kv">
+        <div><dt>{L("شروط الدفع", "Payment terms")}</dt><dd>{c.paymentTermsDays != null ? (c.paymentTermsDays === 0 ? L("نقدًا", "Cash") : ar ? <>آجل <span className="n">{c.paymentTermsDays}</span> يوم</> : <><span className="n">{c.paymentTermsDays}</span> days</>) : notSet}</dd></div>
+        <div data-testid="metric-credit"><dt>{L("حد الائتمان", "Credit limit")}</dt><dd>{c.creditLimit != null ? (ar ? <><span className="n">{whole(c.creditLimit)}</span> ريال</> : <>SAR <span className="n">{whole(c.creditLimit)}</span></>) : notSet}</dd></div>
+        {credit && credit.scope === "all" && c.creditLimit != null ? (
+          <div><dt>{L("المستخدم من الحد", "Used of the limit")}</dt>
+            <dd className={credit.over ? "acc-bad" : (credit.percent ?? 0) >= 80 ? "acc-warn" : undefined} data-testid={credit.over ? "credit-over" : undefined}>
+              <span className="n">{whole(credit.used)}</span> {ar ? "ريال" : "SAR"}{credit.percent != null ? <> · <span className="n">{credit.percent}%</span></> : null}{credit.over ? <> · {L("متجاوز", "exceeded")}</> : null}</dd></div>
+        ) : null}
+        <div><dt>{L("قائمة الأسعار", "Price list")}</dt><dd>{c.priceList ?? notSet}</dd></div>
+        <div><dt>{L("التوصيل", "Delivery")}</dt><dd style={{ whiteSpace: "pre-line" }}>{c.address ?? notSet}</dd></div>
+      </dl>
     </section>
   );
 
@@ -1006,11 +988,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
           {noticeEl}
           {(subline || tierPill) && <p className="acc-subline">{tierPill}{tierPill && subline ? " " : null}{subline}{dialPhone ? <> · {tel ? <a href={tel} className="acc-tel n" dir="ltr" data-testid="account-phone">{dialPhone}</a> : <bdi className="n" dir="ltr">{dialPhone}</bdi>}</> : null}</p>}
           {creditBand}
-          {facts}
-          <dl className="phrows" data-testid="account-metrics">
-            <div><dt className="lbl">{bal?.ar ? L("الرصيد المستحق", "Balance due") : L("عروض مقبولة لم تُفوتر", "Accepted, not invoiced")}</dt><dd className={owed != null && Number(owed) > 0 ? "acc-warn" : undefined} data-testid="phone-balance">{owed != null ? amountWithUnit(owed) : "—"}</dd></div>
-            <div><dt className="lbl">{L("مبيعات 12 شهرًا", "12-month sales")}</dt><dd>{sales && !salesUnknown ? amountWithUnit(sales.net) : "—"}</dd></div>
-          </dl>
+          {strip}
           {sections.sales && (
             <section data-testid="open-deal" className="acc-ph-deal">
               <div className="bh" style={{ marginBottom: 8 }}><h2 className="bt">{L("الصفقة المفتوحة", "Open deal")}</h2>
@@ -1030,7 +1008,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
           )}
           {contacts}
           {tabBar}
-          {tab === "overview" ? <>{activityBlock}<div style={{ marginTop: 24 }}>{usual}{details}{messaging}</div></> : tabBody}
+          {tab === "overview" ? <>{terms}{activityBlock}<div className="acc-side" style={{ marginTop: 16 }}>{usual}{details}<div className="acc-card acc-side-card acc-msg">{messaging}</div></div></> : tabBody}
           {mayLog || quoteBtn ? (
             <div className="sticky-act acc-quickbar" data-acc-more data-testid="account-quickbar">
               {mayLog ? (tel ? <a className="btn" href={tel} aria-label={L("اتصال", "Call")} data-testid="act-call" onClick={() => setDialog({ activity: "CALL" })}><Ico name="phone" /></a>
@@ -1052,9 +1030,12 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
 
   return (
     <HrRoot>
-      <div className="pg acc" data-testid="customer-account">
+      <div className="pg acc acc-v2" data-testid="customer-account">
         {noticeEl}
+        <section className="acc-hero">
         <div className="ph" style={{ alignItems: "flex-start" }}>
+          <div className="acc-id">
+          <span className="acc-av" aria-hidden>{initials(name).slice(0, 1)}</span>
           <div style={{ minWidth: 0 }}>
             <h1 data-testid="account-name">{name}{tierPill}{creditBadges ? <span className="acc-credit-badges" data-testid="account-credit-badges">{creditBadges}</span> : null}</h1>
             <div className="meta">
@@ -1062,6 +1043,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
               {dialPhone && <span className="acc-meta-item"><i aria-hidden />{tel ? <a href={tel} className="acc-tel n" dir="ltr" data-testid="account-phone" onClick={() => { if (mayLog) setDialog({ activity: "CALL" }); }}>{dialPhone}</a> : <bdi className="n" dir="ltr">{dialPhone}</bdi>}</span>}
               {c.commercialRegNo && <span className="acc-meta-item">{metaParts.length > 0 && <i aria-hidden />}<span className="id" data-testid="account-cr">CR-{c.commercialRegNo}</span></span>}
             </div>
+          </div>
           </div>
           <div className="act acc-actbar" data-testid="account-actions">
             {callBtn}
@@ -1079,7 +1061,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
         </div>
 
         {creditBand}
-        {facts}
+        {strip}
         {qoyod ? (
           <>
             <dl className="metrics acc-metrics" data-testid="account-ar-tiles">
@@ -1099,20 +1081,21 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
             </p>
           </>
         ) : null}
-        <dl className="metrics acc-metrics" data-testid="account-metrics">
-          {salesFig}{balFig}{qtyFig}{termsFig}
-        </dl>
         {tabBar}
+        </section>
 
         {tab === "overview" ? (
           <div className="cols acc-cols">
-            <div style={{ minWidth: 0 }}>{dealBlock}{activityBlock}</div>
-            <aside style={{ minWidth: 0 }}>
+            <div className="acc-main">
+              <div className="acc-card acc-main-card">{dealBlock}</div>
+              <div className="acc-card acc-main-card">{activityBlock}</div>
+            </div>
+            <aside className="acc-side">
+              {terms}
               {contacts}
-              <div className="acc-rule" />
               {usual}
               {details}
-              {messaging}
+              <div className="acc-card acc-side-card acc-msg">{messaging}</div>
             </aside>
           </div>
         ) : <div className="acc-tabbody">{tabBody}</div>}
