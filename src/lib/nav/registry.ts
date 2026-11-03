@@ -76,6 +76,12 @@ export type NavNode = {
    * meets it under Operations, and nobody meets it twice.
    */
   unlessAny?: Ability[];
+  /**
+   * «يومي» is the rep's one home (owner, 3 Nov 2026): the tasks, the calendar and the activities are its tabs, so a SALES
+   * REP (the sales module without `lead_assign`, not the admin role) does not see this entry in the menus. The page
+   * itself stays reachable (old links and bookmarks) — `routeAllowed` reads `anyOf` only.
+   */
+  hideForRep?: boolean;
   /** Admin-only double guard, kept from the previous sidebar for the settings screen. */
   adminOnly?: boolean;
   /**
@@ -247,8 +253,8 @@ export const NAV: NavNode[] = [
     anyOf: IN_SALES, unlessAny: [{ module: "sales", role: "admin" }],
     shell: { icon: "home", creates: "sales" },
   },
-  { id: "workspace", ar: "مساحة عملي", en: "My Workspace", icon: ListChecks, href: "/dashboard/workspace", shell: { icon: "inbox" } },
-  { id: "dashboard", ar: "لوحة التحكم", en: "Dashboard", icon: LayoutDashboard, href: "/dashboard", shell: { ar: "لوحة التشغيل", en: "Operations dashboard", icon: "pulse", creates: "operations" } },
+  { id: "workspace", ar: "مساحة عملي", en: "My Workspace", icon: ListChecks, href: "/dashboard/workspace", hideForRep: true, shell: { icon: "inbox" } },
+  { id: "dashboard", ar: "لوحة التحكم", en: "Dashboard", icon: LayoutDashboard, href: "/dashboard", hideForRep: true, shell: { ar: "لوحة التشغيل", en: "Operations dashboard", icon: "pulse", creates: "operations" } },
   {
     // GX D-P02 (1494:3302): no sidebar item of its own; «لوحة التشغيل» is highlighted and the
     // trail reads «لوحة التشغيل / السجل العام». Reached from the quick jump and the dashboard.
@@ -362,6 +368,7 @@ export const NAV: NavNode[] = [
         href: "/dashboard/sales/activities",
         anyOf: IN_SALES,
         unlessAny: [sales("lead_assign")],
+        hideForRep: true,
         shell: { ar: "أنشطتي", en: "My activities", icon: "cal" },
       },
       {
@@ -990,11 +997,17 @@ function meetsModule(v: Viewer, r: Requirement): boolean {
   return (Array.isArray(r) ? r : [r]).every((a) => hasModuleAccess(v.permissions, a.module));
 }
 
+/** A sales rep: the sales module, no `lead_assign` (the team's manager holds it), not the admin role. */
+function isRep(v: Viewer): boolean {
+  return v.role !== "admin" && holds(v, { module: "sales" }) && !holds(v, { module: "sales", sub: "lead_assign" });
+}
+
 /** Whether this node itself is permitted, ignoring its children. */
 export function nodePermitted(v: Viewer, n: NavNode): boolean {
   if (n.adminOnly && v.role !== "admin") return false;
   if (n.requiresAll && !n.requiresAll.every((a) => holds(v, a))) return false;
   if (n.unlessAny && n.unlessAny.some((a) => holds(v, a))) return false;
+  if (n.hideForRep && isRep(v)) return false;
   if (!n.anyOf || n.anyOf.length === 0) return true;
   return n.anyOf.some((r) => meets(v, r));
 }

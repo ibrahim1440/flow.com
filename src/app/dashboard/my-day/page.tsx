@@ -21,6 +21,10 @@ import { HrRoot } from "@/components/hr/ui";
 import { ActivityDialog } from "../customers/[id]/dialogs";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { Ico } from "@/components/shell/icons";
+import { AddMenu, HubTabs, TodaySchedule, hubTabOf } from "./_components/hub";
+import WsTasksPage from "../workspace/tasks/page";
+import WsCalendarPage from "../workspace/calendar/page";
+import ActivitiesPage from "../sales/activities/page";
 import { filterCallList, callFilterOf, type CallFilter } from "@/lib/services/sales/my-day/filters";
 import {
   TIER_LABEL, days, greeting, streakText, monthName, n, reasonPill, telHref, todayLine, waNumber, whyLine,
@@ -61,7 +65,9 @@ function MyDay() {
   const phone = usePhone();
   const user = useUser();
   const router = useRouter();
-  const rep = useSearchParams().get("rep");
+  const sp = useSearchParams();
+  const rep = sp.get("rep");
+  const tab = hubTabOf(sp.get("tab"));
   const [data, setData] = useState<Day | null>(null);
   const [error, setError] = useState("");
   const [tick, setTick] = useState(0);
@@ -185,14 +191,28 @@ function MyDay() {
         <Streak d={data} lang={lang} third={ro} />
         {/* The rep's own overdue tasks are «مساحة عملي»'s; this is the way there (never on a manager's read-only view). */}
         {!ro ? <OverdueTasksLink lang={lang} /> : null}
-        {acts.length ? (
-          <span className="md-acts-top">
-            {acts.map((a) => <Link key={a.id} className={`btn${a.p ? " p" : ""}`} href={a.href} data-testid={a.id}>{ar ? a.ar : a.en}</Link>)}
-          </span>
-        ) : null}
+        {!ro ? <AddMenu ar={ar} links={acts.map((a) => ({ href: a.href, ar: a.ar.replace(/^\+ /, ""), en: a.en.replace(/^\+ /, ""), id: a.id }))} onDone={(m) => { setFlash({ text: m }); reload(); setTick((t) => t + 1); }} /> : null}
       </div>
     </div>
   );
+
+  // «يومي الموحّد»: the tabs (never on a manager's read-only view of a rep's day); «مهامي» and «التقويم» are «مساحة عملي»'s
+  // own screens, shown in place.
+  const tabsBar = !ro ? <HubTabs tab={tab} ar={ar} /> : null;
+  if (!ro && tab !== "today") {
+    return (
+      <div className="pg">
+        <div className="md" data-testid="md-page" data-tab={tab}>
+          {flashBar}
+          {hello}
+          {tabsBar}
+          <div className="md-embed" data-testid={`md-embed-${tab}`}>{tab === "tasks" ? <WsTasksPage /> : <WsCalendarPage />}</div>
+          {/* «أنشطتي» lives here now: the follow-ups with customers, under the tasks. */}
+          {tab === "tasks" ? <div className="md-embed md-embed-acts" id="activities" data-testid="md-embed-activities"><ActivitiesPage /></div> : null}
+        </div>
+      </div>
+    );
+  }
 
   const quick = logFor && !ro ? (
     <HrRoot>
@@ -210,9 +230,11 @@ function MyDay() {
           {introBar}
           {flashBar}
           {hello}
+          {tabsBar}
           {empty ? <NoBookNotice lang={lang} /> : null}
           <TargetCard d={data} lang={lang} who={who} compact />
           <AttentionStrip d={data} lang={lang} ro={ro} />
+          {!ro ? <TodaySchedule ar={ar} reloadKey={tick} /> : null}
           <CallCard d={data} lang={lang} items={shown} total={listed} all={full} onAll={() => setAll((v) => !v)} ro={ro} empty={empty}
             filter={filter} onFilter={setFilter} onDone={openLog} onSnooze={snooze} phone />
           <DealsCard d={data} lang={lang} />
@@ -234,9 +256,11 @@ function MyDay() {
         {introBar}
         {flashBar}
         {hello}
+        {tabsBar}
         {empty ? <NoBookNotice lang={lang} /> : null}
         <TargetCard d={data} lang={lang} who={who} />
         <AttentionStrip d={data} lang={lang} ro={ro} />
+        {!ro ? <TodaySchedule ar={ar} reloadKey={tick} /> : null}
         <div className="md-grid2">
           <CallCard d={data} lang={lang} items={shown} total={listed} all={full} onAll={() => setAll((v) => !v)} ro={ro} empty={empty}
             filter={filter} onFilter={setFilter} onDone={openLog} onSnooze={snooze} />
@@ -279,7 +303,7 @@ function OverdueTasksLink({ lang }: { lang: Lang }) {
   const n = count.more ? `+${count.n}` : String(count.n);
   const ar = lang === "ar";
   return (
-    <Link className="md-pill bad md-overdue" href="/dashboard/workspace/tasks?due=overdue" data-testid="md-overdue-tasks">
+    <Link className="md-pill bad md-overdue" href="/dashboard/my-day?tab=tasks&due=overdue" data-testid="md-overdue-tasks">
       {ar ? <>{count.n === 1 && !count.more ? "عندك مهمة متأخرة" : count.n === 2 && !count.more ? "عندك مهمتين متأخرتين" : <>عندك <bdi className="num">{n}</bdi> {count.n <= 10 ? "مهام متأخرة" : "مهمة متأخرة"}</>} ←</> : <><bdi className="num">{n}</bdi> overdue {count.n === 1 ? "task" : "tasks"} →</>}
     </Link>
   );
