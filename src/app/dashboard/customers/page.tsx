@@ -17,6 +17,7 @@ import { useAccountantView } from "../accounting/_ui/qoyod-pages";
 import { canViewInvoices } from "@/lib/services/invoicing/access";
 import { customersScopedToOwner } from "@/lib/services/sales/scope";
 import { isSalesPersona } from "@/lib/workspace/landing";
+import { MyBookPanel, filterLabel, inFilter, isBookFilter, statusOf, useMyBook, type BookFilter } from "./_components/my-book";
 import "./customers.css";
 
 /**
@@ -101,6 +102,28 @@ export default function CustomersPage() {
     return () => { off = true; };
   }, [salesView]);
   const listUrl = view === "mine" ? "/api/customers?owner=me" : "/api/customers";
+  // «لوحة دفتري» (owner-approved Figma, 3 Nov 2026): the rep's own book — counts and tiers that filter the list (`?f=`).
+  const bookOn = salesView && scopedRep && view === "mine";
+  const myBook = useMyBook(bookOn);
+  const bookById = useMemo(() => new Map((myBook?.book ?? []).map((r) => [r.id, r])), [myBook]);
+  const [bookFilter, setBookFilterState] = useState<BookFilter | null>(null);
+  // `?f=` (from «يومي»'s «انتبه لعملائك» or a reload) is read once on the client; a filter link opens «عملائي» itself.
+  useEffect(() => {
+    const f = new URLSearchParams(window.location.search).get("f");
+    if (!isBookFilter(f)) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the address is only readable after mount
+    setBookFilterState(f);
+    if (viewPick === "book") setViewPickState("mine");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const setBookFilter = (f: BookFilter | null) => {
+    setBookFilterState(f);
+    try {
+      const u = new URL(window.location.href);
+      if (f) u.searchParams.set("f", f); else u.searchParams.delete("f");
+      window.history.replaceState(window.history.state, "", u.toString());
+    } catch { /* address unchanged */ }
+  };
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   // feat/credit-hold: the red badges («متجاوز حد الائتمان», «متأخر السداد …», «البيع موقوف», «مهلة سماح حتى …»).
@@ -336,7 +359,8 @@ export default function CustomersPage() {
   const filteredCustomers = useMemo(() => {
     const q = search.toLowerCase();
     const late = lateOnly && lateIds ? customers.filter((c) => lateIds.has(c.id)) : customers;
-    const base = noOwnerOnly ? late.filter((c) => !c.accountOwnerId) : late;
+    const owned = noOwnerOnly ? late.filter((c) => !c.accountOwnerId) : late;
+    const base = bookOn && bookFilter && myBook ? owned.filter((c) => { const r = bookById.get(c.id); return !!r && inFilter(r, bookFilter); }) : owned;
     if (!q) return base;
     return base.filter((c) =>
       c.name.toLowerCase().includes(q) ||
@@ -344,7 +368,7 @@ export default function CustomersPage() {
       (c.phone && c.phone.includes(q)) ||
       (c.email && c.email.toLowerCase().includes(q))
     );
-  }, [customers, search, lateOnly, lateIds, noOwnerOnly]);
+  }, [customers, search, lateOnly, lateIds, noOwnerOnly, bookOn, bookFilter, myBook, bookById]);
 
   // Beans not yet assigned a profile for this customer
   const availableBeans = useMemo(() => {
@@ -412,6 +436,20 @@ export default function CustomersPage() {
     </div>
   ) : null;
 
+  const bookChip = bookOn && bookFilter ? (
+    <button type="button" className="cu-book-active" onClick={() => setBookFilter(null)} data-testid="book-filter-clear"
+      aria-label={L(`إزالة الفلتر: ${filterLabel(bookFilter, true)}`, `Clear the filter: ${filterLabel(bookFilter, false)}`)}>
+      {L("الفلتر:", "Filter:")} <b>{filterLabel(bookFilter, ar)}</b> <span aria-hidden>✕</span>
+    </button>
+  ) : null;
+  const bookPanel = bookOn && myBook && myBook.book.length > 0 ? <MyBookPanel data={myBook} ar={ar} active={bookFilter} onPick={setBookFilter} /> : null;
+  const statusCell = (id: string) => {
+    const r = bookById.get(id);
+    if (!r) return <span className="sm">—</span>;
+    const s = statusOf(r, ar);
+    return <span className={`st ${s.tone}`} data-testid={`customer-status-${id}`}>{s.text}</span>;
+  };
+
   const lateCount = lateIds ? customers.filter((c) => lateIds.has(c.id)).length : 0;
   const lateChip = salesView && lateIds ? (
     <button type="button" className={`btn sm${lateOnly ? " p" : ""}`} aria-pressed={lateOnly} onClick={() => setLateOnly((v) => !v)} data-testid="customers-filter-late"
@@ -426,6 +464,11 @@ export default function CustomersPage() {
         <p style={{ fontWeight: 500 }}>{L("ما عندك عملاء معيّنين باسمك بعد.", "No customers are assigned to you yet.")}</p>
         <p className="lbl" style={{ fontWeight: 400 }}>{L("اطلب من المدير يعيّنك مسؤولًا عن عملائك، أو شوف «كل المتاح لي».", "Ask your manager to assign your customers to you, or open «All I can serve».")}</p>
         <button type="button" className="btn" style={{ marginTop: 12 }} onClick={() => setViewPick("book")}>{L("كل المتاح لي", "All I can serve")}</button>
+      </div>
+    ) : bookOn && bookFilter && !search && !lateOnly ? (
+      <div data-testid="customers-no-results" style={{ padding: "40px 0", textAlign: "center" }}>
+        <p>{L(`ما فيه عملاء في «${filterLabel(bookFilter, true)}» الحين.`, `No customers in «${filterLabel(bookFilter, false)}» right now.`)}</p>
+        <button type="button" className="btn" style={{ marginTop: 12 }} onClick={() => setBookFilter(null)}>{L("عرض كل عملائي", "Show all my customers")}</button>
       </div>
     ) : search || lateOnly ? (
       <div data-testid="customers-no-results" style={{ padding: "48px 0", textAlign: "center" }}>
@@ -606,6 +649,8 @@ export default function CustomersPage() {
             <>
               <div style={{ marginBottom: 10 }}><SectionPages className="cu-ctx" /></div>
               {viewTabs || lateChip || noOwnerChip ? <div style={{ marginBottom: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>{viewTabs}{lateChip}{noOwnerChip}</div> : null}
+              {bookPanel}
+              {bookChip ? <div style={{ marginBottom: 10 }}>{bookChip}</div> : null}
               <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>{searchBox}{addButton}</div>
               {assignBar}
               {empty ?? (
@@ -622,6 +667,7 @@ export default function CustomersPage() {
                         {!salesView && c._count.roastPreferences > 0 && <span>{num(c._count.roastPreferences)} {t("customerProfilesLabel")}</span>}
                         {c.whatsappOptOut && <span className="flag wa">{L("بلا واتساب", "No WhatsApp")}</span>}
                       </div>
+                      {bookOn && bookById.has(c.id) ? <div className="r2">{statusCell(c.id)}</div> : null}
                       {badges[c.id] && <div className="r2" data-testid={`customer-credit-${c.id}`}><CreditBadges ar={ar} s={badges[c.id]} compact /></div>}
                     </div>
                   ))}
@@ -645,8 +691,10 @@ export default function CustomersPage() {
                   {addButton}
                 </div>
               </div>
+              {bookPanel}
               <div className="tool" style={{ marginBottom: 8 }}>
                 {viewTabs}
+                {bookChip}
                 {lateChip}
                 {noOwnerChip}
                 {searchBox}
@@ -661,6 +709,7 @@ export default function CustomersPage() {
                       <tr>
                         {canAssign ? <th scope="col" style={{ width: 36 }}><input type="checkbox" checked={allPicked} onChange={toggleAll} aria-label={L("تحديد الكل", "Select all")} data-testid="pick-all-customers" /></th> : null}
                         <th scope="col">{L("العميل", "Customer")}</th>
+                        {bookOn && myBook ? <th scope="col">{L("الحالة", "Status")}</th> : null}
                         <th scope="col">{t("customerPhone")}</th>
                         <th scope="col" className="xl">{t("customerEmail")}</th>
                         <th scope="col" className="num">{L("الطلبات", "Orders")}</th>
@@ -686,6 +735,7 @@ export default function CustomersPage() {
                             {canAssign ? <span className="sm cu-namesub" data-testid={`customer-owner-${c.id}`}>{ownerName(c.accountOwnerId) ? L(`المندوب: ${ownerName(c.accountOwnerId)}`, `Rep: ${ownerName(c.accountOwnerId)}`) : L("بدون مندوب", "No rep")}</span> : null}
                             {badges[c.id] && <span className="cu-badges-cell" data-testid={`customer-credit-${c.id}`}><CreditBadges ar={ar} s={badges[c.id]} compact /></span>}
                           </td>
+                          {bookOn && myBook ? <td>{statusCell(c.id)}</td> : null}
                           <td>{c.phone ? <bdi dir="ltr" className="n">{c.phone}</bdi> : <span className="sm">—</span>}</td>
                           <td className="xl">{c.email ? <bdi dir="ltr" style={{ color: "var(--text-secondary)" }}>{c.email}</bdi> : <span className="sm">—</span>}</td>
                           <td className="num">{c._count.orders}</td>

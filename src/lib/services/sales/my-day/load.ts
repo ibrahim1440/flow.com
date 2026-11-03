@@ -174,6 +174,28 @@ export async function loadMyDay(db: Db, opts: {
     stopped: facts.filter((f) => f.reorder?.state === "INACTIVE").length,
   };
 
+  // ── «عملائي» as the rep's book (owner, 3 Nov 2026): ONE row per customer with the same facts as the cards above,
+  // so a number on «يومي» and the list it opens on «عملائي» are the same customers. One status per customer, by
+  // priority: متوقف → يتفاوض → نشط → بلا طلبات حديثة; growth / decline and a contract in the notice window are flags.
+  const contractDaysBy = new Map<string, number>();
+  for (const k of contracts.rows) {
+    const prev = contractDaysBy.get(k.customerId);
+    if (prev === undefined || k.daysLeft < prev) contractDaysBy.set(k.customerId, k.daysLeft);
+  }
+  const bookRowsOut = facts.map((f) => ({
+    id: f.id, name: f.name, nameAr: f.nameAr, phone: f.phone, city: f.city, tier: f.tier, kgPerMonth: f.kgPerMonth,
+    lastOrderAt: f.lastOrderAt ? f.lastOrderAt.toISOString() : null,
+    status: (f.reorder?.state === "INACTIVE" ? "STOPPED" : negotiatingCustomers.has(f.id) ? "NEGOTIATING" : f.active ? "ACTIVE" : "QUIET") as "STOPPED" | "NEGOTIATING" | "ACTIVE" | "QUIET",
+    growthPct: f.growth ? f.growth.pct : null,
+    growing: !!f.growth?.growing, declining: !!f.growth?.declining,
+    contractDaysLeft: contractDaysBy.get(f.id) ?? null,
+  }));
+  const bookCounts = {
+    growing: bookRowsOut.filter((b) => b.growing).length,
+    declining: bookRowsOut.filter((b) => b.declining).length,
+    contracts: bookRowsOut.filter((b) => b.contractDaysLeft !== null).length,
+  };
+
   // ── Target and commission (SAR, collections) ──
   const dealOwners = new Map<string, DealOwners>();
   for (const r of collectionRows) {
@@ -247,7 +269,8 @@ export async function loadMyDay(db: Db, opts: {
     openDeals: deals.length,
     growing,
     tiers: { totalKg: Math.round(totalKg * 10) / 10, groups: tierGroups, percentile: facts.filter((f) => f.kg90 > 0).length >= 8 },
-    counts,
+    counts: { ...counts, ...bookCounts },
+    book: bookRowsOut,
     contracts: contracts.rows.map((c) => ({ ...c, validUntil: c.validUntil.toISOString() })),
     contractWindowDays: contracts.within,
   };

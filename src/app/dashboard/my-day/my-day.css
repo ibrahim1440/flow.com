@@ -250,3 +250,18 @@
 .d21 .md-row3 > .md-card, .d21 .md-pair > .md-card { min-height: 200px }
 @media (max-width: 1279.98px) { .d21 .md-pair { grid-template-columns: minmax(0, 1fr) } }
 @media (max-width: 767.98px) { .d21 .md-row3 > .md-card, .d21 .md-pair > .md-card { min-height: 0 } }
+
+/* «انتبه لعملائك» (owner-approved Figma 160:107): one quiet line under the target band, each item a filtered link. */
+.d21 .md-attn { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; padding: 10px 14px; border-radius: 12px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-strong) }
+.d21 .md-attn-h { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14.5px; color: var(--text-primary); margin-inline-end: auto }
+.d21 .md-attn-h .ico { color: var(--status-warning) }
+.d21 .md-attn-items { display: flex; flex-wrap: wrap; gap: 8px }
+.d21 .md-attn-i { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 12px; border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--text-secondary); text-decoration: none; background: var(--surface-subtle) }
+.d21 .md-attn-i b { font-size: 14px }
+.d21 .md-attn-i.warn { background: var(--status-warning-tint) } .d21 .md-attn-i.warn b, .d21 .md-attn-i.warn > span { color: var(--status-warning) }
+.d21 .md-attn-i.bad { background: var(--status-danger-tint) } .d21 .md-attn-i.bad b, .d21 .md-attn-i.bad > span { color: var(--status-danger) }
+.d21 .md-attn-i.sig { background: var(--status-warning-tint) } .d21 .md-attn-i.sig b, .d21 .md-attn-i.sig > span { color: var(--md-signature-ink) }
+.d21 .md-attn-i.info { background: var(--status-info-tint) } .d21 .md-attn-i.info b, .d21 .md-attn-i.info > span { color: var(--status-info) }
+.d21 .md-attn-i:hover { text-decoration: underline; text-underline-offset: 3px }
+.d21 .md-attn-i:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }
+@media (max-width: 767.98px) { .d21 .md-attn-i { min-height: 44px } .d21 .md-attn-h { flex-basis: 100% } }

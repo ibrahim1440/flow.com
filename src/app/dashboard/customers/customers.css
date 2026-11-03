@@ -70,3 +70,45 @@
 .d21 a.cu-open { text-decoration: none }
 .d21 a.cu-open:hover { text-decoration: underline }
 [dir="rtl"] .d21 .cu-fwd, .d21[dir="rtl"] .cu-fwd { transform: scaleX(-1) }
+
+/* «لوحة دفتري» (owner-approved Figma «عملائي — لوحة دفتري», 3 Nov 2026). Tokens only. */
+.d21 .cu-book { display: grid; gap: 14px; margin: 0 0 16px }
+.d21 .cu-book-tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px }
+.d21 .cu-book-tile { display: grid; justify-items: center; gap: 2px; padding: 12px 8px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border-subtle); font: inherit; cursor: pointer; text-align: center; color: var(--text-primary); min-width: 0 }
+.d21 .cu-book-tile:hover { border-color: var(--border-strong) }
+.d21 .cu-book-tile:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }
+.d21 .cu-book-tile .lbl { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text-secondary) }
+.d21 .cu-book-tile .lbl i { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted) }
+.d21 .cu-book-tile b { font: 700 26px/1.2 var(--f-num) }
+.d21 .cu-book-tile small { font-size: 11.5px; color: var(--text-muted) }
+.d21 .cu-book-tile.ok .lbl i { background: var(--status-success) }
+.d21 .cu-book-tile.in .lbl i { background: var(--status-info) }
+.d21 .cu-book-tile.wa .lbl i { background: var(--status-warning) } .d21 .cu-book-tile.wa b { color: var(--status-warning) }
+.d21 .cu-book-tile.er .lbl i { background: var(--status-danger) } .d21 .cu-book-tile.er b { color: var(--status-danger) }
+.d21 .cu-book-tile.sig .lbl i { background: var(--brand-signature) } .d21 .cu-book-tile.sig b { color: #935a29 }
+.d21 .cu-book-tile.on { border: 2px solid var(--action-primary); background: var(--action-primary-tint) }
+.d21 .cu-book-tile.wa.on { border-color: var(--status-warning); background: var(--status-warning-tint) }
+.d21 .cu-book-tile.er.on { border-color: var(--status-danger); background: var(--status-danger-tint) }
+.d21 .cu-book-tiers { display: grid; gap: 10px; padding: 12px 16px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border-subtle) }
+.d21 .cu-book-tiers-h { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: baseline }
+.d21 .cu-book-tiers-h b { font-size: 14.5px }
+.d21 .cu-book-tiers-h span { font-size: 12px; color: var(--text-muted) }
+.d21 .cu-book-bar { display: flex; gap: 3px; height: 12px; border-radius: 999px; overflow: hidden; background: var(--border-subtle) }
+.d21 .cu-book-bar > span.vip, .d21 .cu-book-chip i.vip { background: var(--brand-signature) }
+.d21 .cu-book-bar > span.reg, .d21 .cu-book-chip i.reg { background: var(--action-primary) }
+.d21 .cu-book-bar > span.small, .d21 .cu-book-chip i.small { background: var(--chart-3) }
+.d21 .cu-book-bar > span.quiet, .d21 .cu-book-chip i.quiet { background: var(--border-strong) }
+.d21 .cu-book-tierchips { display: flex; flex-wrap: wrap; gap: 8px }
+.d21 .cu-book-chip { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; border-radius: 9px; background: var(--surface-subtle); border: 1px solid var(--border-subtle); font: inherit; font-size: 13px; cursor: pointer; color: var(--text-primary) }
+.d21 .cu-book-chip i { width: 10px; height: 10px; border-radius: 3px; display: inline-block }
+.d21 .cu-book-chip span { color: var(--text-muted) }
+.d21 .cu-book-chip.on { border: 2px solid var(--action-primary); background: var(--action-primary-tint) }
+.d21 .cu-book-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }
+.d21 .cu-book-active { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border-radius: 999px; border: 0; background: var(--status-warning-tint); color: var(--status-warning); font: inherit; font-size: 13px; cursor: pointer }
+.d21 .cu-book-active b { font-weight: 700 }
+@media (max-width: 1279.98px) { .d21 .cu-book-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)) } }
+@media (max-width: 767.98px) {
+  .d21 .cu-book-tiles { gap: 8px }
+  .d21 .cu-book-tile { padding: 8px 4px } .d21 .cu-book-tile small { display: none } .d21 .cu-book-tile b { font-size: 20px }
+  .d21 .cu-book-chip, .d21 .cu-book-active { min-height: 44px }
+}

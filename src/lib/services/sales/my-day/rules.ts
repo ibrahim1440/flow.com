@@ -144,7 +144,13 @@ export function classifyTiers(book: { id: string; kg90: number }[], s: MyDaySett
 
 // ─── Growth («ينمون معك») ───────────────────────────────────────────────────────────────────
 
-export type Growth = { lastKg: number; prevKg: number; pct: number; perMonthUp: number; growing: boolean } | null;
+export type Growth = { lastKg: number; prevKg: number; pct: number; perMonthUp: number; growing: boolean; declining: boolean } | null;
+
+/**
+ * «يتراجع» (owner, 3 Nov 2026): the mirror of «ينمو» on the same evidence (≥ 2 business orders in each window) — down
+ * by at least this many percent AND by at least `growthMinKgMonth` kg/month, so one small customer's dip is not a trend.
+ */
+export const DECLINE_MIN_PCT = 25;
 
 /**
  * The last 3 FULL Riyadh months against the 3 before them. Shown only with ≥ 2 business orders in each window (else
@@ -160,6 +166,7 @@ export function growthOf(orders: OrderRow[], now: Date, s: MyDaySettings): Growt
   return {
     lastKg: last.kg, prevKg: prev.kg, pct: Math.round(pct * 10) / 10, perMonthUp: Math.round(perMonthUp * 10) / 10,
     growing: pct >= s.growthMinPct && perMonthUp >= s.growthMinKgMonth,
+    declining: pct <= -DECLINE_MIN_PCT && -perMonthUp >= s.growthMinKgMonth,
   };
 }
 

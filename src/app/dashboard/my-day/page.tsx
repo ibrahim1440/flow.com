@@ -43,7 +43,7 @@ type Day = {
   openDeals: number;
   growing: { id: string; name: string; nameAr: string | null; pct: number; lastKg: number; prevKg: number }[];
   tiers: { totalKg: number; percentile: boolean; groups: { tier: Tier; count: number; kg: number; share: number; customers: { id: string; name: string; nameAr: string | null; kgPerMonth: number; share: number }[] }[] };
-  counts: { total: number; active: number; negotiating: number; stopped: number };
+  counts: { total: number; active: number; negotiating: number; stopped: number; growing?: number; declining?: number; contracts?: number };
   contracts: { customerId: string; customerName: string; fileId: string; title: string; validUntil: string; daysLeft: number }[];
   contractWindowDays?: number;
 };
@@ -212,6 +212,7 @@ function MyDay() {
           {hello}
           {empty ? <NoBookNotice lang={lang} /> : null}
           <TargetCard d={data} lang={lang} who={who} compact />
+          <AttentionStrip d={data} lang={lang} ro={ro} />
           <CallCard d={data} lang={lang} items={shown} total={listed} all={full} onAll={() => setAll((v) => !v)} ro={ro} empty={empty}
             filter={filter} onFilter={setFilter} onDone={openLog} onSnooze={snooze} phone />
           <DealsCard d={data} lang={lang} />
@@ -235,6 +236,7 @@ function MyDay() {
         {hello}
         {empty ? <NoBookNotice lang={lang} /> : null}
         <TargetCard d={data} lang={lang} who={who} />
+        <AttentionStrip d={data} lang={lang} ro={ro} />
         <div className="md-grid2">
           <CallCard d={data} lang={lang} items={shown} total={listed} all={full} onAll={() => setAll((v) => !v)} ro={ro} empty={empty}
             filter={filter} onFilter={setFilter} onDone={openLog} onSnooze={snooze} />
@@ -309,6 +311,37 @@ function summaryOf(list: CallItem[]): { tone: "bad" | "warn" | "info" | "pri"; a
 function Initial({ name }: { name: string }) {
   const ch = Array.from(name.replace(/^(مقهى|مقهي|شركة|مؤسسة|محامص|محمصة|مطعم|مطاعم|سلسلة)\s+/, "").trim().replace(/^ال(?=\S{2})/, ""))[0] ?? "؟";
   return <span className="md-av" aria-hidden>{ch}</span>;
+}
+
+/**
+ * «انتبه لعملائك» (owner-approved Figma 160:107, 3 Nov 2026): what in the book needs attention, each a link to «عملائي»
+ * already filtered (`?f=`) — the same customers the counts are made of. Shown only when there is something.
+ */
+function AttentionStrip({ d, lang, ro }: { d: Day; lang: Lang; ro: boolean }) {
+  const ar = lang === "ar";
+  if (ro) return null;
+  const c = d.counts;
+  const soonest = d.contracts.length ? Math.min(...d.contracts.map((k) => k.daysLeft)) : null;
+  const items = [
+    c.stopped ? { f: "stopped", tone: "warn", n: c.stopped, ar: "متوقفين", en: "Stopped" } : null,
+    c.declining ? { f: "declining", tone: "bad", n: c.declining, ar: "يتراجعون", en: "Declining" } : null,
+    c.contracts ? { f: "contracts", tone: "sig", n: c.contracts, ar: soonest !== null && soonest >= 0 ? `عقد ينتهي بعد ${days(soonest, "ar")}` : "عقود قريبة تنتهي", en: "Contracts ending soon" } : null,
+  ].filter((x): x is NonNullable<typeof x> => x !== null);
+  const deals = d.openDeals;
+  if (!items.length && !deals) return null;
+  return (
+    <nav className="md-attn" aria-label={ar ? "انتبه لعملائك" : "Mind your customers"} data-testid="md-attention">
+      <span className="md-attn-h"><Ico name="bell" small />{ar ? "انتبه لعملائك" : "Mind your customers"}</span>
+      <span className="md-attn-items">
+        {items.map((x) => (
+          <Link key={x.f} className={`md-attn-i ${x.tone}`} href={`/dashboard/customers?f=${x.f}`} data-testid={`md-attn-${x.f}`}>
+            <b className="num">{n(x.n)}</b> {ar ? x.ar : x.en} <span aria-hidden>‹</span>
+          </Link>
+        ))}
+        {deals ? <Link className="md-attn-i info" href="/dashboard/sales/pipeline" data-testid="md-attn-deals"><b className="num">{n(deals)}</b> {ar ? "صفقات مفتوحة" : "Open deals"} <span aria-hidden>‹</span></Link> : null}
+      </span>
+    </nav>
+  );
 }
 
 // ── Cards ────────────────────────────────────────────────────────────────────────────────────
