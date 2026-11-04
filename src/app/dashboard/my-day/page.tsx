@@ -44,7 +44,9 @@ type Day = {
     commissionVisible: boolean; accrued: string | null; estimate: string | null; estimateDiscretionary: boolean; hasPlan: boolean;
   };
   callList: CallItem[];
-  deals: { id: string; title: string; amount: string; customerId: string | null; customerName: string | null; customerNameAr: string | null; stageAr: string; stageEn: string }[];
+  deals: { id: string; title: string; amount: string; customerId: string | null; customerName: string | null; customerNameAr: string | null; stageAr: string; stageEn: string;
+    /** Pipeline v2: what the deal page says is required now, and its one action (server-computed). */
+    requiredNow?: { key: string; ar: string; en: string } | null; nextAction?: { key: string; ar: string; en: string; quoteId: string | null } | null }[];
   openDeals: number;
   growing: { id: string; name: string; nameAr: string | null; pct: number; lastKg: number; prevKg: number }[];
   tiers: { totalKg: number; percentile: boolean; groups: { tier: Tier; count: number; kg: number; share: number; customers: { id: string; name: string; nameAr: string | null; kgPerMonth: number; share: number }[] }[] };
@@ -585,12 +587,12 @@ function CallCard({ d, lang, items, total, all, onAll, ro, empty, filter, onFilt
 function DealsCard({ d, lang }: { d: Day; lang: Lang }) {
   const ar = lang === "ar";
   return (
-    <Card title={ar ? "صفقات في التفاوض" : "Deals in negotiation"} testId="md-deals" link={<Link className="lk" href="/dashboard/sales/pipeline">{ar ? "صفقاتي" : "My deals"}</Link>}>
+    <Card title={ar ? "صفقات في عرض السعر والتفاوض" : "Deals in quotation & negotiation"} testId="md-deals" link={<Link className="lk" href="/dashboard/sales/pipeline">{ar ? "صفقاتي" : "My deals"}</Link>}>
       {d.deals.length === 0
-        ? <Empty action={<Link className="btn sm" href="/dashboard/sales/quotes/new">{ar ? "عرض سعر جديد" : "New quotation"}</Link>}>{ar ? "ما عندك صفقات في التفاوض الحين. أرسل عرض سعر لعميل مهتم وتطلع هنا." : "No deals in negotiation. Send a quotation to an interested customer."}</Empty>
+        ? <Empty action={<Link className="btn sm" href="/dashboard/sales/quotes/new">{ar ? "عرض سعر جديد" : "New quotation"}</Link>}>{ar ? "ما عندك صفقات في عرض السعر والتفاوض الحين. أرسل عرض سعر لعميل مهتم وتطلع هنا." : "No deals in quotation & negotiation. Send a quotation to an interested customer."}</Empty>
         : d.deals.slice(0, 6).map((x) => (
           <div className="md-mini" key={x.id} data-testid="md-deal">
-            <Link href={`/dashboard/sales/deals/${x.id}`}><bdi>{x.customerName ? (ar ? x.customerNameAr || x.customerName : x.customerName) : x.title}</bdi> <span className="sub">· {ar ? x.stageAr : x.stageEn}</span></Link>
+            <Link href={`/dashboard/sales/deals/${x.id}`}><bdi>{x.customerName ? (ar ? x.customerNameAr || x.customerName : x.customerName) : x.title}</bdi> <span className="sub" data-testid="md-deal-required">· {x.requiredNow ? (ar ? x.requiredNow.ar : x.requiredNow.en) : (ar ? x.stageAr : x.stageEn)}</span></Link>
             <span className="num">{n(x.amount)} <span className="sub">{ar ? "ريال" : "SAR"}</span></span>
           </div>
         ))}

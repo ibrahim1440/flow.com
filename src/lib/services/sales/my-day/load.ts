@@ -22,13 +22,20 @@ import { kgBetween, riyadhMonthStartAt, settingsFrom, classifyTiers, customerFac
   estimateAtTarget, daysLeftInMonth, DAY, TIER_WINDOW_DAYS,
   type BookCustomer, type DealRow, type SampleRow, type PlanForEstimate, type Tier, type MyDaySettings } from "./rules";
 import type { OrderRow } from "@/lib/services/customers/aggregates";
+import { dealNextStep } from "../next-step";
+import type { StagePurpose } from "../stages";
+import { discountApprovalState } from "../quotes";
+import { DISCOUNT_APPROVAL_THRESHOLD } from "../discount-limits";
+import { sampleApprovalState } from "../sample-rules";
 
 type Db = Pick<PrismaClient, "$queryRaw">;
 
 /** The contacts that count as «تواصل» (a completed one, and not «لا رد» / a bare note). */
 export const CONTACT_ACTIVITY_TYPES = ["CALL", "VISIT", "MEETING", "WHATSAPP", "EMAIL"] as const;
 /** Stage purposes the «صفقات في التفاوض» card shows. */
-export const NEGOTIATING_PURPOSES = ["NEGOTIATION", "QUOTATION"] as const;
+// Pipeline v2: «صفقات في عرض السعر والتفاوض» — the QUOTATION stage; the legacy NEGOTIATION is kept harmlessly until
+// migration 20261217090000_pipeline_v2 has run everywhere (it retires that purpose). Also feeds BookRow «يتفاوض».
+export const NEGOTIATING_PURPOSES = ["QUOTATION", "NEGOTIATION"] as const;
 export const CONTRACT_WINDOW_DAYS = 45;
 
 const dec = (v: unknown) => (v === null || v === undefined ? ZERO : new Decimal(String(v)));
@@ -54,7 +61,8 @@ export async function loadMyDay(db: Db, opts: {
       period: { planVersionId: string; qualifiedBase: string } | null }[]>`
       SELECT
         (SELECT row_to_json(x) FROM (SELECT "tierVipTopPct", "tierVipMinKgMonth", "tierSmallMaxKgMonth", "growthMinPct", "growthMinKgMonth",
-                "contactDaysVip", "contactDaysRegular", "contactDaysSmall", "contactDaysNew", "reorderLateFactor", "reorderInactiveFactor", "callAwaitDays"
+                "contactDaysVip", "contactDaysRegular", "contactDaysSmall", "contactDaysNew", "reorderLateFactor", "reorderInactiveFactor", "callAwaitDays",
+                "quoteDiscountApprovalPercent"
            FROM "SystemConfig" WHERE "id" = 'singleton') x) AS config,
         (SELECT json_build_object('id', e."id", 'name', e."name") FROM "Employee" e WHERE e."id" = ${owner}) AS rep,
         (SELECT json_agg(json_build_object('periodStart', t."periodStart", 'amount', t."targetAmount"))
@@ -90,13 +98,30 @@ export async function loadMyDay(db: Db, opts: {
     // 3 ── deals (kind DEAL) and samples without feedback (kind SAMPLE), the rep's own deals only
     db.$queryRaw<{ kind: "DEAL" | "SAMPLE"; id: string; dealId: string; title: string; amount: unknown; customerId: string | null;
       customerName: string | null; customerNameAr: string | null; customerPhone: string | null; nextFollowUpAt: Date | null;
-      purpose: string | null; stageAr: string | null; stageEn: string | null; sentAt: Date | null }[]>`
+      purpose: string | null; stageAr: string | null; stageEn: string | null; sentAt: Date | null;
+      stageCode: string | null; businessType: string | null; needSummary: string | null; agreedNextStep: string | null;
+      quote: { id: string; status: string; revision: number; issuedAt: string | null; validUntil: string | null; subtotal: string; discountTotal: string;
+        discountApprovedById: string | null; discountApprovedPercent: string | null; discountRejectedAt: string | null; orderLinks: number } | null;
+      liveSamples: { id: string; status: string; fromStock: boolean; approvalRequired: boolean; approvedAt: string | null; declinedAt: string | null; sentAt: string | null }[] | null }[]>`
       SELECT 'DEAL' AS kind, o."id", o."id" AS "dealId", o."title", o."amount", o."customerId", c."name" AS "customerName", c."nameAr" AS "customerNameAr",
-             c."phone" AS "customerPhone", o."nextFollowUpAt", st."purpose"::text AS purpose, st."nameAr" AS "stageAr", st."nameEn" AS "stageEn", NULL::timestamp AS "sentAt"
+             c."phone" AS "customerPhone", o."nextFollowUpAt", st."purpose"::text AS purpose, st."nameAr" AS "stageAr", st."nameEn" AS "stageEn", NULL::timestamp AS "sentAt",
+             -- Pipeline v2: what the next-step engine needs, in the SAME round trip (the deal's current quotation and its
+             -- live samples), so «صفقات في عرض السعر والتفاوض» says what is required now, as the deal page does.
+             st."code" AS "stageCode", o."businessType", o."needSummary", o."agreedNextStep",
+             (SELECT json_build_object('id', q."id", 'status', q."status", 'revision', q."revision", 'issuedAt', q."issuedAt", 'validUntil', q."validUntil",
+                       'subtotal', q."subtotal", 'discountTotal', q."discountTotal", 'discountApprovedById', q."discountApprovedById",
+                       'discountApprovedPercent', q."discountApprovedPercent", 'discountRejectedAt', q."discountRejectedAt",
+                       'orderLinks', (SELECT count(*) FROM "OpportunityOrder" ol WHERE ol."quoteId" = q."id"))
+                FROM "Quote" q WHERE q."opportunityId" = o."id" AND q."status"::text <> 'SUPERSEDED'
+               ORDER BY (q."status"::text = 'ACCEPTED') DESC, q."revision" DESC, q."createdAt" DESC LIMIT 1) AS "quote",
+             (SELECT json_agg(json_build_object('id', x."id", 'status', x."status", 'fromStock', x."fromStock", 'approvalRequired', x."approvalRequired",
+                       'approvedAt', x."approvedAt", 'declinedAt', x."declinedAt", 'sentAt', x."sentAt"))
+                FROM "SampleShipment" x WHERE x."opportunityId" = o."id" AND x."status"::text <> 'CANCELLED') AS "liveSamples"
         FROM "Opportunity" o JOIN "PipelineStage" st ON st."id" = o."stageId" LEFT JOIN "Customer" c ON c."id" = o."customerId"
        WHERE o."ownerId" = ${owner} AND o."outcome"::text = 'OPEN'
       UNION ALL
-      SELECT 'SAMPLE', s."id", s."opportunityId", s."description", NULL, o."customerId", c."name", c."nameAr", c."phone", NULL, NULL, NULL, NULL, s."sentAt"
+      SELECT 'SAMPLE', s."id", s."opportunityId", s."description", NULL, o."customerId", c."name", c."nameAr", c."phone", NULL, NULL, NULL, NULL, s."sentAt",
+             NULL, NULL, NULL, NULL, NULL::json, NULL::json
         FROM "SampleShipment" s JOIN "Opportunity" o ON o."id" = s."opportunityId" LEFT JOIN "Customer" c ON c."id" = o."customerId"
        WHERE o."ownerId" = ${owner} AND s."status"::text = 'SENT' AND s."feedbackAt" IS NULL AND s."sentAt" IS NOT NULL`,
     // 4 ── collections (12 months) on deals the rep owns or shares, attributed below exactly as the targets screen does
@@ -117,6 +142,9 @@ export async function loadMyDay(db: Db, opts: {
   ]);
 
   const meta = metaRows[0];
+  // The discount-approval threshold, from the same settings row (no extra round trip): the stored one, else the built-in.
+  const storedThreshold = (meta?.config as { quoteDiscountApprovalPercent?: unknown } | null)?.quoteDiscountApprovalPercent;
+  const threshold = new Decimal(storedThreshold === null || storedThreshold === undefined ? DISCOUNT_APPROVAL_THRESHOLD : String(storedThreshold));
   const settings: MyDaySettings = settingsFrom(meta?.config as never);
   const factors = factorsFrom((meta?.config ?? null) as never);
 
@@ -139,6 +167,15 @@ export async function loadMyDay(db: Db, opts: {
     id: d.id, title: d.title, amount: roundMoney(dec(d.amount)).toFixed(2), customerId: d.customerId, customerName: d.customerName,
     customerNameAr: d.customerNameAr, customerPhone: d.customerPhone, nextFollowUpAt: d.nextFollowUpAt, purpose: d.purpose,
     stageAr: d.stageAr ?? "", stageEn: d.stageEn ?? "",
+    nextStep: dealNextStep({
+      outcome: "OPEN", hasCustomer: !!d.customerId, stagePurpose: d.purpose as StagePurpose | null, stageCode: d.stageCode ?? "",
+      businessType: d.businessType, needSummary: d.needSummary, agreedNextStep: d.agreedNextStep,
+      samples: (d.liveSamples ?? []).map((x) => ({ id: x.id, status: x.status, fromStock: x.fromStock, approval: sampleApprovalState(x), sentAt: x.sentAt })),
+      quotes: d.quote ? [{
+        id: d.quote.id, status: d.quote.status, revision: d.quote.revision, issuedAt: d.quote.issuedAt, validUntil: d.quote.validUntil,
+        orderLinks: Number(d.quote.orderLinks), discountApproval: discountApprovalState({ ...d.quote, subtotal: d.quote.subtotal ?? "0", discountTotal: d.quote.discountTotal ?? "0" }, threshold),
+      }] : [],
+    }, now),
   }));
   const samples: SampleRow[] = dealRows.filter((d) => d.kind === "SAMPLE" && d.sentAt).map((d) => ({
     id: d.id, dealId: d.dealId, customerId: d.customerId, sentAt: d.sentAt!, description: d.title,
@@ -265,7 +302,10 @@ export async function loadMyDay(db: Db, opts: {
       hasPlan: !!plan,
     },
     callList: callList.map((c) => ({ ...c })),
-    deals: negotiating.map((d) => ({ id: d.id, title: d.title, amount: d.amount, customerId: d.customerId, customerName: d.customerName, customerNameAr: d.customerNameAr, stageAr: d.stageAr, stageEn: d.stageEn, purpose: d.purpose })),
+    deals: negotiating.map((d) => ({ id: d.id, title: d.title, amount: d.amount, customerId: d.customerId, customerName: d.customerName, customerNameAr: d.customerNameAr, stageAr: d.stageAr, stageEn: d.stageEn, purpose: d.purpose,
+      // Pipeline v2: the card says what is required now and the one action (the deal page's own `nextStep`).
+      quoteState: d.nextStep?.quoteState ?? null, quoteStateLabel: d.nextStep?.quoteStateLabel ?? null,
+      requiredNow: d.nextStep?.requiredNow[0] ?? null, nextAction: d.nextStep?.nextAction ? { key: d.nextStep.nextAction.key, ar: d.nextStep.nextAction.ar, en: d.nextStep.nextAction.en, quoteId: d.nextStep.nextAction.quoteId ?? null } : null })),
     openDeals: deals.length,
     growing,
     tiers: { totalKg: Math.round(totalKg * 10) / 10, groups: tierGroups, percentile: facts.filter((f) => f.kg90 > 0).length >= 8 },

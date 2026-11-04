@@ -2,12 +2,15 @@
 // Used by scripts/sales/align-pipeline-stages.ts (dry run by default); documented, with what the
 // owner approves first, in docs/sales/PIPELINE_STAGES.md.
 //
-// ── The approved pipeline ──
-//   1. Qualified Opportunity «فرصة مؤهلة»            purpose QUALIFICATION   (needs analysis is a detail of it)
-//   2. Sample Evaluation «تجربة وتقييم العينات»       purpose SAMPLE_EVALUATION (skippable, with a documented reason)
-//   3. Quotation «عرض السعر»                         purpose QUOTATION
-//   4. Negotiation & Approval «التفاوض والاعتماد»    purpose NEGOTIATION
-//   5. Closed «مغلقة» → Won «رابحة» / Lost «خاسرة»   the deal's OUTCOME, not a stage
+// ── The approved pipeline (pipeline v2, 20261217090000_pipeline_v2) ──
+//   1. Qualified Opportunity «فرصة مؤهلة»                 purpose QUALIFICATION   (needs analysis is a detail of it)
+//   2. Sample Evaluation «تجربة وتقييم العينات»            purpose SAMPLE_EVALUATION (skippable in one click, with a reason)
+//   3. Quotation & negotiation «عرض السعر والتفاوض»       purpose QUOTATION       (PROPOSAL and NEGOTIATION merged)
+//   4. Closed «مغلقة» → Won «رابحة» / Lost «خاسرة»        the deal's OUTCOME, not a stage
+//
+// A Negotiation / Approval column («التفاوض والاعتماد», legacy purpose NEGOTIATION) is never re-activated or created:
+// it is retired like a Closing column when it holds no open deal, and otherwise reported — "move them, then re-run".
+// This script never moves deals; the migration does.
 //
 // ── What "without destroying anything" means here ──
 // A stage is referenced by every deal in it and by every OpportunityStageEvent that ever named
@@ -17,7 +20,7 @@
 // pipeline needs and nothing matches is created. A redundant «Closing» column (closing is an
 // outcome) is retired only when no open deal sits in it — otherwise it is reported and left alone,
 // because retiring it would hide those deals. Anything else that matches nothing is kept active,
-// placed after the approved four, and reported for the owner to decide.
+// placed after the approved three, and reported for the owner to decide.
 //
 // The planner is pure (asserted in tests/sales/unit); `applyAlignment` writes a plan in one
 // transaction and is idempotent — a second run plans no change.
@@ -40,7 +43,7 @@ export type StageRow = {
 };
 
 export type ApprovedStage = {
-  slot: "QUALIFIED" | "SAMPLES" | "QUOTATION" | "NEGOTIATION";
+  slot: "QUALIFIED" | "SAMPLES" | "QUOTATION";
   purpose: StagePurpose;
   nameEn: string;
   nameAr: string;
@@ -58,14 +61,20 @@ export const APPROVED_STAGES: readonly ApprovedStage[] = [
     match: /QUAL|LEAD|DISCOVER|NEEDS|تأهيل|مؤهل|احتياج/i },
   { slot: "SAMPLES", purpose: "SAMPLE_EVALUATION", nameEn: "Sample Evaluation", nameAr: "تجربة وتقييم العينات", position: 20, probability: 35, code: "SAMPLE_EVALUATION",
     match: /SAMPLE|TRIAL|TASTING|عي[ّ]?ن|تجرب|تذوق/i },
-  { slot: "QUOTATION", purpose: "QUOTATION", nameEn: "Quotation", nameAr: "عرض السعر", position: 30, probability: 50, code: "QUOTATION",
-    match: /QUOT|PROPOSAL|OFFER|عرض/i },
-  { slot: "NEGOTIATION", purpose: "NEGOTIATION", nameEn: "Negotiation & Approval", nameAr: "التفاوض والاعتماد", position: 40, probability: 75, code: "NEGOTIATION",
-    match: /NEGO|APPROV|تفاوض|اعتماد/i },
+  // The merged stage: a «عرض السعر والتفاوض» name matches here too. A stage that reads ONLY as negotiation is not taken
+  // for it while a quotation-named one exists (`QUOTATION_FIRST`), so the retired column is never the one chosen.
+  { slot: "QUOTATION", purpose: "QUOTATION", nameEn: "Quotation & negotiation", nameAr: "عرض السعر والتفاوض", position: 30, probability: 50, code: "QUOTATION",
+    match: /QUOT|PROPOSAL|OFFER|عرض|NEGO|تفاوض/i },
 ];
+
+/** Quotation-named stages are preferred for the QUOTATION slot over negotiation-only ones. */
+const QUOTATION_FIRST = /QUOT|PROPOSAL|OFFER|عرض/i;
 
 /** A «Closing» / «Won» / «Lost» column: redundant, because closing is the deal's outcome. */
 export const CLOSING_MATCH = /CLOS|WON|LOST|إغلاق|اغلاق|مغلق|رابح|خاسر/i;
+
+/** A Negotiation / Approval column — merged into the quotation stage by pipeline v2, so retired, never re-activated. */
+export const NEGOTIATION_MATCH = /NEGO|APPROV|تفاوض|اعتماد/i;
 
 const matches = (re: RegExp, s: StageRow) => re.test(s.code) || re.test(s.nameEn) || re.test(s.nameAr);
 
@@ -87,9 +96,9 @@ export type AlignmentPlan = {
     /** Set when matchedBy is "create". */
     create?: { code: string; nameEn: string; nameAr: string; position: number; probability: number; purpose: StagePurpose };
   }[];
-  /** Redundant closing columns: retired when empty, otherwise reported. */
-  closing: { stageId: string; code: string; openDeals: number; action: "DEACTIVATE" | "KEEP_HAS_OPEN_DEALS" | "ALREADY_INACTIVE"; changes: StageChanges }[];
-  /** Stages that match nothing: kept as they are (active ones re-placed after the approved four). */
+  /** Redundant closing columns, and (pipeline v2) the retired Negotiation column: retired when empty, otherwise reported. */
+  closing: { stageId: string; code: string; openDeals: number; action: "DEACTIVATE" | "KEEP_HAS_OPEN_DEALS" | "ALREADY_INACTIVE"; changes: StageChanges; kind?: "CLOSING" | "NEGOTIATION" }[];
+  /** Stages that match nothing: kept as they are (active ones re-placed after the approved three). */
   extras: { stageId: string; code: string; nameAr: string; isActive: boolean; openDeals: number; changes: StageChanges }[];
   /** Number of rows the plan writes (updates + creations). Zero on an aligned pipeline. */
   writes: number;
@@ -119,6 +128,9 @@ export function planAlignment(rows: readonly StageRow[], opts: { createCodePrefi
   const used = new Set<string>();
   const codes = new Set(stages.map((s) => s.code));
   const closingIds = new Set(stages.filter((s) => s.purpose === null && matches(CLOSING_MATCH, s)).map((s) => s.id));
+  // Pipeline v2: the legacy NEGOTIATION holder, and a purpose-less column that reads only as negotiation, are retired.
+  const negotiationIds = new Set(stages.filter((s) =>
+    s.purpose === "NEGOTIATION" || (s.purpose === null && matches(NEGOTIATION_MATCH, s) && !matches(QUOTATION_FIRST, s))).map((s) => s.id));
 
   const mapping: AlignmentPlan["mapping"] = [];
   const picked = new Map<string, { stage: StageRow; by: "purpose" | "name" }>();
@@ -128,7 +140,7 @@ export function planAlignment(rows: readonly StageRow[], opts: { createCodePrefi
   }
   for (const t of APPROVED_STAGES) {
     if (picked.has(t.slot)) continue;
-    const candidates = stages.filter((s) => !used.has(s.id) && !closingIds.has(s.id) && s.purpose === null && matches(t.match, s));
+    const candidates = stages.filter((s) => !used.has(s.id) && !closingIds.has(s.id) && !negotiationIds.has(s.id) && s.purpose === null && matches(t.match, s));
     const best = candidates.find((s) => s.isActive) ?? candidates[0];
     if (best) { picked.set(t.slot, { stage: best, by: "name" }); used.add(best.id); }
   }
@@ -153,14 +165,14 @@ export function planAlignment(rows: readonly StageRow[], opts: { createCodePrefi
     }
   }
 
-  // Everything else keeps its row. Active leftovers go after the approved four, in their current
+  // Everything else keeps its row. Active leftovers go after the approved three, in their current
   // order, so the board reads the approved pipeline first; inactive ones are not touched. A
   // leftover holding a purpose cannot exist (each purpose's holder was matched above).
-  let next = 50;
+  let next = 40; // after the approved three (10, 20, 30)
   const extras: AlignmentPlan["extras"] = [];
   const closing: AlignmentPlan["closing"] = [];
   for (const s of stages) {
-    if (used.has(s.id) || closingIds.has(s.id)) continue;
+    if (used.has(s.id) || closingIds.has(s.id) || negotiationIds.has(s.id)) continue;
     const changes = s.isActive ? diff(s, { position: next }) : {};
     if (s.isActive) next += 10;
     if (Object.keys(changes).length) writes++;
@@ -175,7 +187,23 @@ export function planAlignment(rows: readonly StageRow[], opts: { createCodePrefi
     const changes = diff(s, retire ? { isActive: false } : { position: next });
     if (!retire) next += 10;
     if (Object.keys(changes).length) writes++;
-    closing.push({ stageId: s.id, code: s.code, openDeals: s.openDeals, action: s.openDeals === 0 ? "DEACTIVATE" : "KEEP_HAS_OPEN_DEALS", changes });
+    closing.push({ stageId: s.id, code: s.code, openDeals: s.openDeals, action: s.openDeals === 0 ? "DEACTIVATE" : "KEEP_HAS_OPEN_DEALS", changes, kind: "CLOSING" });
+  }
+  // The retired Negotiation column: never re-activated (an inactive one stays inactive), its purpose cleared when it
+  // is retired; one still holding open deals keeps everything and is reported for the migration / the owner.
+  for (const s of stages) {
+    if (!negotiationIds.has(s.id) || used.has(s.id)) continue;
+    if (!s.isActive) {
+      const changes = s.purpose ? diff(s, { purpose: null }) : {};
+      if (Object.keys(changes).length) writes++;
+      closing.push({ stageId: s.id, code: s.code, openDeals: s.openDeals, action: "ALREADY_INACTIVE", changes, kind: "NEGOTIATION" });
+      continue;
+    }
+    const retire = s.openDeals === 0;
+    const changes = retire ? diff(s, { isActive: false, purpose: null }) : diff(s, { position: next });
+    if (!retire) next += 10;
+    if (Object.keys(changes).length) writes++;
+    closing.push({ stageId: s.id, code: s.code, openDeals: s.openDeals, action: retire ? "DEACTIVATE" : "KEEP_HAS_OPEN_DEALS", changes, kind: "NEGOTIATION" });
   }
 
   return { mapping, closing, extras, writes };
@@ -226,11 +254,16 @@ export async function applyAlignment(tx: Tx, plan: AlignmentPlan): Promise<{ upd
     }
   }
   for (const c of plan.closing) {
-    if (c.action === "ALREADY_INACTIVE") continue;
+    if (c.action === "ALREADY_INACTIVE") {
+      // Only ever clearing a retired Negotiation column's purpose — never re-activating it.
+      const data = Object.fromEntries(Object.entries(after(c.changes)).filter(([k]) => k === "purpose"));
+      if (Object.keys(data).length) { await tx.pipelineStage.update({ where: { id: c.stageId }, data }); updated++; }
+      continue;
+    }
     let data = after(c.changes);
     if (c.action === "DEACTIVATE") {
       const open = await tx.opportunity.count({ where: { stageId: c.stageId, outcome: "OPEN" } });
-      if (open > 0) { data = Object.fromEntries(Object.entries(data).filter(([k]) => k !== "isActive")); keptClosing++; }
+      if (open > 0) { data = Object.fromEntries(Object.entries(data).filter(([k]) => k !== "isActive" && k !== "purpose")); keptClosing++; }
       else deactivated++;
     } else keptClosing++;
     if (Object.keys(data).length) {
@@ -253,9 +286,9 @@ export function describePlan(plan: AlignmentPlan): string[] {
   }
   out.push("  —   مغلقة / Closed → Won «رابحة» / Lost «خاسرة»: the deal's outcome, not a stage.");
   if (plan.closing.length) {
-    out.push("Redundant closing stages:");
+    out.push("Redundant closing stages, and the retired Negotiation column (merged into «عرض السعر والتفاوض»):");
     for (const c of plan.closing) {
-      out.push(`  ${c.code}: ${c.action === "DEACTIVATE" ? "retire (no open deal)" : c.action === "ALREADY_INACTIVE" ? "already retired" : `KEPT — ${c.openDeals} open deal(s); move them, then re-run`}${Object.keys(c.changes).length ? ` (${fmt(c.changes)})` : ""}`);
+      out.push(`  ${c.code}${c.kind === "NEGOTIATION" ? " [negotiation]" : ""}: ${c.action === "DEACTIVATE" ? "retire (no open deal)" : c.action === "ALREADY_INACTIVE" ? "already retired" : `KEPT — ${c.openDeals} open deal(s); move them, then re-run`}${Object.keys(c.changes).length ? ` (${fmt(c.changes)})` : ""}`);
     }
   }
   if (plan.extras.length) {

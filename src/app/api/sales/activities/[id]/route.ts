@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { seesAllSales, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
-import { syncLeadNextFollowUp } from "@/lib/services/sales/follow-through";
+import { syncLeadNextFollowUp, syncDealNextFollowUp } from "@/lib/services/sales/follow-through";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -30,7 +30,7 @@ export async function PATCH(request: Request, { params }: Params) {
   try {
     const existing = await prisma.activity.findUnique({
       where: { id },
-      select: { id: true, ownerId: true, completedAt: true, type: true, leadId: true },
+      select: { id: true, ownerId: true, completedAt: true, type: true, leadId: true, opportunityId: true },
     });
     if (!existing) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });
     if (existing.ownerId !== user.id) {
@@ -85,6 +85,8 @@ export async function PATCH(request: Request, { params }: Params) {
         select: { id: true, type: true, subject: true, body: true, dueAt: true, completedAt: true },
       });
       if (existing.leadId) await syncLeadNextFollowUp(tx, existing.leadId);
+      // Pipeline v2 (D2): the deal's date follows its open promises too.
+      if (existing.opportunityId) await syncDealNextFollowUp(tx, existing.opportunityId);
       return a;
     });
 
@@ -103,7 +105,7 @@ export async function DELETE(_request: Request, { params }: Params) {
   try {
     const existing = await prisma.activity.findUnique({
       where: { id },
-      select: { id: true, ownerId: true, completedAt: true },
+      select: { id: true, ownerId: true, completedAt: true, leadId: true, opportunityId: true },
     });
     if (!existing) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });
     if (existing.ownerId !== user.id) {
@@ -118,7 +120,13 @@ export async function DELETE(_request: Request, { params }: Params) {
       );
     }
 
-    await prisma.activity.delete({ where: { id } });
+    // The deleted promise leaves the lead's and the deal's next follow-up date too (gate R2-M1): recomputed from what
+    // is still open, in the same transaction as the delete.
+    await prisma.$transaction(async (tx) => {
+      await tx.activity.delete({ where: { id } });
+      if (existing.leadId) await syncLeadNextFollowUp(tx, existing.leadId);
+      if (existing.opportunityId) await syncDealNextFollowUp(tx, existing.opportunityId);
+    });
     return NextResponse.json({ deleted: true });
   } catch (err) {
     return handleDomainError(err);

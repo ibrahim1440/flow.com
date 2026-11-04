@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect, useRef, use } from "react";
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import {
@@ -12,14 +12,17 @@ import { useD21Title, usePhone, useD21Phone, useCreateRequest } from "@/componen
 import { splitTitle } from "@/components/d21/labels";
 import { ACTIVITY_OUTCOMES } from "@/lib/services/sales/qualification";
 import {
-  dayCount, dayUnit, daysFromToday, dueText, money2, relativeDays, shortDate, whole,
+  dayCount, daysFromToday, dueText, longDate, money2, relativeDays, shortDate, whole,
 } from "@/components/d21/format";
 import { CollectionsPanel, type CollectionRow, type Summary } from "./CollectionsPanel";
-import {
-  NeedsBlock, NeedsDialog, SkipSamplesDialog, LostReasonCodeSelect, actionLabel,
-} from "./PipelinePanels";
-import { stagePrimaryAction, type StageAction } from "@/lib/services/sales/stage-actions";
+import { NeedsDialog } from "./PipelinePanels";
 import { parseSampleSkip, type StagePurpose } from "@/lib/services/sales/stages";
+import { QUALIFICATION_FIELD_LABELS, BUSINESS_TYPE_LABELS, qualificationMissing, type BusinessType } from "@/lib/services/sales/needs";
+import type { DealNextStep, DealAction } from "@/lib/services/sales/next-step";
+import {
+  Chip, QUOTE_TONE, StageStepper, AutoToast, SkipSamplesSheet, LossSheet, FollowUpSheet, MoveSheet, DecideMoveSheet,
+  autoWhy, humanReason, isAutoReason, type Step,
+} from "../../_components/pv2";
 import { SampleDialog } from "../../_components/SampleDialog";
 
 
@@ -30,7 +33,14 @@ function skuName(sku: { skuCode: string; name: string | null; nameAr?: string | 
 }
 
 /**
- * Deal detail — built to the approved frame `crm-deal` (Figma `176:1032` / `177:1168`;
+ * Pipeline v2 (Figma page 08: 02a `1766:603` · 02b `1767:810` · 02c `1768:1038` · 02d `1769:1264` · 02e `1769:1850`,
+ * phone `1766:965` …, annotations `1773:1674`): header with «⋯», the stage stepper (a skipped sample stage dashed),
+ * then «المطلوب منك الآن» — ONE primary button and at most two links, all from the server's `nextStep` — the stage's
+ * own panel (needs, samples, the current quotation with its versions), the ONE follow-up, and the timeline that tags
+ * automatic moves «تلقائي»; the deal's details, samples/quotations and contacts beside it. A manual move by a rep is a
+ * request a supervisor approves (owner decision 3): its banner sits above «المطلوب منك الآن».
+ *
+ * Earlier: built to the approved frame `crm-deal` (Figma `176:1032` / `177:1168`;
  * markup `docs/design/direction-2.1-rc/src/crm.py` `deal()`), in its order:
  * header (title, outcome · owner · created; lose · log activity · next stage) → four
  * metrics → stage tracker → next step → quotations, samples and the activity timeline,
@@ -181,7 +191,14 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   const [success, setSuccess] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const [dialog, setDialog] = useState<"activity" | "sample" | "close" | "edit" | "splits" | "needs" | "skip" | null>(null);
+  const [dialog, setDialog] = useState<"activity" | "sample" | "close" | "edit" | "splits" | "needs" | "skip" | "followup" | "move" | "decide" | null>(null);
+  // Pipeline v2: the server's answer to «what now?», and a manual move waiting for (or refused by) a supervisor.
+  const [ns, setNs] = useState<DealNextStep | null>(null);
+  const [pendingMove, setPendingMove] = useState<{ id: string; toStageId: string; toStage: { nameAr: string; nameEn: string } | null; reason: string | null; requestedBy: string | null; createdAt: string; canDecide: boolean; canWithdraw: boolean } | null>(null);
+  const [rejectedMove, setRejectedMove] = useState<{ id: string; toStage: { nameAr: string; nameEn: string } | null; note: string | null; decidedBy: string | null; decidedAt: string } | null>(null);
+  const [moveDirect, setMoveDirect] = useState(false);
+  const [dialogError, setDialogError] = useState("");
+  const [toast, setToast] = useState<{ title: string; why: string } | null>(null);
   // The sample whose customer evaluation is being recorded («تسجيل النتيجة»).
   const [feedbackFor, setFeedbackFor] = useState<Deal["samples"][number] | null>(null);
   // «للعميل من كل محصول عيّنة واحدة»: the coffee products this customer already had a sample of (the dialog warns),
@@ -201,6 +218,8 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
    * `cancelled` stops a slow response landing after a newer one.
    */
   const [reloadToken, setReloadToken] = useState(0);
+  // Where the deal was on the previous load: an automatic move since then is announced once (annotation 2).
+  const prevStage = useRef<string | null>(null);
   const reload = () => setReloadToken((t) => t + 1);
 
   useEffect(() => {
@@ -211,14 +230,27 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
         collections: CollectionRow[]; collectionSummary: Summary;
         collectionAction: { available: boolean; reason: string };
         sampledProductIds?: string[];
+        nextStep?: DealNextStep; pendingMove?: typeof pendingMove; rejectedMove?: typeof rejectedMove;
       }>(`/api/sales/opportunities/${id}`);
       if (cancelled) return;
       if (res.ok) {
-        setDeal(res.data.deal);
+        const d = res.data.deal;
+        if (prevStage.current && prevStage.current !== d.stage.id) {
+          const ev = d.stageEvents.find((e) => e.toStageId === d.stage.id && e.fromStageId);
+          if (ev && isAutoReason(ev.reason)) {
+            setToast({ title: ar ? `انتقلت الصفقة إلى ${d.stage.nameAr}` : `The deal moved to ${d.stage.nameEn}`, why: autoWhy(ev.reason, ar) ?? "" });
+          }
+        }
+        prevStage.current = d.stage.id;
+        setDeal(d);
         setSampledProducts(res.data.sampledProductIds ?? []);
         setStages(res.data.stages);
         setActors(res.data.actors ?? {});
         setCan(res.data.can);
+        setNs(res.data.nextStep ?? null);
+        setPendingMove(res.data.pendingMove ?? null);
+        setRejectedMove(res.data.rejectedMove ?? null);
+        setMoveDirect(!!(res.data.can as Can & { moveDirectly?: boolean }).moveDirectly);
         setCollections(res.data.collections ?? []);
         setCollectionSummary(res.data.collectionSummary ?? null);
         setCollectionAction(res.data.collectionAction ?? { available: false, reason: "NO_PRIVILEGE" });
@@ -241,7 +273,6 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
     title: phoneCustomer ?? deal?.title ?? "",
     sub: deal ? `${ar ? "صفقة" : "Deal"}${phoneRest ? ` · ${phoneRest}` : ""}` : undefined,
     back: "/dashboard/sales/pipeline",
-    ownBar: true,
   });
   // Batch 24 WP-A: «عيّنة» from the customer page lands here with ?new=sample — the existing request form
   // (one sample per product, the manager's approval for a second) opens on arrival.
@@ -258,25 +289,58 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   async function transition(body: Record<string, unknown>, okMessage: string) {
     if (busy) return;
     setBusy(true);
-    setError("");
-    const res = await api<{ code?: string }>(`/api/sales/opportunities/${id}/transition`, { method: "POST", body });
+    setError(""); setDialogError(""); setSuccess("");
+    const res = await api<{ code?: string; pending?: boolean; stageAdvanced?: boolean }>(`/api/sales/opportunities/${id}/transition`, { method: "POST", body });
     setBusy(false);
-    // Moving past Sample Evaluation with no sample: the server asks for the reason — ask for it
-    // here, then send the same move again with `skipReason`.
-    if (!res.ok && res.data.code === "SAMPLE_SKIP_REASON_REQUIRED" && typeof body.toStageId === "string") {
-      const target = stages.find((s) => s.id === body.toStageId);
-      setSkipTarget(target ? { id: target.id, nameAr: target.nameAr, nameEn: target.nameEn } : { id: body.toStageId, nameAr: "", nameEn: "" });
+    // Moving past Sample Evaluation with no sample: the server asks for the documented skip — the
+    // «العميل ما يحتاج عينات» sheet, which sends `skipSamples` with its coded reason.
+    if (!res.ok && res.data.code === "SAMPLE_SKIP_REASON_REQUIRED") {
+      const target = typeof body.toStageId === "string" ? stages.find((s) => s.id === body.toStageId) : undefined;
+      setSkipTarget(target ? { id: target.id, nameAr: target.nameAr, nameEn: target.nameEn } : null);
       setDialog("skip");
       return false;
     }
     if (!res.ok) {
-      setError(res.data.error ?? (ar ? "تعذّر التنفيذ." : "Could not do that."));
+      const msg = res.data.error ?? (ar ? "تعذّر التنفيذ." : "Could not do that.");
+      // A dialog stays open with what was typed (annotation 5); the message shows inside it.
+      if (dialog) setDialogError(msg); else setError(msg);
       return false;
     }
-    setSuccess(okMessage);
+    // A rep's manual move is a request (202): nothing moved yet.
+    setSuccess(res.data.pending
+      ? (ar ? "أُرسل طلب النقل إلى المشرف؛ تبقى الصفقة في مرحلتها حتى يعتمده." : "Move request sent; the deal stays where it is until a supervisor approves.")
+      : okMessage);
     setDialog(null);
     reload();
     return true;
+  }
+
+  /** The supervisor's decision on a pending move, or the requester withdrawing it. */
+  async function decideMove(decision: "APPROVE" | "REJECT" | "WITHDRAW", note?: string) {
+    if (!pendingMove || busy) return;
+    setBusy(true); setDialogError(""); setError("");
+    const res = decision === "WITHDRAW"
+      ? await api(`/api/sales/stage-move-requests/${pendingMove.id}`, { method: "DELETE" })
+      : await api(`/api/sales/stage-move-requests/${pendingMove.id}`, { method: "POST", body: { decision, note } });
+    setBusy(false);
+    if (!res.ok) { const m = res.data.error ?? (ar ? "تعذّر التنفيذ." : "Could not do that."); if (dialog) setDialogError(m); else setError(m); return; }
+    setDialog(null);
+    setSuccess(decision === "APPROVE" ? (ar ? "اعتُمد النقل ونُقلت الصفقة." : "Move approved; the deal moved.")
+      : decision === "REJECT" ? (ar ? "رُفض طلب النقل؛ بقيت الصفقة مكانها." : "Move rejected; the deal stays put.")
+        : (ar ? "سُحب طلب النقل." : "Move request withdrawn."));
+    reload();
+  }
+
+  /** «جدولة متابعة»: the deal's ONE follow-up, moved — never a second (PATCH; services/sales/follow-through.ts). */
+  async function scheduleFollowUp(at: Date, subject: string) {
+    if (busy) return;
+    setBusy(true); setDialogError("");
+    const res = await api(`/api/sales/opportunities/${id}`, { method: "PATCH", body: { nextFollowUpAt: at.toISOString(), followUpSubject: subject } });
+    setBusy(false);
+    if (!res.ok) { setDialogError(res.data.error ?? (ar ? "تعذّر الحفظ." : "Could not save.")); return; }
+    setDialog(null);
+    setSuccess(ar ? "حُفظت المتابعة." : "Follow-up saved.");
+    reload();
   }
 
   async function complete(activityId: string) {
@@ -302,7 +366,6 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   const L = (x: { ar: string; en: string } | { nameAr: string; nameEn: string }) =>
     "ar" in x ? (ar ? x.ar : x.en) : (ar ? x.nameAr : x.nameEn);
   const open = deal.outcome === "OPEN";
-  const cur = (lang === "ar" && deal.currency === "SAR" ? "ريال" : deal.currency);
   const acceptedQuote = deal.quotes.find((q) => q.status === "ACCEPTED");
   const qty = (q: string, unit: string) =>
     `${unit === "KG" ? money2(q) : q} ${UNIT_LABELS[unit] ? pick(UNIT_LABELS, unit, lang) : unit}`;
@@ -310,7 +373,6 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   // ── Stages: the ordered active ones, plus the deal's own if it has since been retired.
   const shown = stages.filter((s) => s.isActive || s.id === deal.stage.id).sort((a, b) => a.position - b.position);
   const atIdx = shown.findIndex((s) => s.id === deal.stage.id);
-  const nextStage = atIdx >= 0 ? shown[atIdx + 1] : undefined;
   const stageById = new Map(stages.map((s) => [s.id, s]));
   // When the deal reached each stage: the latest event into it.
   const reached = new Map<string, string>();
@@ -320,117 +382,119 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
 
   // ── The one next step: the open activity due soonest; an undated one only if nothing is dated.
   const openActivities = deal.activities.filter((a) => !a.completedAt);
-  const nextStep = [...openActivities].sort((a, b) =>
+  const soonest = [...openActivities].sort((a, b) =>
     (a.dueAt ? new Date(a.dueAt).getTime() : Infinity) - (b.dueAt ? new Date(b.dueAt).getTime() : Infinity))[0];
-  const lateBy = nextStep?.dueAt && new Date(nextStep.dueAt) < new Date() ? Math.max(1, -daysFromToday(nextStep.dueAt)) : 0;
+  // Pipeline v2: the ONE follow-up is the server's (`nextStep.followUp`); a quotation's reply date has no task of its own.
+  const nextStep = (ns?.followUp?.activityId ? openActivities.find((a) => a.id === ns.followUp!.activityId) : undefined)
+    ?? (ns?.followUp && ns.followUp.kind !== "PLANNED" ? undefined : soonest);
 
-  // ── The primary action (reference: «التالي: تفاوض»). Moving the deal on is the default;
-  //    once a quotation is accepted, or at the last stage, it is marking the deal won.
-  const winButton = (primary: boolean) => (
-    <button type="button" className={`btn${primary ? " p" : ""}`} data-testid="win-deal" disabled={busy}
-      onClick={() => transition({ toOutcome: "WON" }, ar ? "سُجّلت الصفقة رابحة." : "Deal marked won.")}>
-      {ar ? "تعليم رابحة" : "Mark won"}
-    </button>
-  );
-  // Offered exactly when the server would accept it (`transitionOpportunity`): the close
-  // privilege, a linked customer and an accepted quotation. The stage plays no part — reaching
-  // the last stage does not make a deal winnable, and these rules are not changed here.
-  const winnable = open && can.close && !!deal.customer && !!acceptedQuote;
-  const nextButton = (isPrimary: boolean) => nextStage ? (
-    <button type="button" className={`btn${isPrimary ? " p" : ""}`} data-testid="next-stage" disabled={busy}
-      onClick={() => transition({ toStageId: nextStage.id }, ar ? `نُقلت إلى ${nextStage.nameAr}.` : `Moved to ${nextStage.nameEn}.`)}>
-      {ar ? `التالي: ${nextStage.nameAr}` : `Next: ${nextStage.nameEn}`}
-    </button>
-  ) : null;
-
-  // ── The stage's one job (docs/sales/PIPELINE_STAGES.md; `stagePrimaryAction`): record the needs,
-  //    the sample and its evaluation (or skip it, with a reason), the quotation, the negotiation,
-  //    the win or the loss. Moving on stays available beside it, quieter, and on the tracker.
-  const stageAction = stagePrimaryAction(deal.stage.purpose ?? stages.find((s) => s.id === deal.stage.id)?.purpose ?? null, {
-    outcome: deal.outcome, hasCustomer: !!deal.customer, hasNextStage: !!nextStage,
-    businessType: deal.businessType, needSummary: deal.needSummary, agreedNextStep: deal.agreedNextStep,
-    samples: deal.samples, quotes: deal.quotes.map((q) => ({ id: q.id, status: q.status, discountPending: q.discountApproval === "PENDING" })),
-  });
-  const allowed = (k: StageAction["key"]) =>
-    k === "WIN" ? winnable
-      : k === "DOCUMENT_LOSS" ? open && can.close
-        : k === "CREATE_QUOTE" || k === "REQUEST_APPROVAL" ? open && can.quote
-          : k === "FOLLOW_QUOTE" ? open
-            : k === "ADVANCE" ? open && can.write && !!nextStage
-              : open && can.write;
-  async function runAction(a: StageAction) {
+  // ── «المطلوب منك الآن»: the server's action → the control, gated by what this person may do ──
+  const quoteHref = (qid?: string) => (qid ? `/dashboard/sales/quotes/${qid}` : `/dashboard/sales/quotes/new?opportunityId=${deal.id}`);
+  /** Why an action is shown disabled for THIS person (annotation 5, «صلاحية»), or null when allowed. */
+  const blockedBy = (k: DealAction["key"]): string | null => {
+    switch (k) {
+      case "WIN": return can.close ? (deal.customer ? null : (ar ? "اربط عميلًا بالصفقة أولًا" : "Link a customer first"))
+        : (ar ? "تسجيل القبول يحتاج صلاحية إغلاق الصفقات — اطلبها من مديرك" : "Marking it won needs the close permission — ask your manager");
+      case "DOCUMENT_LOSS": return can.close ? null : (ar ? "يحتاج صلاحية إغلاق الصفقات" : "Needs the close permission");
+      case "REOPEN": return can.reopen ? null : (ar ? "يحتاج صلاحية إعادة الفتح" : "Needs the reopen permission");
+      case "CREATE_QUOTE": case "ISSUE_QUOTE": case "EDIT_QUOTE": case "REVISE_QUOTE": case "RECORD_REPLY":
+        return can.quote ? null : (ar ? "يحتاج صلاحية عروض الأسعار" : "Needs the quotation permission");
+      case "REQUEST_APPROVAL": return null;
+      case "CREATE_ORDER": return can.createOrder ? null : (ar ? "إنشاء الطلب يحتاج صلاحية الطلبات" : "Creating the order needs the orders permission");
+      case "VIEW_ORDER": return null;
+      default: return can.write ? null : (ar ? "يحتاج صلاحية تعديل الصفقات" : "Needs the deal write permission");
+    }
+  };
+  const actionHref = (a: DealAction): string | null => {
+    switch (a.key) {
+      case "CREATE_QUOTE": return quoteHref();
+      case "ISSUE_QUOTE": case "EDIT_QUOTE": case "REVISE_QUOTE": case "REQUEST_APPROVAL": case "RECORD_REPLY": case "CREATE_ORDER":
+        return quoteHref(a.quoteId);
+      case "VIEW_ORDER": return "/dashboard/orders";
+      default: return null;
+    }
+  };
+  const nextStageId = (() => {
+    const shownIds = stages.filter((s) => s.isActive).sort((x, y) => x.position - y.position);
+    const i = shownIds.findIndex((s) => s.id === deal.stage.id);
+    return i >= 0 ? shownIds[i + 1]?.id : undefined;
+  })();
+  async function runAction(a: DealAction) {
     switch (a.key) {
       case "RECORD_NEEDS": setDialog("needs"); return;
-      case "RECORD_SAMPLE": setDialog("sample"); return;
-      // The samples section's own «تسجيل النتيجة» dialog — one way to record an evaluation.
-      case "RECORD_SAMPLE_EVALUATION": { const s = deal?.samples.find((x) => x.id === a.sampleId); if (s) setFeedbackFor(s); return; }
-      case "SKIP_SAMPLES":
-        if (nextStage) { setSkipTarget({ id: nextStage.id, nameAr: nextStage.nameAr, nameEn: nextStage.nameEn }); setDialog("skip"); }
-        return;
+      case "REQUEST_SAMPLE": setDialog("sample"); return;
+      case "RECORD_SAMPLE_EVALUATION": { const x = deal?.samples.find((y) => y.id === a.sampleId) ?? deal?.samples.find((y) => y.status === "SENT"); if (x) setFeedbackFor(x); return; }
+      case "SKIP_SAMPLES": setSkipTarget(null); setDialogError(""); setDialog("skip"); return;
       case "SEND_SAMPLE": {
+        if (!a.sampleId) return;
         setBusy(true);
         const res = await api(`/api/sales/samples/${a.sampleId}`, { method: "PATCH", body: { status: "SENT" } });
         setBusy(false);
         if (res.ok) { setSuccess(ar ? "عُلّمت العيّنة مُرسلة." : "Sample marked sent."); reload(); } else setError(res.data.error ?? "");
         return;
       }
-      case "RECORD_NEGOTIATION": setDialog("activity"); return;
-      case "DOCUMENT_LOSS": setDialog("close"); return;
+      case "LOG_CALL": setDialog("activity"); return;
+      case "DOCUMENT_LOSS": setDialogError(""); setDialog("close"); return;
       case "WIN": transition({ toOutcome: "WON" }, ar ? "سُجّلت الصفقة رابحة." : "Deal marked won."); return;
+      case "REOPEN": transition({ toOutcome: "OPEN" }, ar ? "أُعيد فتح الصفقة." : "Deal reopened."); return;
       case "ADVANCE":
-        if (nextStage) transition({ toStageId: nextStage.id }, ar ? `نُقلت إلى ${nextStage.nameAr}.` : `Moved to ${nextStage.nameEn}.`);
+        if (nextStageId) transition({ toStageId: nextStageId }, ar ? "نُقلت الصفقة إلى المرحلة التالية." : "Moved to the next stage.");
         return;
-      default: return; // the quotation actions are links (below)
+      default: return; // the quotation and order actions are links
     }
   }
-  const actionHref = (a: StageAction) =>
-    a.key === "CREATE_QUOTE" ? `/dashboard/sales/quotes/new?opportunityId=${deal.id}`
-      : (a.key === "FOLLOW_QUOTE" || a.key === "REQUEST_APPROVAL") && a.quoteId ? `/dashboard/sales/quotes/${a.quoteId}` : null;
-  const actionControl = (a: StageAction, isPrimary: boolean) => {
-    if (!allowed(a.key)) return null;
-    if (a.key === "ADVANCE") return nextButton(isPrimary);
-    if (a.key === "WIN") return winButton(isPrimary);
-    const text = actionLabel(a, ar, nextStage ? (ar ? nextStage.nameAr : nextStage.nameEn) : undefined);
+  const ACTION_TESTID: Partial<Record<DealAction["key"], string>> = { WIN: "win-deal", REOPEN: "reopen-deal", ADVANCE: "next-stage" };
+  /** The one primary button (annotation 1): disabled with its reason when the deal waits, or the person may not. */
+  const actionControl = (a: DealAction, primary: boolean) => {
+    const why = a.disabled ? null : blockedBy(a.key);
+    const label = ar ? a.ar : a.en;
+    const testId = ACTION_TESTID[a.key] ?? `stage-action-${a.key.toLowerCase().replace(/_/g, "-")}`;
+    if (!primary) {
+      if (why) return null; // a link the person cannot use is not offered
+      const href = actionHref(a);
+      return href
+        ? <Link key={a.key} className="pv2-lk" style={{ margin: 0 }} href={href} data-testid={testId}>{label}</Link>
+        : <button key={a.key} type="button" className="pv2-lk" style={{ margin: 0 }} data-testid={testId} disabled={busy} onClick={() => runAction(a)}>{label}</button>;
+    }
+    if (a.disabled || why) {
+      return (
+        <span key={a.key} style={{ display: "inline-flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <button type="button" className="pv2-btn" disabled data-testid={testId} aria-describedby="now-why">{label}</button>
+          {why ? <span className="why" id="now-why" data-testid="now-why">{why}</span> : null}
+        </span>
+      );
+    }
     const href = actionHref(a);
-    const testId = `stage-action-${a.key.toLowerCase().replace(/_/g, "-")}`;
     return href
-      ? <Link key={a.key} className={`btn${isPrimary ? " p" : ""}`} href={href} data-testid={testId}>{text}</Link>
-      : <button key={a.key} type="button" className={`btn${isPrimary ? " p" : " g"}`} data-testid={testId} disabled={busy} onClick={() => runAction(a)}>{text}</button>;
+      ? <Link key={a.key} className="pv2-btn" href={href} data-testid={testId}><Ico name="note" small />{label}</Link>
+      : <button key={a.key} type="button" className="pv2-btn" data-testid={testId} disabled={busy} onClick={() => runAction(a)}><Ico name="note" small />{label}</button>;
   };
-  const primaryControl = stageAction ? actionControl(stageAction, true) : null;
-  const secondaryControl = stageAction?.secondary
-    ? actionControl({ key: stageAction.secondary, quoteId: stageAction.quoteId }, false) : null;
-  let primary: React.ReactNode = null;
-  if (primaryControl) {
-    // The stage's job leads; «التالي» stays beside it (quiet) unless the job IS moving on.
-    primary = <>{secondaryControl}{stageAction?.key !== "ADVANCE" && stageAction?.key !== "WIN" && open && can.write && stageAction?.key !== "SKIP_SAMPLES" && stageAction?.secondary !== "SKIP_SAMPLES" ? nextButton(false) : null}{primaryControl}</>;
-  } else if (winnable) primary = winButton(true);
-  else if (open && can.write && nextStage) primary = nextButton(true);
-  // The documented skip, if this deal skipped its samples: shown with the needs, not lost in the history.
+  // The documented skip, if this deal skipped its samples.
   const skipEvent = deal.stageEvents.find((e) => parseSampleSkip(e.reason));
   const skippedBecause = skipEvent ? parseSampleSkip(skipEvent.reason) : null;
 
   // ── The activity timeline: what happened on the deal, newest first — activities, samples
   //    sent, quotations issued and accepted, stage and outcome changes, the conversion.
   type Entry = { key: string; at: string; kind: string; title: React.ReactNode; detail?: React.ReactNode;
-    when: string; diff?: string; activity?: Deal["activities"][number] };
+    when: string; diff?: string; activity?: Deal["activities"][number]; auto?: boolean };
   const entries: Entry[] = [];
   const stageName = (sid: string | null | undefined) => {
     const s = sid ? stageById.get(sid) : undefined;
     return s ? (ar ? s.nameAr : s.nameEn) : null;
   };
-  const stageDiffs: { at: number; text: string; used: boolean }[] = deal.stageEvents
+  const stageDiffs: { at: number; text: string; used: boolean; auto: boolean; why: string | null }[] = deal.stageEvents
     // The stage a deal starts in is not a change; only moves get the «A ← B» chip.
     .filter((e) => e.toStageId && e.fromStageId)
     .map((e) => {
       const from = stageName(e.fromStageId), to = stageName(e.toStageId) ?? (e.toStage ? L(e.toStage) : "");
-      return { at: new Date(e.createdAt).getTime(), text: `${ar ? "المرحلة" : "Stage"}: ${from ? `${from} ${ar ? "←" : "→"} ` : ""}${to}`, used: false };
+      return { at: new Date(e.createdAt).getTime(), text: `${ar ? "المرحلة" : "Stage"}: ${from ? `${from} ${ar ? "←" : "→"} ` : ""}${to}`, used: false,
+        auto: isAutoReason(e.reason), why: autoWhy(e.reason, ar) };
     });
   const claimDiff = (at: string) => {
     const t = new Date(at).getTime();
     const d = stageDiffs.find((x) => !x.used && Math.abs(x.at - t) < 120_000);
     if (d) d.used = true;
-    return d?.text;
+    return d;
   };
   const by = (name?: string | null) => (name ? ` · ${name}` : "");
   const actorName = (empId?: string | null) => (empId ? actors[empId] : undefined);
@@ -463,7 +527,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       title: ar
         ? <>أُصدر العرض <bdi className="id" dir="ltr">{q.quoteNumber}</bdi> · المراجعة {q.revision}</>
         : <>Quotation <bdi className="id" dir="ltr">{q.quoteNumber}</bdi> issued · revision {q.revision}</>,
-      when: shortDate(q.issuedAt, lang), diff: claimDiff(q.issuedAt),
+      when: shortDate(q.issuedAt, lang), ...(() => { const d = claimDiff(q.issuedAt!); return d ? { diff: d.text, auto: d.auto } : {}; })(),
     });
     if (q.acceptedAt) entries.push({
       key: `qa-${q.id}`, at: q.acceptedAt, kind: "quote",
@@ -474,13 +538,13 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   if (deal.conversion) entries.push({
     key: "conv", at: deal.conversion.convertedAt, kind: "conversion",
     title: <><Link href={`/dashboard/sales/leads/${deal.conversion.leadId}`} style={{ color: "inherit", textDecoration: "none" }}>{ar ? "حُوِّل من عميل محتمل" : "Converted from a lead"}</Link> · {pick(LEAD_SOURCE_LABELS, deal.conversion.lead.source, lang)}</>,
-    when: `${shortDate(deal.conversion.convertedAt, lang)}${by(actorName(deal.conversion.convertedById))}`, diff: claimDiff(deal.conversion.convertedAt),
+    when: `${shortDate(deal.conversion.convertedAt, lang)}${by(actorName(deal.conversion.convertedById))}`, diff: claimDiff(deal.conversion.convertedAt)?.text,
   });
   for (const e of deal.stageEvents) {
     if (e.toOutcome && e.toOutcome !== "OPEN") {
-      entries.push({ key: `o-${e.id}`, at: e.createdAt, kind: "outcome",
-        title: e.toOutcome === "WON" ? (ar ? "رُبحت الصفقة" : "Deal won") : (ar ? "خُسرت الصفقة" : "Deal lost"),
-        detail: e.reason ?? undefined, when: `${shortDate(e.createdAt, lang)}${by(actorName(e.actorId))}` });
+      entries.push({ key: `o-${e.id}`, at: e.createdAt, kind: "outcome", auto: isAutoReason(e.reason),
+        title: e.toOutcome === "WON" ? (ar ? "أُغلقت الصفقة رابحة" : "Deal won") : (ar ? "خُسرت الصفقة" : "Deal lost"),
+        detail: (isAutoReason(e.reason) ? autoWhy(e.reason, ar) : humanReason(e.reason)) ?? undefined, when: `${shortDate(e.createdAt, lang)}${by(actorName(e.actorId))}` });
     } else if (e.toOutcome === "OPEN" && !e.toStageId) {
       entries.push({ key: `o-${e.id}`, at: e.createdAt, kind: "outcome", title: ar ? "أُعيد فتح الصفقة" : "Deal reopened",
         detail: e.reason ?? undefined, when: `${shortDate(e.createdAt, lang)}${by(actorName(e.actorId))}` });
@@ -500,9 +564,11 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
     const d = stageDiffs.find((x) => x.at === t && !x.used);
     if (!d) continue;
     d.used = true;
-    entries.push({ key: `st-${e.id}`, at: e.createdAt, kind: "stage",
-      title: ar ? `انتقلت إلى ${stageName(e.toStageId) ?? ""}` : `Moved to ${stageName(e.toStageId) ?? ""}`,
-      detail: e.reason ?? undefined, when: `${shortDate(e.createdAt, lang)}${by(actorName(e.actorId))}`, diff: d.text });
+    const skipped = parseSampleSkip(e.reason);
+    const manual = humanReason(e.reason)?.split(" · ").filter((x) => !x.startsWith("تخطّي العيّنات: ")).join(" · ") || null;
+    entries.push({ key: `st-${e.id}`, at: e.createdAt, kind: "stage", auto: d.auto,
+      title: ar ? `انتقلت إلى «${stageName(e.toStageId) ?? ""}»` : `Moved to “${stageName(e.toStageId) ?? ""}”`,
+      detail: [skipped ? (ar ? `تُخطّيت العيّنات: ${skipped}` : `Samples skipped: ${skipped}`) : null, d.auto ? d.why : manual].filter(Boolean).join(" · ") || undefined, when: `${shortDate(e.createdAt, lang)}${by(actorName(e.actorId))}`, diff: d.text });
   }
   // Open follow-ups first (they are what is due), then the history newest first.
   entries.sort((a, b) => {
@@ -562,7 +628,6 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
     ? (ar ? <>الضريبة <span className="n">{rates[0]}%</span> تُحسب لكل بند بعد الخصم</> : <>VAT <span className="n">{rates[0]}%</span> is calculated per line after the discount</>)
     : (ar ? "الضريبة تُحسب لكل بند بعد الخصم، بنسبة البند" : "VAT is calculated per line after the discount, at each line's rate");
 
-  const notYet = <span style={{ color: "var(--text-muted)" }}>{ar ? "غير متوفر بعد" : "Not available yet"}</span>;
 
   // The decisions on one sample (approve / decline, mark sent, cancel, record the result) — the table cell on a desktop,
   // the card's button row on a phone (FOLLOWUPS sales UI bug 6: they were cut off at 390).
@@ -601,711 +666,600 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
     </>
   );
   // ── Sections shared by the desktop and phone layouts ──
-  const samplesBlock = (
-    <>
-      {/* ── Samples ── */}
-      <div className="bh">
-        <h2 className="bt">{ar ? "العيّنات" : "Samples"}</h2>
-        {can.write && open && (
-          <button type="button" className="lk" data-testid="add-sample" onClick={() => setDialog("sample")}>
-            <Ico name="plus" small />{ar ? "طلب عيّنة" : "Request sample"}
+  // ═══ Pipeline v2 layout (Figma page 08) — one layout; below 768 the two columns stack (1766:965) ═══
+  const L2 = (o: { ar: string; en: string }) => (ar ? o.ar : o.en);
+  const { top: headTitle, sub: headSub } = splitTitle(deal.title, customerName);
+  const phase = ns?.phase ?? (open ? "QUALIFIED" : "CLOSED");
+  const liveSamples = deal.samples.filter((x) => x.status !== "CANCELLED");
+  const money = (v: string | number) => ar ? <><span className="n">{whole(v)}</span> ر.س</> : <>SAR <span className="n">{whole(v)}</span></>;
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  const timeOf = (v: string) => { const d = new Date(v); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+
+  // ── The stepper (1766:797): three stages + «مغلقة»; a skipped sample stage is dashed with its reason ──
+  const sampleIdx = shown.findIndex((x) => x.purpose === "SAMPLE_EVALUATION");
+  const pastSamples = sampleIdx >= 0 && (atIdx > sampleIdx || (!open && atIdx >= sampleIdx));
+  const samplesSkipped = !!skippedBecause || (pastSamples && liveSamples.length === 0 && atIdx !== sampleIdx);
+  const shortName = (x: Stage) => {
+    if (!phone) return ar ? x.nameAr : x.nameEn;
+    const short: Record<string, { ar: string; en: string }> = { QUALIFICATION: { ar: "مؤهلة", en: "Qualified" }, SAMPLE_EVALUATION: { ar: "العيّنات", en: "Samples" }, QUOTATION: { ar: "عرض السعر", en: "Quotation" } };
+    return x.purpose && short[x.purpose] ? L2(short[x.purpose]) : (ar ? x.nameAr : x.nameEn);
+  };
+  const steps: Step[] = shown.map((x, i) => {
+    const isSample = i === sampleIdx;
+    const reachedAt = reached.get(x.id);
+    let state: Step["state"];
+    if (open) state = i < atIdx ? (isSample && samplesSkipped ? "skip" : "done") : i === atIdx ? "cur" : "up";
+    else state = i <= atIdx ? (isSample && samplesSkipped && i < atIdx ? "skip" : "done") : "up";
+    const sub = state === "skip" ? `${ar ? "تُخطّيت" : "skipped"}${skippedBecause ? ` · ${skippedBecause}` : ""}`
+      : state === "cur" ? (phone ? (ar ? "الآن" : "now") : inStageDays === 0 ? (ar ? "منذ اليوم" : "since today") : relativeDays(inStageSince, lang))
+        : state === "done" ? (reachedAt ? shortDate(reachedAt, lang) : "") : (phone ? "" : "—");
+    return { key: x.id, label: shortName(x), sub, state, testId: `stage-${x.code}` };
+  });
+  steps.push({
+    key: "closed", testId: "stage-closed-step",
+    label: deal.outcome === "WON" ? (ar ? "مغلقة · رابحة" : "Closed · won") : deal.outcome === "LOST" ? (ar ? "مغلقة · خاسرة" : "Closed · lost") : (ar ? "مغلقة" : "Closed"),
+    state: deal.outcome === "WON" ? "done" : deal.outcome === "LOST" ? "cur" : "up",
+    sub: deal.closedAt ? shortDate(deal.closedAt, lang) : phone ? "" : (ar ? "رابحة أو خاسرة" : "won or lost"),
+  });
+  const stepperNote = open && phase !== "QUOTE"
+    ? (ar ? "لا تحتاج تحريك الصفقة يدويًا: طلب عيّنة ينقلها إلى «العيّنات»، وإصدار عرض سعر ينقلها إلى «عرض السعر والتفاوض»."
+      : "No need to move the deal by hand: requesting a sample moves it to Samples, issuing a quotation to Quotation & negotiation.")
+    : null;
+
+  // ── The latest automatic move into where the deal is now (annotation 2: shown in «المطلوب منك الآن») ──
+  const lastIn = deal.stageEvents.find((e) => (open ? e.toStageId === deal.stage.id && e.fromStageId : e.toOutcome === deal.outcome));
+  const autoLine = lastIn && isAutoReason(lastIn.reason) ? (
+    <div className="auto" data-testid="now-auto">
+      <Chip label={ar ? "تلقائي" : "Automatic"} dot={false} />
+      <span>{open
+        ? (ar ? `انتقلت الصفقة إلى هذه المرحلة تلقائيًا ${autoWhy(lastIn.reason, ar)}` : `The deal moved here automatically, ${autoWhy(lastIn.reason, ar)}`)
+        : (ar ? `أُغلقت الصفقة رابحة تلقائيًا ${autoWhy(lastIn.reason, ar)}` : `The deal was won automatically, ${autoWhy(lastIn.reason, ar)}`)}
+        {acceptedQuote && !open ? <> <bdi className="id" dir="ltr">{acceptedQuote.quoteNumber}</bdi></> : null} · {shortDate(lastIn.createdAt, lang)}، {timeOf(lastIn.createdAt)}</span>
+    </div>
+  ) : null;
+
+  // ── The current quotation (the server's choice) and its versions ──
+  const currentQuote = (ns?.quoteId ? deal.quotes.find((x) => x.id === ns.quoteId) : undefined)
+    ?? [...deal.quotes].filter((x) => x.status !== "SUPERSEDED").sort((a, b) => b.revision - a.revision)[0];
+  const versions = [...deal.quotes].sort((a, b) => a.revision - b.revision);
+  const daysLeft = (v: string) => daysFromToday(v);
+
+  // ── «المطلوب منك الآن» (1766:816; won 1769:1264; lost 1769:1850) ──
+  const needItems: { key: "businessType" | "needSummary" | "expectedMonthlyKg" | "nextStep"; label: string; value: React.ReactNode | null }[] = [
+    { key: "businessType", label: L2(QUALIFICATION_FIELD_LABELS.businessType), value: deal.businessType ? L2(BUSINESS_TYPE_LABELS[deal.businessType as BusinessType] ?? { ar: deal.businessType, en: deal.businessType }) : null },
+    { key: "needSummary", label: L2(QUALIFICATION_FIELD_LABELS.needSummary), value: deal.needSummary ? <bdi>{deal.needSummary}</bdi> : null },
+    { key: "expectedMonthlyKg", label: ar ? "الكمية الشهرية المتوقعة (اختياري)" : "Expected monthly volume (optional)", value: deal.expectedMonthlyKg !== null ? <><span className="n">{Number(deal.expectedMonthlyKg)}</span> {ar ? "كغ" : "kg"}</> : null },
+    { key: "nextStep", label: L2(QUALIFICATION_FIELD_LABELS.nextStep), value: deal.agreedNextStep ? <bdi>{deal.agreedNextStep}</bdi> : null },
+  ];
+  const needsDone = needItems.filter((x) => x.value !== null).length;
+  const sentSample = liveSamples.find((x) => x.status === "SENT");
+  const nowDetail = (): string | null => {
+    if (!ns) return null;
+    const extra = ns.requiredNow.slice(1).map(L2);
+    const k = ns.nextAction?.key;
+    let base: string | null = null;
+    if (k === "RECORD_NEEDS") {
+      // The count is the minimum's — the same items the title lists (gate fix L4); the monthly volume is optional.
+      const left = qualificationMissing(deal).length;
+      base = ar ? `${left === 1 ? "بقي بند واحد" : left === 2 ? "بقي بندان" : `بقيت ${left} بنود`} من الحد الأدنى. بعدها اطلب عيّنة، أو حدّد أن العميل لا يحتاجها.`
+        : `${left} of the minimum left. Then request a sample, or say the customer needs none.`;
+    }
+    else if (k === "RECORD_SAMPLE_EVALUATION" && sentSample?.sentAt) {
+      const due = ns.followUp?.dueAt;
+      base = ar ? `أُرسلت العيّنة يوم ${shortDate(sentSample.sentAt, lang)}. الرأي متوقع ${due ? (daysFromToday(due) === 0 ? "اليوم" : daysFromToday(due) < 0 ? `منذ ${dayCount(-daysFromToday(due), lang)}` : shortDate(due, lang)) : ""}.`
+        : `The sample was sent on ${shortDate(sentSample.sentAt, lang)}. The view is expected ${due ? shortDate(due, lang) : ""}.`;
+    } else if (k === "RECORD_REPLY" && currentQuote?.issuedAt) {
+      const n = -daysFromToday(currentQuote.issuedAt);
+      base = ar ? `${n === 0 ? "أُرسلت اليوم" : `أُرسلت قبل ${dayCount(n, lang)}`} ولم يصل رد بعد.${currentQuote.validUntil ? ` العرض صالح حتى ${shortDate(currentQuote.validUntil, lang)}.` : ""}`
+        : `${n === 0 ? "Sent today" : `Sent ${dayCount(n, lang)} ago`} with no reply yet.${currentQuote.validUntil ? ` Valid until ${shortDate(currentQuote.validUntil, lang)}.` : ""}`;
+    } else if (k === "CREATE_ORDER" && acceptedQuote) {
+      base = ar ? `قبل العميل النسخة ${acceptedQuote.revision} بقيمة ${whole(acceptedQuote.grandTotal)} ر.س. إنشاء الطلب يبدأ التجهيز والتوصيل، ولا يحتاج إعادة إدخال الأصناف.`
+        : `The customer accepted version ${acceptedQuote.revision} (SAR ${whole(acceptedQuote.grandTotal)}). The order starts preparation and delivery; nothing is typed again.`;
+    }
+    return [base, ...extra].filter(Boolean).join(" ") || null;
+  };
+  const lostEvent = deal.outcome === "LOST" ? deal.stageEvents.find((e) => e.toOutcome === "LOST") : undefined;
+  const nowCard = !ns ? (
+    <div className="pv2-now idle" aria-busy="true"><div className="pv2-skel" style={{ width: 120 }} /><div className="pv2-skel" style={{ width: 260 }} /><div className="pv2-skel" style={{ width: 180 }} /></div>
+  ) : deal.outcome === "LOST" ? (
+    <div className="pv2-now idle" data-testid="now-card">
+      <span className="k" style={{ color: "var(--text-secondary)" }}>{ar ? "الصفقة مغلقة — لا شيء مطلوب منك" : "The deal is closed — nothing for you"}</span>
+      <h2>{ar ? "خُسرت الصفقة" : "The deal was lost"}{deal.lostReason ? <>: <bdi>{deal.lostReason}</bdi></> : null}</h2>
+      {lostEvent && <p>{ar ? `سجّلها ${actorName(lostEvent.actorId) ?? "—"} في ${longDate(lostEvent.createdAt, lang)}.` : `Recorded by ${actorName(lostEvent.actorId) ?? "—"} on ${longDate(lostEvent.createdAt, lang)}.`} {ar ? "أُغلقت المتابعات المفتوحة تلقائيًا." : "Open follow-ups were closed automatically."}</p>}
+      {ns.secondary.length > 0 && <div className="acts">{ns.secondary.slice(0, 2).map((a) => actionControl(a, false))}</div>}
+    </div>
+  ) : (
+    <div className={`pv2-now${deal.outcome === "WON" ? " won" : ""}`} data-testid="now-card">
+      <span className="k">{ar ? "المطلوب منك الآن" : "What you need to do now"}</span>
+      <h2 data-testid="now-title">{ns.requiredNow[0] ? L2(ns.requiredNow[0]) : (ar ? "لا شيء مطلوب منك الآن" : "Nothing for you now")}</h2>
+      {nowDetail() ? <p>{nowDetail()}</p> : null}
+      {autoLine}
+      {(ns.nextAction || ns.secondary.length > 0) && (
+        <div className="acts">
+          {ns.nextAction ? actionControl(ns.nextAction, true) : null}
+          {ns.secondary.slice(0, 2).map((a) => actionControl(a, false))}
+        </div>
+      )}
+    </div>
+  );
+
+  // ── A manual move waiting for a supervisor (owner decision 3), or the last refusal ──
+  const moveBanner = pendingMove ? (
+    <div className="pv2-pending" role="status" data-testid="pending-move">
+      <b>{ar ? "طلب نقل بانتظار اعتماد المشرف" : "Move request awaiting a supervisor"}</b>
+      <span>{ar ? `إلى «${pendingMove.toStage?.nameAr ?? ""}»` : `to “${pendingMove.toStage?.nameEn ?? ""}”`}{pendingMove.requestedBy ? ` · ${ar ? "بطلب" : "by"} ${pendingMove.requestedBy}` : ""}{pendingMove.reason ? <> · <bdi>{pendingMove.reason}</bdi></> : null}</span>
+      <span className="sp" />
+      {pendingMove.canDecide && <button type="button" className="btn sm p" data-testid="decide-move" onClick={() => { setDialogError(""); setDialog("decide"); }}>{ar ? "اعتماد أو رفض" : "Approve or reject"}</button>}
+      {pendingMove.canWithdraw && <button type="button" className="btn sm g" data-testid="withdraw-move" disabled={busy} onClick={() => decideMove("WITHDRAW")}>{ar ? "سحب الطلب" : "Withdraw"}</button>}
+    </div>
+  ) : rejectedMove && open ? (
+    <div className="pv2-pending rej" role="status" data-testid="rejected-move">
+      <b>{ar ? "رُفض طلب النقل" : "Move request rejected"}</b>
+      <span>{ar ? `إلى «${rejectedMove.toStage?.nameAr ?? ""}»` : `to “${rejectedMove.toStage?.nameEn ?? ""}”`}{rejectedMove.decidedBy ? ` · ${rejectedMove.decidedBy}` : ""}{rejectedMove.note ? <>: <bdi>{rejectedMove.note}</bdi></> : null}</span>
+    </div>
+  ) : null;
+
+  // ── Needs (1766:849): a step inside «فرصة مؤهلة» ──
+  const needsPanel = (
+    <section className="pv2-panel" data-testid="deal-needs" aria-labelledby="pv2-needs-h">
+      <div className="h">
+        <h2 id="pv2-needs-h">{ar ? "تحليل الاحتياج · خطوة داخل «فرصة مؤهلة»" : "Needs analysis · a step of “Qualified”"}</h2>
+        <span className="c">{ar ? `${needsDone} من 4` : `${needsDone} of 4`}</span>
+        {open && can.write && <button type="button" className="lk" data-testid="edit-needs" onClick={() => setDialog("needs")}>{ar ? "تعديل" : "Edit"}</button>}
+      </div>
+      <div className="pv2-progress" aria-hidden><span style={{ width: `${needsDone * 25}%` }} /></div>
+      <ul className="pv2-check">
+        {needItems.map((it) => (
+          <li key={it.key} data-testid={`need-${it.key}`}>
+            <span className={`bx${it.value !== null ? " on" : ""}`} role="img" aria-label={it.value !== null ? (ar ? "مكتمل" : "done") : (ar ? "ناقص" : "missing")}>{it.value !== null ? <Ico name="tick" small /> : null}</span>
+            <span className="tx"><b>{it.label}</b>{it.value !== null ? <span>{it.value}</span> : <span className="no">{ar ? "لم يُسجّل بعد" : "Not recorded yet"}</span>}</span>
+            {it.value === null && open && can.write && <button type="button" className="pv2-lk" onClick={() => setDialog("needs")}>{ar ? "إضافة" : "Add"}</button>}
+          </li>
+        ))}
+      </ul>
+      <p className="note">{ar ? "يكفي إكمال الحد الأدنى (نوع النشاط، الاحتياج، الخطوة التالية) لتصبح الخطوة التالية «طلب عيّنة». لا يلزم ترتيب معيّن." : "The minimum (business type, need, next step) makes «request a sample» the next step. Any order."}</p>
+    </section>
+  );
+
+  // ── Samples (1767:810) ──
+  const sampleChip = (x: Deal["samples"][number]) => awaitsManager(x)
+    ? <Chip tone="warn" label={pick(SAMPLE_APPROVAL_LABELS, "PENDING", lang)} testId={`sample-status-${x.id}`} />
+    : <Chip tone={x.status === "SENT" ? "info" : x.status === "FEEDBACK_RECEIVED" ? "ok" : "neutral"} testId={`sample-status-${x.id}`}
+      label={x.status === "SENT" ? (ar ? "أُرسلت · بانتظار الرأي" : "Sent · awaiting the view") : x.status === "FEEDBACK_RECEIVED" && x.feedbackScore !== null ? `${pick(SAMPLE_LABELS, x.status, lang)} · ${x.feedbackScore}/5` : pick(SAMPLE_LABELS, x.status, lang)} />;
+  const samplesPanel = (
+    <section className="pv2-panel" data-testid="deal-samples" aria-labelledby="pv2-smp-h">
+      <div className="h">
+        <h2 id="pv2-smp-h">{ar ? "العيّنات في هذه الصفقة" : "Samples on this deal"}</h2>
+        <span className="c">{deal.samples.length}</span>
+        {can.write && open && <button type="button" className="lk" data-testid="add-sample" onClick={() => setDialog("sample")}>{ar ? "طلب عيّنة" : "Request sample"}</button>}
+      </div>
+      {deal.samples.length === 0 ? <p className="txt">{ar ? "لا توجد عيّنات." : "No samples."}</p> : deal.samples.map((x) => (
+        <div key={x.id} className="pv2-smp" data-testid={`sample-${x.id}`}>
+          <span className="ic" aria-hidden><Ico name="flask" small /></span>
+          <span className="tx">
+            <b><bdi>{skuName(x.productSku, ar) ?? x.description}</bdi> · {qty(x.quantity, x.unit)}</b>
+            {x.description && x.productSku ? <span><bdi>{x.description}</bdi></span> : null}
+            <small data-testid={`sample-kind-${x.id}`}>{x.fromStock ? (ar ? "من المخزون" : "from stock") : (ar ? "للتسجيل فقط · لا يُصرف من المخزون" : "record only · no stock movement")}{x.sentAt ? ` · ${ar ? "أُرسلت" : "sent"} ${shortDate(x.sentAt, lang)}` : ""}</small>
+            {(x.approval === "APPROVED" || x.approval === "DECLINED") && (
+              <small data-testid={`sample-approval-${x.id}`}>{pick(SAMPLE_APPROVAL_LABELS, x.approval, lang)}{x.approval === "DECLINED" && x.approvalNote ? <>: <bdi data-testid={`sample-approval-note-${x.id}`}>{x.approvalNote}</bdi></> : null}</small>
+            )}
+            {canSend && <span className="deal-smp-act" style={{ marginTop: 6 }}>{sampleButtons(x)}</span>}
+          </span>
+          {sampleChip(x)}
+        </div>
+      ))}
+      {sentSample && open && (
+        <>
+          <hr />
+          <p className="txt" style={{ margin: 0 }}>{ar ? "عند تسجيل التقييم ستختار واحدًا:" : "When you record the view you choose one:"}</p>
+          <div className="pv2-opts" aria-hidden>
+            <Chip tone="ok" dot={false} label={ar ? "أعجبه — جهّز العرض" : "Liked it — prepare the quotation"} />
+            <Chip dot={false} label={ar ? "يريد صنفًا آخر" : "Wants another product"} />
+            <Chip dot={false} label={ar ? "لم يعجبه" : "Did not like it"} />
+          </div>
+        </>
+      )}
+    </section>
+  );
+
+  // ── The current quotation with its version history (1768:1038); the accepted one (1769:1264) ──
+  const quotePanel = currentQuote ? (
+    <section className="pv2-panel pv2-q" data-testid="deal-quotes" aria-labelledby="pv2-q-h">
+      <div className="h">
+        <h2 id="pv2-q-h">{currentQuote.status === "ACCEPTED" ? (ar ? "العرض المعتمد" : "Accepted quotation") : (ar ? "عرض السعر الحالي" : "Current quotation")}</h2>
+        {can.quote && open
+          ? <Link className="lk" href={`/dashboard/sales/quotes/new?opportunityId=${deal.id}`} data-testid="new-quote">{ar ? "عرض سعر جديد" : "New quotation"}</Link>
+          : <Link className="lk" href={quoteHref(currentQuote.id)}>{ar ? "فتح العرض" : "Open"}</Link>}
+      </div>
+      <div className="ttl">
+        <span style={{ display: "flex", flexDirection: "column" }}>
+          <b>{ar ? "عرض السعر " : "Quotation "}<bdi className="id" dir="ltr">{currentQuote.quoteNumber}</bdi> · {ar ? `النسخة ${currentQuote.revision}` : `version ${currentQuote.revision}`}</b>
+          {currentQuote.acceptedAt ? <span className="txt">{ar ? `قُبل في ${longDate(currentQuote.acceptedAt, lang)}` : `Accepted on ${longDate(currentQuote.acceptedAt, lang)}`}</span> : null}
+        </span>
+        {ns && ns.quoteId === currentQuote.id
+          ? <Chip tone={QUOTE_TONE[ns.quoteState]} label={L2(ns.quoteStateLabel)} testId="quote-state" />
+          : <Chip tone={currentQuote.status === "ACCEPTED" ? "ok" : "neutral"} label={pick(QUOTE_STATUS_SPECS, currentQuote.status, lang)} testId="quote-state" />}
+      </div>
+      <div>
+        <div className="kv">{ar ? "المجموع قبل الضريبة" : "Before VAT"}<b>{money(Number(currentQuote.grandTotal) - Number(currentQuote.taxTotal ?? 0))}</b></div>
+        <div className="kv">{ar ? "ضريبة القيمة المضافة" : "VAT"}<b>{money(Number(currentQuote.taxTotal ?? 0))}</b></div>
+        <div className="kv">{ar ? "الإجمالي شامل ضريبة القيمة المضافة" : "Total incl. VAT"}<b>{money(currentQuote.grandTotal)}</b></div>
+        {currentQuote.discountApproval && currentQuote.discountApproval !== "NOT_NEEDED" && (
+          <div className="kv">{ar ? "الخصم" : "Discount"}<b>{currentQuote.discountApproval === "APPROVED" ? (ar ? "معتمد" : "approved") : currentQuote.discountApproval === "PENDING" ? (ar ? "بانتظار الاعتماد" : "awaiting approval") : (ar ? "مرفوض" : "refused")}</b></div>
+        )}
+        {currentQuote.validUntil && currentQuote.status !== "ACCEPTED" && open && (
+          <div className="kv">{ar ? "صالح حتى" : "Valid until"}<b>{longDate(currentQuote.validUntil, lang)}{daysLeft(currentQuote.validUntil) >= 0 ? ` · ${relativeDays(currentQuote.validUntil, lang)}` : ""}</b></div>
+        )}
+        <p className="note" style={{ margin: "4px 0 0" }}>{vatNote}</p>
+      </div>
+      {versions.length > 1 && (
+        <>
+          <hr />
+          <div className="h" style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            <b style={{ font: "600 13px/22px var(--f-ui)" }}>{ar ? "تاريخ النسخ" : "Version history"}</b>
+            <span className="note" style={{ marginInlineStart: "auto" }}>{ar ? "الأحدث يسارًا" : "newest last"}</span>
+          </div>
+          <div className="pv2-vers" data-testid="quote-versions">
+            {versions.map((v) => (
+              <Link key={v.id} href={quoteHref(v.id)} className={`pv2-ver${v.id === currentQuote.id ? " cur" : ""}`} data-testid={`quote-row-${v.quoteNumber}`} aria-current={v.id === currentQuote.id ? "true" : undefined}>
+                <span className="top"><b>{ar ? `النسخة ${v.revision}` : `Version ${v.revision}`}</b><span>{money(v.grandTotal)}</span></span>
+                <Chip tone={v.status === "ACCEPTED" ? "ok" : v.status === "REJECTED" || v.status === "EXPIRED" ? "danger" : v.status === "ISSUED" ? "info" : "neutral"} label={pick(QUOTE_STATUS_SPECS, v.status, lang)} />
+                <small>{v.issuedAt ? shortDate(v.issuedAt, lang) : (ar ? "لم تُصدر" : "not issued")}</small>
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
+      {versions.length === 1 && <span hidden data-testid={`quote-row-${currentQuote.quoteNumber}`} />}
+      <div style={{ display: "flex", gap: 16 }}>
+        <Link className="pv2-lk" style={{ margin: 0 }} href={quoteHref(currentQuote.id)}>{ar ? "فتح العرض" : "Open quotation"}</Link>
+        <Link className="pv2-lk" style={{ margin: 0 }} href={`/dashboard/sales/quotes/${currentQuote.id}/print`}>{ar ? "تنزيل PDF" : "Download PDF"}</Link>
+      </div>
+    </section>
+  ) : null;
+  const showSamplesMain = phase === "SAMPLES" || (phase === "QUALIFIED" && deal.samples.length > 0);
+  const showQuoteMain = !!currentQuote && (phase === "QUOTE" || phase === "CLOSED" || !showSamplesMain);
+
+  // ── The ONE follow-up (1766:871) ──
+  const fu = ns?.followUp ?? null;
+  const fuAct = nextStep;
+  const fuDue = fuAct?.dueAt ?? fu?.dueAt ?? deal.nextFollowUpAt ?? null;
+  const fuLate = fuDue ? Math.max(0, -daysFromToday(fuDue)) : 0;
+  const fuToday = !!fuDue && daysFromToday(fuDue) === 0 && new Date(fuDue) >= new Date(new Date().setHours(0, 0, 0, 0));
+  // The sample reminder's stored subject is the system's (English); its title is said in the page's language.
+  const fuTitle = fu?.kind === "SAMPLE_FEEDBACK" ? (ar ? "سؤال العميل عن رأيه في العيّنة" : "Ask the customer about the sample")
+    : fuAct ? fuAct.subject
+    : fu?.kind === "QUOTE_REPLY" ? (ar ? `متابعة رد العميل على النسخة ${currentQuote?.revision ?? ""}` : `Follow the customer's reply to version ${currentQuote?.revision ?? ""}`)
+      : deal.nextFollowUpAt ? (ar ? "متابعة" : "Follow-up") : null;
+  const fuNote = fu?.kind === "SAMPLE_FEEDBACK" ? (ar ? "أُنشئت تلقائيًا مع العيّنة، وتُغلق وحدها عند تسجيل التقييم — لا تحتاج مهمة أخرى." : "Created with the sample; it closes when the view is recorded.")
+    : fu?.kind === "QUOTE_REPLY" ? (ar ? "مأخوذة من العرض المُرسل، وتنتهي وحدها عند تسجيل القبول أو الرفض أو التعديل." : "Taken from the sent quotation; it ends when the reply is recorded.")
+      : (ar ? "متابعة واحدة لهذه الصفقة. جدولة موعد جديد تنقل هذه ولا تضيف أخرى." : "One follow-up per deal. Scheduling a new time moves this one.");
+  const followPanel = (open || !!fuAct) ? (
+    <section className="pv2-panel" data-testid="next-step" aria-labelledby="pv2-fu-h">
+      <div className="h">
+        <h2 id="pv2-fu-h">{ar ? "المتابعة القادمة" : "Next follow-up"}</h2>
+        {open && can.write && <button type="button" className="lk" data-testid="schedule-follow-up" onClick={() => { setDialogError(""); setDialog("followup"); }}>{fuTitle ? (ar ? "تغيير الموعد" : "Reschedule") : (ar ? "جدولة متابعة" : "Schedule")}</button>}
+      </div>
+      {fuTitle ? (
+        <div className="pv2-fu">
+          <span className={`ic${fuLate ? " late" : ""}`} aria-hidden><Ico name="cal" small /></span>
+          <span className="tx">
+            <b><bdi>{fuTitle}</bdi></b>
+            {fuDue && <span className={fuLate ? "late" : fuToday ? "today" : undefined}>
+              {fuLate ? `${ar ? `متأخرة ${dayCount(fuLate, lang)} · كانت` : `${dayCount(fuLate, lang)} late · was`} ${longDate(fuDue, lang)}، ${timeOf(fuDue)}`
+                : fuToday ? `${ar ? "اليوم" : "Today"} · ${longDate(fuDue, lang)}، ${timeOf(fuDue)}` : `${dueText(fuDue, lang)}`}
+            </span>}
+          </span>
+          {fuAct && can.write && (
+            <button type="button" className="btn sm" data-testid={`complete-${fuAct.id}`} disabled={busy} onClick={() => complete(fuAct.id)}>{ar ? "إكمال" : "Complete"}</button>
+          )}
+        </div>
+      ) : <p className="txt" style={{ margin: 0 }}>{ar ? "لا متابعة مجدولة لهذه الصفقة." : "No follow-up scheduled for this deal."}</p>}
+      <p className="note" style={{ margin: 0 }}>{fuNote}</p>
+    </section>
+  ) : null;
+
+  // ── The timeline «السجل» (1766:907): «تلقائي» on automatic moves ──
+  const timeline = (
+    <section className="pv2-panel" aria-labelledby="pv2-tl-h">
+      <div className="h">
+        <h2 id="pv2-tl-h">{ar ? "السجل" : "History"}</h2>
+        {entries.length > 20 && (
+          <span className="c" data-testid="deal-activities-count">{ar ? "يُعرض " : "Showing "}<bdi className="n">{visible.length}</bdi>{ar ? " من " : " of "}<bdi className="n">{entries.length}</bdi></span>
+        )}
+        {entries.length > 20 && (
+          <button type="button" className="lk" data-testid="toggle-all-activities" aria-expanded={allEntries} onClick={() => setAllEntries((v) => !v)}>
+            {allEntries ? (ar ? "عرض أقل" : "Show fewer") : (ar ? "عرض الكل" : "Show all")}
           </button>
         )}
       </div>
-      {deal.samples.length === 0 ? (
-        <p className="lbl" style={{ fontWeight: 400, margin: "0 0 32px" }}>{ar ? "لا توجد عيّنات." : "No samples."}</p>
-      ) : phone ? (
-        <ul className="deal-smp-cards" data-testid="sample-cards">
-          {deal.samples.map((s) => (
-            <li key={s.id} data-testid={`sample-${s.id}`}>
-              <div className="deal-smp-top">
-                <b><bdi>{skuName(s.productSku, ar) ?? s.description}</bdi></b>
-                <span className={`st ${awaitsManager(s) ? "" : SAMPLE_ST[s.status] ?? ""}`} data-testid={`sample-status-${s.id}`}>
-                  {awaitsManager(s) ? pick(SAMPLE_APPROVAL_LABELS, "PENDING", lang) : pick(SAMPLE_LABELS, s.status, lang)}</span>
-              </div>
-              <div className="deal-smp-sub">
-                <span>{qty(s.quantity, s.unit)}</span>
-                <span data-testid={`sample-kind-${s.id}`}>{s.fromStock ? (ar ? "من المخزون" : "from stock") : (ar ? "للتسجيل فقط" : "record only")}</span>
-                {s.sentAt ? <span>{shortDate(s.sentAt, lang)}</span> : null}
-                {s.feedbackScore !== null ? <span>{ar ? "التقييم" : "score"} {s.feedbackScore}/5</span> : null}
-              </div>
-              {s.approval === "DECLINED" && s.approvalNote ? <div className="deal-smp-sub"><bdi data-testid={`sample-approval-note-${s.id}`}>{s.approvalNote}</bdi></div> : null}
-              {canSend ? <div className="deal-smp-act">{sampleButtons(s)}</div> : null}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <div style={{ overflowX: "auto", marginBottom: 32 }}>
-          <table className="t dense"><tbody>
-            {deal.samples.map((s) => (
-              <tr key={s.id} data-testid={`sample-${s.id}`}>
-                <td style={{ whiteSpace: "normal", minWidth: 160 }}><span className="who"><bdi>{skuName(s.productSku, ar) ?? s.description}</bdi></span>
-                  {s.description && s.productSku && <span className="sm"> · {s.description}</span>}
-                  {/* Which kind it is, said plainly: only a stock sample ever leaves the shelf. */}
-                  <span className="sm" data-testid={`sample-kind-${s.id}`}> · {s.fromStock
-                    ? (ar ? "من المخزون" : "from stock")
-                    : (ar ? "للتسجيل فقط · لا يُصرف من المخزون" : "record only · no stock movement")}</span></td>
-                <td className="num">{qty(s.quantity, s.unit)}</td>
-                <td><span className={`st ${awaitsManager(s) ? "" : SAMPLE_ST[s.status] ?? ""}`} data-testid={`sample-status-${s.id}`}>
-                  {awaitsManager(s) ? pick(SAMPLE_APPROVAL_LABELS, "PENDING", lang) : pick(SAMPLE_LABELS, s.status, lang)}</span></td>
-                <td className="sm" style={{ whiteSpace: "normal", maxWidth: 240 }}>
-                  {s.sentAt ? shortDate(s.sentAt, lang) : ""}
-                  {s.feedbackScore !== null && <> · {ar ? "التقييم" : "score"} {s.feedbackScore}/5</>}
-                  {/* A second sample of the product: the manager's decision, and the reason of a decline. */}
-                  {(s.approval === "APPROVED" || s.approval === "DECLINED") && (
-                    <span data-testid={`sample-approval-${s.id}`}>{s.sentAt || s.feedbackScore !== null ? " · " : ""}{pick(SAMPLE_APPROVAL_LABELS, s.approval, lang)}
-                      {/* A long reason wraps, clamped to two lines (full text on hover), so the action buttons stay in view (I-45). */}
-                      {s.approval === "DECLINED" && s.approvalNote && <>: <bdi data-testid={`sample-approval-note-${s.id}`} title={s.approvalNote}
-                        style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", overflowWrap: "anywhere" }}>{s.approvalNote}</bdi></>}</span>
-                  )}
-                </td>
-                {canSend && <td style={{ textAlign: "end" }}>{sampleButtons(s)}</td>}
-              </tr>
-            ))}
-          </tbody></table>
-        </div>
-      )}
-    </>
-  );
-  const activityBlock = (
-    <>
-      {/* ── Activity ── */}
-      <div className="bh">
-        <h2 className="bt">{ar ? "النشاط" : "Activity"}</h2>
-        <span className="sub">{ar ? "مكالمات، زيارات، عيّنات، عروض" : "Calls, visits, samples, quotations"}</span>
-      </div>
-      {entries.length === 0 ? (
-        <p className="lbl" style={{ fontWeight: 400 }}>{ar ? "لم يُسجَّل أي نشاط." : "Nothing logged yet."}</p>
-      ) : (
-        <ol className="tl" data-testid="deal-activities">
-          {visible.map((e, i) => {
+      {entries.length === 0 ? <p className="txt" style={{ margin: 0 }}>{ar ? "لم يُسجَّل أي نشاط." : "Nothing logged yet."}</p> : (
+        <ol className="pv2-tl" data-testid="deal-activities">
+          {visible.map((e) => {
             const a = e.activity;
             const openA = a && !a.completedAt;
             const late = openA && a.dueAt && new Date(a.dueAt) < new Date();
             return (
-              <li key={e.key} data-kind={e.kind} data-testid={a ? `activity-${a.id}` : undefined}>
-                <span className={`m${i === 0 && !openA ? " b" : ""}`} />
-                <div className="row" style={{ display: "flex", gap: 12, alignItems: "baseline" }}>
-                  <span>{e.title}</span>
-                  {late && <span className="flag">{ar ? "متأخرة" : "Overdue"}</span>}
-                  <span className="when" style={{ marginInlineStart: "auto", whiteSpace: "nowrap" }}>{e.when}</span>
-                </div>
-                {e.detail && <div style={{ color: "var(--text-secondary)", marginTop: 4, maxWidth: "60ch", overflowWrap: "anywhere" }} dir="auto">{e.detail}</div>}
-                {e.diff && <span className="diff">{e.diff}</span>}
-                {openA && can.write && a.id !== nextStep?.id && (
-                  <div style={{ marginTop: 6 }}>
-                    <button type="button" className="btn sm" data-testid={`complete-${a.id}`} disabled={busy} onClick={() => complete(a.id)}>
-                      {ar ? "إكمال" : "Complete"}
-                    </button>
-                  </div>
-                )}
+              <li key={e.key} data-kind={e.kind} data-auto={e.auto ? "true" : undefined} data-testid={a ? `activity-${a.id}` : undefined}>
+                <span className={`m${e.auto ? " auto" : ""}`} aria-hidden />
+                <span className="tx">
+                  <span className="r">
+                    <span>{e.title}</span>
+                    {e.auto && <Chip label={ar ? "تلقائي" : "Automatic"} dot={false} testId={`auto-${e.key}`} />}
+                    {late && <Chip tone="danger" label={ar ? "متأخرة" : "Overdue"} />}
+                  </span>
+                  {e.detail && <span className="d" dir="auto">{e.detail}</span>}
+                  <span className="w">{e.when}</span>
+                  {openA && can.write && a.id !== nextStep?.id && (
+                    <span><button type="button" className="btn sm" data-testid={`complete-${a.id}`} disabled={busy} onClick={() => complete(a.id)}>{ar ? "إكمال" : "Complete"}</button></span>
+                  )}
+                </span>
               </li>
             );
           })}
         </ol>
       )}
-      {entries.length > 20 && (
-        <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 13, color: "var(--text-muted)", marginTop: 4 }}>
-          <span data-testid="deal-activities-count">
-            {ar ? "يُعرض " : "Showing "}<bdi className="n">{visible.length}</bdi>{ar ? " من " : " of "}<bdi className="n">{entries.length}</bdi>
-          </span>
-          <button type="button" className="btn sm" data-testid="toggle-all-activities" aria-expanded={allEntries}
-            onClick={() => setAllEntries((v) => !v)} style={{ marginInlineStart: "auto" }}>
-            {allEntries ? (ar ? "عرض أقل" : "Show fewer") : (ar ? "عرض الكل" : "Show all")}
-          </button>
-        </div>
-      )}
-    </>
-  );
-  const customerBlock = (
-    <>
-      <div className="lbl" style={{ marginBottom: 12 }}>{ar ? "العميل" : "Customer"}</div>
-      {customerName ? (
-        <>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>
-            <Link href={`/dashboard/customers/${deal.customer!.id}`} style={{ color: "inherit", textDecoration: "none" }} data-testid="deal-customer-link">{customerName}</Link>
-          </div>
-          {/* CRM.md backend dependencies: no customer AR balance, open-order query or
-              contacts relation exists yet, so these say so rather than show a figure. */}
-          <dl className="props" style={{ marginBottom: 24 }}>
-            {/* The customer file's figure (release item I-44): the balance owed from receivables once invoiced,
-                else the accepted quotations not yet invoiced or paid — labelled as such, as on the customer file. */}
-            {deal.customerBalance?.ar ? (
-              <><dt>{ar ? "الرصيد المستحق" : "Balance due"}</dt><dd data-testid="deal-customer-balance">{ar ? <><bdi className="n">{whole(deal.customerBalance.ar.outstanding)}</bdi> ريال</> : <>SAR <bdi className="n">{whole(deal.customerBalance.ar.outstanding)}</bdi></>}</dd></>
-            ) : deal.customerBalance ? (
-              <><dt>{ar ? "عروض مقبولة لم تُفوتر" : "Accepted, not invoiced"}</dt><dd data-testid="deal-customer-balance">{ar ? <><bdi className="n">{whole(deal.customerBalance.outstanding)}</bdi> ريال</> : <>SAR <bdi className="n">{whole(deal.customerBalance.outstanding)}</bdi></>}</dd></>
-            ) : (
-              <><dt>{ar ? "الرصيد المستحق" : "Balance due"}</dt><dd>{notYet}</dd></>
-            )}
-            <dt>{ar ? "طلب مفتوح" : "Open order"}</dt><dd>{notYet}</dd>
-            {/* The contact is the person on the lead this deal came from. Without one, the
-                customer's own phone is shown under its own name, not passed off as a person. */}
-            {deal.conversion?.lead.contactName ? (
-              <>
-                <dt>{ar ? "جهة الاتصال" : "Contact"}</dt>
-                <dd>
-                  {deal.conversion.lead.contactName}
-                  {deal.conversion.lead.phone && <> · <bdi dir="ltr" className="n">{deal.conversion.lead.phone}</bdi></>}
-                </dd>
-                {/* The customer's own number is not the contact's: named separately. */}
-                {!deal.conversion.lead.phone && deal.customer?.phone && (
-                  <><dt>{ar ? "هاتف العميل" : "Customer phone"}</dt><dd><bdi dir="ltr" className="n">{deal.customer.phone}</bdi></dd></>
-                )}
-              </>
-            ) : deal.customer?.phone ? (
-              <><dt>{ar ? "هاتف العميل" : "Customer phone"}</dt><dd><bdi dir="ltr" className="n">{deal.customer.phone}</bdi></dd></>
-            ) : (
-              <><dt>{ar ? "جهة الاتصال" : "Contact"}</dt><dd>{notYet}</dd></>
-            )}
-          </dl>
-        </>
-      ) : (
-        <p style={{ color: "var(--text-muted)", fontSize: 13.5, margin: "0 0 24px" }}>
-          {ar ? "لا عميل مرتبط بالصفقة بعد." : "No customer linked to this deal yet."}
-        </p>
-      )}
-    </>
-  );
-  const detailsBlock = (
-    <>
-      <div className="lbl" style={{ marginBottom: 12, display: "flex", alignItems: "baseline" }}>
-        {ar ? "التفاصيل" : "Details"}
-        {can.write && open && (
-          <button type="button" className="lk-inline" data-testid="edit-deal" onClick={() => setDialog("edit")}>
-            {ar ? "تعديل" : "Edit"}
-          </button>
-        )}
-      </div>
-      <dl className="props">
-        <dt>{ar ? "المرحلة" : "Stage"}</dt><dd>{ar ? deal.stage.nameAr : deal.stage.nameEn}</dd>
-        <dt>{ar ? "توزيع العمولة" : "Commission split"}</dt>
-        <dd data-testid="split-list">
-          {(deal.owners.length > 0
-            ? deal.owners.map((o) => ({ name: o.employee.name, pct: Number(o.sharePercent) }))
-            : deal.owner ? [{ name: deal.owner.name, pct: 100 }] : []).map((o, i) => (
-            <div key={i}>{o.name} · <span className="n">{o.pct}%</span>
-              {i === 0 && can.assign && (
-                <button type="button" className="lk-inline" data-testid="edit-splits" onClick={() => setDialog("splits")}>
-                  {ar ? "تعديل" : "Edit"}
-                </button>
-              )}
-            </div>
-          ))}
-        </dd>
-        <dt>{ar ? "أصل الصفقة" : "Deal origin"}</dt>
-        <dd>{deal.conversion
-          ? <Link href={`/dashboard/sales/leads/${deal.conversion.leadId}`} style={{ color: "inherit", textDecoration: "none" }}>{ar ? "عميل محتمل · " : "Lead · "}{pick(LEAD_SOURCE_LABELS, deal.conversion.lead.source, lang)}</Link>
-          : (ar ? "أُنشئت مباشرة" : "Created directly")}</dd>
-        <dt>{ar ? "العملة" : "Currency"}</dt><dd>{cur}</dd>
-        <dt>{ar ? "طلبات مرتبطة" : "Linked orders"}</dt>
-        <dd>{deal.orderLinks.length === 0
-          ? <span style={{ color: "var(--text-muted)" }}>{ar ? "تُنشأ بعد قبول العرض" : "Created once the quotation is accepted"}</span>
-          : deal.orderLinks.map((l) => (
-            <div key={l.id}><Link href="/dashboard/orders" style={{ color: "inherit" }}><bdi className="id" dir="ltr">#{l.order.orderNumber}</bdi></Link> · {l.order.status}{l.isFirstOrder ? (ar ? " · الأول" : " · first") : ""}</div>
-          ))}</dd>
-      </dl>
-    </>
+    </section>
   );
 
-  const notice = (
-    <>
-  {(error || success) && (
+  // ── Side column: details, samples / quotations at a glance, contacts ──
+  const splits = (deal.owners.length > 0
+    ? deal.owners.map((o) => ({ name: o.employee.name, pct: Number(o.sharePercent) }))
+    : deal.owner ? [{ name: deal.owner.name, pct: 100 }] : []);
+  const detailsPanel = (
+    <section className="pv2-panel" data-testid="deal-metrics" aria-labelledby="pv2-det-h">
+      <div className="h">
+        <h2 id="pv2-det-h">{ar ? "تفاصيل الصفقة" : "Deal details"}</h2>
+        {can.write && open && <button type="button" className="lk" data-testid="edit-deal" onClick={() => setDialog("edit")}>{ar ? "تعديل" : "Edit"}</button>}
+      </div>
+      <div className="kv">{ar ? "القيمة المتوقعة" : "Expected value"}<b>{money(deal.amount)}</b></div>
+      <div className="kv">{ar ? "الاحتمال" : "Probability"}<b><span className="n">{deal.probability}%</span></b></div>
+      <div className="kv">{ar ? "الكمية الشهرية المتوقعة" : "Expected monthly volume"}<b>{deal.expectedMonthlyKg !== null ? <><span className="n">{Number(deal.expectedMonthlyKg)}</span> {ar ? "كغ" : "kg"}</> : (ar ? "لم تُحدّد" : "Not set")}</b></div>
+      {open
+        ? <div className="kv">{ar ? "الإغلاق المتوقع" : "Expected close"}<b>{deal.expectedCloseAt ? longDate(deal.expectedCloseAt, lang) : (ar ? "غير محدد" : "Not set")}</b></div>
+        : <div className="kv">{ar ? "أُغلقت" : "Closed"}<b>{deal.closedAt ? longDate(deal.closedAt, lang) : "—"}</b></div>}
+      <div className="kv">{ar ? "أصل الصفقة" : "Origin"}<b>{deal.conversion
+        ? <Link href={`/dashboard/sales/leads/${deal.conversion.leadId}`} style={{ color: "inherit", textDecoration: "none" }}>{ar ? "عميل محتمل · " : "Lead · "}{pick(LEAD_SOURCE_LABELS, deal.conversion.lead.source, lang)}</Link>
+        : (ar ? "أُنشئت مباشرة" : "Created directly")}</b></div>
+      <div className="kv" data-testid="split-list">{ar ? "توزيع العمولة" : "Commission split"}<b>
+        {splits.map((o, i) => <span key={i} style={{ display: "block" }}>{o.name} · <span className="n">{o.pct}%</span></span>)}
+        {can.assign && <button type="button" className="lk-inline" data-testid="edit-splits" onClick={() => setDialog("splits")}>{ar ? "تعديل" : "Edit"}</button>}
+      </b></div>
+      {(deal.outcome === "WON" || deal.orderLinks.length > 0) && (
+        <div className="kv">{ar ? "الطلب" : "Order"}<b>{deal.orderLinks.length === 0 ? (ar ? "لم يُنشأ بعد" : "Not created yet")
+          : deal.orderLinks.map((l) => <Link key={l.id} href="/dashboard/orders" style={{ color: "inherit", display: "block" }}><bdi className="id" dir="ltr">#{l.order.orderNumber}</bdi></Link>)}</b></div>
+      )}
+    </section>
+  );
+  const sideSamples = !showSamplesMain && (deal.samples.length > 0 || samplesSkipped) ? (
+    <section className="pv2-panel" aria-labelledby="pv2-ss-h" data-testid="side-samples">
+      <div className="h"><h2 id="pv2-ss-h">{ar ? "العيّنات" : "Samples"}</h2>
+        {can.write && open && <button type="button" className="lk" data-testid="add-sample" onClick={() => setDialog("sample")}>{ar ? "طلب عيّنة" : "Request"}</button>}</div>
+      {deal.samples.length === 0 && samplesSkipped ? (
+        <>
+          <span><Chip dashed label={ar ? "تُخطّيت" : "Skipped"} testId="samples-skipped" /></span>
+          <p className="txt" style={{ margin: 0 }}>{skippedBecause ? <bdi>{skippedBecause}</bdi> : null}{skipEvent ? ` · ${actorName(skipEvent.actorId) ?? ""}، ${shortDate(skipEvent.createdAt, lang)}` : ""}</p>
+        </>
+      ) : deal.samples.map((x) => (
+        <div key={x.id} data-testid={`sample-${x.id}`} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div className="kv" style={{ alignItems: "center" }}><bdi>{skuName(x.productSku, ar) ?? x.description}</bdi><b>{sampleChip(x)}</b></div>
+          <span className="note">{qty(x.quantity, x.unit)}{x.sentAt ? ` · ${ar ? "أُرسلت" : "sent"} ${shortDate(x.sentAt, lang)}` : ""}</span>
+          {canSend && <span className="deal-smp-act">{sampleButtons(x)}</span>}
+        </div>
+      ))}
+    </section>
+  ) : null;
+  const sideQuotes = !showQuoteMain ? (
+    <section className="pv2-panel" aria-labelledby="pv2-sq-h">
+      <div className="h"><h2 id="pv2-sq-h">{deal.samples.length === 0 && !currentQuote && !samplesSkipped ? (ar ? "العيّنات وعروض الأسعار" : "Samples and quotations") : (ar ? "عروض الأسعار" : "Quotations")}</h2>
+        {can.quote && open && <Link className="lk" href={`/dashboard/sales/quotes/new?opportunityId=${deal.id}`} data-testid="new-quote">{ar ? "عرض سعر جديد" : "New quotation"}</Link>}</div>
+      {currentQuote ? (
+        <div className="kv" data-testid={`quote-row-${currentQuote.quoteNumber}`}>
+          <Link href={quoteHref(currentQuote.id)} style={{ color: "inherit" }}><bdi className="id" dir="ltr">{currentQuote.quoteNumber}</bdi></Link>
+          <b>{ns && ns.quoteId === currentQuote.id ? <Chip tone={QUOTE_TONE[ns.quoteState]} label={L2(ns.quoteStateLabel)} /> : pick(QUOTE_STATUS_SPECS, currentQuote.status, lang)}</b>
+        </div>
+      ) : (
+        <p className="txt" style={{ margin: 0 }}>{deal.samples.length === 0 && !samplesSkipped
+          ? (ar ? "لا عيّنات ولا عروض بعد. أول عيّنة أو عرض يظهر هنا." : "No samples or quotations yet.")
+          : (ar ? "لا يوجد عرض بعد. إصدار العرض ينقل الصفقة إلى «عرض السعر والتفاوض» تلقائيًا." : "No quotation yet. Issuing one moves the deal to Quotation & negotiation.")}</p>
+      )}
+    </section>
+  ) : null;
+  const contact = deal.conversion?.lead.contactName ? { name: deal.conversion.lead.contactName, phone: deal.conversion.lead.phone ?? deal.customer?.phone ?? null }
+    : deal.customer ? { name: customerName ?? "", phone: deal.customer.phone } : null;
+  const digits = (p: string) => p.replace(/[^\d]/g, "");
+  const contactsPanel = (
+    <section className="pv2-panel" aria-labelledby="pv2-ct-h">
+      <div className="h"><h2 id="pv2-ct-h">{ar ? "جهات الاتصال" : "Contacts"}</h2></div>
+      {customerName ? (
+        <div className="kv">{ar ? "العميل" : "Customer"}<b><Link href={`/dashboard/customers/${deal.customer!.id}`} style={{ color: "inherit", textDecoration: "none" }} data-testid="deal-customer-link">{customerName}</Link></b></div>
+      ) : <p className="txt" style={{ margin: 0 }}>{ar ? "لا عميل مرتبط بالصفقة بعد." : "No customer linked to this deal yet."}</p>}
+      {deal.customerBalance && (
+        <div className="kv">{deal.customerBalance.ar ? (ar ? "الرصيد المستحق" : "Balance due") : (ar ? "عروض مقبولة لم تُفوتر" : "Accepted, not invoiced")}
+          <b data-testid="deal-customer-balance">{money(deal.customerBalance.ar ? deal.customerBalance.ar.outstanding : deal.customerBalance.outstanding)}</b></div>
+      )}
+      {contact && (
+        <>
+          <div className="pv2-ct">
+            <span className="av" aria-hidden>{contact.name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("")}</span>
+            <span className="tx"><b>{contact.name}</b>{contact.phone ? <span><bdi dir="ltr" className="n">{contact.phone}</bdi></span> : null}</span>
+          </div>
+          {contact.phone && (
+            <div className="pv2-ct-acts">
+              <a className="btn sm" href={`tel:${digits(contact.phone)}`}><Ico name="phone" small />{ar ? "اتصال" : "Call"}</a>
+              <a className="btn sm" href={`https://wa.me/${digits(contact.phone)}`} target="_blank" rel="noreferrer"><Ico name="chat" small />{ar ? "واتساب" : "WhatsApp"}</a>
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+
+  const notice = (error || success) ? (
     <p className={`notice ${error ? "er" : "ok"}`} role={error ? "alert" : "status"} style={{ marginBottom: 16 }}
       data-testid={error ? "alert-error" : "alert-success"}>
       {error || success}
       <button type="button" onClick={() => { setError(""); setSuccess(""); }} aria-label={ar ? "إغلاق" : "Dismiss"}>×</button>
     </p>
-  )}
-    </>
-  );
+  ) : null;
+
+  const quoteStage = stages.find((x) => x.isActive && x.purpose === "QUOTATION");
+  const dealLine = `${headTitle} · ${whole(deal.amount)} ${ar ? "ر.س" : "SAR"} · ${ar ? deal.stage.nameAr : deal.stage.nameEn}`;
   const dialogs = (
     <>
-  {dialog === "close" && (
-    <LostDialog ar={ar} busy={busy} onClose={() => setDialog(null)}
-      onSubmit={(reason, code) => transition({ toOutcome: "LOST", lostReason: reason, ...(code ? { lostReasonCode: code } : {}) }, ar ? "سُجّلت الصفقة خاسرة." : "Deal marked lost.")} />
-  )}
-  {dialog === "needs" && (
-    <NeedsDialog ar={ar} dealId={deal.id} needs={deal} onClose={() => setDialog(null)}
-      onDone={() => { setDialog(null); setSuccess(ar ? "حُفظ تحليل الاحتياج." : "Needs saved."); reload(); }} />
-  )}
-  {dialog === "skip" && skipTarget && (
-    <SkipSamplesDialog ar={ar} busy={busy} targetName={ar ? skipTarget.nameAr : skipTarget.nameEn}
-      onClose={() => { setDialog(null); setSkipTarget(null); }}
-      onSubmit={(reason) => transition({ toStageId: skipTarget.id, skipReason: reason },
-        ar ? `تُخطّيت العيّنات ونُقلت إلى ${skipTarget.nameAr}.` : `Samples skipped; moved to ${skipTarget.nameEn}.`)} />
-  )}
-  {dialog === "activity" && (
-    <ActivityDialog ar={ar} opportunityId={deal.id} onClose={() => setDialog(null)}
-      onDone={() => { setDialog(null); setSuccess(ar ? "سُجّل النشاط." : "Activity logged."); reload(); }} />
-  )}
-  {dialog === "sample" && (
-    <SampleDialog ar={ar} opportunityId={deal.id} onClose={() => setDialog(null)}
-      sampledProductIds={sampledProducts} manager={!!can.approveSample}
-      onDone={(requested, replayed, approval) => {
-        setDialog(null);
-        setSuccess(replayed
-          ? (ar ? "هذا الطلب مُسجّل مسبقًا؛ لم يُكرَّر." : "This request was already recorded; it was not duplicated.")
-          : approval === "PENDING"
-          // A rep's second sample of the product: recorded, but it waits for the manager before dispatch sees it.
-          ? (ar ? "سُجّل طلب العيّنة الثانية وهو بانتظار موافقة المدير؛ لن يصل إلى قسم الشحن قبل موافقته." : "Second-sample request recorded; it awaits the sales manager's approval and reaches dispatch only once approved.")
-          : approval === "APPROVED"
-          ? (ar ? "سُجّلت موافقتك على العيّنة الثانية وأُرسل الطلب إلى قسم الشحن. لم يتحرك المخزون بعد." : "Your approval of the second sample is recorded and the request has gone to dispatch. No stock has moved yet.")
-          : requested
-          ? (ar ? "أُرسل طلب العيّنة إلى قسم الشحن. لم يتحرك المخزون بعد." : "Sample requested from dispatch. No stock has moved yet.")
-          : (ar ? "سُجّلت العيّنة." : "Sample recorded."));
-        reload();
-      }} />
-  )}
-  {feedbackFor && (
-    <FeedbackDialog ar={ar} sample={feedbackFor} busy={busy} onClose={() => setFeedbackFor(null)}
-      onSubmit={async (score, notes) => {
-        const ok = await patchSample(feedbackFor.id, { status: "FEEDBACK_RECEIVED", feedbackScore: score, feedbackNotes: notes });
-        if (ok) { setFeedbackFor(null); setSuccess(ar ? "سُجّلت نتيجة العيّنة." : "Sample result recorded."); }
-      }} />
-  )}
-  {declineFor && (
-    <DeclineSampleDialog ar={ar} busy={busy} onClose={() => setDeclineFor(null)}
-      onSubmit={async (reason) => { if (await decideSample(declineFor.id, "DECLINE", reason)) setDeclineFor(null); }} />
-  )}
-  {dialog === "edit" && (
-    <EditDialog ar={ar} deal={deal} onClose={() => setDialog(null)}
-      onDone={() => { setDialog(null); setSuccess(ar ? "حُفظت التعديلات." : "Saved."); reload(); }} />
-  )}
-  {dialog === "splits" && (
-    <SplitDialog ar={ar} deal={deal} onClose={() => setDialog(null)}
-      onDone={() => { setDialog(null); setSuccess(ar ? "حُفظ التوزيع." : "Split saved."); reload(); }} />
-  )}
+      {dialog === "close" && (
+        <LossSheet ar={ar} busy={busy} dealLine={dealLine} error={dialogError} onClose={() => setDialog(null)}
+          onSubmit={(reason, code) => transition({ toOutcome: "LOST", lostReason: reason, ...(code ? { lostReasonCode: code } : {}) }, ar ? "سُجّلت الصفقة خاسرة." : "Deal marked lost.")} />
+      )}
+      {dialog === "needs" && (
+        <NeedsDialog ar={ar} dealId={deal.id} needs={deal} onClose={() => setDialog(null)}
+          onDone={() => { setDialog(null); setSuccess(ar ? "حُفظ تحليل الاحتياج." : "Needs saved."); reload(); }} />
+      )}
+      {dialog === "skip" && (
+        <SkipSamplesSheet ar={ar} busy={busy} dealName={headTitle} error={dialogError}
+          targetName={quoteStage ? (ar ? quoteStage.nameAr : quoteStage.nameEn) : skipTarget ? (ar ? skipTarget.nameAr : skipTarget.nameEn) : (ar ? "عرض السعر والتفاوض" : "Quotation")}
+          onClose={() => { setDialog(null); setSkipTarget(null); }}
+          onSubmit={(code, text) => transition({ skipSamples: true, skipReasonCode: code, ...(text ? { skipReason: text } : {}) },
+            ar ? "تُخطّيت العيّنات ونُقلت الصفقة إلى عرض السعر والتفاوض." : "Samples skipped; moved to the quotation stage.")} />
+      )}
+      {dialog === "followup" && (
+        <FollowUpSheet ar={ar} busy={busy} dealName={headTitle} error={dialogError} onClose={() => setDialog(null)}
+          current={fuDue && fuTitle ? { dueAt: fuDue, label: dueText(fuDue, lang) } : null}
+          onSubmit={(at, subject) => scheduleFollowUp(at, subject)} />
+      )}
+      {dialog === "move" && (
+        <MoveSheet ar={ar} busy={busy} dealName={headTitle} stages={shown.filter((x) => x.isActive)} currentStageId={deal.stage.id}
+          direct={moveDirect} error={dialogError} onClose={() => setDialog(null)}
+          onSubmit={(to, reason) => transition({ toStageId: to, ...(reason ? { reason } : {}) }, ar ? `نُقلت الصفقة إلى ${stageName(to) ?? ""}.` : `Moved to ${stageName(to) ?? ""}.`)} />
+      )}
+      {dialog === "decide" && pendingMove && (
+        <DecideMoveSheet ar={ar} busy={busy} error={dialogError} onClose={() => setDialog(null)}
+          line={ar ? `${headTitle} · إلى «${pendingMove.toStage?.nameAr ?? ""}»${pendingMove.requestedBy ? ` · بطلب ${pendingMove.requestedBy}` : ""}${pendingMove.reason ? ` · ${pendingMove.reason}` : ""}`
+            : `${headTitle} · to “${pendingMove.toStage?.nameEn ?? ""}”${pendingMove.requestedBy ? ` · by ${pendingMove.requestedBy}` : ""}`}
+          onSubmit={(d, note) => decideMove(d, note)} />
+      )}
+      {dialog === "activity" && (
+        <ActivityDialog ar={ar} opportunityId={deal.id} onClose={() => setDialog(null)}
+          onDone={() => { setDialog(null); setSuccess(ar ? "سُجّل النشاط." : "Activity logged."); reload(); }} />
+      )}
+      {dialog === "sample" && (
+        <SampleDialog ar={ar} opportunityId={deal.id} onClose={() => setDialog(null)}
+          sampledProductIds={sampledProducts} manager={!!can.approveSample}
+          onDone={(requested, replayed, approval) => {
+            setDialog(null);
+            setSuccess(replayed
+              ? (ar ? "هذا الطلب مُسجّل مسبقًا؛ لم يُكرَّر." : "This request was already recorded; it was not duplicated.")
+              : approval === "PENDING"
+              // A rep's second sample of the product: recorded, but it waits for the manager before dispatch sees it.
+              ? (ar ? "سُجّل طلب العيّنة الثانية وهو بانتظار موافقة المدير؛ لن يصل إلى قسم الشحن قبل موافقته." : "Second-sample request recorded; it awaits the sales manager's approval and reaches dispatch only once approved.")
+              : approval === "APPROVED"
+              ? (ar ? "سُجّلت موافقتك على العيّنة الثانية وأُرسل الطلب إلى قسم الشحن. لم يتحرك المخزون بعد." : "Your approval of the second sample is recorded and the request has gone to dispatch. No stock has moved yet.")
+              : requested
+              ? (ar ? "أُرسل طلب العيّنة إلى قسم الشحن. لم يتحرك المخزون بعد." : "Sample requested from dispatch. No stock has moved yet.")
+              : (ar ? "سُجّلت العيّنة." : "Sample recorded."));
+            reload();
+          }} />
+      )}
+      {feedbackFor && (
+        <FeedbackDialog ar={ar} sample={feedbackFor} busy={busy} onClose={() => setFeedbackFor(null)}
+          onSubmit={async (score, notes) => {
+            const ok = await patchSample(feedbackFor.id, { status: "FEEDBACK_RECEIVED", feedbackScore: score, feedbackNotes: notes });
+            if (ok) { setFeedbackFor(null); setSuccess(ar ? "سُجّلت نتيجة العيّنة." : "Sample result recorded."); }
+          }} />
+      )}
+      {declineFor && (
+        <DeclineSampleDialog ar={ar} busy={busy} onClose={() => setDeclineFor(null)}
+          onSubmit={async (reason) => { if (await decideSample(declineFor.id, "DECLINE", reason)) setDeclineFor(null); }} />
+      )}
+      {dialog === "edit" && (
+        <EditDialog ar={ar} deal={deal} onClose={() => setDialog(null)}
+          onDone={() => { setDialog(null); setSuccess(ar ? "حُفظت التعديلات." : "Saved."); reload(); }} />
+      )}
+      {dialog === "splits" && (
+        <SplitDialog ar={ar} deal={deal} onClose={() => setDialog(null)}
+          onDone={() => { setDialog(null); setSuccess(ar ? "حُفظ التوزيع." : "Split saved."); reload(); }} />
+      )}
+      {toast && <AutoToast ar={ar} title={toast.title} why={toast.why} onDone={() => setToast(null)} />}
     </>
   );
 
-  // ── Phone (below 768): the 390 frame `178:1285` ──
-  // Status line, three figures as rows, the next step, the current quotations, the latest
-  // activity, and a sticky bar with the page's primary action and «⋯». What the frame does not
-  // draw but carries a function of this page (samples, collection, customer, details, the full
-  // history) follows in the desktop order; nothing is dropped.
-  if (phone) {
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const dueShort = (v: string) => { const d = new Date(v); return `${shortDate(d, lang)} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
-    const current = deal.quotes.filter((q) => q.status !== "SUPERSEDED");
-    const latest = allEntries ? entries : entries.slice(0, 2);
-    // D6.1 (owner, 15 Oct): the bar's primary is «تسجيل نتيجة المكالمة» as in the frame — it
-    // opens the same log-activity dialog, which records a new activity with its outcome. It
-    // does not complete the open follow-up; that stays «إكمال» in the next-step band. Moving
-    // the deal on («التالي») and marking it won keep their permissions, under «⋯».
-    const moreItems: React.ReactNode[] = [];
-    // The stage's job (`stagePrimaryAction`) heads the menu; moving on and winning follow as before.
-    if (stageAction && stageAction.key !== "ADVANCE" && stageAction.key !== "WIN" && allowed(stageAction.key)) {
-      const href = actionHref(stageAction);
-      const text = actionLabel(stageAction, ar);
-      moreItems.push(href
-        ? <Link key="stage-action" role="menuitem" href={href} data-testid="stage-action">{text}</Link>
-        : <button key="stage-action" type="button" role="menuitem" data-testid="stage-action" disabled={busy}
-            onClick={() => { setMore(false); runAction(stageAction); }}>{text}</button>);
-    }
-    if (open && can.write && nextStage) moreItems.push(
-      <button key="next" type="button" role="menuitem" data-testid="next-stage" disabled={busy}
-        onClick={() => { setMore(false); transition({ toStageId: nextStage.id }, ar ? `نُقلت إلى ${nextStage.nameAr}.` : `Moved to ${nextStage.nameEn}.`); }}>
-        {ar ? `التالي: ${nextStage.nameAr}` : `Next: ${nextStage.nameEn}`}
-      </button>);
-    if (winnable) moreItems.push(
-      <button key="win" type="button" role="menuitem" data-testid="win-deal" disabled={busy}
-        onClick={() => { setMore(false); transition({ toOutcome: "WON" }, ar ? "سُجّلت الصفقة رابحة." : "Deal marked won."); }}>
-        {ar ? "تعليم رابحة" : "Mark won"}
-      </button>);
-    if (can.quote && open) moreItems.push(
-      <Link key="quote" role="menuitem" href={`/dashboard/sales/quotes/new?opportunityId=${deal.id}`} data-testid="new-quote">
-        {ar ? "عرض سعر جديد" : "New quotation"}
-      </Link>);
-    if (open && can.close) moreItems.push(
-      <button key="lose" type="button" role="menuitem" className="danger" data-testid="lose-deal" disabled={busy}
-        onClick={() => { setMore(false); setDialog("close"); }}>
-        {ar ? "تعليم خاسرة" : "Mark as lost"}
-      </button>);
-    const reopen = !open && can.reopen ? (
-      <button type="button" className="btn p" data-testid="reopen-deal" disabled={busy}
-        onClick={() => transition({ toOutcome: "OPEN" }, ar ? "أُعيد فتح الصفقة." : "Deal reopened.")}>
-        {ar ? "إعادة فتح الصفقة" : "Reopen the deal"}
-      </button>
-    ) : null;
-    const logOutcome = open && can.write ? (
-      <button type="button" className="btn p" data-testid="log-activity" onClick={() => setDialog("activity")}>
-        {ar ? "تسجيل نتيجة المكالمة" : "Log call outcome"}
-      </button>
-    ) : null;
-    const barPrimary = reopen ?? logOutcome;
-    return (
-      <div className="pg">
-        {notice}
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <span className={`st${deal.outcome === "WON" ? " ok" : deal.outcome === "LOST" ? " er" : ""}`} data-testid="deal-outcome">
-            {deal.outcome === "OPEN" ? (ar ? "مفتوحة" : "Open") : deal.outcome === "WON" ? (ar ? "رابحة" : "Won") : (ar ? "خاسرة" : "Lost")}
-          </span>
-          <span className="st in" style={{ fontSize: 12.5 }}>{ar ? deal.stage.nameAr : deal.stage.nameEn}</span>
-          {deal.owner && <span style={{ fontSize: 12.5, color: "var(--text-muted)" }}>{deal.owner.name}</span>}
-        </div>
-
-        <dl className="phrows" data-testid="deal-metrics">
-          <div><dt className="lbl">{ar ? "القيمة المتوقعة" : "Expected value"}</dt>
-            <dd>{ar
-              ? <><span className="n" style={{ fontSize: 20 }}>{whole(deal.amount)}</span><span className="unit">{cur}</span></>
-              : <><span className="unit pre">{cur}</span><span className="n" style={{ fontSize: 20 }}>{whole(deal.amount)}</span></>}</dd></div>
-          <div><dt className="lbl">{ar ? "الاحتمال" : "Probability"}</dt>
-            <dd><span className="n" style={{ fontSize: 20 }}>{deal.probability}%</span></dd></div>
-          <div><dt className="lbl">{ar ? "الإغلاق المتوقع" : "Expected close"}</dt>
-            <dd>{deal.expectedCloseAt ? shortDate(deal.expectedCloseAt, lang) : (ar ? "غير محدد" : "Not set")}</dd></div>
-        </dl>
-
-        {open ? (
-          <div data-testid="next-step" className={`callout ph${lateBy ? " er" : ""}`}>
-            {nextStep ? (
-              <>
-                {lateBy > 0 && <span className="flag">{ar ? `متأخرة ${dayCount(lateBy, lang)}` : `${dayCount(lateBy, lang)} overdue`}</span>}
-                <span>
-                  <b style={{ fontWeight: 600 }}>{ar ? "الخطوة التالية:" : "Next step:"}</b> <bdi>{nextStep.subject}</bdi>
-                  {nextStep.dueAt && <> · {dueShort(nextStep.dueAt)}</>}
-                </span>
-                {/* Not in the frame, whose bar records the call's outcome — the system can only mark
-                    a follow-up done (record: conflict P-2). */}
-                {can.write && (
-                  <button type="button" className="btn sm" data-testid={`complete-${nextStep.id}`} disabled={busy} onClick={() => complete(nextStep.id)}>
-                    {ar ? "إكمال" : "Complete"}
-                  </button>
-                )}
-              </>
-            ) : (
-              <span>
-                <b style={{ fontWeight: 600 }}>{ar ? "الخطوة التالية:" : "Next step:"}</b>{" "}
-                {deal.nextFollowUpAt
-                  ? <>{ar ? "متابعة · " : "follow-up · "}{dueShort(deal.nextFollowUpAt)}</>
-                  : <span style={{ color: "var(--text-secondary)" }}>{ar ? "لا نشاط مفتوح." : "Nothing open."}</span>}
-              </span>
-            )}
-          </div>
-        ) : deal.lostReason ? (
-          <div className="callout ph">
-            <span><b style={{ fontWeight: 600 }}>{ar ? "سبب الخسارة:" : "Lost because:"}</b> <bdi>{deal.lostReason}</bdi></span>
-          </div>
-        ) : null}
-
-        <div className="lbl" style={{ margin: "18px 0 4px" }}>{ar ? "عروض الأسعار" : "Quotations"}</div>
-        {current.length === 0 ? (
-          <p className="lbl" style={{ fontWeight: 400, margin: 0 }}>{ar ? "لا توجد عروض أسعار بعد." : "No quotations yet."}</p>
-        ) : (
-          <div data-testid="deal-quotes">
-            {current.map((q) => (
-              <div key={q.id} className="mrow" data-testid={`quote-row-${q.quoteNumber}`}>
-                <div>
-                  <Link href={`/dashboard/sales/quotes/${q.id}`} className="id" style={{ color: "inherit", textDecoration: "none" }}>
-                    <bdi dir="ltr">{q.quoteNumber}</bdi>
-                  </Link>{" "}
-                  <span style={{ fontSize: 12.5, color: "var(--text-muted)" }}>{ar ? "المراجعة" : "revision"} {q.revision}</span>
-                </div>
-                <span className="n">{money2(q.grandTotal)}</span>
-                <div className="r2">
-                  <span className={`st ${QUOTE_ST[q.status] ?? ""}`} style={{ fontSize: 12.5 }}>{pick(QUOTE_STATUS_SPECS, q.status, lang)}</span>
-                  {q.validUntil && <span style={{ marginInlineStart: "auto" }}>{ar ? "صالح حتى " : "Valid until "}{shortDate(q.validUntil, lang)}</span>}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="lbl" style={{ margin: "18px 0 8px" }}>{ar ? "آخر نشاط" : "Last activity"}</div>
-        {entries.length === 0 ? (
-          <p className="lbl" style={{ fontWeight: 400, margin: 0 }}>{ar ? "لم يُسجَّل أي نشاط." : "Nothing logged yet."}</p>
-        ) : (
-          <ol className="tl" style={{ fontSize: 13 }} data-testid="deal-activities">
-            {latest.map((e, i) => {
-              const a = e.activity;
-              const openA = a && !a.completedAt;
-              return (
-                <li key={e.key} data-kind={e.kind} data-testid={a ? `activity-${a.id}` : undefined}>
-                  <span className={`m${i === 0 && !openA ? " b" : ""}`} />
-                  {e.title}
-                  <div className="when">{e.when}</div>
-                  {openA && can.write && a.id !== nextStep?.id && (
-                    <div style={{ marginTop: 6 }}>
-                      <button type="button" className="btn sm" data-testid={`complete-${a.id}`} disabled={busy} onClick={() => complete(a.id)}>
-                        {ar ? "إكمال" : "Complete"}
-                      </button>
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
-        )}
-        {/* The frame shows the latest two; the rest of the history stays one tap away. */}
-        {entries.length > 2 && (
-          <button type="button" className="btn sm" data-testid="toggle-all-activities" aria-expanded={allEntries}
-            onClick={() => setAllEntries((v) => !v)}>
-            {allEntries ? (ar ? "عرض أقل" : "Show fewer") : (ar ? `عرض الكل (${entries.length})` : `Show all (${entries.length})`)}
-          </button>
-        )}
-
-        {/* Not in the 390 frame; each carries a function of this page (record: P-3). */}
-        <div style={{ marginTop: 32 }}>
-          {collectionsHere && collectionsPanel}
-          {samplesBlock}
-          {!collectionsHere && collectionsPanel}
-          {customerBlock}
-          <div style={{ height: 1, background: "var(--border-subtle)", marginBottom: 24 }} />
-          {detailsBlock}
-        </div>
-
-        <div className="sticky-act" data-deal-more>
-          {barPrimary && <div className="grow">{barPrimary}</div>}
-          {moreItems.length > 0 && (
-            <div style={{ position: "relative", marginInlineStart: barPrimary ? undefined : "auto" }}>
-              <button type="button" className="btn" style={{ width: 44, padding: 0, justifyContent: "center" }}
-                aria-haspopup="menu" aria-expanded={more} aria-label={ar ? "المزيد" : "More"}
-                data-testid="deal-more" onClick={() => setMore((v) => !v)}>
-                <Ico name="more" small />
-              </button>
-              {more && <div className="menu" role="menu">{moreItems}</div>}
-            </div>
-          )}
-        </div>
-        {dialogs}
-      </div>
-    );
-  }
+  // «⋯» (IconButton 12:201): the deal's other actions, so «المطلوب منك الآن» keeps one primary button.
+  const moreItems: React.ReactNode[] = [];
+  if (open && can.write) moreItems.push(
+    <button key="fu" type="button" role="menuitem" data-testid="menu-follow-up" onClick={() => { setMore(false); setDialogError(""); setDialog("followup"); }}>{ar ? "جدولة متابعة" : "Schedule a follow-up"}</button>,
+    <button key="mv" type="button" role="menuitem" data-testid="move-deal" disabled={!!pendingMove} onClick={() => { setMore(false); setDialogError(""); setDialog("move"); }}>
+      {moveDirect ? (ar ? "نقل إلى…" : "Move to…") : (ar ? "طلب نقل إلى…" : "Request a move…")}</button>,
+    <button key="smp" type="button" role="menuitem" data-testid="menu-add-sample" onClick={() => { setMore(false); setDialog("sample"); }}>{ar ? "طلب عيّنة" : "Request a sample"}</button>,
+  );
+  if (open && can.quote) moreItems.push(<Link key="q" role="menuitem" href={`/dashboard/sales/quotes/new?opportunityId=${deal.id}`} data-testid="menu-new-quote">{ar ? "عرض سعر جديد" : "New quotation"}</Link>);
+  if (open && can.write) moreItems.push(<button key="ed" type="button" role="menuitem" data-testid="menu-edit-deal" onClick={() => { setMore(false); setDialog("edit"); }}>{ar ? "تعديل التفاصيل" : "Edit details"}</button>);
+  if (open && can.close) moreItems.push(
+    <button key="lose" type="button" role="menuitem" className="danger" data-testid="lose-deal" disabled={busy}
+      onClick={() => { setMore(false); setDialogError(""); setDialog("close"); }}>{ar ? "تعليم خاسرة" : "Mark as lost"}</button>);
 
   return (
     <div className="pg">
       {notice}
-
-      <div className="ph" style={{ alignItems: "flex-start" }}>
-        <div>
-          <h1>{deal.title}</h1>
+      <header className="pv2-dh">
+        <div className="t">
+          <h1>
+            <span>{headTitle}</span>
+            {deal.outcome !== "OPEN"
+              ? <Chip tone={deal.outcome === "WON" ? "ok" : "neutral"} label={deal.outcome === "WON" ? (ar ? "رابحة" : "Won") : (ar ? "خاسرة" : "Lost")} testId="deal-outcome" />
+              : <span hidden data-testid="deal-outcome">{ar ? "مفتوحة" : "Open"}</span>}
+          </h1>
+          {headSub ? <div className="sub">{headSub}</div> : null}
           <div className="meta">
-            {/* Outcome and stage are two facts: the outcome here, the stage on the tracker. */}
-            <span className={`st${deal.outcome === "WON" ? " ok" : deal.outcome === "LOST" ? " er" : ""}`} data-testid="deal-outcome">
-              {deal.outcome === "OPEN" ? (ar ? "مفتوحة" : "Open") : deal.outcome === "WON" ? (ar ? "رابحة" : "Won") : (ar ? "خاسرة" : "Lost")}
-            </span>
-            {deal.owner && <><i /><span>{ar ? "المالك " : "Owner "}{deal.owner.name}</span></>}
-            <i /><span>{ar ? "أُنشئت " : "Created "}{shortDate(deal.createdAt, lang)}</span>
-            {!open && deal.closedAt && <><i /><span>{ar ? "أُغلقت " : "Closed "}{shortDate(deal.closedAt, lang)}</span></>}
+            <span className="amt">{money(deal.amount)}{open ? (ar ? " متوقعة" : " expected") : ""}</span>
+            {deal.owner && <><i>·</i><span>{ar ? "المالك: " : "Owner: "}{deal.owner.name}</span></>}
+            <i>·</i><span>{ar ? "أُنشئت " : "Created "}{longDate(deal.createdAt, lang)}</span>
           </div>
         </div>
         <div className="act">
-          {open && can.close && (
-            <button type="button" className="btn g" data-testid="lose-deal" disabled={busy} onClick={() => setDialog("close")}>
-              {ar ? "تعليم خاسرة" : "Mark as lost"}
-            </button>
-          )}
-          {can.write && (
+          {open && can.write && (
             <button type="button" className="btn" data-testid="log-activity" onClick={() => setDialog("activity")}>
               <Ico name="phone" small />{ar ? "تسجيل نشاط" : "Log activity"}
             </button>
           )}
-          {!open && can.reopen && (
-            <button type="button" className="btn p" data-testid="reopen-deal" disabled={busy}
-              onClick={() => transition({ toOutcome: "OPEN" }, ar ? "أُعيد فتح الصفقة." : "Deal reopened.")}>
-              {ar ? "إعادة فتح الصفقة" : "Reopen the deal"}
-            </button>
-          )}
-          {primary}
-        </div>
-      </div>
-
-      {/* The four figures a deal is read by (reference `crm-deal` metrics row). */}
-      <dl className="metrics m4" data-testid="deal-metrics" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))", margin: "8px 0 32px" }}>
-        <div>
-          <dt className="lbl">{ar ? "القيمة المتوقعة" : "Expected value"}</dt>
-          <dd className="mid n">{whole(deal.amount)}</dd>
-          <dd className="d">{cur}</dd>
-        </div>
-        <div>
-          <dt className="lbl">{ar ? "الاحتمال" : "Probability"}</dt>
-          <dd className="mid n">{deal.probability}%</dd>
-          <dd className="d">{ar
-            ? <>مرجّحة <span className="n">{whole(Number(deal.amount) * deal.probability / 100)}</span> {cur}</>
-            : <>Weighted {cur} <span className="n">{whole(Number(deal.amount) * deal.probability / 100)}</span></>}</dd>
-        </div>
-        <div>
-          <dt className="lbl">{ar ? "الإغلاق المتوقع" : "Expected close"}</dt>
-          <dd className="mid">{deal.expectedCloseAt ? shortDate(deal.expectedCloseAt, lang) : (ar ? "غير محدد" : "Not set")}</dd>
-          <dd className="d">{deal.expectedCloseAt ? relativeDays(deal.expectedCloseAt, lang) : " "}</dd>
-        </div>
-        <div>
-          <dt className="lbl">{ar ? "في المرحلة" : "In stage"}</dt>
-          <dd className="mid n">{inStageDays}<span className="unit">{dayUnit(inStageDays, lang)}</span></dd>
-          <dd className="d">{ar ? "منذ " : "since "}{shortDate(inStageSince, lang)}</dd>
-        </div>
-      </dl>
-
-      {/* Stage tracker (`.track`). Each step is also the control that moves the deal there. */}
-      <div className="track-wrap" style={{ maxWidth: 628, marginBottom: 22 }}>
-      <ol className="track" aria-label={ar ? "المرحلة" : "Stage"}>
-        {shown.map((s, i) => {
-          const done = i < atIdx, current = i === atIdx;
-          const since = reached.get(s.id);
-          return (
-            <li key={s.id} className={done ? "done" : current ? "cur" : undefined}>
-              <button type="button" data-testid={`stage-${s.code}`} aria-pressed={current}
-                aria-current={current ? "step" : undefined}
-                disabled={busy || current || !open || !can.write}
-                onClick={() => transition({ toStageId: s.id }, ar ? `نُقلت إلى ${s.nameAr}.` : `Moved to ${s.nameEn}.`)}>
-                <b className={done || current ? undefined : "later"}>{ar ? s.nameAr : s.nameEn}</b>
-                {current ? <small>{inStageDays === 0 ? (ar ? "منذ اليوم" : "since today") : relativeDays(inStageSince, lang)}</small>
-                  : done && since ? <small>{shortDate(since, lang)}</small> : null}
+          {moreItems.length > 0 && (
+            <div style={{ position: "relative" }} data-deal-more>
+              <button type="button" className="btn g" style={{ width: 34, padding: 0, justifyContent: "center" }}
+                aria-haspopup="menu" aria-expanded={more} aria-label={ar ? "إجراءات أخرى" : "More actions"}
+                data-testid="deal-more" onClick={() => setMore((v) => !v)}>
+                <Ico name="more" small />
               </button>
-            </li>
-          );
-        })}
-      </ol>
-      </div>
-
-      {/* «تحليل الاحتياج» — a detail of the Qualified Opportunity stage, so it sits with the stage. */}
-      <NeedsBlock ar={ar} needs={deal} canEdit={open && can.write} onEdit={() => setDialog("needs")} />
-      {skippedBecause && (
-        <p className="sm" data-testid="samples-skipped" style={{ maxWidth: 628, margin: "-12px 0 22px", color: "var(--text-secondary)" }}>
-          <b style={{ fontWeight: 600 }}>{ar ? "تُخطّيت العيّنات:" : "Samples skipped:"}</b> <bdi>{skippedBecause}</bdi>
-        </p>
-      )}
-
-      {/* The next step (reference: red tint when it is overdue). Closed deals show why instead. */}
-      {open ? (
-        <div data-testid="next-step" className={`callout${lateBy ? " er" : ""}`} style={{ marginBottom: 32 }}>
-          {nextStep ? (
-            <>
-              {lateBy > 0 && <span className="flag">{ar ? `متأخرة ${dayCount(lateBy, lang)}` : `${dayCount(lateBy, lang)} overdue`}</span>}
-              <span>
-                <b style={{ fontWeight: 600 }}>{ar ? "الخطوة التالية:" : "Next step:"}</b> <bdi>{nextStep.subject}</bdi>
-                {nextStep.dueAt && <> · {lateBy ? (ar ? "كانت مستحقة " : "was due ") : (ar ? "مستحقة " : "due ")}{dueText(nextStep.dueAt, lang)}</>}
-              </span>
-              {can.write && (
-                <button type="button" className="btn sm" data-testid={`complete-${nextStep.id}`} disabled={busy} onClick={() => complete(nextStep.id)}>
-                  {ar ? "إكمال" : "Complete"}
-                </button>
-              )}
-            </>
-          ) : (
-            <span>
-              <b style={{ fontWeight: 600 }}>{ar ? "الخطوة التالية:" : "Next step:"}</b>{" "}
-              {deal.nextFollowUpAt
-                ? <>{ar ? "متابعة · " : "follow-up · "}{dueText(deal.nextFollowUpAt, lang)}</>
-                : <span style={{ color: "var(--text-secondary)" }}>{ar ? "لا نشاط مفتوح. سجّل نشاطًا يحدّد ما يحدث بعد ذلك." : "Nothing open. Log an activity that says what happens next."}</span>}
-            </span>
-          )}
-        </div>
-      ) : deal.lostReason ? (
-        <div className="callout" style={{ marginBottom: 32 }}>
-          <span><b style={{ fontWeight: 600 }}>{ar ? "سبب الخسارة:" : "Lost because:"}</b> <bdi>{deal.lostReason}</bdi></span>
-        </div>
-      ) : null}
-
-      <div className="cols" style={{ gridTemplateColumns: "minmax(0,1fr) 300px", gap: 56 }}>
-        <div style={{ minWidth: 0 }}>
-          {/* ── Quotations ── */}
-          <div className="bh">
-            <h2 className="bt">{ar ? "عروض الأسعار" : "Quotations"}</h2>
-            <span className="sub">{vatNote}</span>
-            {can.quote && open && (
-              <Link className="lk" href={`/dashboard/sales/quotes/new?opportunityId=${deal.id}`} data-testid="new-quote">
-                <Ico name="plus" small />{ar ? "عرض سعر جديد" : "New quotation"}
-              </Link>
-            )}
-          </div>
-          {deal.quotes.length === 0 ? (
-            <p className="lbl" style={{ fontWeight: 400, margin: "0 0 32px" }}>{ar ? "لا توجد عروض أسعار بعد." : "No quotations yet."}</p>
-          ) : (
-            <div style={{ overflowX: "auto", marginBottom: 32 }}>
-              <table className="t" data-testid="deal-quotes">
-                <thead><tr>
-                  <th>{ar ? "العرض" : "Quotation"}</th>
-                  <th>{ar ? "المراجعة" : "Revision"}</th>
-                  <th>{ar ? "الحالة" : "Status"}</th>
-                  <th className="num">{ar ? "قبل الضريبة" : "Before VAT"}</th>
-                  <th className="num">{ar ? `الإجمالي · ${(lang === "ar" && deal.currency === "SAR" ? "ريال" : deal.currency)}` : `Total · ${deal.currency}`}</th>
-                  <th>{ar ? "صالح حتى" : "Valid until"}</th>
-                </tr></thead>
-                <tbody>
-                  {deal.quotes.map((q) => (
-                    <tr key={q.id} data-testid={`quote-row-${q.quoteNumber}`}>
-                      <td className="id" style={{ color: "var(--text-secondary)" }}>
-                        <Link href={`/dashboard/sales/quotes/${q.id}`}>{q.quoteNumber}</Link>
-                      </td>
-                      <td className="num" style={{ textAlign: "start" }}>{q.revision}</td>
-                      <td><span className={`st ${QUOTE_ST[q.status] ?? ""}`}>{pick(QUOTE_STATUS_SPECS, q.status, lang)}</span></td>
-                      <td className="num">{money2(Number(q.grandTotal) - Number(q.taxTotal))}</td>
-                      <td className="num">{money2(q.grandTotal)}</td>
-                      <td className="sm">{q.validUntil ? shortDate(q.validUntil, lang) : "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              {more && <div className="menu" role="menu" style={{ insetInlineEnd: 0, top: "calc(100% + 4px)", bottom: "auto", minWidth: 200 }}>{moreItems}</div>}
             </div>
           )}
+        </div>
+      </header>
 
-          {/* The money against the deal — not in the frame (record: conflict C-3). Under the
-              quotations once there is an accepted one to collect against. */}
+      <StageStepper ar={ar} steps={steps} note={stepperNote} />
+
+      <div className="pv2-body">
+        <div className="pv2-main">
+          {moveBanner}
+          {nowCard}
+          {phase === "QUALIFIED" && open && needsPanel}
+          {showSamplesMain && samplesPanel}
+          {showQuoteMain && quotePanel}
           {collectionsHere && collectionsPanel}
-
-          {samplesBlock}
-
-          {activityBlock}
-          {!collectionsHere && collectionsPanel && <div style={{ marginTop: 32 }}>{collectionsPanel}</div>}
+          {followPanel}
+          {timeline}
+          {!collectionsHere && collectionsPanel}
         </div>
-
-        {/* ── Side column: the customer, then the deal's own details ── */}
-        <div style={{ minWidth: 0 }}>
-          {customerBlock}
-          <div style={{ height: 1, background: "var(--border-subtle)", marginBottom: 24 }} />
-          {detailsBlock}
-        </div>
+        <aside className="pv2-side" aria-label={ar ? "تفاصيل" : "Details"}>
+          {detailsPanel}
+          {sideSamples}
+          {sideQuotes}
+          {contactsPanel}
+        </aside>
       </div>
-
       {dialogs}
     </div>
   );
 }
 
-/** Quote status → the reference status dot (`.st` + tone). */
-const QUOTE_ST: Record<string, string> = { ISSUED: "in", ACCEPTED: "ok", REJECTED: "er", EXPIRED: "wa", SUPERSEDED: "x" };
-const SAMPLE_ST: Record<string, string> = { SENT: "in", FEEDBACK_RECEIVED: "ok", CANCELLED: "x" };
-
-function LostDialog({
-  ar, busy, onClose, onSubmit,
-}: {
-  ar: boolean; busy: boolean; onClose: () => void; onSubmit: (reason: string, code: string | null) => void;
-}) {
-  const [reason, setReason] = useState("");
-  // The coded reason (20261204100000_pipeline_qualification): optional; a code other than «other»
-  // is a reason on its own, «other» needs the text.
-  const [code, setCode] = useState("");
-  const enough = reason.trim().length >= 2 || (!!code && code !== "OTHER");
-  return (
-    <Modal
-      title={ar ? "تسجيل خسارة الصفقة" : "Mark the deal lost"}
-      onClose={onClose}
-      testId="lost-dialog"
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose}>{ar ? "إلغاء" : "Cancel"}</Button>
-          <Button variant="danger" disabled={busy || !enough} onClick={() => onSubmit(reason, code || null)} testId="confirm-lost">
-            {ar ? "تأكيد الخسارة" : "Confirm lost"}
-          </Button>
-        </>
-      }
-    >
-      <LostReasonCodeSelect ar={ar} value={code} onChange={setCode} />
-      <Field
-        id="lost-reason"
-        label={ar ? "السبب" : "Reason"}
-        required={!code || code === "OTHER"}
-        hint={
-          ar
-            ? "مطلوب. مسار مليء بصفقات خاسرة بلا أسباب لا يُعلّم أحداً شيئاً."
-            : "Required. A pipeline of lost deals with no reasons teaches nobody anything."
-        }
-      >
-        <TextArea id="lost-reason" value={reason} onChange={setReason} rows={3} />
-      </Field>
-    </Modal>
-  );
-}
 
 function ActivityDialog({
   ar, opportunityId, onClose, onDone,

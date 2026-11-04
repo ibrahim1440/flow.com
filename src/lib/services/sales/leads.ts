@@ -1,6 +1,6 @@
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 import { resolveLostReason, type LostReasonCode } from "./needs";
-import { sampleSkipRequired, sampleSkipReasonText, SAMPLE_SKIP_REFUSAL } from "./stages";
+import { sampleSkipRequired, sampleSkipReasonText, SAMPLE_SKIP_REFUSAL, resolveSampleSkip, requireStageFor } from "./stages";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -268,6 +268,15 @@ export async function transitionOpportunity(
      * the stage event's reason (`sampleSkipReasonText`). Ignored on every other move.
      */
     skipReason?: string | null;
+    /**
+     * «العميل ما يحتاج عينات» (pipeline v2 §2.4): skip the samples in one click. The target is resolved HERE as the
+     * Quotation-purpose stage (the client supplies no stage), the reason is a code (`SAMPLE_SKIP_CODES`; OTHER needs
+     * text), and the move is refused (409) when the deal is closed, already at or past the quotation stage, or has a
+     * live (non-cancelled) sample.
+     */
+    skipSamples?: { code: string | null; text?: string | null } | null;
+    /** A supervisor's approval of a rep's move request (stage-move.ts): «يدوي — باعتماد …», first in the event's reason. */
+    manualNote?: string | null;
     actorId: string;
     canReopen: boolean;
   },
@@ -283,6 +292,36 @@ export async function transitionOpportunity(
 
   const closing = input.toOutcome === "WON" || input.toOutcome === "LOST";
   const wasClosed = opp.outcome === "WON" || opp.outcome === "LOST";
+
+  // «العميل ما يحتاج عينات»: one click, every rule on the server (pipeline v2 §2.4).
+  let codedSkip: string | null = null;
+  if (input.skipSamples) {
+    if (input.toOutcome) throw { _appCode: 400, message: "Skip the samples and change the outcome in two steps." };
+    if (wasClosed) {
+      throw { _appCode: 409, code: "DEAL_CLOSED", message: `This deal is already ${opp.outcome}.`, errorAr: "الصفقة مغلقة؛ لا يمكن تخطّي العيّنات عليها." };
+    }
+    const r = resolveSampleSkip({ code: input.skipSamples.code, text: input.skipSamples.text });
+    if (!r.ok) throw { _appCode: 400, code: "SAMPLE_SKIP_REASON_INVALID", message: r.error, errorAr: r.errorAr };
+    const target = await requireStageFor(tx, "QUOTATION");
+    const here = await tx.pipelineStage.findUnique({ where: { id: opp.stageId }, select: { position: true } });
+    if (opp.stageId === target.id || (here && here.position >= target.position)) {
+      throw {
+        _appCode: 409, code: "SAMPLE_SKIP_ALREADY_PAST",
+        message: "This deal is already at the quotation stage or past it; there are no samples left to skip.",
+        errorAr: "الصفقة في مرحلة عرض السعر أو بعدها؛ لا توجد عيّنات لتخطّيها.",
+      };
+    }
+    const live = await tx.sampleShipment.count({ where: { opportunityId: input.opportunityId, status: { not: "CANCELLED" } } });
+    if (live > 0) {
+      throw {
+        _appCode: 409, code: "SAMPLE_SKIP_HAS_SAMPLE",
+        message: "This deal has a sample. Record its evaluation, or cancel it, instead of skipping.",
+        errorAr: "على هذه الصفقة عيّنة قائمة. سجّل تقييمها أو ألغِها بدل التخطّي.",
+      };
+    }
+    input = { ...input, toStageId: target.id };
+    codedSkip = sampleSkipReasonText(r.reason);
+  }
 
   // Reopening is a privileged act, and it is the only way out of a terminal state. Editing
   // a closed deal's stage must not quietly reopen it — that is how a lost deal reappears in
@@ -309,10 +348,20 @@ export async function transitionOpportunity(
     lost = { reason: r.reason, code: r.code };
   }
 
+  // A deal is never put into a stage the board does not draw (gate fix MEDIUM-1): whatever the path — a direct
+  // move, an approved request, a reopen into a chosen stage — the target must be active, read under a share lock so
+  // a concurrent «إخفاء» cannot slip between the check and the move.
+  if (input.toStageId && input.toStageId !== opp.stageId) {
+    const target = (await tx.$queryRaw<{ isActive: boolean }[]>`SELECT "isActive" FROM "PipelineStage" WHERE "id" = ${input.toStageId} FOR SHARE`)[0];
+    if (!target?.isActive) {
+      throw { _appCode: 400, code: "STAGE_INVALID", message: "That stage is not available.", errorAr: "هذه المرحلة غير متاحة." };
+    }
+  }
+
   // Sample Evaluation may be skipped, but not silently (owner decision, docs/sales/PIPELINE_STAGES.md):
   // a forward move past it on a deal with no sample needs the reason the customer does not need one.
-  let skipText: string | null = null;
-  if (input.toStageId && input.toStageId !== opp.stageId) {
+  let skipText: string | null = codedSkip;
+  if (!codedSkip && input.toStageId && input.toStageId !== opp.stageId) {
     const sampleStage = await tx.pipelineStage.findFirst({
       where: { purpose: "SAMPLE_EVALUATION", isActive: true },
       select: { position: true },
@@ -379,11 +428,20 @@ export async function transitionOpportunity(
       toStageId: nextStageId,
       fromOutcome: opp.outcome as "OPEN" | "WON" | "LOST",
       toOutcome: nextOutcome,
-      // The why of this move: the skip, the loss, or both (" · " — `parseSampleSkip` reads the first part).
-      reason: [skipText, lost?.reason].filter(Boolean).join(" · ") || null,
+      // The why of this move: the skip, the loss, or both (" · " — `parseSampleSkip` reads the first part), after the
+      // approval of a requested move when there was one.
+      reason: [input.manualNote, skipText, lost?.reason].filter(Boolean).join(" · ") || null,
       actorId: input.actorId,
     },
   });
+  // Pipeline v2 (owner decision 3): a rep's pending move request on this deal no longer describes it once its stage or
+  // outcome changed (stage-move.ts; inline here because this module is also imported by client screens).
+  if (nextStageId !== opp.stageId || nextOutcome !== opp.outcome) {
+    await tx.stageMoveRequest.updateMany({
+      where: { opportunityId: input.opportunityId, status: "PENDING" },
+      data: { status: "CANCELLED", decidedAt: new Date(), decisionNote: "تغيّرت مرحلة الصفقة أو نتيجتها قبل الاعتماد" },
+    });
+  }
   // The route raises "sales.deal_stage_changed" from these (services/sales/deal-events.ts): this
   // module is also imported by client screens for its constants, so it must not import the outbox.
   return { stageId: nextStageId, outcome: nextOutcome, fromStageId: opp.stageId, fromOutcome: opp.outcome, samplesSkipped: !!skipText };

@@ -3286,8 +3286,10 @@ enum PipelineStagePurpose {
   /// «تجربة وتقييم العينات» (additive, 20261204100000_pipeline_qualification): moving a deal
   /// forward past this stage with no sample on it needs a documented skip reason.
   SAMPLE_EVALUATION
-  /// «التفاوض والاعتماد» (additive, 20261204100000_pipeline_qualification). Read by the deal
-  /// page's primary action only; no automation moves a deal here.
+  /// DEPRECATED (pipeline v2, 20261217090000_pipeline_v2): «التفاوض والاعتماد» was merged into the
+  /// QUOTATION stage «عرض السعر والتفاوض». Kept in the enum so rows written before the migration read and a
+  /// rollback of the code still works (Postgres cannot drop an enum value in place); no stage may be given it
+  /// (services/sales/stages.ts STAGE_PURPOSES), and the migration retires the stage that held it.
   NEGOTIATION
 }
 
@@ -3312,7 +3314,8 @@ model PipelineStage {
   /// Default probability offered when a deal enters this stage. Advisory only.
   probability Int                   @default(0)
   /// At most one stage may hold each purpose — the unique index is what stops two columns
-  /// both claiming to be where quotations land.
+  /// both claiming to be where quotations land. Pipeline v2: three purposes (QUALIFICATION, SAMPLE_EVALUATION,
+  /// QUOTATION); the stage that held NEGOTIATION is retired (purpose NULL, inactive) and kept so history resolves.
   purpose     PipelineStagePurpose? @unique
   isActive    Boolean               @default(true)
 
@@ -3365,6 +3368,8 @@ model Opportunity {
   currency        String    @default("SAR")
   probability     Int       @default(0)
   expectedCloseAt DateTime?
+  /// Pipeline v2: COMPUTED, never typed — the earliest open dated activity or open FOLLOW_UP workspace task on the
+  /// deal, or null (services/sales/follow-through.ts `syncDealNextFollowUp`, called wherever one of those changes).
   nextFollowUpAt  DateTime?
 
   ownerId String
@@ -3373,6 +3378,8 @@ model Opportunity {
   conversion  LeadConversion?
   owners      OpportunityOwner[]
   stageEvents OpportunityStageEvent[]
+  /// Pipeline v2: a rep's manual stage move waiting for a supervisor (StageMoveRequest, one PENDING per deal).
+  stageMoveRequests StageMoveRequest[]
   quotes      Quote[]
   samples     SampleShipment[]
   activities  Activity[]
@@ -3413,6 +3420,32 @@ model OpportunityOwner {
 
 /// Every stage move, owner change and value change, kept for the pipeline-duration
 /// report and for answering "who moved this and when".
+/// Pipeline v2 (20261217090000_pipeline_v2): a manual stage move (drag or «نقل إلى…») asked for by somebody without
+/// `sales › deal_stage_move`. Nothing moves until a supervisor (deal_stage_move or lead_assign, whose scope covers the
+/// deal) approves it; approving applies it through `transitionOpportunity` (a stage event «يدوي — باعتماد …»), and
+/// rejecting leaves the deal where it is. At most ONE PENDING per deal (a partial unique index in the migration's raw
+/// SQL): a new request from the same deal REPLACES the pending one (it becomes SUPERSEDED). A pending request is
+/// CANCELLED when the deal's stage or outcome changes first (an automatic move, a close). Stage and person ids are
+/// plain ids, as on OpportunityStageEvent. status: PENDING | APPROVED | REJECTED | CANCELLED | SUPERSEDED (CHECK).
+model StageMoveRequest {
+  id            String      @id @default(cuid())
+  opportunityId String
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  fromStageId   String
+  toStageId     String
+  reason        String?
+  requestedById String
+  status        String      @default("PENDING")
+  decidedById   String?
+  decidedAt     DateTime?
+  decisionNote  String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([opportunityId, status])
+  @@index([status, createdAt])
+}
+
 model OpportunityStageEvent {
   id            String      @id @default(cuid())
   opportunityId String
@@ -3568,6 +3601,12 @@ model Activity {
 
   dueAt       DateTime?
   completedAt DateTime?
+
+  /// Pipeline v2 (20261217090000_pipeline_v2): the key of a SYSTEM follow-up — `sample:<sampleId>` (the sample's
+  /// feedback reminder), `deal-follow-up:<dealId>` (the deal's «جدولة متابعة»). At most one OPEN row per key: a
+  /// partial unique index ("Activity_open_sourceKey_key", WHERE "sourceKey" IS NOT NULL AND "completedAt" IS NULL)
+  /// that lives in the migration's raw SQL (Prisma cannot model a partial index). Null on every person's activity.
+  sourceKey   String?
 
   ownerId String
   owner   Employee @relation("ActivityOwner", fields: [ownerId], references: [id])

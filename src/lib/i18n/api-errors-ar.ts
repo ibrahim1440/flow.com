@@ -4,6 +4,13 @@
  * Keys are the English exactly as sent.
  */
 export const API_ERRORS_AR: Readonly<Record<string, string>> = {
+  // ── Pipeline v2 (20261217090000_pipeline_v2) ──
+  "Skip the samples and change the outcome in two steps.": "تخطَّ العيّنات أولًا ثم غيّر نتيجة الصفقة في خطوة ثانية.",
+  "This deal is already at the quotation stage or past it; there are no samples left to skip.": "الصفقة في مرحلة عرض السعر أو بعدها؛ لا توجد عيّنات لتخطّيها.",
+  "This deal has a sample. Record its evaluation, or cancel it, instead of skipping.": "على هذه الصفقة عيّنة قائمة. سجّل تقييمها أو ألغِها بدل التخطّي.",
+  "Request not found.": "الطلب غير موجود.",
+  "Choose why the customer does not need a sample.": "اختر سبب عدم حاجة العميل إلى عيّنة.",
+  "Write the reason (at least 2 characters).": "اكتب السبب (حرفان على الأقل).",
   // ── «رسائل العملاء التلقائية» e-mail (batch 25) ──
   "emailOptOut must be true or false": "خيار إيقاف الإيميلات يجب أن يكون نعم أو لا.",
   "No e-mail provider is configured.": "الإيميل غير مربوط على هذا الخادم. كلّم الدعم الفني.",
@@ -964,4 +971,6 @@ export const API_ERROR_TEMPLATES_AR: ReadonlyArray<readonly [string, string]> = 
   ["Collection ${e.id} is in ${e.currency} but the plan pays in ${version.currency}. There is no exchange-rate policy configured, so this cannot be converted.", "التحصيل {0} بعملة {1} والخطة تدفع بـ {2}، ولا توجد سياسة صرف عملات."],
   ["A stored plan version is not valid: ${problems[0]?.message ?? \"unknown\"}", "نسخة خطة محفوظة غير صالحة: {0}"],  // ── Sales CRM optimization (29 Oct 2026) ──
   ["This deal is ${existing.outcome.toLowerCase()}. Reopen it before editing its needs.", "الصفقة مغلقة ({0}). أعد فتحها قبل تعديل تحليل الاحتياج."],
+  // ── Pipeline v2 ──
+  ["This deal is already ${opp.outcome}.", "الصفقة مغلقة ({0})؛ لا يمكن تخطّي العيّنات عليها."],
 ];

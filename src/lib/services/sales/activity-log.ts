@@ -15,7 +15,7 @@ import {
   ACTIVITY_OUTCOMES, qualifies, qualifyLeadFromActivity, markLeadNotInterested, lockLeadForAutomation,
 } from "./qualification";
 import { seesAllSales, NOT_FOUND_MESSAGE } from "./scope";
-import { CONTACT_TYPES, fulfilPlannedContacts, markLeadContacted, syncLeadNextFollowUp } from "./follow-through";
+import { CONTACT_TYPES, fulfilPlannedContacts, markLeadContacted, syncLeadNextFollowUp, syncDealNextFollowUp } from "./follow-through";
 import { parseQualificationInput } from "./needs";
 
 type Tx = PrismaNS.TransactionClient;
@@ -116,6 +116,8 @@ export async function logLeadOrDealActivity(tx: Tx, actor: ActivityActor, a: Par
   }
   // The lead list's «المتابعة القادمة» follows what is actually open, in the same transaction.
   if (a.leadId) await syncLeadNextFollowUp(tx, a.leadId);
+  // Pipeline v2 (D2): the deal's date too — computed from what is open, never typed.
+  if (a.opportunityId) await syncDealNextFollowUp(tx, a.opportunityId);
   return { activity, qualification };
 }
 
@@ -137,5 +139,6 @@ export async function logCustomerActivity(tx: Tx, actor: ActivityActor, customer
     select: { id: true, type: true, subject: true, outcome: true, dueAt: true, completedAt: true, createdAt: true, customerId: true, opportunityId: true },
   });
   if (a.completed) await fulfilPlannedContacts(tx, { ownerId: actor.id, customerId, opportunityId: a.opportunityId, exceptId: activity.id });
+  if (a.opportunityId) await syncDealNextFollowUp(tx, a.opportunityId);
   return { activity };
 }

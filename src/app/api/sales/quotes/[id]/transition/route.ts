@@ -6,7 +6,7 @@ import { quotesSeeAll, writesViaAccounting } from "@/lib/services/sales/quote-ac
 import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
-import { advanceToQuotationStage, winOnAcceptedQuote } from "@/lib/services/sales/lifecycle";
+import { advanceToPurpose, advanceToQuotationStage, winOnAcceptedQuote } from "@/lib/services/sales/lifecycle";
 import { issueQuote, decideQuote } from "@/lib/services/sales/quotes";
 import { emitAutomationEvent } from "@/lib/automation/emit";
 import { discountThreshold } from "@/lib/services/sales/quote-settings";
@@ -148,6 +148,9 @@ export async function POST(request: Request, { params }: Params) {
             actorId: user.id,
           },
         });
+        // Pipeline v2 T7 (owner Q3: acceptance stays auto-WON): a deal pushed back by hand is won AT the quotation
+        // stage — forward only, so a deal already there (the usual case) is not moved.
+        await advanceToPurpose(tx, visible.opportunityId, "QUOTATION", user.id, "the customer accepted the quotation");
         wonNow = await winOnAcceptedQuote(tx, visible.opportunityId, user.id);
       }
 

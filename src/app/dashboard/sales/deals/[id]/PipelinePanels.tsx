@@ -31,7 +31,6 @@ export function actionLabel(a: StageAction, ar: boolean, nextStageName?: string)
     case "CREATE_QUOTE": return ar ? "إنشاء عرض سعر" : "Create a quotation";
     case "FOLLOW_QUOTE": return ar ? "متابعة عرض السعر" : "Follow the quotation";
     case "REQUEST_APPROVAL": return ar ? "طلب اعتماد الخصم" : "Get the discount approved";
-    case "RECORD_NEGOTIATION": return ar ? "تسجيل نتيجة التفاوض" : "Record the negotiation result";
     case "WIN": return ar ? "توثيق الربح" : "Mark won";
     case "DOCUMENT_LOSS": return ar ? "توثيق سبب الخسارة" : "Record the loss reason";
     case "ADVANCE": return nextStageName ? (ar ? `التالي: ${nextStageName}` : `Next: ${nextStageName}`) : (ar ? "المرحلة التالية" : "Next stage");

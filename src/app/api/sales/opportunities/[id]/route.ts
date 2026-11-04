@@ -14,6 +14,10 @@ import { sampledProductIds } from "@/lib/services/sales/sample-request";
 import { customerInScope } from "@/lib/services/sales/customer-access";
 import { customerBalance } from "@/lib/services/customers/balance";
 import { canViewInvoices } from "@/lib/services/invoicing/access";
+import { dealNextStep } from "@/lib/services/sales/next-step";
+import type { StagePurpose } from "@/lib/services/sales/stages";
+import { scheduleDealFollowUp } from "@/lib/services/sales/follow-through";
+import { approvesMove, isGeneralManager, movesDirectly } from "@/lib/services/sales/stage-move";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -87,6 +91,8 @@ export async function GET(_request: Request, { params }: Params) {
           take: 100,
           select: {
             id: true, type: true, subject: true, body: true, outcome: true, dueAt: true, completedAt: true,
+            // Pipeline v2: a system follow-up's key (`sample:<id>`, `deal-follow-up:<id>`), so the page shows it once.
+            sourceKey: true,
             createdAt: true, owner: { select: { id: true, name: true } },
           },
         },
@@ -167,8 +173,57 @@ export async function GET(_request: Request, { params }: Params) {
       ? await customerBalance(prisma, deal.customer.id, seesAllSales(user.permissions) ? {} : { ownerId: user.id }, canViewInvoices(user.permissions), new Date())
       : null;
 
+    // «المطلوب منك الآن» (pipeline v2 §2.5): computed HERE, on the server, from the deal as just read — the page
+    // renders it and never decides on its own. my-day computes the same function from its own query.
+    const samplesWithState = deal.samples.map((s) => ({ ...s, approval: sampleApprovalState(s) }));
+    const activeAfter = stages.filter((s) => s.isActive && s.position > deal.stage.position);
+    const nextStep = dealNextStep({
+      outcome: deal.outcome as "OPEN" | "WON" | "LOST",
+      hasCustomer: !!deal.customer,
+      stagePurpose: deal.stage.purpose as StagePurpose | null,
+      stageCode: deal.stage.code,
+      hasNextStage: activeAfter.length > 0,
+      businessType: deal.businessType, needSummary: deal.needSummary, agreedNextStep: deal.agreedNextStep,
+      samples: samplesWithState.map((s) => ({ id: s.id, status: s.status, fromStock: s.fromStock, approval: s.approval, sentAt: s.sentAt })),
+      quotes: quotes.map((q) => ({
+        id: q.id, status: q.status, revision: q.revision, discountApproval: q.discountApproval,
+        issuedAt: q.issuedAt, validUntil: q.validUntil, orderLinks: q._count.orderLinks,
+      })),
+      openActivities: deal.activities.filter((a) => !a.completedAt).map((a) => ({ id: a.id, type: a.type, dueAt: a.dueAt, sourceKey: a.sourceKey })),
+      orderId: deal.orderLinks[0]?.order.id ?? null,
+    }, new Date(), { approveDiscount: hasSubPrivilege(user.permissions, "sales", "quote_approve_discount") });
+
+    // Owner decision 3: a rep's manual move waiting for a supervisor — «طلب نقل بانتظار اعتماد المشرف».
+    const pending = await prisma.stageMoveRequest.findFirst({
+      where: { opportunityId: id, status: "PENDING" },
+      select: { id: true, fromStageId: true, toStageId: true, reason: true, requestedById: true, createdAt: true },
+    });
+    const lastDecided = pending ? null : await prisma.stageMoveRequest.findFirst({
+      where: { opportunityId: id, status: "REJECTED", decidedAt: { gte: new Date(Date.now() - 14 * 86_400_000) } },
+      orderBy: { decidedAt: "desc" },
+      select: { id: true, toStageId: true, decisionNote: true, decidedById: true, decidedAt: true },
+    });
+    const moveNames = Object.fromEntries((await prisma.employee.findMany({
+      where: { id: { in: [pending?.requestedById, lastDecided?.decidedById].filter((x): x is string => !!x) } }, select: { id: true, name: true },
+    })).map((e) => [e.id, e.name]));
+    const stageName = (sid: string) => stages.find((s) => s.id === sid);
+    const pendingMove = pending ? {
+      id: pending.id, toStageId: pending.toStageId,
+      toStage: stageName(pending.toStageId) ? { nameAr: stageName(pending.toStageId)!.nameAr, nameEn: stageName(pending.toStageId)!.nameEn } : null,
+      reason: pending.reason, requestedBy: moveNames[pending.requestedById] ?? null, createdAt: pending.createdAt,
+      canDecide: approvesMove({ id: user.id, permissions: user.permissions, role: user.role, generalManager: await isGeneralManager(prisma, user.id) }) && pending.requestedById !== user.id,
+      canWithdraw: pending.requestedById === user.id,
+    } : null;
+    const rejectedMove = lastDecided ? {
+      id: lastDecided.id, toStage: stageName(lastDecided.toStageId) ? { nameAr: stageName(lastDecided.toStageId)!.nameAr, nameEn: stageName(lastDecided.toStageId)!.nameEn } : null,
+      note: lastDecided.decisionNote, decidedBy: lastDecided.decidedById ? moveNames[lastDecided.decidedById] ?? null : null, decidedAt: lastDecided.decidedAt,
+    } : null;
+
     return NextResponse.json({
-      deal: { ...deal, quotes, samples: deal.samples.map((s) => ({ ...s, approval: sampleApprovalState(s) })), customerBalance: balance },
+      nextStep,
+      pendingMove,
+      rejectedMove,
+      deal: { ...deal, quotes, samples: samplesWithState, customerBalance: balance },
       sampledProductIds: sampledProducts,
       stages,
       actors,
@@ -191,6 +246,8 @@ export async function GET(_request: Request, { params }: Params) {
         quote: hasSubPrivilege(user.permissions, "sales", "quote_write"),
         approveDiscount: hasSubPrivilege(user.permissions, "sales", "quote_approve_discount"),
         assign: seesAllSales(user.permissions),
+        // Owner decision 3: moves the deal between stages directly; without it a manual move is a request.
+        moveDirectly: movesDirectly(user.permissions, user.role, await isGeneralManager(prisma, user.id)),
         // A customer's second sample of a product: the sales manager or the administrator approves it.
         approveSample: approvesSamples(user.permissions),
         createOrder: hasSubPrivilege(user.permissions, "orders", "create"),
@@ -268,15 +325,24 @@ export async function PATCH(request: Request, { params }: Params) {
       }
       data.probability = p;
     }
-    for (const key of ["expectedCloseAt", "nextFollowUpAt"] as const) {
-      if (b[key] === null) {
-        data[key] = null;
-      } else if (typeof b[key] === "string" && b[key]) {
-        const d = new Date(b[key] as string);
-        if (Number.isNaN(d.getTime())) throw { _appCode: 400, message: `${key} is not a date.` };
-        data[key] = d;
-      }
+    if (b.expectedCloseAt === null) {
+      data.expectedCloseAt = null;
+    } else if (typeof b.expectedCloseAt === "string" && b.expectedCloseAt) {
+      const d = new Date(b.expectedCloseAt);
+      if (Number.isNaN(d.getTime())) throw { _appCode: 400, message: "expectedCloseAt is not a date." };
+      data.expectedCloseAt = d;
     }
+    // Pipeline v2 (D2, D4): the deal's follow-up date is no longer a free column. «جدولة متابعة» is ONE keyed TASK
+    // activity (`deal-follow-up:<id>`) — scheduling again moves it — and the column is computed from what is open.
+    // The field is still accepted for one release, routed through the same helper.
+    let followUp: { dueAt: Date | null } | null = null;
+    if (b.nextFollowUpAt === null) followUp = { dueAt: null };
+    else if (typeof b.nextFollowUpAt === "string" && b.nextFollowUpAt) {
+      const d = new Date(b.nextFollowUpAt);
+      if (Number.isNaN(d.getTime())) throw { _appCode: 400, message: "nextFollowUpAt is not a date." };
+      followUp = { dueAt: d };
+    }
+    const followUpSubject = typeof b.followUpSubject === "string" ? b.followUpSubject.slice(0, 200) : null;
     if (typeof b.customerId === "string" && b.customerId) {
       // Release gate N1: relinking a deal to a customer outside the rep's book would pull that customer
       // into it (a deal widens the book, services/sales/scope.ts). Refused as missing — and BEFORE any
@@ -307,17 +373,22 @@ export async function PATCH(request: Request, { params }: Params) {
       };
     }
 
-    if (Object.keys(data).length === 0) {
+    if (Object.keys(data).length === 0 && !followUp) {
       return NextResponse.json({ error: "Nothing to change." }, { status: 400 });
     }
 
-    const deal = await prisma.opportunity.update({
-      where: { id },
-      data,
-      select: {
-        id: true, title: true, amount: true, probability: true, expectedCloseAt: true,
-        nextFollowUpAt: true, ownerId: true, customerId: true,
-      },
+    const deal = await prisma.$transaction(async (tx) => {
+      if (Object.keys(data).length > 0) await tx.opportunity.update({ where: { id }, data });
+      if (followUp) {
+        await scheduleDealFollowUp(tx, { opportunityId: id, ownerId: (data.ownerId as string | undefined) ?? existing.ownerId, dueAt: followUp.dueAt, subject: followUpSubject });
+      }
+      return tx.opportunity.findUniqueOrThrow({
+        where: { id },
+        select: {
+          id: true, title: true, amount: true, probability: true, expectedCloseAt: true,
+          nextFollowUpAt: true, ownerId: true, customerId: true,
+        },
+      });
     });
 
     // An owner change is pipeline history, not a silent field edit: the duration report and

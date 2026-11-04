@@ -96,6 +96,10 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "lead_export", label: "Export leads" },
     { key: "deal_close", label: "Mark a deal Won or Lost" },
     { key: "deal_reopen", label: "Reopen a closed deal" },
+    // Pipeline v2 (owner decision 3, final): move the deals in MY OWN scope between stages by hand directly, without a
+    // request. It approves nothing: a manual move by somebody without it is a request that a supervisor or manager —
+    // lead_assign, the administrator or a «مدير عام» member — approves (StageMoveRequest). Automatic moves never need it.
+    { key: "deal_stage_move", label: "Move my own deals between stages directly, without a request (does not approve others' requests)" },
     { key: "quote_write", label: "Create / edit quotations" },
     { key: "quote_approve_discount", label: "Approve a discount above the threshold" },
     { key: "stage_manage", label: "Configure pipeline stages" },

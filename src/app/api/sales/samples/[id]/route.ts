@@ -4,6 +4,8 @@ import { requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { seesAllSales, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
 import { sampleTransitionRefusal } from "@/lib/services/sales/sample-rules";
+import { advanceToPurpose } from "@/lib/services/sales/lifecycle";
+import { ensureSampleFollowUp, closeSampleFollowUp } from "@/lib/services/sales/follow-through";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -92,17 +94,18 @@ export async function PATCH(request: Request, { params }: Params) {
       }
 
       // Same reasoning as on creation: a sample sent with nothing scheduled after it is a
-      // sample nobody chases. Same transaction as the status, so the two cannot drift apart.
-      if (data.status === "SENT" && b.createFollowUp !== false) {
-        await tx.activity.create({
-          data: {
-            type: "SAMPLE_FOLLOW_UP",
-            subject: `Follow up on sample: ${sample.description ?? "product sample"}`,
-            opportunityId: sample.opportunityId,
-            dueAt: new Date(Date.now() + 7 * 86400_000),
-            ownerId: user.id,
-          },
-        });
+      // sample nobody chases. Same transaction as the status, so the two cannot drift apart — and ONE keyed
+      // reminder per sample (pipeline v2 D1), however many paths reach SENT.
+      if (data.status === "SENT") {
+        if (b.createFollowUp !== false) {
+          await ensureSampleFollowUp(tx, { sampleId: id, opportunityId: sample.opportunityId, description: sample.description, ownerId: user.id, sentAt: now });
+        }
+        // Pipeline v2 T2b: a sample sent is the deal at Sample Evaluation (idempotent with T2; covers pre-v2 samples).
+        await advanceToPurpose(tx, sample.opportunityId, "SAMPLE_EVALUATION", user.id, "a sample was sent");
+      }
+      // The customer's view is recorded, or the sample is cancelled: its reminder has done its job and closes itself.
+      if (data.status === "FEEDBACK_RECEIVED" || data.status === "CANCELLED") {
+        await closeSampleFollowUp(tx, { sampleId: id, opportunityId: sample.opportunityId }, now);
       }
 
       return tx.sampleShipment.findUniqueOrThrow({

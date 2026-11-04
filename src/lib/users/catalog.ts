@@ -68,7 +68,7 @@ export const SUB_AR: Record<string, Record<string, string>> = {
   workspace: { assign_any: "إسناد المهام لأي موظف وإدارة أي مهمة", team_view: "عرض مهام وتقويم وأعباء جميع الموظفين" },
   sales: {
     lead_write: "إنشاء العملاء المحتملين وتعديلهم", lead_assign: "إسناد العميل المحتمل أو تغيير مالكه", lead_convert: "تحويل العميل المحتمل إلى عميل وصفقة",
-    lead_import: "استيراد عملاء محتملين من ملف", lead_export: "تصدير العملاء المحتملين", deal_close: "إغلاق الصفقة بربح أو خسارة", deal_reopen: "إعادة فتح صفقة مغلقة",
+    lead_import: "استيراد عملاء محتملين من ملف", lead_export: "تصدير العملاء المحتملين", deal_close: "إغلاق الصفقة بربح أو خسارة", deal_reopen: "إعادة فتح صفقة مغلقة", deal_stage_move: "نقل صفقاتي بين المراحل مباشرة دون طلب اعتماد (لا تمنح اعتماد طلبات الآخرين)",
     quote_write: "إنشاء عروض الأسعار وتعديلها", quote_approve_discount: "اعتماد خصم فوق حد الاعتماد", stage_manage: "ضبط مراحل الصفقات",
     collection_submit: "تسجيل تحصيل على صفقة يملكها", collection_view_team: "عرض تحصيلات الفريق",
     invoices_view: "عرض فواتير المبيعات والإشعارات", invoices_create: "إنشاء مسودات الفواتير وتعديلها", invoices_issue: "إصدار الفاتورة الضريبية",

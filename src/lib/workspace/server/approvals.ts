@@ -10,6 +10,7 @@
 // never as "nothing waiting".
 import { prisma } from "@/lib/db";
 import { hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
+import { approvesMove, isGeneralManager } from "@/lib/services/sales/stage-move";
 import { isSimpleMode } from "@/lib/simple-mode";
 import { can as hrCan, resolveScope as hrScope, type HrActor } from "@/lib/hr/core";
 import { listRequests, assessLeave } from "@/lib/hr/services/leave";
@@ -25,7 +26,7 @@ import { listApprovals as mktList } from "@/lib/marketing/server/approvals";
 import { parseDay } from "@/lib/hr/dates";
 import type { WsActor } from "./context";
 
-export type ApprovalType = "LEAVE" | "ADVANCE" | "DISCOUNT" | "SAMPLE" | "FINANCE" | "MARKETING";
+export type ApprovalType = "LEAVE" | "ADVANCE" | "DISCOUNT" | "SAMPLE" | "STAGE_MOVE" | "FINANCE" | "MARKETING";
 
 export type ApprovalItem = {
   key: string;
@@ -195,6 +196,41 @@ async function sampleItems(actor: WsActor): Promise<ApprovalItem[]> {
   });
 }
 
+// Pipeline v2 (owner decision 3): a rep's manual stage move waits for a supervisor or manager — lead_assign (whose
+// scope is every deal), the administrator, or a «مدير عام» member (stage-move.ts `approvesMove`; deal_stage_move alone
+// never approves), and never the requester. ONE item per deal (one PENDING request per deal, a partial unique index),
+// so it shows once. Decided at POST /api/sales/stage-move-requests/[id].
+async function stageMoveItems(actor: WsActor): Promise<ApprovalItem[]> {
+  if (!approvesMove({ id: actor.id, permissions: actor.permissions, role: actor.role, generalManager: await isGeneralManager(prisma, actor.id) })) return [];
+  const rows = await prisma.stageMoveRequest.findMany({
+    where: { status: "PENDING", ...(isSimpleMode() ? {} : { requestedById: { not: actor.id } }) },
+    orderBy: { createdAt: "asc" }, take: 200,
+    select: {
+      id: true, fromStageId: true, toStageId: true, reason: true, requestedById: true, createdAt: true,
+      opportunity: { select: { id: true, title: true, amount: true, customer: { select: { name: true, nameAr: true } }, owner: { select: { name: true } } } },
+    },
+  });
+  const stageIds = [...new Set(rows.flatMap((r) => [r.fromStageId, r.toStageId]))];
+  const stages = new Map((await prisma.pipelineStage.findMany({ where: { id: { in: stageIds } }, select: { id: true, nameAr: true, nameEn: true } })).map((x) => [x.id, x]));
+  const people = new Map((await prisma.employee.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.requestedById))] } }, select: { id: true, name: true } })).map((p) => [p.id, p.name]));
+  return rows.map((r) => {
+    const from = stages.get(r.fromStageId), to = stages.get(r.toStageId);
+    return {
+      key: `STAGE_MOVE:${r.opportunity.id}`, type: "STAGE_MOVE" as const, id: r.id,
+      title: `نقل صفقة إلى «${to?.nameAr ?? "—"}»`, titleEn: `Move a deal to “${to?.nameEn ?? "—"}”`,
+      requester: people.get(r.requestedById) ?? null,
+      subject: r.opportunity.customer?.nameAr ?? r.opportunity.customer?.name ?? r.opportunity.title,
+      subjectEn: r.opportunity.customer?.name ?? r.opportunity.title,
+      createdAt: iso(r.createdAt),
+      facts: { deal: r.opportunity.title, dealOwner: r.opportunity.owner?.name ?? null, from: from?.nameAr ?? null, fromEn: from?.nameEn ?? null, to: to?.nameAr ?? null, toEn: to?.nameEn ?? null, reason: r.reason, amount: r.opportunity.amount.toFixed(2) },
+      warnings: [],
+      decide: { url: `/api/sales/stage-move-requests/${encodeURIComponent(r.id)}`, rejectNeedsReason: true as const },
+      openUrl: `/dashboard/sales/deals/${encodeURIComponent(r.opportunity.id)}`,
+      notice: { ar: "الاعتماد ينقل الصفقة إلى المرحلة المطلوبة ويسجّل ذلك في تاريخها؛ الرفض يبقيها حيث هي ويُبلغ المندوب بالسبب.", en: "Approving moves the deal to the requested stage and records it in its history; rejecting keeps it where it is and tells the rep why." },
+    };
+  });
+}
+
 const FIN_TYPE_AR: Record<string, string> = { BUDGET_APPROVAL: "اعتماد ميزانية", ALLOCATION_RULES: "قواعد التوزيع", CATEGORY_TRANSFER: "تحويل بين البنود", SPEND_OVERRIDE: "تجاوز حد الصرف", PERIOD_REOPEN: "إعادة فتح فترة" };
 const FIN_TYPE_EN: Record<string, string> = { BUDGET_APPROVAL: "Budget approval", ALLOCATION_RULES: "Allocation rules", CATEGORY_TRANSFER: "Transfer between categories", SPEND_OVERRIDE: "Spending limit override", PERIOD_REOPEN: "Reopen a period" };
 /** The marketing request's subject type, in both languages (the screen showed the raw code). */
@@ -235,7 +271,7 @@ async function marketingItems(actor: WsActor): Promise<ApprovalItem[]> {
 }
 
 const SOURCES: [ApprovalType, (a: WsActor) => Promise<ApprovalItem[]>][] = [
-  ["LEAVE", leaveItems], ["ADVANCE", advanceItems], ["DISCOUNT", discountItems], ["SAMPLE", sampleItems], ["FINANCE", financeItems], ["MARKETING", marketingItems],
+  ["LEAVE", leaveItems], ["ADVANCE", advanceItems], ["DISCOUNT", discountItems], ["SAMPLE", sampleItems], ["STAGE_MOVE", stageMoveItems], ["FINANCE", financeItems], ["MARKETING", marketingItems],
 ];
 
 export async function myApprovals(actor: WsActor, only?: ApprovalType | null) {

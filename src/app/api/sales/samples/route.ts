@@ -11,6 +11,8 @@ import { requestStockSampleIn } from "@/lib/services/sales/sample-request";
 import { hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
 import { customerInScope } from "@/lib/services/sales/customer-access";
 import { actsForAccountOwner, resolveQuickDeal } from "@/lib/services/sales/quick-deal";
+import { advanceToPurpose } from "@/lib/services/sales/lifecycle";
+import { ensureSampleFollowUp } from "@/lib/services/sales/follow-through";
 
 /**
  * Sample shipments.
@@ -215,7 +217,10 @@ export async function POST(request: Request) {
           opportunityId, productSkuId, units, description: description || null,
           approvalNote: typeof b.approvalNote === "string" ? b.approvalNote : null,
         }, { id: user.id, permissions: user.permissions });
-        return { kind: "stock" as const, r, opportunityId };
+        // Pipeline v2 T2 (owner Q1: the deal enters the sample stage when the rep REQUESTS a sample — also while a
+        // second sample waits for the manager): forward only, never on a closed deal, same transaction.
+        const stage = await advanceToPurpose(tx, opportunityId, "SAMPLE_EVALUATION", user.id, "a sample was requested");
+        return { kind: "stock" as const, r, opportunityId, stageAdvanced: stage.moved };
       }
 
       // ── A record-only sample: as it always was ──
@@ -241,19 +246,14 @@ export async function POST(request: Request) {
       });
 
       // A sample that nobody follows up is a sample that was given away. The task is created
-      // with it rather than left to the rep's memory. (A stock sample gets its task when dispatch issues it.)
+      // with it rather than left to the rep's memory — ONE keyed reminder per sample (pipeline v2 D1), due on the
+      // same clock as my-day. (A stock sample gets its reminder when dispatch issues it.)
       if (status === "SENT" && b.createFollowUp !== false) {
-        await tx.activity.create({
-          data: {
-            type: "SAMPLE_FOLLOW_UP",
-            subject: `Follow up on sample: ${description || "product sample"}`,
-            opportunityId,
-            dueAt: new Date(Date.now() + 7 * 86400_000),
-            ownerId: user.id,
-          },
-        });
+        await ensureSampleFollowUp(tx, { sampleId: created.id, opportunityId, description: description || null, ownerId: user.id, sentAt: created.sentAt ?? new Date() });
       }
-      return { kind: "created" as const, sample: created, opportunityId };
+      // Pipeline v2 T2: recording a sample is the deal reaching Sample Evaluation (forward only, never a closed deal).
+      const stage = await advanceToPurpose(tx, opportunityId, "SAMPLE_EVALUATION", user.id, "a sample was recorded");
+      return { kind: "created" as const, sample: created, opportunityId, stageAdvanced: stage.moved };
     }, TX_OPTS);
 
     if (outcome.kind === "stock") {
@@ -261,7 +261,7 @@ export async function POST(request: Request) {
       const pending = r.sample.approval === "PENDING";
       return NextResponse.json(
         {
-          sample: r.sample, replayed: r.replayed, priorSamples: r.priorSamples, opportunityId: outcome.opportunityId,
+          sample: r.sample, replayed: r.replayed, priorSamples: r.priorSamples, opportunityId: outcome.opportunityId, stageAdvanced: outcome.stageAdvanced,
           notice: pending ? APPROVAL_NOTICE : REQUEST_NOTICE, noticeAr: pending ? APPROVAL_NOTICE_AR : REQUEST_NOTICE_AR,
         },
         { status: r.replayed ? 200 : 201 },
@@ -275,7 +275,7 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
-    return NextResponse.json({ sample: outcome.sample, opportunityId: outcome.opportunityId, notice: STOCK_NOTICE }, { status: 201 });
+    return NextResponse.json({ sample: outcome.sample, opportunityId: outcome.opportunityId, stageAdvanced: outcome.stageAdvanced, notice: STOCK_NOTICE }, { status: 201 });
   } catch (err) {
     return handleDomainError(err);
   }

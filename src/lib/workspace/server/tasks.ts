@@ -14,7 +14,7 @@ import {
 } from "./context";
 import { planTaskReminders, snoozeTask } from "./reminders";
 import { getSettings } from "./settings";
-import { syncLeadNextFollowUp } from "@/lib/services/sales/follow-through";
+import { syncFollowUps } from "@/lib/services/sales/follow-through";
 
 type Tx = PrismaNS.TransactionClient;
 type Body = Record<string, unknown>;
@@ -220,6 +220,8 @@ export async function createTask(actor: WsActor, b: Body, now = new Date()) {
     if (rec.recurRule) await tx.workTask.update({ where: { id: t.id }, data: { seriesId: t.id } });
     await event(tx, t.id, actor.id, "CREATED", { assigneeId, dueAt: dueAt.toISOString(), dueBasis, priority, kind });
     await planTaskReminders(tx, t.id, now);
+    // Pipeline v2 (D2): a follow-up on a lead / deal moves that record's computed «المتابعة القادمة».
+    if (kind === "FOLLOW_UP") await syncFollowUps(tx, { leadId: links.leadId, opportunityId: links.opportunityId });
     if (assigneeId !== actor.id) {
       await notify(tx, {
         event: "me.task_assigned", dedupeKey: `${t.id}:assigned:${assigneeId}`, actorId: actor.id, people: { assignee: assigneeId },
@@ -357,6 +359,11 @@ export async function updateTask(actor: WsActor, id: string, b: Body, now = new 
       changed.links = l;
     }
     await tx.workTask.update({ where: { id }, data });
+    if (t.kind === "FOLLOW_UP") {
+      await syncFollowUps(tx, { leadId: t.leadId, opportunityId: t.opportunityId });
+      const nl = changed.links as { leadId?: string | null; opportunityId?: string | null } | undefined;
+      if (nl) await syncFollowUps(tx, { leadId: nl.leadId !== t.leadId ? nl.leadId : null, opportunityId: nl.opportunityId !== t.opportunityId ? nl.opportunityId : null });
+    }
     await event(tx, id, actor.id, dueChanged ? "DUE_CHANGED" : "UPDATED", changed);
     await planTaskReminders(tx, id, now);
     if (dueChanged && t.assigneeId !== actor.id) {
@@ -391,6 +398,7 @@ export async function transitionTask(actor: WsActor, id: string, b: Body, now = 
     if (action === "cancel") { data.cancelledAt = now; data.cancelledById = actor.id; data.cancelReason = reason; }
     if (to === "IN_PROGRESS" && !t.startedAt) data.startedAt = now;
     await tx.workTask.update({ where: { id }, data });
+    if (t.kind === "FOLLOW_UP") await syncFollowUps(tx, { leadId: t.leadId, opportunityId: t.opportunityId });
     await event(tx, id, actor.id, action === "approve_review" ? "REVIEW_APPROVED" : action === "return" ? "REVIEW_RETURNED" : action === "cancel" ? "CANCELLED" : "STATUS", { from: t.status, to, reason, late: to === "DONE" ? now > t.dueAt : undefined });
     await planTaskReminders(tx, id, now);
     await afterTransition(tx, actor, t, to, action, reason, now);
@@ -579,8 +587,8 @@ export async function recordResult(actor: WsActor, id: string, b: Body, now = ne
       await event(tx, n.id, actor.id, "CREATED", { previousFollowUp: id, dueAt: nextDue.dueAt.toISOString() });
       await planTaskReminders(tx, n.id, now);
     }
-    // The task just closed and the next one (if any) opened: the lead's next follow-up follows them.
-    if (t.leadId) await syncLeadNextFollowUp(tx, t.leadId);
+    // The task just closed and the next one (if any) opened: the lead's and the deal's next follow-up follow them.
+    await syncFollowUps(tx, { leadId: t.leadId, opportunityId: t.opportunityId });
     return { task: present((await load(tx, id))!, actor, ctx, now), activityId: logged.activity.id, nextTaskId, qualification: "qualification" in logged ? logged.qualification : null };
   });
 }

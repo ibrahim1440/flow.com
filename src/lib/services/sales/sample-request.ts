@@ -30,6 +30,7 @@ import { seesAllSales, NOT_FOUND_MESSAGE } from "./scope";
 import {
   SAMPLE_REQUEST_REPLAY_MS, approvesSamples, sampleApprovalState, sampleOneUnitRefusal, type SampleApprovalState,
 } from "./sample-rules";
+import { closeSampleFollowUp } from "./follow-through";
 
 type Tx = Prisma.TransactionClient;
 
@@ -224,6 +225,11 @@ export async function decideSampleApproval(
       ? { approvedById: actor.id, approvedAt: now, approvalNote: reason }
       : { declinedById: actor.id, declinedAt: now, approvalNote: reason, status: "CANCELLED" as const };
     await tx.sampleShipment.update({ where: { id: s.id }, data });
+    // A declined second sample is cancelled: whatever reminder it had closes with it (pipeline v2 D1).
+    if (decision === "DECLINE") {
+      const row = await tx.sampleShipment.findUniqueOrThrow({ where: { id: s.id }, select: { opportunityId: true } });
+      await closeSampleFollowUp(tx, { sampleId: s.id, opportunityId: row.opportunityId }, now);
+    }
     return { replayed: false, sample: withState(await read()) };
   }, TX_OPTS);
 }

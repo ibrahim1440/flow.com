@@ -6,15 +6,18 @@
 //
 //   Qualified opportunity   record the needs analysis, until the minimum is known
 //   Sample evaluation       record a sample, send it, record its evaluation — or skip, with a reason
-//   Quotation               create the quotation, then follow it
-//   Negotiation & approval  record the negotiation result, or get the discount approved
+//   Quotation & negotiation create the quotation, then follow it (pipeline v2 merged «التفاوض والاعتماد» into it)
 //   Closed (an outcome)     document the win, or the reason for the loss
+//
+// Pipeline v2: the deal page now renders the server's `dealNextStep` (next-step.ts) — «المطلوب منك الآن», one primary
+// action and at most two secondary ones. This module stays as a thin compatibility layer for older callers; the
+// legacy NEGOTIATION purpose reads as the quotation stage.
 //
 // Pure, and decided from the deal as the page already holds it: no request of its own, nothing a
 // client could not equally compute, and asserted without a browser (tests/sales/unit). Which of
 // these the person may actually do (the privileges) is the page's call — this only says what the
 // stage wants.
-import type { StagePurpose } from "./stages";
+import { effectivePurpose, type StagePurpose } from "./stages";
 import { qualificationMissing } from "./needs";
 
 export type StageActionKey =
@@ -26,7 +29,6 @@ export type StageActionKey =
   | "CREATE_QUOTE"           // start a quotation for this deal
   | "FOLLOW_QUOTE"           // open the open quotation (`quoteId`)
   | "REQUEST_APPROVAL"       // the draft quotation waits for discount approval (`quoteId`)
-  | "RECORD_NEGOTIATION"     // log the negotiation call / meeting and its result
   | "WIN"                    // mark the deal won (an accepted quotation exists)
   | "DOCUMENT_LOSS"          // the customer refused: record the loss and its reason
   | "ADVANCE";               // this stage's job is done: move to the next stage
@@ -70,7 +72,7 @@ export function stagePrimaryAction(purpose: StagePurpose | null | undefined, dea
   // The quotation still in play: the newest one that is neither superseded nor expired.
   const live = deal.quotes.find((q) => q.status === "DRAFT" || q.status === "ISSUED" || q.status === "REJECTED");
 
-  switch (purpose) {
+  switch (effectivePurpose(purpose)) {
     case "QUALIFICATION":
       if (qualificationMissing(deal).length > 0) return { key: "RECORD_NEEDS" };
       return advance ?? { key: "RECORD_NEEDS" };
@@ -91,13 +93,8 @@ export function stagePrimaryAction(purpose: StagePurpose | null | undefined, dea
       if (live.status === "REJECTED") return { key: "DOCUMENT_LOSS", secondary: "CREATE_QUOTE", quoteId: live.id };
       return { key: "FOLLOW_QUOTE", quoteId: live.id };
 
-    case "NEGOTIATION":
-      if (live?.status === "DRAFT" && live.discountPending) return { key: "REQUEST_APPROVAL", quoteId: live.id };
-      if (live?.status === "REJECTED") return { key: "DOCUMENT_LOSS", secondary: "CREATE_QUOTE", quoteId: live.id };
-      return { key: "RECORD_NEGOTIATION", ...(live ? { quoteId: live.id } : {}) };
-
     default:
-      // Not aligned yet (no purpose), or a stage after Negotiation such as a legacy «Closing»:
+      // Not aligned yet (no purpose), or a stage after the quotation stage such as a legacy «Closing»:
       // move on while there is somewhere to go; at the end, the only open job is the outcome.
       if (advance) return advance;
       if (live?.status === "REJECTED") return { key: "DOCUMENT_LOSS", quoteId: live.id };

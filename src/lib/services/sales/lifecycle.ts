@@ -1,5 +1,5 @@
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
-import { stageFor, advancesForward, sampleSkipRequired, sampleSkipReasonText } from "./stages";
+import { stageFor, advancesForward, sampleSkipRequired, sampleSkipReasonText, SAMPLE_SKIP_LABELS, type StagePurpose } from "./stages";
 import { emitDealMoved } from "./deal-events";
 
 type Tx = PrismaNS.TransactionClient;
@@ -48,7 +48,29 @@ export async function advanceToQuotationStage(
   opportunityId: string,
   actorId: string,
 ): Promise<StageAdvance> {
-  const stage = await stageFor(tx, "QUOTATION");
+  return advanceToPurpose(tx, opportunityId, "QUOTATION", actorId, "a quotation was issued");
+}
+
+/**
+ * Pipeline v2 (docs/sales/PIPELINE_STAGES.md, PIPELINE-V2-DESIGN §2.3): move an OPEN deal to the stage configured for
+ * `purpose`, because a real act happened (`why`: «a quotation was issued», «a sample was requested»). The shared
+ * guards of every automatic move:
+ *   1. the deal is OPEN (never a closed deal);
+ *   2. forward only (`advancesForward`) — a deal already at or past the target is never pulled back;
+ *   3. an unconfigured target refuses nothing: it is reported (`NOT_CONFIGURED`) and the act goes on;
+ *   4. the deal row is locked (`FOR UPDATE`);
+ *   5. one stage event, actor = the acting person, reason `Automatic: <why>` (who caused it, and why);
+ *   6. `sales.deal_stage_changed` is emitted, like any move.
+ * A move to QUOTATION that passes Sample Evaluation with no sample records the skip in the reason, code QUOTE_ISSUED.
+ */
+export async function advanceToPurpose(
+  tx: Tx,
+  opportunityId: string,
+  purpose: Exclude<StagePurpose, "NEGOTIATION">,
+  actorId: string,
+  why: string,
+): Promise<StageAdvance> {
+  const stage = await stageFor(tx, purpose);
   if (!stage) return { moved: false, reason: "NOT_CONFIGURED" };
 
   const locked = await tx.$queryRaw<
@@ -63,7 +85,7 @@ export async function advanceToQuotationStage(
   const deal = locked[0];
   if (!deal) return { moved: false, reason: "NO_DEAL" };
 
-  // A closed deal is not re-staged by a quotation. Re-issuing on a won deal is unusual but
+  // A closed deal is not re-staged by a quotation or a sample. Re-issuing on a won deal is unusual but
   // legal; silently dragging it back into the pipeline is not.
   if (deal.outcome !== "OPEN") return { moved: false, reason: "DEAL_CLOSED" };
   if (deal.stageId === stage.id) return { moved: false, reason: "ALREADY_THERE" };
@@ -71,13 +93,15 @@ export async function advanceToQuotationStage(
 
   // Issuing a quotation is never refused for want of a sample (the quotation is the act; see
   // above), but when it carries the deal past Sample Evaluation with no sample on it, the skip
-  // is written into the move's reason so it is as visible as one a person documented.
-  let reason = "Automatic: a quotation was issued";
-  const sampleStage = await stageFor(tx, "SAMPLE_EVALUATION");
-  if (sampleStage) {
-    const sampleCount = await tx.sampleShipment.count({ where: { opportunityId, status: { not: "CANCELLED" } } });
-    if (sampleSkipRequired({ fromPosition: deal.position, toPosition: stage.position, samplePosition: sampleStage.position, sampleCount })) {
-      reason = `${sampleSkipReasonText("أُصدر عرض السعر دون عيّنة مسجّلة")} · ${reason}`;
+  // is written into the move's reason so it is as visible as one a person documented (code QUOTE_ISSUED).
+  let reason = `Automatic: ${why}`;
+  if (purpose === "QUOTATION") {
+    const sampleStage = await stageFor(tx, "SAMPLE_EVALUATION");
+    if (sampleStage) {
+      const sampleCount = await tx.sampleShipment.count({ where: { opportunityId, status: { not: "CANCELLED" } } });
+      if (sampleSkipRequired({ fromPosition: deal.position, toPosition: stage.position, samplePosition: sampleStage.position, sampleCount })) {
+        reason = `${sampleSkipReasonText(SAMPLE_SKIP_LABELS.QUOTE_ISSUED.ar)} · ${reason}`;
+      }
     }
   }
 
@@ -95,6 +119,11 @@ export async function advanceToQuotationStage(
       reason,
       actorId,
     },
+  });
+  // Owner decision 3: an automatic move invalidates a rep's pending manual-move request (stage-move.ts).
+  await tx.stageMoveRequest.updateMany({
+    where: { opportunityId, status: "PENDING" },
+    data: { status: "CANCELLED", decidedAt: new Date(), decisionNote: `تغيّرت مرحلة الصفقة تلقائيًا قبل الاعتماد (${why})` },
   });
   await emitDealMoved(tx, { opportunityId, fromStageId: deal.stageId, toStageId: stage.id, fromOutcome: deal.outcome, toOutcome: "OPEN", actorId });
   return { moved: true, stageId: stage.id };
@@ -136,6 +165,10 @@ export async function winOnAcceptedQuote(
   await tx.opportunity.update({
     where: { id: opportunityId },
     data: { outcome: "WON", closedAt: new Date(), lostReason: null },
+  });
+  await tx.stageMoveRequest.updateMany({
+    where: { opportunityId, status: "PENDING" },
+    data: { status: "CANCELLED", decidedAt: new Date(), decisionNote: "رُبحت الصفقة قبل الاعتماد" },
   });
   await tx.opportunityStageEvent.create({
     data: {

@@ -5,6 +5,7 @@ import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { transitionOpportunity } from "@/lib/services/sales/leads";
 import { emitDealMoved } from "@/lib/services/sales/deal-events";
+import { isGeneralManager, movesDirectly, requestStageMove } from "@/lib/services/sales/stage-move";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -31,14 +32,29 @@ export async function POST(request: Request, { params }: Params) {
   const b = (body ?? {}) as Record<string, unknown>;
 
   const OUTCOMES = ["OPEN", "WON", "LOST"] as const;
-  const toOutcome =
+  let toOutcome =
     typeof b.toOutcome === "string" && (OUTCOMES as readonly string[]).includes(b.toOutcome)
       ? (b.toOutcome as "OPEN" | "WON" | "LOST")
       : null;
   let toStageId = typeof b.toStageId === "string" ? b.toStageId : null;
+  // «العميل ما يحتاج عينات» (pipeline v2 §2.4): the server resolves the target itself (the quotation stage).
+  const skipSamples = b.skipSamples === true
+    ? { code: typeof b.skipReasonCode === "string" ? b.skipReasonCode : null, text: typeof b.skipReason === "string" ? b.skipReason : null }
+    : null;
+  if (skipSamples) toStageId = null;
 
-  if (!toOutcome && !toStageId) {
+  if (!toOutcome && !toStageId && !skipSamples) {
     return NextResponse.json({ error: "Nothing to change: give a stage or an outcome." }, { status: 400 });
+  }
+
+  // Pipeline v2 §2.7: moving a deal through the stages by hand (or skipping its samples) is editing the deal, so it
+  // needs «تعديل العملاء المحتملين والصفقات» (sales › lead_write) — before v2 the sales module alone was enough, so a
+  // view-only sales user who owned a deal could move it. Closing and reopening keep their own privileges below.
+  if ((toStageId || skipSamples) && !hasSubPrivilege(user.permissions, "sales", "lead_write")) {
+    return NextResponse.json(
+      { error: "نقل الصفقة بين المراحل يحتاج صلاحية تعديل الصفقات.", errorEn: "Moving a deal between stages needs the lead-write permission.", code: "LEAD_WRITE_REQUIRED" },
+      { status: 403 },
+    );
   }
 
   // Closing a deal is its own privilege, separate from editing one. Moving a card through the
@@ -52,7 +68,7 @@ export async function POST(request: Request, { params }: Params) {
   try {
     const opp = await prisma.opportunity.findUnique({
       where: { id },
-      select: { id: true, ownerId: true, outcome: true, stage: { select: { isActive: true } } },
+      select: { id: true, ownerId: true, outcome: true, stageId: true, stage: { select: { isActive: true } } },
     });
     if (!opp) return NextResponse.json({ error: "Deal not found." }, { status: 404 });
 
@@ -73,6 +89,35 @@ export async function POST(request: Request, { params }: Params) {
       toStageId = first.id;
     }
 
+    // Decided on the REAL effect, never on the body's shape (gate fix HIGH-1): `toOutcome:"OPEN"` on a deal that is
+    // already open reopens nothing, so it is dropped — it cannot turn a request into a direct move.
+    const reopening = toOutcome === "OPEN" && opp.outcome !== "OPEN";
+    if (toOutcome === "OPEN" && !reopening) toOutcome = null;
+    const stageChange = !!toStageId && toStageId !== opp.stageId;
+    // Closing and moving are two acts: a stage change rides on no WON/LOST (a deal_close holder cannot move by closing).
+    if (stageChange && (toOutcome === "WON" || toOutcome === "LOST")) {
+      return NextResponse.json({
+        error: "أغلق الصفقة أو انقلها، كلٌّ على حدة.", errorEn: "Close the deal or move it, in two steps.", code: "MOVE_AND_CLOSE",
+      }, { status: 400 });
+    }
+    if (!toOutcome && !stageChange && !skipSamples) {
+      return NextResponse.json({ error: "لا شيء لتغييره.", errorEn: "Nothing to change: give a stage or an outcome.", code: "NOTHING_TO_CHANGE" }, { status: 400 });
+    }
+
+    // Owner decision 3 (pipeline v2): a manual stage move (drag, «نقل إلى…») by somebody without sales ›
+    // deal_stage_move (or lead_assign) is a REQUEST a supervisor approves — nothing moves yet. 202, and the screen
+    // shows «طلب نقل بانتظار اعتماد المشرف». A permitted reopen (deal_reopen, checked in the service) and the
+    // documented sample skip are not manual moves; every other real stage change without the duty is a request.
+    if (stageChange && !reopening && !skipSamples && !movesDirectly(user.permissions, user.role, await isGeneralManager(prisma, user.id))) {
+      const made = await prisma.$transaction((tx) => requestStageMove(tx, {
+        opportunityId: id, toStageId: toStageId!, reason: typeof b.reason === "string" ? b.reason : typeof b.skipReason === "string" ? b.skipReason : null, requestedById: user.id,
+      }), TX_OPTS);
+      return NextResponse.json({
+        pending: true, request: { id: made.request.id, toStageId: made.request.toStageId, status: made.request.status }, replaced: made.replaced,
+        notice: "أُرسل طلب النقل إلى المشرف؛ تبقى الصفقة في مرحلتها حتى يعتمده.", noticeEn: "Move request sent to the supervisor; the deal stays where it is until it is approved.",
+      }, { status: 202 });
+    }
+
     if (toStageId) {
       const stage = await prisma.pipelineStage.findFirst({
         where: { id: toStageId, isActive: true },
@@ -90,7 +135,12 @@ export async function POST(request: Request, { params }: Params) {
         // Optional coded reason (PRICE, QUALITY, COMPETITOR, NO_NEED, NO_RESPONSE, OTHER).
         lostReasonCode: typeof b.lostReasonCode === "string" ? b.lostReasonCode : null,
         // Why the samples are skipped — required only past Sample Evaluation with no sample.
-        skipReason: typeof b.skipReason === "string" ? b.skipReason : null,
+        skipReason: !skipSamples && typeof b.skipReason === "string" ? b.skipReason : null,
+        skipSamples,
+        // A direct manual move (deal_stage_move / lead_assign) says so in the history: «يدوي — <reason>».
+        manualNote: stageChange && !reopening
+          ? (typeof b.reason === "string" && b.reason.trim() ? `يدوي — ${b.reason.trim().slice(0, 300)}` : "يدوي")
+          : null,
         actorId: user.id,
         canReopen: hasSubPrivilege(user.permissions, "sales", "deal_reopen"),
       });

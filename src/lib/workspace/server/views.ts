@@ -14,6 +14,7 @@ import { appointmentsBetween } from "./appointments";
 import { listOccasions, canSeeOccasions } from "./occasions";
 import { leaveTypeName } from "@/lib/i18n/hr";
 import { reorderSuggestions } from "@/lib/services/customers/reorder";
+import { quoteFollowUpDue } from "@/lib/services/sales/next-step";
 
 const DAY = 86_400_000;
 
@@ -63,9 +64,6 @@ async function crmFollowUps(actor: WsActor, until: Date) {
     }));
 }
 
-/** Days an issued quotation waits for the customer's answer before it asks for a follow-up. */
-const QUOTE_FOLLOW_UP_DAYS = 3;
-
 /**
  * Issued quotations of the person's deals still waiting for the customer's answer, due for a follow-up
  * three days after issue, or two days before they lapse when that is sooner («عروض تحتاج متابعة»).
@@ -82,10 +80,8 @@ async function quotesToFollow(actor: WsActor, until: Date) {
     // «مسار المحاسب»: a quotation with no deal is the accounting section's, not a rep's follow-up.
     if (!q.opportunity) return [];
     const opp = q.opportunity;
-    const issued = q.issuedAt ?? new Date();
-    const byAge = issued.getTime() + QUOTE_FOLLOW_UP_DAYS * DAY;
-    const byExpiry = q.validUntil ? q.validUntil.getTime() - 2 * DAY : Infinity;
-    const due = new Date(Math.min(byAge, byExpiry));
+    // The ONE rule (pipeline v2 D3): the deal page and my-day read the same function.
+    const due = quoteFollowUpDue({ issuedAt: q.issuedAt, validUntil: q.validUntil });
     if (due > until) return [];
     return [{
       id: q.id, quoteNumber: q.quoteNumber, dueAt: due.toISOString(), validUntil: q.validUntil?.toISOString() ?? null,

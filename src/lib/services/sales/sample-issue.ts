@@ -39,6 +39,8 @@ import { onSampleIssue } from "@/lib/accounting/ops/inventory-events";
 import {
   AWAITING_APPROVAL_REFUSAL, DISPATCHABLE_APPROVAL, planSampleLots, sampleTransitionRefusal, wholeUnits, type SampleLotCandidate,
 } from "./sample-rules";
+import { ensureSampleFollowUp } from "./follow-through";
+import { advanceToPurpose } from "./lifecycle";
 
 type Tx = Prisma.TransactionClient;
 
@@ -259,16 +261,11 @@ export async function issueSample(sampleId: string, actorId: string, db: typeof 
     // will hear what the customer thought), in this same transaction.
     const ownerId = deal?.ownerId ?? s.createdById;
     if (ownerId) {
-      await tx.activity.create({
-        data: {
-          type: "SAMPLE_FOLLOW_UP",
-          subject: `Follow up on sample: ${s.description || sku.skuCode}`,
-          opportunityId: s.opportunityId,
-          dueAt: new Date(now.getTime() + 7 * 86400_000),
-          ownerId,
-        },
-      });
+      // ONE keyed reminder per sample (pipeline v2 D1), due on my-day's clock.
+      await ensureSampleFollowUp(tx, { sampleId: s.id, opportunityId: s.opportunityId, description: s.description || sku.skuCode, ownerId, sentAt: now });
     }
+    // Pipeline v2 T2b: issued is sent — the deal is at Sample Evaluation (idempotent with the request's T2).
+    await advanceToPurpose(tx, s.opportunityId, "SAMPLE_EVALUATION", actorId, "the sample was issued by dispatch");
 
     // Accounting A3: the queued SAMPLES_EXPENSE entry posts last, after every row this transaction locks (flushPostings).
     await flushPostings(tx);

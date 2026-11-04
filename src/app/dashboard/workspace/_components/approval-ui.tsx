@@ -48,6 +48,12 @@ function Facts({ item }: { item: ApprovalItem }) {
     rows.push([L("العميل", "Customer"), n(lang === "ar" ? f.customerAr ?? f.customer : f.customer)]);
     rows.push([L("الصفقة", "Deal"), `${n(f.deal)}${f.dealOwner ? ` · ${f.dealOwner}` : ""}`]);
     rows.push([L("المحصول", "Product"), <span key="p"><bdi>{n(lang === "ar" ? f.productAr ?? f.product : f.product)}</bdi> · <span className="hr-num">{n(f.units)}</span> {L("عبوة", "unit")}</span>]);
+  } else if (item.type === "STAGE_MOVE") {
+    // Pipeline v2: a rep's manual stage move waiting for the supervisor.
+    rows.push([L("الصفقة", "Deal"), `${n(f.deal)}${f.dealOwner ? ` · ${f.dealOwner}` : ""}`]);
+    rows.push([L("من مرحلة", "From"), n(lang === "ar" ? f.from : f.fromEn ?? f.from)]);
+    rows.push([L("إلى مرحلة", "To"), <b key="to">{n(lang === "ar" ? f.to : f.toEn ?? f.to)}</b>]);
+    if (f.reason) rows.push([L("السبب", "Reason"), n(f.reason)]);
   } else {
     if (item.subject) rows.push([L("الموضوع", "Subject"), n(item.subject)]);
     if (f.action) rows.push([L("الإجراء", "Action"), n(f.action)]);

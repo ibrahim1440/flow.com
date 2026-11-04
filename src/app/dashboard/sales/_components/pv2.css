@@ -1,0 +1,316 @@
+/*
+ * Pipeline v2 — the board and the deal page, built to Figma page «08 — مسار الصفقات v2»
+ * (file 1JbZgpMqmPkUVne8ms9Ozz: components 1762:3, board 1764:15 / 1765:517, deal 1766:603 … 1769:1850,
+ * annotations 1773:1674). Quiet Ledger 2.1: tokens of components/shell/direction-2.1.css only.
+ * Motion (annotation 4): ≤ 200 ms, ease-out cubic-bezier(0.23, 1, 0.32, 1); reduced motion = opacity only.
+ */
+.d21 { --pv2-ease: cubic-bezier(0.23, 1, 0.32, 1); }
+
+/* ── PV2 · Chip (1762:22): text + tone, colour never the only signal ── */
+.d21 .pv2-chip { display: inline-flex; align-items: center; gap: 6px; padding: 1px 8px; border-radius: 6px; font: 500 12px/18px var(--f-ui); white-space: nowrap; color: var(--text-secondary); background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle); max-width: 100%; overflow: hidden; text-overflow: ellipsis }
+.d21 .pv2-chip .t { min-width: 0; overflow: hidden; text-overflow: ellipsis }
+.d21 .pv2-chip::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor }
+.d21 .pv2-chip.nodot::before { display: none }
+.d21 .pv2-chip.info { color: var(--status-info); background: var(--status-info-tint); box-shadow: none }
+.d21 .pv2-chip.warn { color: var(--status-warning); background: var(--status-warning-tint); box-shadow: none }
+.d21 .pv2-chip.ok { color: var(--status-success); background: var(--status-success-tint); box-shadow: none }
+.d21 .pv2-chip.danger { color: var(--status-danger); background: var(--status-danger-tint); box-shadow: none }
+.d21 .pv2-chip.primary { color: var(--action-primary); background: var(--action-primary-tint); box-shadow: none }
+.d21 .pv2-chip.dashed { box-shadow: none; outline: 1px dashed var(--border-control); outline-offset: -1px; background: var(--surface) }
+
+/* ── Board (1764:15) ── */
+.d21 .pv2-head { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 20px }
+.d21 .pv2-head h1 { margin: 0; font: 600 28px/35px var(--f-ui); color: var(--text-primary) }
+.d21 .pv2-head .meta { margin-top: 4px; font: 400 13px/22px var(--f-ui); color: var(--text-secondary) }
+.d21 .pv2-head .act { margin-inline-start: auto; display: flex; gap: 8px; align-items: center }
+.d21 .pv2-tool { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 20px }
+.d21 .pv2-tool .search { width: 300px; max-width: 100% }
+.d21 .pv2-tool .sp { flex: 1 }
+.d21 .pv2-tool .sort { display: inline-flex; align-items: center; gap: 4px; font: 400 13px/22px var(--f-ui); color: var(--text-muted) }
+.d21 .pv2-tool .sort select { appearance: none; border: 0; background: none; font: 500 13px/22px var(--f-ui); color: var(--text-secondary); cursor: pointer; padding: 0 2px }
+.d21 .pv2-tool .chip[aria-pressed="true"] { background: var(--action-primary-tint); color: var(--action-primary); box-shadow: inset 0 0 0 1px var(--action-primary) }
+.d21 .pv2-tool .chip { cursor: pointer; border: 0; font-family: var(--f-ui) }
+
+.d21 .pv2-board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) 196px; gap: 12px; align-items: start }
+.d21 .pv2-board.open-closed { grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(0, 1fr) }
+.d21 .pv2-board-wrap { overflow-x: auto; padding-bottom: 4px; overscroll-behavior-x: contain }
+.d21 .pv2-board.many { width: max-content; min-width: 100% }
+@media (max-width: 1100px) { .d21 .pv2-board:not(.many) { min-width: 960px } }
+.d21 .pv2-col { background: var(--surface-subtle); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 0; outline: none; transition: box-shadow 0.15s var(--pv2-ease) }
+.d21 .pv2-col.drop { box-shadow: inset 0 0 0 1.5px var(--action-primary); background: var(--action-primary-tint) }
+.d21 .pv2-colh { display: flex; align-items: center; gap: 8px; padding: 2px; white-space: nowrap }
+.d21 .pv2-colh b { font: 600 16px/20.8px var(--f-ui); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis }
+.d21 .pv2-colh .cnt { background: var(--surface); border-radius: 999px; padding: 0 8px; font: 500 12.5px/18px var(--f-num); color: var(--text-secondary) }
+.d21 .pv2-colh .tot { margin-inline-start: auto; font: 400 12.5px/18px var(--f-num); color: var(--text-secondary) }
+.d21 .pv2-empty { padding: 14px 4px; font: 400 13px/20px var(--f-ui); color: var(--text-muted); text-align: center }
+
+/* DealCard (1762:118) */
+.d21 .pv2-card { position: relative; background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; transition: box-shadow 0.15s var(--pv2-ease), opacity 0.12s var(--pv2-ease), background-color 0.2s var(--pv2-ease) }
+.d21 .pv2-card:hover { box-shadow: var(--shadow-sheet) }
+.d21 .pv2-card:focus-within { border-color: var(--text-primary); box-shadow: inset 0 0 0 0.5px var(--text-primary) }
+.d21 .pv2-card[draggable="true"] { cursor: grab }
+.d21 .pv2-card.dragging { opacity: 0.4 }
+.d21 .pv2-card.arrived { background: var(--action-primary-tint) }
+.d21 .pv2-card .r1 { display: flex; align-items: baseline; gap: 8px; min-width: 0 }
+.d21 .pv2-card .who { font: 600 14px/22px var(--f-ui); color: var(--text-primary); text-decoration: none; min-width: 0; overflow-wrap: anywhere }
+.d21 .pv2-card .who::after { content: ""; position: absolute; inset: 0; border-radius: inherit }
+.d21 .pv2-card .who:focus-visible { outline: 0 }
+.d21 .pv2-card .amt { margin-inline-start: auto; font: 500 14px/22px var(--f-num); color: var(--text-primary); white-space: nowrap }
+.d21 .pv2-card .sub { font: 400 13px/20px var(--f-ui); color: var(--text-secondary); overflow-wrap: anywhere; margin-top: -6px }
+.d21 .pv2-card .r3 { display: flex; align-items: center; gap: 8px; min-width: 0 }
+.d21 .pv2-card .r3 .pv2-chip { flex: 0 1 auto; min-width: 0 }
+.d21 .pv2-card .r3 .since { flex: none }
+.d21 .pv2-card .r3 .since { margin-inline-start: auto; font: 400 12px/18px var(--f-ui); color: var(--text-muted); white-space: nowrap }
+.d21 .pv2-card hr { border: 0; height: 1px; background: var(--border-subtle); margin: 0 }
+.d21 .pv2-card .r4 { display: flex; align-items: center; gap: 6px; min-width: 0 }
+.d21 .pv2-card .nx { font: 500 13px/20px var(--f-ui); color: var(--text-secondary); min-width: 0; overflow-wrap: anywhere }
+.d21 .pv2-card .nx.late { color: var(--status-danger) }
+.d21 .pv2-card .nx.today { color: var(--status-warning) }
+.d21 .pv2-card .cue { flex: none; width: 6px; height: 6px; border-radius: 50% }
+.d21 .pv2-card .nx.late + .cue, .d21 .pv2-card .cue.late { background: var(--status-danger) }
+.d21 .pv2-card .cue.today { background: var(--status-warning) }
+.d21 .pv2-card .av { margin-inline-start: auto; flex: none; width: 22px; height: 22px; border-radius: 11px; display: grid; place-items: center; background: var(--surface-selected); color: var(--action-primary); font: 600 10.5px/1 var(--f-ui) }
+.d21 .pv2-card .pend { position: relative; z-index: 1 }
+.d21 .pv2-card .mv { position: relative; z-index: 1; margin-inline-start: 4px; border: 0; background: none; padding: 2px 4px; border-radius: 6px; color: var(--text-muted); cursor: pointer; font: 500 12px/18px var(--f-ui); white-space: nowrap; flex: none }
+.d21 .pv2-card .mv:hover, .d21 .pv2-card .mv:focus-visible { color: var(--text-primary); background: var(--surface-hover) }
+
+/* «مغلقة» — collapsed (1764:535) */
+.d21 .pv2-closed { background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0 }
+.d21 .pv2-closed .h { display: flex; align-items: center; gap: 6px }
+.d21 .pv2-closed .h b { font: 600 16px/20.8px var(--f-ui) }
+.d21 .pv2-closed .h button { margin-inline-start: auto; border: 0; background: none; padding: 4px; border-radius: 6px; color: var(--text-secondary); cursor: pointer; display: grid; place-items: center }
+.d21 .pv2-closed .h button:hover { background: var(--surface-hover) }
+.d21 .pv2-closed .mo { font: 400 12px/18px var(--f-ui); color: var(--text-muted); margin-top: -8px }
+.d21 .pv2-closed hr { border: 0; height: 1px; background: var(--border-subtle); margin: 0 }
+.d21 .pv2-closed .o { display: flex; flex-direction: column; gap: 2px }
+.d21 .pv2-closed .o .l { display: inline-flex; align-items: center; gap: 6px; font: 500 14px/22px var(--f-ui); color: var(--text-secondary) }
+.d21 .pv2-closed .o .l::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted) }
+.d21 .pv2-closed .o.won .l { color: var(--status-success) }
+.d21 .pv2-closed .o.won .l::before { background: var(--status-success) }
+.d21 .pv2-closed .o .v { font: 400 12.5px/18px var(--f-num); color: var(--text-secondary) }
+.d21 .pv2-closed .wait { font: 500 13px/22px var(--f-ui); color: var(--status-warning) }
+.d21 .pv2-closed .lk { font: 500 13px/22px var(--f-ui); color: var(--text-link); border: 0; background: none; padding: 0; cursor: pointer; text-align: start }
+.d21 .pv2-closed .row { display: flex; gap: 8px; align-items: baseline; font: 400 13px/20px var(--f-ui); color: var(--text-secondary); min-width: 0 }
+.d21 .pv2-closed .row a { color: var(--text-primary); text-decoration: none; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0 }
+.d21 .pv2-closed .row .n { margin-inline-start: auto; white-space: nowrap }
+
+/* Toast (1764:544) — role=status, 5 s, pauses on hover/focus */
+.d21 .pv2-toast { position: fixed; inset-inline-end: 32px; bottom: 32px; z-index: 70; display: flex; align-items: center; gap: 14px; padding: 12px 16px; border-radius: 10px; background: var(--text-primary); color: var(--text-inverse); box-shadow: 0 14px 34px -10px rgb(40 36 26 / 0.22), 0 0 0 1px rgb(40 36 26 / 0.07); max-width: min(520px, calc(100vw - 32px)); animation: pv2-toast-in 0.18s var(--pv2-ease) both }
+.d21 .pv2-toast.out { animation: pv2-toast-out 0.15s var(--pv2-ease) both }
+.d21 .pv2-toast svg { flex: none; width: 18px; height: 18px }
+.d21 .pv2-toast .t { display: flex; flex-direction: column; min-width: 0 }
+.d21 .pv2-toast .t b { font: 500 14px/22px var(--f-ui) }
+.d21 .pv2-toast .t span { font: 400 13px/22px var(--f-ui); opacity: 0.86 }
+.d21 .pv2-toast a { margin-inline-start: auto; flex: none; color: var(--text-inverse); font: 500 13px/22px var(--f-ui); text-decoration: underline; text-underline-offset: 3px }
+@keyframes pv2-toast-in { from { opacity: 0; transform: translateY(8px) } }
+@keyframes pv2-toast-out { to { opacity: 0; transform: translateY(8px) } }
+@media (max-width: 767px) { .d21 .pv2-toast { inset-inline: 16px; bottom: calc(76px + env(safe-area-inset-bottom)) } }
+
+/* Phone board (1765:517): stage tabs + a list of cards */
+.d21 .pv2-mtabs { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -16px 12px; padding: 0 16px }
+.d21 .pv2-mtabs button { flex: none; display: inline-flex; align-items: center; gap: 8px; min-height: 34px; padding-block: 0; padding-inline: 14px 4px; border: 0; border-radius: 999px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-strong); font: 500 13px/1 var(--f-ui); color: var(--text-secondary); cursor: pointer }
+.d21 .pv2-mtabs button:last-child { padding-inline: 14px }
+.d21 .pv2-mtabs button .n { display: inline-grid; place-items: center; min-width: 26px; height: 26px; border-radius: 50%; background: var(--surface); color: var(--text-primary); box-shadow: inset 0 0 0 1px var(--border-strong); font: 500 12.5px/1 var(--f-num) }
+.d21 .pv2-mtabs button[aria-selected="true"] { background: var(--text-primary); color: var(--text-inverse); box-shadow: none }
+.d21 .pv2-mhead { display: flex; align-items: baseline; gap: 8px; margin: 4px 0 10px }
+.d21 .pv2-mhead b { font: 600 16px/20.8px var(--f-ui) }
+.d21 .pv2-mhead span { margin-inline-start: auto; font: 400 12.5px/18px var(--f-num); color: var(--text-secondary) }
+.d21 .pv2-mlist { display: flex; flex-direction: column; gap: 10px }
+.d21 .pv2-mscope { font: 400 13px/22px var(--f-ui); color: var(--text-secondary) }
+
+/* ── Deal page (1766:603) ── */
+.d21 .pv2-dh { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 20px }
+.d21 .pv2-dh .t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px }
+.d21 .pv2-dh h1 { margin: 0; font: 600 28px/35px var(--f-ui); display: flex; align-items: center; gap: 10px; flex-wrap: wrap }
+.d21 .pv2-dh .sub { font: 400 14px/22px var(--f-ui); color: var(--text-secondary) }
+.d21 .pv2-dh .meta { display: flex; gap: 8px; flex-wrap: wrap; font: 400 13px/22px var(--f-ui); color: var(--text-secondary) }
+.d21 .pv2-dh .meta i { font-style: normal; color: var(--text-muted) }
+.d21 .pv2-dh .meta .amt { font: 500 14px/22px var(--f-num); color: var(--text-primary) }
+.d21 .pv2-dh .act { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end }
+
+/* PV2 · StageStep (1762:43) and the stepper card (1766:797) */
+.d21 .pv2-stepper-card { border: 1px solid var(--border-subtle); border-radius: 10px; padding: 16px 24px 12px; margin-bottom: 20px; display: flex; flex-direction: column; gap: 10px }
+.d21 .pv2-stepper { list-style: none; margin: 0; padding: 0; display: flex; align-items: flex-start; gap: 4px }
+.d21 .pv2-stepper > li { flex: none; width: 150px; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center }
+.d21 .pv2-stepper > li.ln { flex: 1 1 0; width: auto; min-width: 12px; padding-top: 12px }
+.d21 .pv2-stepper > li.ln::before { content: ""; display: block; height: 2px; border-radius: 1px; background: var(--border-subtle); transform-origin: right; transition: background-color 0.2s var(--pv2-ease) }
+[dir="ltr"].d21 .pv2-stepper > li.ln::before, .d21 [dir="ltr"] .pv2-stepper > li.ln::before { transform-origin: left }
+.d21 .pv2-stepper > li.ln.done::before { background: var(--action-primary); animation: pv2-grow 0.2s var(--pv2-ease) both }
+.d21 .pv2-stepper .mk { width: 26px; height: 26px; border-radius: 13px; border: 1.5px solid var(--border-control); background: var(--surface); display: grid; place-items: center; color: var(--text-inverse); transition: background-color 0.18s var(--pv2-ease) }
+.d21 .pv2-stepper .done .mk { background: var(--action-primary); border-color: var(--action-primary) }
+.d21 .pv2-stepper .done .mk svg { width: 14px; height: 14px; stroke-width: 2.2 }
+.d21 .pv2-stepper .cur .mk { border: 2px solid var(--action-primary) }
+.d21 .pv2-stepper .cur .mk::after { content: ""; width: 12px; height: 12px; border-radius: 6px; background: var(--action-primary) }
+.d21 .pv2-stepper .skip .mk { border-style: dashed; border-color: var(--text-muted) }
+.d21 .pv2-stepper .skip .mk::after { content: ""; width: 10px; height: 1.5px; background: var(--text-muted) }
+.d21 .pv2-stepper .lb { font: 400 13px/22px var(--f-ui); color: var(--text-secondary) }
+.d21 .pv2-stepper .cur .lb, .d21 .pv2-stepper .done .lb { font-weight: 600; color: var(--text-primary) }
+.d21 .pv2-stepper .done .lb { font-weight: 500 }
+.d21 .pv2-stepper .sb { font: 400 12px/18px var(--f-ui); color: var(--text-muted) }
+.d21 .pv2-stepper .cur .sb { color: var(--action-primary) }
+.d21 .pv2-stepper-note { font: 400 12px/18px var(--f-ui); color: var(--text-secondary); text-align: center }
+@keyframes pv2-grow { from { transform: scaleX(0) } }
+
+.d21 .pv2-body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; align-items: start }
+.d21 .pv2-main, .d21 .pv2-side { display: flex; flex-direction: column; gap: 16px; min-width: 0 }
+.d21 .pv2-panel { background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0 }
+.d21 .pv2-panel > .h { display: flex; align-items: center; gap: 8px }
+.d21 .pv2-panel > .h h2 { margin: 0; font: 600 14px/22px var(--f-ui); color: var(--text-primary) }
+.d21 .pv2-panel > .h .c { font: 400 13px/22px var(--f-num); color: var(--text-muted); white-space: nowrap; flex: none }
+.d21 .pv2-panel > .h h2 { min-width: 0 }
+.d21 .pv2-panel > .h .lk, .d21 .pv2-lk { margin-inline-start: auto; font: 500 13px/22px var(--f-ui); color: var(--text-link); border: 0; background: none; padding: 0; cursor: pointer; text-decoration: none }
+.d21 .pv2-lk:hover { text-decoration: underline }
+.d21 .pv2-panel .kv { display: flex; align-items: baseline; gap: 8px; font: 400 13px/22px var(--f-ui); color: var(--text-secondary) }
+.d21 .pv2-panel .kv b { margin-inline-start: auto; font-weight: 500; color: var(--text-primary); text-align: end }
+.d21 .pv2-panel .note { font: 400 12px/18px var(--f-ui); color: var(--text-muted) }
+.d21 .pv2-panel .txt { font: 400 13px/22px var(--f-ui); color: var(--text-secondary) }
+.d21 .pv2-panel hr { border: 0; height: 1px; background: var(--border-subtle); margin: 2px 0 }
+/* The old blocks re-used inside a panel keep their own look but not their outer margins. */
+.d21 .pv2-panel .bh { margin-top: 0 }
+.d21 .pv2-panel > div[data-testid="deal-needs"] { margin-bottom: 0 !important; max-width: none !important }
+
+/* «المطلوب منك الآن» (1766:816) */
+.d21 .pv2-now { background: var(--action-primary-tint); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 10px }
+.d21 .pv2-now.won { background: var(--status-success-tint) }
+.d21 .pv2-now.idle { background: var(--surface-subtle) }
+.d21 .pv2-now .k { display: inline-flex; align-items: center; gap: 6px; font: 600 13px/22px var(--f-ui); color: var(--action-primary) }
+.d21 .pv2-now .k::before { content: ""; width: 8px; height: 8px; border-radius: 4px; background: currentColor }
+.d21 .pv2-now.won .k { color: var(--status-success) }
+.d21 .pv2-now h2 { margin: 0; font: 600 16px/20.8px var(--f-ui); color: var(--text-primary) }
+.d21 .pv2-now p { margin: 0; font: 400 13px/22px var(--f-ui); color: var(--text-secondary) }
+.d21 .pv2-now .auto { display: flex; align-items: center; gap: 8px; font: 400 12px/18px var(--f-ui); color: var(--text-secondary); flex-wrap: wrap }
+.d21 .pv2-now .acts { display: flex; align-items: center; gap: 20px; padding-top: 6px; flex-wrap: wrap }
+.d21 .pv2-now .acts .why { font: 400 12.5px/18px var(--f-ui); color: var(--text-secondary) }
+.d21 .pv2-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 34px; padding: 0 14px; border: 0; border-radius: 9px; background: var(--action-primary); color: var(--text-inverse); font: 500 13.5px/22px var(--f-ui); cursor: pointer; text-decoration: none; white-space: nowrap; transition: transform 0.1s var(--pv2-ease), background-color 0.15s var(--pv2-ease) }
+.d21 .pv2-btn:hover:not(:disabled) { background: var(--action-primary-hover) }
+.d21 .pv2-btn:active:not(:disabled) { transform: scale(0.97) }
+.d21 .pv2-btn:disabled, .d21 .pv2-btn[aria-disabled="true"] { cursor: not-allowed; background: var(--surface-disabled); color: var(--text-disabled); box-shadow: inset 0 0 0 1px var(--border-disabled) }
+.d21 .pv2-btn svg { width: 16px; height: 16px }
+.d21 .pv2-skel { height: 10px; border-radius: 4px; background: linear-gradient(90deg, var(--surface-subtle), var(--border-subtle), var(--surface-subtle)); background-size: 200% 100%; animation: pv2-shimmer 1.6s linear infinite }
+@keyframes pv2-shimmer { to { background-position: -200% 0 } }
+
+/* Pending move banner (owner decision 3) */
+.d21 .pv2-pending { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 16px; border-radius: 10px; background: var(--status-warning-tint); color: var(--text-primary); font: 400 13px/22px var(--f-ui) }
+.d21 .pv2-pending b { font-weight: 600; color: var(--status-warning) }
+.d21 .pv2-pending .sp { flex: 1 }
+.d21 .pv2-pending.rej { background: var(--surface-subtle) }
+.d21 .pv2-pending.rej b { color: var(--text-primary) }
+
+/* Needs checklist (1766:849) */
+.d21 .pv2-progress { display: flex; gap: 0; height: 6px; border-radius: 3px; overflow: hidden; background: var(--surface-subtle) }
+.d21 .pv2-progress > span { background: var(--action-primary); transition: width 0.2s var(--pv2-ease) }
+.d21 .pv2-check { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column }
+.d21 .pv2-check li { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0 }
+.d21 .pv2-check .bx { flex: none; width: 15px; height: 15px; margin-top: 4px; border-radius: 4px; border: 1.5px solid var(--border-control); display: grid; place-items: center }
+.d21 .pv2-check .bx.on { background: var(--action-primary); border-color: var(--action-primary); color: var(--text-inverse) }
+.d21 .pv2-check .bx svg { width: 11px; height: 11px; stroke-width: 2.6 }
+.d21 .pv2-check .tx { flex: 1; min-width: 0; display: flex; flex-direction: column }
+.d21 .pv2-check .tx b { font: 500 14px/22px var(--f-ui); color: var(--text-primary) }
+.d21 .pv2-check .tx span { font: 400 13px/22px var(--f-ui); color: var(--text-secondary); overflow-wrap: anywhere }
+.d21 .pv2-check .tx span.no { color: var(--text-muted) }
+
+/* Sample row and evaluation hint (1767:810) */
+.d21 .pv2-smp { display: flex; gap: 12px; align-items: flex-start }
+.d21 .pv2-smp .ic { flex: none; width: 34px; height: 34px; border-radius: 8px; background: var(--surface-subtle); display: grid; place-items: center; color: var(--text-secondary) }
+.d21 .pv2-smp .ic svg { width: 18px; height: 18px }
+.d21 .pv2-smp .tx { flex: 1; min-width: 0; display: flex; flex-direction: column }
+.d21 .pv2-smp .tx b { font: 600 14px/22px var(--f-ui) }
+.d21 .pv2-smp .tx span { font: 400 13px/22px var(--f-ui); color: var(--text-secondary) }
+.d21 .pv2-smp .tx small { font: 400 12px/18px var(--f-ui); color: var(--text-muted) }
+.d21 .pv2-opts { display: flex; gap: 8px; flex-wrap: wrap }
+
+/* Current quote + version history (1768:1038) */
+.d21 .pv2-q .ttl { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap }
+.d21 .pv2-q .ttl b { font: 600 14px/22px var(--f-ui) }
+.d21 .pv2-q .ttl .pv2-chip { margin-inline-start: auto }
+.d21 .pv2-vers { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; align-items: stretch }
+.d21 .pv2-ver { position: relative; border: 1px solid var(--border-subtle); background: var(--surface-subtle); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; text-decoration: none; color: inherit }
+.d21 .pv2-ver.cur { background: var(--surface); border: 1.5px solid var(--text-primary) }
+.d21 .pv2-ver .top { display: flex; align-items: baseline; gap: 8px }
+.d21 .pv2-ver .top b { font: 600 13px/22px var(--f-ui) }
+.d21 .pv2-ver .top span { margin-inline-start: auto; font: 500 13px/22px var(--f-num) }
+.d21 .pv2-ver small { font: 400 12px/18px var(--f-ui); color: var(--text-secondary); overflow-wrap: anywhere }
+.d21 .pv2-lines { display: flex; flex-direction: column }
+.d21 .pv2-lines > div { display: flex; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border-subtle); font: 400 13px/22px var(--f-ui); color: var(--text-secondary) }
+.d21 .pv2-lines > div:last-child { border-bottom: 0 }
+.d21 .pv2-lines > div b { margin-inline-start: auto; font: 500 13px/22px var(--f-num); color: var(--text-primary) }
+
+/* Follow-up (1766:871) */
+.d21 .pv2-fu { display: flex; gap: 10px; align-items: center }
+.d21 .pv2-fu .ic { flex: none; width: 34px; height: 34px; border-radius: 8px; background: var(--surface-subtle); display: grid; place-items: center; color: var(--text-secondary) }
+.d21 .pv2-fu .ic.late { background: var(--status-danger-tint); color: var(--status-danger) }
+.d21 .pv2-fu .ic svg { width: 18px; height: 18px }
+.d21 .pv2-fu .tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px }
+.d21 .pv2-fu .tx b { font: 500 14px/22px var(--f-ui); overflow-wrap: anywhere }
+.d21 .pv2-fu .tx span { font: 400 13px/22px var(--f-ui); color: var(--text-secondary) }
+.d21 .pv2-fu .tx span.late { color: var(--status-danger) }
+.d21 .pv2-fu .tx span.today { color: var(--status-warning) }
+
+/* Timeline (1766:907) — «تلقائي» on automatic moves */
+.d21 .pv2-tl { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px }
+.d21 .pv2-tl li { display: flex; gap: 10px; align-items: flex-start }
+.d21 .pv2-tl .m { flex: none; width: 8px; height: 8px; margin-top: 7px; border-radius: 4px; background: var(--text-muted) }
+.d21 .pv2-tl .m.auto { background: var(--action-primary) }
+.d21 .pv2-tl .tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px }
+.d21 .pv2-tl .r { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font: 400 14px/22px var(--f-ui); color: var(--text-primary) }
+.d21 .pv2-tl .w { font: 400 12px/18px var(--f-ui); color: var(--text-muted); overflow-wrap: anywhere }
+.d21 .pv2-tl .d { font: 400 13px/20px var(--f-ui); color: var(--text-secondary); overflow-wrap: anywhere }
+.d21 .pv2-tl .diff { align-self: flex-start }
+
+/* Contacts (1766:962) */
+.d21 .pv2-ct { display: flex; gap: 10px; align-items: center }
+.d21 .pv2-ct .av { flex: none; width: 22px; height: 22px; border-radius: 11px; display: grid; place-items: center; background: var(--surface-selected); color: var(--action-primary); font: 600 10.5px/1 var(--f-ui) }
+.d21 .pv2-ct .tx { flex: 1; min-width: 0; display: flex; flex-direction: column }
+.d21 .pv2-ct .tx b { font: 500 14px/22px var(--f-ui) }
+.d21 .pv2-ct .tx span { font: 400 12px/18px var(--f-ui); color: var(--text-muted) }
+.d21 .pv2-ct-acts { display: flex; gap: 8px; justify-content: flex-end }
+
+/* Dialog option chips (1770:1591, 1770:1663) — a radio group, the choice announced with aria-checked */
+.d21 .pv2-radio { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; border: 0 }
+.d21 .pv2-radio button { display: inline-flex; align-items: center; min-height: 34px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-strong); font: 500 13.5px/22px var(--f-ui); color: var(--text-primary); cursor: pointer; transition: background-color 0.12s var(--pv2-ease) }
+.d21 .pv2-radio button:hover { background: var(--surface-hover) }
+.d21 .pv2-radio button[aria-checked="true"] { background: var(--text-primary); color: var(--text-inverse); box-shadow: none }
+.d21 .pv2-dlg-note { margin: 0; padding: 12px 14px; border-radius: 9px; background: var(--surface-subtle); font: 400 13px/20px var(--f-ui); color: var(--text-secondary) }
+.d21 .pv2-dlg-note.warn { background: var(--status-warning-tint); color: var(--status-warning) }
+.d21 .pv2-dlg-hint { margin: -6px 0 0; font: 400 12px/18px var(--f-ui); color: var(--text-muted) }
+.d21 .pv2-seg { display: inline-flex; padding: 2px; gap: 2px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--border-strong); align-self: flex-start }
+.d21 .pv2-seg button { border: 0; background: none; padding: 5px 16px; border-radius: 7px; font: 400 13px/22px var(--f-ui); color: var(--text-muted); cursor: pointer }
+.d21 .pv2-seg button[aria-checked="true"] { background: var(--surface); color: var(--text-primary); font-weight: 600; box-shadow: var(--shadow-sheet) }
+.d21-dlg-btn.is-danger { background: var(--status-danger); color: var(--text-inverse); box-shadow: none; flex: 1 }
+.d21-dlg-btn.is-danger:hover:not(:disabled) { filter: brightness(0.94) }
+@media (max-width: 767px) { .d21 .pv2-radio button { min-height: 40px } }
+.d21 .d21-dlg-input.ta { height: auto; min-height: 76px; padding: 8px 11px; resize: vertical }
+
+/* ── Phone deal page (1766:965) ── */
+@media (max-width: 767px) {
+  .d21 .pv2-body { grid-template-columns: minmax(0, 1fr) }
+  .d21 .pv2-dh h1 { font-size: 24px; line-height: 30px }
+  .d21 .pv2-dh { flex-wrap: wrap; gap: 8px }
+  .d21 .pv2-dh .meta { column-gap: 12px; row-gap: 0 }
+  .d21 .pv2-dh .meta i { display: none }
+  .d21 .pv2-stepper-card { border: 0; padding: 0; margin: 0 0 16px }
+  .d21 .pv2-stepper > li { width: 64px }
+  .d21 .pv2-stepper > li.ln { min-width: 8px; padding-top: 12px }
+  .d21 .pv2-stepper .lb { font-size: 12.5px; line-height: 18px }
+  .d21 .pv2-stepper-note { display: none }
+  .d21 .pv2-now { padding: 16px }
+  .d21 .pv2-now .acts { flex-direction: column; align-items: stretch; gap: 12px }
+  .d21 .pv2-now .acts .pv2-btn { height: 44px; width: 100% }
+  .d21 .pv2-now .acts .pv2-lk { margin: 0; text-align: center; min-height: 34px }
+  .d21 .pv2-vers { grid-template-columns: minmax(0, 1fr) }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .d21 .pv2-toast, .d21 .pv2-toast.out { animation: none }
+  .d21 .pv2-stepper > li.ln.done::before { animation: none }
+  .d21 .pv2-card, .d21 .pv2-btn, .d21 .pv2-col, .d21 .pv2-stepper .mk { transition: opacity 0.12s linear }
+  .d21 .pv2-btn:active:not(:disabled) { transform: none }
+  .d21 .pv2-skel { animation: none }
+}
+
+/* Focus (gate fix L5): every pipeline-v2 control shows the 2px focus ring, not just a background change. */
+.d21 :is(.pv2-card .mv, .pv2-lk, .pv2-btn, .pv2-closed .h button, .pv2-closed .lk, .pv2-mtabs button, .pv2-radio button, .pv2-seg button, .pv2-ver, .pv2-panel > .h .lk, .pv2-tool .chip, .pv2-tool .sort select):focus-visible {
+  outline: 2px solid var(--focus-ring); outline-offset: 2px;
+}
+.d21 .pv2-card .who:focus-visible { outline: 0 }
+.d21 .pv2-card:has(.who:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: 2px }

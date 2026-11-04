@@ -4,7 +4,7 @@ import { requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { ACTIVITY_OUTCOMES } from "@/lib/services/sales/qualification";
 import { parseActivity, logLeadOrDealActivity, logCustomerActivity, mayLogActivity } from "@/lib/services/sales/activity-log";
-import { suggestNextStep } from "@/lib/services/sales/follow-through";
+import { suggestNextStep, syncFollowUps } from "@/lib/services/sales/follow-through";
 import { NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
 
 type Params = { params: Promise<{ id: string }> };
@@ -71,6 +71,8 @@ export async function POST(request: Request, { params }: Params) {
         : await logCustomerActivity(tx, writer, planned.customerId!, parsed);
       // The planned one is the promise this result keeps (a sample reminder included).
       await tx.activity.updateMany({ where: { id, completedAt: null }, data: { completedAt: new Date() } });
+      // The dates computed from what is open (the lead's, and pipeline v2's deal date) — after the promise closed.
+      await syncFollowUps(tx, { leadId: planned.leadId, opportunityId: planned.opportunityId });
 
       let nextActivityId: string | null = null;
       if (next) {

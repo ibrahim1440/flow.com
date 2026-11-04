@@ -5,6 +5,7 @@ import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { seesAllSales } from "@/lib/services/sales/scope";
 import { STAGE_PURPOSES } from "@/lib/services/sales/stages";
+import { cancelMovesToStages } from "@/lib/services/sales/stage-move";
 
 /**
  * Pipeline stages — the columns of the board, as configuration rather than as a constant
@@ -19,8 +20,8 @@ import { STAGE_PURPOSES } from "@/lib/services/sales/stages";
  * deployment are historical (`UAT_QUALIFY`, `UAT_PROPOSAL`), so neither can be matched
  * against without guessing. See `services/sales/stages.ts`.
  */
-// One list, in pipeline order, owned by the service (SAMPLE_EVALUATION and NEGOTIATION added by
-// 20261204100000_pipeline_qualification). Still at most one stage per purpose.
+// One list, in pipeline order, owned by the service (pipeline v2: three purposes — NEGOTIATION was merged into
+// QUOTATION by 20261217090000_pipeline_v2 and is refused here with the 400 below). Still at most one stage per purpose.
 type StagePurposeValue = (typeof STAGE_PURPOSES)[number];
 
 /**
@@ -194,23 +195,6 @@ export async function PATCH(request: Request) {
     // or not). A closed deal reopened from a hidden stage is moved to the first active stage
     // by the transition route.
     const retiring = updates.filter((u) => u.data.isActive === false).map((u) => u.id);
-    if (retiring.length > 0) {
-      const holding = await prisma.opportunity.groupBy({
-        by: ["stageId"],
-        where: { stageId: { in: retiring }, outcome: "OPEN" },
-        _count: { _all: true },
-      });
-      const blocked = holding.filter((h) => h._count._all > 0);
-      if (blocked.length > 0) {
-        const stage = await prisma.pipelineStage.findUnique({ where: { id: blocked[0].stageId }, select: { nameEn: true } });
-        throw {
-          _appCode: 409,
-          message:
-            `${stage?.nameEn ?? "This stage"} still holds ${blocked[0]._count._all} open deals. ` +
-            "Move them to another stage before retiring it.",
-        };
-      }
-    }
 
     // A purpose belongs to at most one stage, enforced by a unique index. Moving it has to
     // clear the previous holder in the SAME transaction, or the update hits the index and
@@ -221,19 +205,39 @@ export async function PATCH(request: Request) {
       .filter((u) => typeof u.data.purpose === "string")
       .map((u) => ({ id: u.id, purpose: u.data.purpose as StagePurposeValue }));
 
-    // A sequence rather than one statement: each row gets its own update, and the whole set
-    // is atomic so a half-applied reorder cannot leave two columns sharing a position.
-    await prisma.$transaction([
-      ...claiming.map((c) =>
-        prisma.pipelineStage.updateMany({
-          where: { purpose: c.purpose, id: { not: c.id } },
-          data: { purpose: null },
-        }),
-      ),
-      ...updates
-        .filter((u) => Object.keys(u.data).length > 0)
-        .map((u) => prisma.pipelineStage.update({ where: { id: u.id }, data: u.data })),
-    ]);
+    // One transaction: the open-deal check that guards hiding a stage is read INSIDE it, with the stage rows
+    // locked (pipeline v2 §2.7), so a deal moved into a stage a moment before it is hidden is seen, not missed.
+    // Each row gets its own update, and the whole set is atomic so a half-applied reorder cannot leave two columns
+    // sharing a position.
+    await prisma.$transaction(async (tx) => {
+      if (retiring.length > 0) {
+        await tx.$queryRaw`SELECT "id" FROM "PipelineStage" WHERE "id" = ANY(${retiring}::text[]) FOR UPDATE`;
+        const holding = await tx.opportunity.groupBy({
+          by: ["stageId"],
+          where: { stageId: { in: retiring }, outcome: "OPEN" },
+          _count: { _all: true },
+        });
+        const blocked = holding.filter((h) => h._count._all > 0);
+        if (blocked.length > 0) {
+          const stage = await tx.pipelineStage.findUnique({ where: { id: blocked[0].stageId }, select: { nameEn: true } });
+          throw {
+            _appCode: 409,
+            message:
+              `${stage?.nameEn ?? "This stage"} still holds ${blocked[0]._count._all} open deals. ` +
+              "Move them to another stage before retiring it.",
+          };
+        }
+        // A pending move request into a stage being hidden could only ever put an open deal into a column the
+        // board no longer draws (gate fix MEDIUM-1): it is cancelled here, in the same transaction.
+        await cancelMovesToStages(tx, retiring);
+      }
+      for (const c of claiming) {
+        await tx.pipelineStage.updateMany({ where: { purpose: c.purpose, id: { not: c.id } }, data: { purpose: null } });
+      }
+      for (const u of updates.filter((x) => Object.keys(x.data).length > 0)) {
+        await tx.pipelineStage.update({ where: { id: u.id }, data: u.data });
+      }
+    });
 
     const stages = await prisma.pipelineStage.findMany({
       orderBy: [{ position: "asc" }, { code: "asc" }],

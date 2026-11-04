@@ -112,7 +112,7 @@ function TeamPage() {
             <th>{ar ? "المندوب" : "Rep"}</th>
             <th className="num">{ar ? "الهدف (التحصيل)" : "Target (collections)"}</th>
             <th className="num">{ar ? "المحصّل (ريال)" : "Collected (SAR)"}</th>
-            <th className="num">{ar ? "في التفاوض (ريال)" : "In negotiation (SAR)"}</th>
+            <th className="num">{ar ? "في عرض السعر والتفاوض (ريال)" : "In quotation & negotiation (SAR)"}</th>
             <th className="num">{ar ? "طلبات متأخرة" : "Late reorders"}</th>
             <th className="num">{ar ? `عقود تنتهي خلال ${num(windowDays)} يوم` : `Contracts ending in ${num(windowDays)} days`}</th>
             <th>{ar ? "آخر نشاط" : "Last activity"}</th>
@@ -157,7 +157,7 @@ function TeamPage() {
       {rows && rows.length > 0 && (
         <p style={{ ...muted, fontSize: 12.5, marginTop: 16 }}>
           {ar
-            ? "الهدف والمحصّل من التحصيل هذا الشهر. «في التفاوض»: قيمة الصفقات المفتوحة في مرحلة عرض السعر أو التفاوض. اضغط اسم المندوب تشوف يومه (للاطلاع فقط)."
+            ? "الهدف والمحصّل من التحصيل هذا الشهر. «في عرض السعر والتفاوض»: قيمة الصفقات المفتوحة في مرحلة عرض السعر والتفاوض. اضغط اسم المندوب تشوف يومه (للاطلاع فقط)."
             : "Target and collected are this month's collections. «In negotiation»: the value of open deals at the quotation or negotiation stage. Open a rep's name to see their day (read only)."}
         </p>
       )}

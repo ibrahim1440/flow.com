@@ -1,7 +1,7 @@
 import { wsRoute } from "@/lib/workspace/server/http";
 import { myApprovals, type ApprovalType } from "@/lib/workspace/server/approvals";
 
-const TYPES = ["LEAVE", "ADVANCE", "DISCOUNT", "SAMPLE", "FINANCE", "MARKETING"];
+const TYPES = ["LEAVE", "ADVANCE", "DISCOUNT", "SAMPLE", "STAGE_MOVE", "FINANCE", "MARKETING"];
 
 /**
  * GET /api/workspace/approvals?type= — what waits for the caller's decision, from each department's own

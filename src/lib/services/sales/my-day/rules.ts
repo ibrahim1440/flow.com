@@ -10,6 +10,7 @@ import { Decimal, ZERO, roundMoney, commissionOnCumulativeBase, type PlanRules }
 import { bonusBracket, overTargetIncentive, type Components } from "@/lib/services/commissions/builder";
 import { MONTHLY_KG_WINDOW_DAYS, isBusinessOrder, kgPerMonthOf, medianGapDays, type OrderRow } from "@/lib/services/customers/aggregates";
 import { reorderStatus, type ReorderFactors, type ReorderState } from "@/lib/services/customers/reorder";
+import { SAMPLE_FEEDBACK_DAYS } from "../next-step";
 
 export const DAY = 86_400_000;
 const RIYADH = 3 * 3_600_000;
@@ -182,7 +183,8 @@ export type CallReason =
   /** A LATE customer the rep contacted since its last order, within `callAwaitDays`: «كلّمته — بانتظار الطلب». */
   | { code: "CALLED"; daysLate: number; intervalDays: number; calledDaysAgo: number; awaitDays: number };
 
-export const SAMPLE_FEEDBACK_DAYS = 5;
+// The sample-feedback clock lives with the next-step engine (pipeline v2: one clock for every surface).
+export { SAMPLE_FEEDBACK_DAYS };
 export const EXPECTED_WITHIN_DAYS = 7;
 
 export type BookCustomer = {
@@ -245,6 +247,8 @@ export function customerFacts(c: BookCustomer, tier: Tier, kg90: number, s: MyDa
 export type DealRow = {
   id: string; title: string; amount: string; customerId: string | null; customerName: string | null; customerNameAr: string | null;
   customerPhone: string | null; nextFollowUpAt: Date | null; purpose: string | null; stageAr: string; stageEn: string;
+  /** Pipeline v2: the deal's next step (services/sales/next-step.ts), computed by the loader. */
+  nextStep?: import("../next-step").DealNextStep;
 };
 export type SampleRow = { id: string; dealId: string; customerId: string | null; sentAt: Date; description: string };
 
