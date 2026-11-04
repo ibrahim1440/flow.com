@@ -62,8 +62,12 @@
 .d21 .mny-table td { padding: 12px 20px; border-top: 1px solid var(--border-subtle) } .d21 .mny-table td.n { font-weight: 600 } .d21 .mny-table td.ok { color: var(--status-success); font-weight: 700 }
 .d21 .mny-card.flush { padding: 0; gap: 0; overflow: hidden } .d21 .mny-card.flush > .mny-h { padding: 18px 20px 12px } .d21 .mny-card.flush > .mny-note { padding: 12px 20px 14px }
 /* The status tiles of «التحصيل». */
-.d21 .mny-stt { display: grid; gap: 6px; padding: 18px; border-radius: 14px } .d21 .mny-stt .h { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700 } .d21 .mny-stt b { font-size: 26px; font-weight: 700; color: var(--text-primary) } .d21 .mny-stt small { font-size: 12.5px; color: var(--text-muted) }
-.d21 .mny-stt.t-wa { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--status-warning) 22%, transparent) } .d21 .mny-stt.t-ok { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--status-success) 22%, transparent) } .d21 .mny-stt.t-er { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--status-danger) 22%, transparent) }
+/* The status tiles of «التحصيل» — option ب (owner, 4 Nov 2026): a white card, a thin strip of the state's colour on
+   the reading edge, the title in that colour; the figure stays in ink. */
+.d21 .mny-stt { position: relative; display: grid; gap: 6px; padding: 18px; padding-inline-start: 22px; border-radius: 14px; overflow: hidden; background: var(--surface) !important; box-shadow: inset 0 0 0 1px var(--border-subtle) }
+.d21 .mny-stt::before { content: ""; position: absolute; inset-block: 0; inset-inline-start: 0; width: 4px; background: currentColor }
+.d21 .mny-stt .h { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 14px; font-weight: 700 }
+.d21 .mny-stt b { justify-self: center; padding: 4px 0 2px; font-size: 28px; font-weight: 700; color: var(--text-primary) } .d21 .mny-stt small { font-size: 12.5px; color: var(--text-muted) }
 .d21 .mny-need { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--status-danger-tint) } .d21 .mny-need .mny-li-t small { color: var(--status-danger); font-weight: 500 }
 .d21 .mny-chips { display: flex; flex-wrap: wrap; gap: 6px } .d21 .mny-chips button { min-height: 30px; padding: 0 12px; border-radius: 999px; border: 0; box-shadow: inset 0 0 0 1px var(--border-subtle); background: var(--surface); font: inherit; font-size: 12.5px; color: var(--text-secondary); cursor: pointer } .d21 .mny-chips button[aria-pressed="true"] { background: var(--text-primary); color: var(--surface); box-shadow: none; font-weight: 700 }
 .d21 .mny-top { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap } .d21 .mny-top h1 { margin: 0; font-size: 28px } .d21 .mny-top p { margin: 2px 0 0; color: var(--text-muted); font-size: 14px }

@@ -794,7 +794,6 @@ export default function CollectionsPage() {
   if (!isFinance) {
     const returned = rows.filter((r) => r.status === "REJECTED" && r.decisionReasonCode === "RETURN_FOR_CORRECTION" && !r.correctedBy);
     const returnedSum = returned.reduce((a, r) => a + Number(r.amountGross), 0);
-    const approvedCount = data.counts ? (data.counts.APPROVED ?? 0) : approved.length;
     const whole = (v: string | number) => Math.round(Number(v)).toLocaleString("en-US");
     const word = (r: Collection): [string, string] =>
       r.status === "PENDING_VERIFICATION" ? [ar ? "بانتظار المالية" : "Awaiting finance", "t-wa"]
@@ -802,7 +801,6 @@ export default function CollectionsPage() {
           : r.status === "REVERSED" ? [ar ? "معكوس" : "Reversed", "t-in"]
             : returned.includes(r) ? [ar ? "رجع لك" : "Back to you", "t-er"] : [ar ? "مرفوض" : "Rejected", "t-er"];
     const shown = rows.filter((r) => repFilter === "all" ? true : repFilter === "pending" ? r.status === "PENDING_VERIFICATION" : repFilter === "approved" ? r.status === "APPROVED" : returned.includes(r));
-    const count = (n: number, one: string, two: string, many: string) => (ar ? (n === 0 ? "ما فيه" : n === 1 ? one : n === 2 ? two : `${n} ${many}`) : `${n}`);
     const recordHref = eligible.length === 1 ? `/dashboard/sales/deals/${eligible[0].id}#collections` : "#mny-owing";
     const dayText = (iso: string) => new Date(iso).toLocaleDateString(ar ? "ar-SA-u-ca-gregory-nu-latn" : "en-GB", { day: "numeric", month: "long", timeZone: "Asia/Riyadh" });
     return (
@@ -820,9 +818,9 @@ export default function CollectionsPage() {
             {data.can.submit ? <Link className="btn p" href={recordHref} data-testid="record-collection" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Ico name="plus" small />{ar ? "سجّل تحصيل" : "Record a collection"}</Link> : null}
           </div>
           <div className="mny-row" style={{ ["--n" as string]: 3 }}>
-            <div className="mny-stt t-wa" data-testid="stat-pending"><span className="h"><Ico name="clock" small />{ar ? "بانتظار المالية" : "Awaiting finance"}</span><b className="num">{whole(pendingGross)} {unit}</b><small>{ar ? `${count(pendingCount, "تحصيل واحد", "تحصيلين", "تحصيلات")} · ما لها عمولة للحين` : `${pendingCount} · no commission yet`}</small></div>
-            <div className="mny-stt t-ok" data-testid="stat-approved"><span className="h"><Ico name="tick" small />{ar ? "اعتمدتها المالية" : "Approved"}</span><b className="num">{whole(approvedGross)} {unit}</b><small>{ar ? `${count(approvedCount, "تحصيل واحد", "تحصيلين", "تحصيلات")} · دخلت في عمولتك` : `${approvedCount} · counted in your commission`}</small></div>
-            <div className="mny-stt t-er" data-testid="stat-returned"><span className="h"><Ico name="back" small />{ar ? "رجعت لك" : "Back to you"}</span><b className="num">{whole(returnedSum)} {unit}</b><small>{returned.length ? (ar ? `${count(returned.length, "تحصيل واحد", "تحصيلين", "تحصيلات")} يحتاج تصحيح` : `${returned.length} to fix`) : (ar ? "ما فيه شي يحتاج تصحيح" : "Nothing to fix")}</small></div>
+            <div className="mny-stt t-wa" data-testid="stat-pending"><span className="h"><Ico name="clock" small />{ar ? "بانتظار المالية" : "Awaiting finance"}</span><b className="num">{whole(pendingGross)} {unit}</b></div>
+            <div className="mny-stt t-ok" data-testid="stat-approved"><span className="h"><Ico name="tick" small />{ar ? "اعتمدتها المالية" : "Approved"}</span><b className="num">{whole(approvedGross)} {unit}</b></div>
+            <div className="mny-stt t-er" data-testid="stat-returned"><span className="h"><Ico name="back" small />{ar ? "رجعت لك" : "Back to you"}</span><b className="num">{whole(returnedSum)} {unit}</b></div>
           </div>
           {returned.length ? (
             <section className="mny-card" aria-labelledby="mny-need-h" style={{ boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--status-danger) 25%, transparent)" }} data-testid="collections-returned">
