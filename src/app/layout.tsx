@@ -4,9 +4,31 @@ import { verifyToken } from "@/lib/auth";
 import { LANG_COOKIE, asLang } from "@/lib/i18n/language-switch";
 import "./globals.css";
 
+// Link previews (WhatsApp, iMessage, Slack… — owner, Nov 2026, option A): the activation link and every other link to the
+// system unfurl as the brand card. og:image must be ABSOLUTE for crawlers, so `metadataBase` is the system's public
+// address: APP_BASE_URL (the one the activation links and e-mails are built on), else the production URL Vercel gives,
+// else the production domain. Crawlers fetch /brand/* and the sign-in pages without a session (there is no request
+// middleware; those routes are public).
+function publicBase(): URL {
+  const own = process.env.APP_BASE_URL?.trim().replace(/\/+$/, "");
+  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+  try {
+    return new URL(own || (vercel ? `https://${vercel}` : "https://www.beanflow.net"));
+  } catch {
+    return new URL("https://www.beanflow.net");
+  }
+}
+
+const OG_TITLE = "حِقبة — نظام المحمصة";
+const OG_DESCRIPTION = "سجّل دخولك إلى نظام محمصة حِقبة";
+const OG_IMAGE = { url: "/brand/og-hiqbah-1200x630.png", width: 1200, height: 630, alt: "حِقبة", type: "image/png" };
+
 export const metadata: Metadata = {
-  title: "Hiqbah Coffee | محمصة حِقبة",
-  description: "Internal production management system for Hiqbah Coffee Roasters",
+  metadataBase: publicBase(),
+  title: OG_TITLE,
+  description: OG_DESCRIPTION,
+  openGraph: { title: OG_TITLE, description: OG_DESCRIPTION, images: [OG_IMAGE], type: "website", locale: "ar_SA", siteName: "حِقبة" },
+  twitter: { card: "summary_large_image", title: OG_TITLE, description: OG_DESCRIPTION, images: [OG_IMAGE.url] },
   // Brand guideline v003: the «ح» mark (olive «ح», clay stroke) on a sand tile, so it reads on
   // light and dark tab bars. `app/favicon.ico` (16/32/48) is rendered from the same SVG.
   icons: {
