@@ -3,7 +3,7 @@
 // «وضع التجربة مع قيود» (owner's pilot) on the invoice page: the pilot notice, Qoyod's tax invoice attached by the
 // accountant (number + PDF), and the rep's «إرسال» to the customer (WhatsApp file + e-mail attachment), with what each
 // channel did. The customer never receives this system's own document during the pilot.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Msg, useApi, useLang, useWrite } from "./inv";
 import { Banner } from "./request-ui";
 
@@ -21,9 +21,16 @@ const STATUS: Record<string, [string, string, string]> = {
 };
 const at = (v: string | null) => (v ? new Date(v).toLocaleString("en-GB", { timeZone: "Asia/Riyadh", dateStyle: "short", timeStyle: "short" }) : "—");
 
-export function QoyodPanel({ invoiceId, status }: { invoiceId: string; status: string }) {
+/**
+ * `focus`: the document was just issued on this screen — the attach form is scrolled into view and Qoyod's number
+ * field focused, so the accountant goes straight from «مراجعة وإصدار» to «إرفاق» (production report, 4 Nov 2026: the
+ * accountant saw «حفظ المسودة» and looked for the attach field on the draft; it exists only once the document is issued).
+ */
+export function QoyodPanel({ invoiceId, status, focus = false }: { invoiceId: string; status: string; focus?: boolean }) {
   const { L } = useLang();
   const api = useApi<Data>(`/api/sales/invoices/${invoiceId}/qoyod`);
+  const numberRef = useRef<HTMLInputElement>(null);
+  const focused = useRef(false);
   const w = useWrite();
   const [number, setNumber] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -32,6 +39,13 @@ export function QoyodPanel({ invoiceId, status }: { invoiceId: string; status: s
   const [ch, setCh] = useState({ whatsapp: true, email: true });
   const [outcomes, setOutcomes] = useState<Outcome[] | null>(null);
   const d = api.data;
+  const formOpen = !!d && d.can.attach && (!d.copy || replace);
+  useEffect(() => {
+    if (!focus || !formOpen || focused.current || !numberRef.current) return;
+    focused.current = true;
+    numberRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
+    numberRef.current.focus();
+  }, [focus, formOpen]);
   if (!d) return null;
   // Nothing to show outside the pilot unless a copy exists.
   if (!d.pilot.until && !d.copy) return null;
@@ -81,13 +95,13 @@ export function QoyodPanel({ invoiceId, status }: { invoiceId: string; status: s
           <div><dt>{L("الإرسال للعميل", "Sent to the customer")}</dt><dd>{d.copy.sendCount ? <><span className="hr-num">{d.copy.sendCount}×</span> · <bdi>{d.copy.lastSentBy}</bdi> · <span className="hr-num">{at(d.copy.lastSentAt)}</span></> : L("لم تُرسل بعد", "Not sent yet")}</dd></div>
         </dl>
       ) : (
-        <p className="acct-hint" data-testid="qoyod-missing">{status === "ISSUED" ? L("ما أُرفقت فاتورة قيود بعد. المحاسب يصدرها في قيود ويرفع ملفها هنا.", "Qoyod's invoice is not attached yet. The accountant issues it in Qoyod and uploads it here.") : L("تُرفق فاتورة قيود بعد إصدار المستند.", "Qoyod's invoice is attached once the document is issued.")}</p>
+        <p className="acct-hint" data-testid="qoyod-missing">{status === "ISSUED" ? L("ما أُرفقت فاتورة قيود بعد. المحاسب يصدرها في قيود ويرفع ملفها هنا.", "Qoyod's invoice is not attached yet. The accountant issues it in Qoyod and uploads it here.") : L("أصدر الفاتورة ثم أرفق فاتورة قيود — الإرفاق على مستند صادر فقط.", "Issue the invoice, then attach Qoyod's invoice — it attaches to an issued document only.")}</p>
       )}
 
       {showForm ? (
         <div className="acct-row" data-testid="qoyod-upload">
           <label className="hr-field"><span className="hr-label">{L("رقم الفاتورة في قيود", "Qoyod invoice no.")}</span>
-            <input className="hr-input" dir="ltr" maxLength={60} value={number} onChange={(e) => setNumber(e.target.value)} data-testid="qoyod-number-input" /></label>
+            <input ref={numberRef} className="hr-input" dir="ltr" maxLength={60} value={number} onChange={(e) => setNumber(e.target.value)} data-testid="qoyod-number-input" /></label>
           <label className="hr-field acct-grow"><span className="hr-label">{L("ملف PDF من قيود", "PDF from Qoyod")}</span>
             <input className="hr-input" type="file" accept="application/pdf,.pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} data-testid="qoyod-file" /></label>
           <button type="button" className="hr-btn is-primary" disabled={uploading} onClick={upload} data-testid="qoyod-upload-btn">{d.copy ? L("استبدال", "Replace") : L("إرفاق", "Attach")}</button>

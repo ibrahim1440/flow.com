@@ -58,6 +58,9 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   type Form = { lines: EditLine[]; buyer: Buyer; family: "STANDARD" | "SIMPLIFIED"; supplyDate: string; terms: string; notes: string; reason: string };
   const [form, setForm] = useState<Form | null>(null);
   const [dialog, setDialog] = useState<"issue" | "cancel" | "return" | null>(null);
+  // «أصدر الفاتورة ثم أرفق فاتورة قيود»: right after a successful issue the Qoyod attach form is opened (scrolled to
+  // and focused) for the issuer, so the accountant's path is one straight line: review → issue → attach.
+  const [attachNow, setAttachNow] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [problems, setProblems] = useState<{ ar: string; en: string }[]>([]);
   // The draft's form: what the user typed, else the stored draft (no effect: derived on render).
@@ -117,6 +120,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     setDialog(null);
     if (!res.ok) { w.setError(b.error ?? b.errorEn ?? `HTTP ${res.status}`); if (Array.isArray(b.problems)) setProblems(b.problems); return; }
     w.setDone(L(`صدرت برقم ${b.number}.`, `Issued as ${b.number}.`));
+    setAttachNow(true);
     doc.reload();
   };
   const cancel = async () => {
@@ -190,7 +194,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
         )}
         <ZatcaPanel invoiceId={d.id} uuid={d.uuid} key={`${d.id}:${d.status}`} />
       </div>
-      {d.status === "ISSUED" ? <QoyodPanel invoiceId={d.id} status={d.status} key={`qoyod:${d.id}`} /> : null}
+      {d.status === "ISSUED" || (d.status === "DRAFT" && issuerHere) ? <QoyodPanel invoiceId={d.id} status={d.status} focus={attachNow && d.status === "ISSUED"} key={`qoyod:${d.id}:${d.status}`} /> : null}
 
       {d.status === "DRAFT" && canEditDraft && lines && buyer ? (
         <>
@@ -215,8 +219,13 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               <label className="hr-field"><span className="hr-label">{L("ملاحظات للعميل", "Notes to the customer")}</span><textarea className="hr-input" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
               <Totals lines={lines} />
             </div>
-            <div className="acct-foot"><span className="acct-hint">{L("المسودة قابلة للتعديل حتى الإصدار.", "The draft can be edited until it is issued.")}</span>
-              <button type="button" className="hr-btn" disabled={!!w.busy} onClick={save} data-testid="save-draft">{L("حفظ المسودة", "Save draft")}</button></div>
+            <div className="acct-foot"><span className="acct-hint">{canIssue
+                ? (requested ? L("راجع البيانات ثم أصدر الفاتورة؛ بعد الإصدار تُرفق فاتورة قيود هنا.", "Review, then issue; Qoyod's invoice is attached here after issue.") : L("المسودة قابلة للتعديل حتى الإصدار.", "The draft can be edited until it is issued."))
+                : L("المسودة قابلة للتعديل حتى الإصدار.", "The draft can be edited until it is issued.")}</span>
+              <span className="acct-actions">
+                <button type="button" className="hr-btn" disabled={!!w.busy} onClick={save} data-testid="save-draft">{L("حفظ المسودة", "Save draft")}</button>
+                {canIssue ? <button type="button" className="hr-btn is-primary" disabled={!!w.busy} onClick={() => setDialog("issue")} data-testid="issue-foot">{requested ? L("مراجعة وإصدار", "Review and issue") : isNote ? L("إصدار الإشعار", "Issue the note") : L("إصدار الفاتورة", "Issue the invoice")}</button> : null}
+              </span></div>
           </div>
         </>
       ) : (

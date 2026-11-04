@@ -62,6 +62,9 @@ export async function GET(request: Request) {
           createdAt: true, source: true, buyer: true, originalInvoice: { select: { id: true, number: true } }, branchId: true,
           applications: { where: { status: "APPLIED" }, select: { amount: true } },
           creditApplications: { where: { status: "APPLIED" }, select: { amount: true } },
+          // «فاتورة قيود»: the rep's list shows which issued invoices carry Qoyod's PDF (number only; the bytes are the
+          // document route's).
+          qoyodCopy: { select: { qoyodNumber: true } },
         },
       }),
       prisma.salesInvoice.count({ where }),
@@ -81,6 +84,7 @@ export async function GET(request: Request) {
           original: r.originalInvoice, open: open === null ? null : open.toFixed(2),
           payment: open === null ? null : open <= 0.0001 ? "PAID" : paid > 0 ? "PARTIAL" : "UNPAID",
           overdue: open !== null && open > 0 && !!r.dueDate && day(r.dueDate)! < today,
+          qoyodNumber: r.qoyodCopy?.qoyodNumber ?? null,
         };
       }),
       total, take, skip,
