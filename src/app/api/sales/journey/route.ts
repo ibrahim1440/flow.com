@@ -10,6 +10,7 @@ import { quotesSeeAll } from "@/lib/services/sales/quote-access";
  * top of «العملاء المحتملون», «العيّنات», «عروض الأسعار» and «العملاء». Each count is scoped exactly as its own list
  * is, so the strip never shows a number the page behind it would not:
  *   · leads    — open leads (NEW, CONTACTED, QUALIFIED); own unless `lead_assign` (GET /api/sales/leads);
+ *   · deals    — open deals (outcome OPEN); own unless all-sales (the pipeline's own scope);
  *   · samples  — not yet answered (no feedback, not cancelled); through the deal's owner unless all-sales;
  *   · quotes   — open: drafts, issued, and accepted ones not yet turned into an order; own unless quotesSeeAll;
  *   · customers — the viewer's book (customerVisibilityWhere); a count of 0 for a viewer without the module.
@@ -23,8 +24,9 @@ export async function GET() {
   const quoteOwn = quotesSeeAll(p) ? {} : { opportunity: { ownerId: user.id } };
   const seesCustomers = hasModuleAccess(p, "customers");
 
-  const [leads, samples, quotes, customers] = await Promise.all([
+  const [leads, deals, samples, quotes, customers] = await Promise.all([
     prisma.lead.count({ where: { ...leadOwn, status: { in: ["NEW", "CONTACTED", "QUALIFIED"] } } }),
+    prisma.opportunity.count({ where: { ...(seesAllSales(p) ? {} : { ownerId: user.id }), outcome: "OPEN" } }),
     prisma.sampleShipment.count({ where: { ...dealOwn, status: { in: ["REQUESTED", "PREPARING", "SENT"] } } }),
     prisma.quote.count({
       where: {
@@ -34,5 +36,5 @@ export async function GET() {
     }),
     seesCustomers ? prisma.customer.count({ where: customerVisibilityWhere(user) }) : Promise.resolve(0),
   ]);
-  return NextResponse.json({ leads, samples, quotes, customers, scope: seesAllSales(p) ? "all" : "own" });
+  return NextResponse.json({ leads, deals, samples, quotes, customers, scope: seesAllSales(p) ? "all" : "own" });
 }

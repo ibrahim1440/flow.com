@@ -12,7 +12,7 @@ import { pinLookup, pinVerifierInput, requirePinLookupSecret } from "@/lib/pin-l
 import { pinSetThrottle, pinUnavailable, isPinLookupConflict } from "@/lib/pin-set-guard";
 import { refreshSessionCookie, setFreshSession } from "@/lib/session-cookie";
 import { asMsgLang } from "@/lib/automation/employee-lang";
-import { homeChoice, isSalesPersona, landingSetByAdmin } from "@/lib/workspace/landing";
+import { homeChoice, homeIsMyDayOnly, isSalesPersona, landingSetByAdmin } from "@/lib/workspace/landing";
 import { writeSettingsAudit } from "@/lib/services/settings/audit";
 import { readSessionEmployee } from "@/lib/auth/session-employee";
 
@@ -60,6 +60,9 @@ export async function PATCH(request: Request) {
       const me = await readSessionEmployee<{ role: string; permissions: unknown; defaultRoute: string }>(prisma as never, user.id, { role: true, permissions: true, defaultRoute: true });
       if (!me || !isSalesPersona({ role: me.role, permissions: parsePermissions(me.permissions as string) })) {
         return NextResponse.json({ error: "اختيار الصفحة الرئيسية لمندوبي المبيعات.", errorEn: "Only a sales account picks this home." }, { status: 400 });
+      }
+      if (home === "classic" && homeIsMyDayOnly({ role: me.role, permissions: parsePermissions(me.permissions as string) })) {
+        return NextResponse.json({ error: "صفحة المندوب الرئيسية «يومي».", errorEn: "A sales rep's home is «My day»." }, { status: 400 });
       }
       if (landingSetByAdmin(me.defaultRoute)) {
         return NextResponse.json({ error: "صفحتك الرئيسية حددها المدير.", errorEn: "Your home page was set by the administrator.", code: "HOME_SET_BY_ADMIN" }, { status: 409 });

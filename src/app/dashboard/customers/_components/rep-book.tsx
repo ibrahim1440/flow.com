@@ -130,7 +130,9 @@ export function RepBook({
       {shown.length === 0 ? (
         <p className="spg-tip" data-testid="customers-no-results">
           <Ico name="user" small />
-          {filter ? L(`ما فيه عملاء في «${filterLabel(filter, true)}» الحين.`, `No customers in «${filterLabel(filter, false)}» right now.`) : L("ما فيه عملاء بهذا البحث.", "No customers match.")}
+          {filter ? L(`ما فيه عملاء في «${filterLabel(filter, true)}» الحين.`, `No customers in «${filterLabel(filter, false)}» right now.`)
+            : customers.length === 0 ? L("ما عندك عملاء بعد. اطلب من المدير يعيّنك مسؤولًا عن عملائك.", "No customers yet. Ask your manager to assign yours.")
+              : L("ما فيه عملاء بهذا البحث.", "No customers match.")}
         </p>
       ) : (
         <section className="mny-card flush">

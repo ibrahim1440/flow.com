@@ -11,7 +11,7 @@ import { stockChangeRefusal, stockAuthSnapshot } from "./auth/stock-change";
 import { isBcryptHash } from "./auth/secret";
 import { isSimpleMode, simpleModePermissions } from "./simple-mode";
 import { stationDelegate } from "./auth/station-delegate";
-import { homeChoice, landingSetByAdmin } from "./workspace/landing";
+import { homeChoice, homeIsMyDayOnly, landingSetByAdmin } from "./workspace/landing";
 import { readSessionEmployee } from "./auth/session-employee";
 
 /**
@@ -132,7 +132,7 @@ export async function getUserWithPermissions(): Promise<SessionUser | null> {
     id: user.id, name: employee.name, role: employee.role, permissions, preferredLanguage: user.preferredLanguage, cv: user.cv, sid: user.sid,
     ...(user.iat !== undefined ? { iat: user.iat } : {}), ...(user.exp !== undefined ? { exp: user.exp } : {}),
   };
-  const home = { choice: homeChoice(employee.defaultRoute, employee.homePreference), setByAdmin: landingSetByAdmin(employee.defaultRoute) };
+  const home = { choice: homeIsMyDayOnly({ role: employee.role, permissions }) ? "my-day" as const : homeChoice(employee.defaultRoute, employee.homePreference), setByAdmin: landingSetByAdmin(employee.defaultRoute) };
   return { ...identity, authTime: session.authTime, sessionId: session.id, sessionMethod: session.method, sessionMfa: session.mfa, authFactor: session.authFactor, privileged, mfaEnrollmentRequired, passwordChangeRequired: employee.passwordMustChange, home };
 }
 

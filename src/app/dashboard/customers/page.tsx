@@ -81,14 +81,10 @@ export default function CustomersPage() {
   // definition Ctrl K searches — and can switch to everything they may serve (their deals' and orders' customers and
   // the ones nobody owns). The server decides visibility; `?owner=me` only narrows it.
   const scopedRep = user ? customersScopedToOwner(user) : false;
-  // The last tab is remembered per person on this device (council fix round 1, P0-16) — a convenience, never data.
-  const viewKey = user ? `hq.customersView.v1.${user.id}` : null;
-  const [viewPick, setViewPickState] = useState<"mine" | "book" | null>(() => {
-    if (!viewKey || typeof window === "undefined") return null;
-    try { const v = window.localStorage.getItem(viewKey); return v === "mine" || v === "book" ? v : null; } catch { return null; }
-  });
-  const setViewPick = (v: "mine" | "book") => { setViewPickState(v); try { if (viewKey) window.localStorage.setItem(viewKey, v); } catch { /* private window */ } };
-  const view = viewPick ?? (scopedRep ? "mine" : "book");
+  // One list (owner, 4 Nov 2026): «كل المتاح لي» beside «عملائي» read as the same list twice, so a rep sees ONE list —
+  // everything the server lets them serve (their accounts, and their deals' and orders' customers) — with «لوحة دفتري»
+  // on top. The server decides visibility as before.
+  const view = "book" as "mine" | "book";
   // A sales person (council fix round 3, seat 5): no roast-profile column (a roastery's word, not a rep's), and a
   // «متأخرين» chip — the customers whose reorder status is LATE, the same status «يومي» and «متابعة إعادة الشراء» use.
   const salesView = !!user && isSalesPersona(user);
@@ -102,9 +98,9 @@ export default function CustomersPage() {
     }).catch(() => undefined);
     return () => { off = true; };
   }, [salesView]);
-  const listUrl = view === "mine" ? "/api/customers?owner=me" : "/api/customers";
+  const listUrl = "/api/customers";
   // «لوحة دفتري» (owner-approved Figma, 3 Nov 2026): the rep's own book — counts and tiers that filter the list (`?f=`).
-  const bookOn = salesView && scopedRep && view === "mine";
+  const bookOn = salesView && scopedRep;
   const myBook = useMyBook(bookOn);
   const bookById = useMemo(() => new Map((myBook?.book ?? []).map((r) => [r.id, r])), [myBook]);
   const [bookFilter, setBookFilterState] = useState<BookFilter | null>(null);
@@ -114,7 +110,6 @@ export default function CustomersPage() {
     if (!isBookFilter(f)) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the address is only readable after mount
     setBookFilterState(f);
-    if (viewPick === "book") setViewPickState("mine");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const setBookFilter = (f: BookFilter | null) => {
@@ -424,18 +419,8 @@ export default function CustomersPage() {
     </label>
   );
 
-  // «عملائي» / «كل المتاح لي» — only for a rep scoped to their own book (see `view` above).
-  const viewTabs = scopedRep ? (
-    <div className="seg cu-view" role="group" aria-label={L("أي عملاء؟", "Which customers?")} data-testid="customers-view">
-      <button type="button" className={view === "mine" ? "on" : undefined} aria-pressed={view === "mine"} onClick={() => { setViewPick("mine"); setSelected(null); }} data-testid="customers-view-mine">
-        {L("عملائي", "My customers")}
-      </button>
-      <button type="button" className={view === "book" ? "on" : undefined} aria-pressed={view === "book"} onClick={() => { setViewPick("book"); setSelected(null); }} data-testid="customers-view-book"
-        title={L("عملاؤك، وعملاء صفقاتك وطلباتك، والعملاء اللي ما لهم مسؤول", "Your customers, your deals' and orders' customers, and the ones nobody owns")}>
-        {L("كل المتاح لي", "All I can serve")}
-      </button>
-    </div>
-  ) : null;
+  // «عملائي» / «كل المتاح لي» are one list now (owner, 4 Nov 2026): no toggle.
+  const viewTabs = null;
 
   const bookChip = bookOn && bookFilter ? (
     <button type="button" className="cu-book-active" onClick={() => setBookFilter(null)} data-testid="book-filter-clear"
@@ -460,11 +445,10 @@ export default function CustomersPage() {
   ) : null;
 
   const empty = filteredCustomers.length === 0 ? (
-    !search && !lateOnly && !loading && view === "mine" && scopedRep ? (
+    !search && !lateOnly && !loading && scopedRep && !bookFilter ? (
       <div data-testid="customers-empty-mine" style={{ padding: "48px 0", textAlign: "center" }}>
-        <p style={{ fontWeight: 500 }}>{L("ما عندك عملاء معيّنين باسمك بعد.", "No customers are assigned to you yet.")}</p>
-        <p className="lbl" style={{ fontWeight: 400 }}>{L("اطلب من المدير يعيّنك مسؤولًا عن عملائك، أو شوف «كل المتاح لي».", "Ask your manager to assign your customers to you, or open «All I can serve».")}</p>
-        <button type="button" className="btn" style={{ marginTop: 12 }} onClick={() => setViewPick("book")}>{L("كل المتاح لي", "All I can serve")}</button>
+        <p style={{ fontWeight: 500 }}>{L("ما عندك عملاء بعد.", "You have no customers yet.")}</p>
+        <p className="lbl" style={{ fontWeight: 400 }}>{L("اطلب من المدير يعيّنك مسؤولًا عن عملائك.", "Ask your manager to assign your customers to you.")}</p>
       </div>
     ) : bookOn && bookFilter && !search && !lateOnly ? (
       <div data-testid="customers-no-results" style={{ padding: "40px 0", textAlign: "center" }}>
@@ -645,7 +629,7 @@ export default function CustomersPage() {
     <HrRoot>
       <div className={`split${pane ? " has-pane" : ""} cu-split`}>
         <div className="pg">
-          {bookOn && myBook && myBook.book.length > 0 ? (
+          {bookOn && myBook ? (
             // A rep's own book (Figma page 10): the linked «العملاء» view (rep-book.tsx).
             <RepBook ar={ar} phone={phone} book={myBook} customers={customers} shown={filteredCustomers}
               filter={bookFilter} onFilter={setBookFilter} search={searchBox} notice={notice} viewTabs={viewTabs}

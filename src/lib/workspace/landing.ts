@@ -4,7 +4,7 @@
 // the stations) keep their operational dashboard; every other new login (the administrator, a custom
 // role: sales, finance, HR, marketing, managers) starts in «مساحة عملي». Existing accounts are never
 // changed by this; the administrator picks any account's landing page in the account editor.
-import { hasModuleAccess, type Permissions } from "@/lib/auth-shared";
+import { hasModuleAccess, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 export const WORKSPACE_ROUTE = "/dashboard/workspace";
 const OPERATIONAL_ROLES = new Set(["inventory", "roasting", "qc", "dispatch"]);
 
@@ -51,6 +51,15 @@ export function isSalesPersona(v: { role?: string | null; permissions: Permissio
 }
 
 /**
+ * A sales REP (a sales persona without `lead_assign`): «يومي» is their only home (owner, 4 Nov 2026 — «أفضل شيء إنه
+ * يدخل على طول على يومي»). The old home («مساحة عملي») is no longer offered to them, and a choice stored before is
+ * ignored. A sales manager keeps the choice.
+ */
+export function homeIsMyDayOnly(v: { role?: string | null; permissions: Permissions | Record<string, unknown> }): boolean {
+  return isSalesPersona(v) && !hasSubPrivilege(v.permissions as Permissions, "sales", "lead_assign");
+}
+
+/**
  * Where a sign-in lands, given the account's stored landing page: a sales persona whose landing is still one of the
  * defaults («مساحة عملي» or the dashboard) lands on «يومي»; a landing page the administrator chose is kept.
  */
@@ -60,6 +69,7 @@ export function landingFor(
   opts: { teamViewWithoutBook?: boolean; homePreference?: string | null } = {},
 ): string {
   if (landingSetByAdmin(defaultRoute)) return defaultRoute;
+  if (homeIsMyDayOnly(v)) return MY_DAY_ROUTE;
   if (homeChoice(defaultRoute, opts.homePreference) === "classic") return WORKSPACE_ROUTE;
   if (isSalesPersona(v)) {
     // A team-view manager with no customer of their own lands on «متابعة الفريق», not on an empty «يومي».

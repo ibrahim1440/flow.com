@@ -14,6 +14,7 @@ import type { TodayData } from "@/lib/services/dashboard/today";
 import { isPipelineStage, type PipelineStage } from "@/lib/order-stage";
 import { StageTabs } from "@/components/ui/StageTabs";
 import { useUser } from "./user-context";
+import { homeIsMyDayOnly } from "@/lib/workspace/landing";
 import "./home.css";
 
 /**
@@ -94,6 +95,10 @@ export default function DashboardPage() {
   const pathname = usePathname();
   const params = useSearchParams();
   const urlStage = params.get("stage");
+  // A sales rep's home is «يومي» (owner, 4 Nov 2026): the operations dashboard is not theirs — the site's root, an old
+  // bookmark or the home-screen icon landing here goes on to «يومي».
+  const repHome = !!user && homeIsMyDayOnly({ role: user.role, permissions: user.permissions });
+  useEffect(() => { if (repHome) router.replace("/dashboard/my-day"); }, [repHome, router]);
   const [data, setData] = useState<TodayData | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "denied" | "error">("loading");
 

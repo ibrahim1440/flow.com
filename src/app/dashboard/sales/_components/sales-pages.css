@@ -83,7 +83,7 @@
   .d21 .spg-attn { grid-template-columns: minmax(0, 1fr) }
 }
 @media (max-width: 767.98px) {
-  .d21 .sj ol { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+  .d21 .sj ol { display: flex; overflow-x: auto; scrollbar-width: none } .d21 .sj li { flex: none }
   .d21 .sj-arrow { display: none }
   .d21 .sj-step { justify-content: flex-start; font-size: 13px }
   .d21 .spg-top h1 { font-size: 22px }

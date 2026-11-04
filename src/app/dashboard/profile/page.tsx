@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "@/app/dashboard/user-context";
-import { isSalesPersona } from "@/lib/workspace/landing";
+import { homeIsMyDayOnly, isSalesPersona } from "@/lib/workspace/landing";
 import { PIN_LENGTH } from "@/lib/pin-policy";
 import { PASSWORD_MAX, PASSWORD_MIN } from "@/lib/password-policy";
 import { MfaEnrollment } from "@/components/auth/MfaEnrollment";
@@ -95,7 +95,8 @@ export default function ProfilePage() {
   // «صفحتي الرئيسية» (council fix round 1, P0-15): a sales persona picks «يومي» or the old home; saved at once.
   // Owner decision (1 Nov 2026): the sign-in log is shown to the administrator only (the API also returns none).
   const canSeeLog = user?.role === "admin";
-  const salesHome = !!user && isSalesPersona({ role: user.role, permissions: user.permissions });
+  // A rep has one home, «يومي» (owner, 4 Nov 2026): the choice is offered to a sales manager only.
+  const salesHome = !!user && isSalesPersona({ role: user.role, permissions: user.permissions }) && !homeIsMyDayOnly({ role: user.role, permissions: user.permissions });
   const [classic, setClassic] = useState<boolean>(!!(user as { classicHome?: boolean } | null)?.classicHome);
   const homeLocked = !!(user as { homeSetByAdmin?: boolean } | null)?.homeSetByAdmin;
   const [homeMsg, setHomeMsg] = useState("");

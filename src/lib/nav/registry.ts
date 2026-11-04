@@ -274,41 +274,18 @@ export const NAV: NavNode[] = [
     icon: Briefcase,
     children: [
       {
-        id: "sales.customers",
-        ar: "إدارة العملاء",
-        en: "Customer management",
-        icon: UserPlus,
-        // The rep's sidebar (batch 24 WP-B): «عملائي» for somebody who sees only their own book.
-        shell: { ar: "العملاء", en: "Customers", icon: "users", own: { ar: "عملائي", en: "My customers", unlessAny: [sales("lead_assign")] } },
-        children: [
-          {
-            // The one customers entry, for everyone who holds the module (20:236: «المبيعات ›
-            // العملاء»). Somebody without the Sales CRM — the legacy order-taking role holds
-            // `customers` and no `sales` — meets the same «العملاء» item, opening on this page.
-            id: "sales.customers.accounts",
-            ar: "العملاء", en: "Customers",
-            href: "/dashboard/customers",
-            anyOf: [{ module: "customers" }],
-          },
-          {
-            id: "sales.customers.leads",
-            ar: "العملاء المحتملون", en: "Leads",
-            href: "/dashboard/sales/leads",
-            anyOf: IN_SALES,
-          },
-        ],
-      },
-      {
+        // First in «المبيعات» (owner, 4 Nov 2026): the deals are what a rep opens the section for — «المبيعات» opens here.
         id: "sales.pipeline",
         ar: "الفرص والمتابعات",
         en: "Opportunities and follow-ups",
         icon: KanbanSquare,
-        shell: { ar: "الصفقات", en: "Deals", icon: "deal", own: { ar: "صفقاتي", en: "My deals", unlessAny: [sales("lead_assign")] } },
+        shell: { ar: "الصفقات", en: "Deals", icon: "deal" },
         children: [
           {
             id: "sales.pipeline.board",
             ar: "مسار الصفقات", en: "Pipeline",
             href: "/dashboard/sales/pipeline",
+
             // A deal has no nav entry of its own and belongs to the board it came from.
             alsoMatches: ["/dashboard/sales/deals"],
             anyOf: IN_SALES,
@@ -324,6 +301,35 @@ export const NAV: NavNode[] = [
         ],
       },
       {
+        id: "sales.customers",
+        ar: "إدارة العملاء",
+        en: "Customer management",
+        icon: UserPlus,
+        // The rep's sidebar (owner, 4 Nov 2026): «الصفقات» then «العملاء» — the leads, samples and quotations are reached
+        // from the «مسار العميل» strip on «العملاء», so the rep's «المبيعات» group lists these two (the others are `hideForRep`).
+        shell: { ar: "العملاء", en: "Customers", icon: "users" },
+        children: [
+          {
+            // The one customers entry, for everyone who holds the module (20:236: «المبيعات ›
+            // العملاء»). Somebody without the Sales CRM — the legacy order-taking role holds
+            // `customers` and no `sales` — meets the same «العملاء» item, opening on this page.
+            id: "sales.customers.accounts",
+            ar: "العملاء", en: "Customers",
+            href: "/dashboard/customers",
+            anyOf: [{ module: "customers" }],
+          },
+          {
+            id: "sales.customers.leads",
+            ar: "العملاء المحتملون", en: "Leads",
+            href: "/dashboard/sales/leads",
+            anyOf: IN_SALES,
+            // A rep reaches it from «مسار العميل»; no second tab on «العملاء» (owner, 4 Nov 2026).
+            hideForRep: true,
+            highlightAs: ["sales.customers.leads", "sales.customers.accounts"],
+          },
+        ],
+      },
+      {
         id: "sales.quotes",
         ar: "عروض الأسعار والطلبات",
         en: "Quotations and orders",
@@ -334,6 +340,10 @@ export const NAV: NavNode[] = [
             id: "sales.quotes.list",
             ar: "عروض الأسعار", en: "Quotations",
             href: "/dashboard/sales/quotes",
+            // A rep reaches it from «العملاء» («مسار العميل»), which it then highlights (owner, 4 Nov 2026).
+            hideForRep: true,
+            highlightAs: ["sales.quotes.list", "sales.customers.accounts"],
+
             anyOf: IN_SALES,
           },
           {
@@ -357,6 +367,10 @@ export const NAV: NavNode[] = [
         icon: FlaskRound,
         href: "/dashboard/sales/samples",
         anyOf: IN_SALES,
+        // A rep reaches it from «العملاء» («مسار العميل»), which it then highlights (owner, 4 Nov 2026).
+        hideForRep: true,
+        highlightAs: ["sales.samples", "sales.customers.accounts"],
+
         shell: { icon: "flask" },
       },
       {
