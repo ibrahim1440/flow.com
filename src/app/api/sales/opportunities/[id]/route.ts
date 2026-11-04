@@ -211,7 +211,7 @@ export async function GET(_request: Request, { params }: Params) {
       id: pending.id, toStageId: pending.toStageId,
       toStage: stageName(pending.toStageId) ? { nameAr: stageName(pending.toStageId)!.nameAr, nameEn: stageName(pending.toStageId)!.nameEn } : null,
       reason: pending.reason, requestedBy: moveNames[pending.requestedById] ?? null, createdAt: pending.createdAt,
-      canDecide: approvesMove({ id: user.id, permissions: user.permissions, role: user.role, generalManager: await isGeneralManager(prisma, user.id) }) && pending.requestedById !== user.id,
+      canDecide: approvesMove({ id: user.id, permissions: user.permissions, generalManager: await isGeneralManager(prisma, user.id) }) && pending.requestedById !== user.id,
       canWithdraw: pending.requestedById === user.id,
     } : null;
     const rejectedMove = lastDecided ? {
@@ -247,7 +247,7 @@ export async function GET(_request: Request, { params }: Params) {
         approveDiscount: hasSubPrivilege(user.permissions, "sales", "quote_approve_discount"),
         assign: seesAllSales(user.permissions),
         // Owner decision 3: moves the deal between stages directly; without it a manual move is a request.
-        moveDirectly: movesDirectly(user.permissions, user.role, await isGeneralManager(prisma, user.id)),
+        moveDirectly: movesDirectly(user.permissions, await isGeneralManager(prisma, user.id)),
         // A customer's second sample of a product: the sales manager or the administrator approves it.
         approveSample: approvesSamples(user.permissions),
         createOrder: hasSubPrivilege(user.permissions, "orders", "create"),

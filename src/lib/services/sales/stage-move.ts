@@ -10,7 +10,7 @@
 //   - ONE PENDING request per deal (a partial unique index backs it): a new request REPLACES the pending one, which
 //     becomes SUPERSEDED — the newer intention is the one a supervisor should judge;
 //   - approvers (owner's rule, gate fix MEDIUM-3): a supervisor or manager — `lead_assign` (whose scope is every deal),
-//     the administrator, or a member of the «مدير عام» role — and never the requester (four eyes). `deal_stage_move`
+//     the administrator (by its template's lead_assign), or a member of the «مدير عام» role — and never the requester (four eyes). `deal_stage_move`
 //     alone NEVER approves: it only means "I may move deals in my own scope directly, without a request";
 //   - approving applies the move through `transitionOpportunity` — the same rules as any move (the documented sample
 //     skip included: a request that passes Sample Evaluation with no sample needs its reason when it is made) — with
@@ -26,7 +26,7 @@ import { sampleSkipRequired, SAMPLE_SKIP_REFUSAL } from "./stages";
 import { transitionOpportunity } from "./leads";
 
 type Tx = PrismaNS.TransactionClient;
-type Actor = { id: string; name?: string | null; permissions: Permissions | Record<string, unknown>; role?: string | null; generalManager?: boolean };
+type Actor = { id: string; name?: string | null; permissions: Permissions | Record<string, unknown>; generalManager?: boolean };
 
 /** The role template whose members approve stage moves whatever their sub-privileges (owner's rule). */
 export const GENERAL_MANAGER_ROLE = "مدير عام";
@@ -44,9 +44,10 @@ export type StageMoveStatus = (typeof STAGE_MOVE_STATUSES)[number];
  * May this person move a deal between stages directly (no request)? `deal_stage_move` (deals in their own scope —
  * the route has already refused a deal outside it), the supervisor (`lead_assign`), or the administrator.
  */
-export function movesDirectly(permissions: Actor["permissions"], role?: string | null, generalManager = false): boolean {
-  // A «مدير عام» member is a manager: moves directly, as a lead_assign holder does (gate round 2).
-  if (role === "admin" || generalManager) return true;
+export function movesDirectly(permissions: Actor["permissions"], generalManager = false): boolean {
+  // A «مدير عام» member is a manager: moves directly, as a lead_assign holder does (gate round 2). By permission only
+  // (release gate A5 / N2): the administrator holds lead_assign through its template, so no role check decides here.
+  if (generalManager) return true;
   return hasSubPrivilege(permissions as Permissions, "sales", "deal_stage_move") || hasSubPrivilege(permissions as Permissions, "sales", "lead_assign");
 }
 
@@ -56,7 +57,8 @@ export function movesDirectly(permissions: Actor["permissions"], role?: string |
  * alone. Not their own request: checked on decide.
  */
 export function approvesMove(actor: Actor): boolean {
-  if (actor.role === "admin" || actor.generalManager) return true;
+  // By permission only (release gate A5 / N2): the administrator holds lead_assign through its template.
+  if (actor.generalManager) return true;
   return hasSubPrivilege(actor.permissions as Permissions, "sales", "lead_assign");
 }
 

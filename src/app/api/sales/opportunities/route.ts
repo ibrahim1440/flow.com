@@ -89,7 +89,7 @@ export async function GET() {
     const threshold = await discountThreshold(prisma);
     // Who decides a rep's move request (owner's rule): lead_assign, the administrator, or a «مدير عام» member.
     const gm = await isGeneralManager(prisma, user.id);
-    const decider = approvesMove({ id: user.id, permissions: user.permissions, role: user.role, generalManager: gm });
+    const decider = approvesMove({ id: user.id, permissions: user.permissions, generalManager: gm });
     const now = new Date();
     return NextResponse.json({
       stages,
@@ -145,7 +145,7 @@ export async function GET() {
         // Pipeline v2: moving a card (drag, «نقل إلى…»): lead_write; direct only with deal_stage_move / lead_assign,
         // otherwise the move is a request a supervisor approves (owner decision 3).
         move: hasSubPrivilege(user.permissions, "sales", "lead_write"),
-        moveDirectly: movesDirectly(user.permissions, user.role, gm),
+        moveDirectly: movesDirectly(user.permissions, gm),
       },
     });
   } catch (err) {

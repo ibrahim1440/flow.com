@@ -108,7 +108,7 @@ export async function POST(request: Request, { params }: Params) {
     // deal_stage_move (or lead_assign) is a REQUEST a supervisor approves — nothing moves yet. 202, and the screen
     // shows «طلب نقل بانتظار اعتماد المشرف». A permitted reopen (deal_reopen, checked in the service) and the
     // documented sample skip are not manual moves; every other real stage change without the duty is a request.
-    if (stageChange && !reopening && !skipSamples && !movesDirectly(user.permissions, user.role, await isGeneralManager(prisma, user.id))) {
+    if (stageChange && !reopening && !skipSamples && !movesDirectly(user.permissions, await isGeneralManager(prisma, user.id))) {
       const made = await prisma.$transaction((tx) => requestStageMove(tx, {
         opportunityId: id, toStageId: toStageId!, reason: typeof b.reason === "string" ? b.reason : typeof b.skipReason === "string" ? b.skipReason : null, requestedById: user.id,
       }), TX_OPTS);

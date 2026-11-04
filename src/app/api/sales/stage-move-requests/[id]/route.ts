@@ -25,7 +25,7 @@ export async function POST(request: Request, { params }: Params) {
   if (!decision) return NextResponse.json({ error: "اختر اعتماد الطلب أو رفضه.", errorEn: "decision must be APPROVE or REJECT.", code: "DECISION_INVALID" }, { status: 400 });
   try {
     const out = await prisma.$transaction(async (tx) => {
-      const r = await decideStageMove(tx, { requestId: id, decision, note: typeof b.note === "string" ? b.note : null, actor: { id: user.id, name: user.name ?? null, permissions: user.permissions, role: user.role } });
+      const r = await decideStageMove(tx, { requestId: id, decision, note: typeof b.note === "string" ? b.note : null, actor: { id: user.id, name: user.name ?? null, permissions: user.permissions } });
       if (r.moved) {
         await emitDealMoved(tx, { opportunityId: r.request.opportunityId, fromStageId: r.moved.fromStageId, toStageId: r.moved.stageId, fromOutcome: r.moved.fromOutcome, toOutcome: r.moved.outcome, actorId: user.id });
       }

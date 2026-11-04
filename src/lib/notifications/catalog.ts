@@ -806,7 +806,9 @@ export const EVENTS: NotificationEventDef[] = [
     // «طلبات الفواتير» (20261126090000_invoice_requests): a salesperson asked for a tax invoice; the issuer reviews it.
     key: "finance.invoice_requested", category: "finance", severity: "info",
     label: { ar: "طلب فاتورة ضريبية جديد", en: "A new tax invoice request" },
-    recipients: [{ perm: [sales("invoices_issue")] }], requires: [MOD("accounting")],
+    // The issuers: sales › invoices_issue, and «مسار المحاسب» (accounting › invoices_issue, no sales module — the live
+    // accountant; readiness review P0-1). One rule, so a holder of both is told once.
+    recipients: [{ perm: [sales("invoices_issue"), { module: "accounting", sub: "invoices_issue" }] }], requires: [MOD("accounting")],
     trigger: "requestInvoice (lib/services/invoicing/requests.ts): POST /api/sales/invoices/[id]/request",
     render: (f) => ({
       titleAr: `طلب فاتورة ضريبية: ${s(f.customerName)}`,
@@ -821,7 +823,7 @@ export const EVENTS: NotificationEventDef[] = [
     // service level (two business days) or within five days of the legal limit (the 15th of the month after supply).
     key: "finance.invoice_queue_overdue", category: "finance", severity: "warning",
     label: { ar: "طلبات فواتير متأخرة", en: "Overdue invoice requests" },
-    recipients: [{ perm: [sales("invoices_issue")] }], requires: [MOD("accounting")],
+    recipients: [{ perm: [sales("invoices_issue"), { module: "accounting", sub: "invoices_issue" }] }], requires: [MOD("accounting")],
     trigger: "invoiceQueueDigest (lib/services/invoicing/requests.ts), daily: GET /api/cron/hr-document-expiry",
     render: (f) => ({
       titleAr: `${s(f.count)} طلب فاتورة متأخر`,

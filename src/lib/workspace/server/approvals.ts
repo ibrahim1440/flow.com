@@ -201,7 +201,7 @@ async function sampleItems(actor: WsActor): Promise<ApprovalItem[]> {
 // never approves), and never the requester. ONE item per deal (one PENDING request per deal, a partial unique index),
 // so it shows once. Decided at POST /api/sales/stage-move-requests/[id].
 async function stageMoveItems(actor: WsActor): Promise<ApprovalItem[]> {
-  if (!approvesMove({ id: actor.id, permissions: actor.permissions, role: actor.role, generalManager: await isGeneralManager(prisma, actor.id) })) return [];
+  if (!approvesMove({ id: actor.id, permissions: actor.permissions, generalManager: await isGeneralManager(prisma, actor.id) })) return [];
   const rows = await prisma.stageMoveRequest.findMany({
     where: { status: "PENDING", ...(isSimpleMode() ? {} : { requestedById: { not: actor.id } }) },
     orderBy: { createdAt: "asc" }, take: 200,
