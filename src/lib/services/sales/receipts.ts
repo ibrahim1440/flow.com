@@ -12,7 +12,7 @@
 // basis and the rep's claim. Pure helpers are exported for the unit tests.
 import type { Prisma } from "@/generated/prisma/client";
 import { Decimal, ZERO, roundMoney } from "../commissions/engine";
-import { PAYMENT_METHODS, customerOpenDeal, submitCollection, type PaymentMethodValue } from "./collections";
+import { PAYMENT_METHODS, collectionSummary, customerOpenDeal, submitCollection, type PaymentMethodValue } from "./collections";
 import { hasModuleAccess, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 import { emitAutomationEvent } from "@/lib/automation/emit";
 import { defaultBranchForActor } from "@/lib/accounting/locations";
@@ -124,6 +124,19 @@ export async function recordAccountantReceipt(tx: Tx, input: AccountantReceiptIn
   const room = roundMoney(total.minus(new Decimal((applied._sum.amount ?? 0).toString())).minus(new Decimal((pending._sum.amountGross ?? 0).toString())));
   if (input.amountGross.greaterThan(room)) {
     throw bi("OVER_INVOICE", 409, `المتبقي على الفاتورة بعد السندات المعلّقة ${room.toFixed(2)} فقط.`, `Only ${room.toFixed(2)} is left on the invoice after the pending receipts.`);
+  }
+  // «طلب مباشر» (gate H1): the invoice's order is a direct order on a deal — the money of that order is one pot shared by
+  // Sales collections on the deal and this receipt. What the deal still has to collect (its document less every claim,
+  // Sales or accountant, approved or pending) caps the receipt, so the two together never exceed the order's value.
+  if (inv.orderId) {
+    const link = await tx.opportunityOrder.findFirst({ where: { orderId: inv.orderId, quoteId: null, directGross: { not: null } }, select: { opportunityId: true } });
+    if (link) {
+      await tx.$queryRaw`SELECT "id" FROM "Opportunity" WHERE "id" = ${link.opportunityId} FOR UPDATE`;
+      const left = (await collectionSummary(tx, link.opportunityId)).availableToSubmitGross;
+      if (input.amountGross.greaterThan(left)) {
+        throw bi("OVER_DEAL", 409, `هذا الطلب مربوط بصفقة، والمتبقي لتحصيله بعد تحصيل المبيعات والسندات ${Decimal.max(left, ZERO).toFixed(2)} فقط.`, `The order is linked to a deal; only ${Decimal.max(left, ZERO).toFixed(2)} is left after the Sales collections and receipts.`);
+      }
+    }
   }
   const { tax, net } = splitByInvoice(input.amountGross, total, new Decimal(inv.taxTotal.toString()));
   const created = await tx.salesCollection.create({

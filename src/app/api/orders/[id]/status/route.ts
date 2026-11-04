@@ -23,6 +23,7 @@ import {
   type StatusAction,
 } from "@/lib/services/order-operations";
 import { emitAutomationEvent } from "@/lib/automation/emit";
+import { refreshDirectOrderDeal } from "@/lib/services/sales/direct-order-deal";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -192,6 +193,9 @@ export async function POST(request: Request, { params }: Params) {
           message: "Order status changed before this action could be applied. Please reload and retry.",
         };
       }
+      // «طلب مباشر» (gate M1): a cancelled order's value stops counting on its deal; an auto deal with nothing claimed
+      // becomes LOST «تلقائي: إلغاء الطلب», one with money recorded keeps WON at the claimed amount.
+      if (action === "cancel") await refreshDirectOrderDeal(tx, { orderId: id, actorId: user.id, change: "end" });
 
       // A terminal order must stop holding shelf stock, otherwise its reservations sit
       // there forever and quietly starve every other order of coffee that is physically

@@ -48,7 +48,8 @@ export const PAYMENT_METHODS: PaymentMethodValue[] = [
 export type PaymentState = "UNPAID" | "PARTIALLY_COLLECTED" | "FULLY_COLLECTED";
 
 export type EligibleDocument = {
-  quoteId: string;
+  /** The accepted quotation, or null for a deal that collects against its direct orders («طلب مباشر»). */
+  quoteId: string | null;
   quoteNumber: string;
   currency: string;
   /** The accepted quotation's own figures — the ceiling everything is measured against. */
@@ -73,13 +74,41 @@ export async function eligibleDocument(
     orderBy: { revision: "desc" },
     select: { id: true, quoteNumber: true, currency: true, grandTotal: true, taxTotal: true },
   });
-  if (!quote) return null;
-  const gross = new Decimal(quote.grandTotal.toString());
-  const tax = new Decimal(quote.taxTotal.toString());
+  // «طلب مباشر» (20261219090000_direct_order_deal; gate H1 / M1 / M2): orders placed WITHOUT a quotation that joined this
+  // deal add their value as snapshot on the link — only orders still alive (not Cancelled / Rejected), and LESS what the
+  // accountant already recorded against those orders' invoices (receipts APPROVED or PENDING), so one order's money is
+  // never claimed twice (Sales collection + accountant receipt). A quotation-born order is not a direct link (its link
+  // carries the quotation, no direct value), so a deal with an accepted quotation AND direct orders collects against
+  // quotation + direct orders with no double count.
+  const direct = await tx.opportunityOrder.findMany({
+    where: { opportunityId, quoteId: null, directGross: { not: null }, order: { status: { notIn: ["Cancelled", "Rejected"] } } },
+    orderBy: { createdAt: "asc" },
+    select: { orderId: true, directGross: true, directTax: true, order: { select: { orderNumber: true } } },
+  });
+  let dGross = roundMoney(direct.reduce((t, r) => t.plus(new Decimal(r.directGross!.toString())), new Decimal(0)));
+  let dTax = roundMoney(direct.reduce((t, r) => t.plus(new Decimal(r.directTax!.toString())), new Decimal(0)));
+  if (direct.length) {
+    const receipts = await tx.salesCollection.aggregate({
+      where: { source: "ACCOUNTANT", opportunityId: null, orderId: { in: direct.map((r) => r.orderId) }, status: { in: ["APPROVED", "PENDING_VERIFICATION"] } },
+      _sum: { amountGross: true },
+    });
+    const taken = new Decimal((receipts._sum.amountGross ?? 0).toString());
+    if (taken.greaterThan(0)) {
+      const left = Decimal.max(roundMoney(dGross.minus(taken)), new Decimal(0));
+      dTax = dGross.isZero() ? new Decimal(0) : roundMoney(dTax.times(left).dividedBy(dGross));
+      dGross = left;
+    }
+  }
+  if (!quote && dGross.lessThanOrEqualTo(0)) return null;
+  const qGross = quote ? new Decimal(quote.grandTotal.toString()) : new Decimal(0);
+  const qTax = quote ? new Decimal(quote.taxTotal.toString()) : new Decimal(0);
+  const gross = roundMoney(qGross.plus(dGross));
+  const tax = roundMoney(qTax.plus(dTax));
+  const label = [quote?.quoteNumber, ...(dGross.greaterThan(0) ? direct.map((r) => `طلب #${r.order.orderNumber}`) : [])].filter(Boolean).join("، ");
   return {
-    quoteId: quote.id,
-    quoteNumber: quote.quoteNumber,
-    currency: quote.currency,
+    quoteId: quote?.id ?? null,
+    quoteNumber: label,
+    currency: quote?.currency ?? "SAR",
     gross,
     tax,
     net: roundMoney(gross.minus(tax)),
@@ -94,6 +123,8 @@ export type CollectionSummary = {
   approvedNet: PrismaNS.Decimal;
   /** Submitted and awaiting a decision. Reserved against the ceiling, not yet earned. */
   pendingGross: PrismaNS.Decimal;
+  /** The VAT carried by the pending submissions (allocate needs it: a settling payment takes the VAT left after BOTH). */
+  pendingTax: PrismaNS.Decimal;
   reversedGross: PrismaNS.Decimal;
   /**
    * What the customer still owes: the document less the approved collections. A pending
@@ -134,6 +165,7 @@ export async function collectionSummary(tx: Tx, opportunityId: string): Promise<
   let approvedTax = ZERO;
   let approvedNet = ZERO;
   let pendingGross = ZERO;
+  let pendingTax = ZERO;
   let reversedGross = ZERO;
 
   for (const r of rows) {
@@ -144,6 +176,7 @@ export async function collectionSummary(tx: Tx, opportunityId: string): Promise<
       approvedNet = approvedNet.plus(new Decimal(r.amountNet.toString()));
     } else if (r.status === "PENDING_VERIFICATION") {
       pendingGross = pendingGross.plus(g);
+      pendingTax = pendingTax.plus(new Decimal(r.amountTax.toString()));
     } else {
       reversedGross = reversedGross.plus(g);
     }
@@ -153,6 +186,7 @@ export async function collectionSummary(tx: Tx, opportunityId: string): Promise<
   approvedTax = roundMoney(approvedTax);
   approvedNet = roundMoney(approvedNet);
   pendingGross = roundMoney(pendingGross);
+  pendingTax = roundMoney(pendingTax);
   reversedGross = roundMoney(reversedGross);
 
   const ceiling = document?.gross ?? ZERO;
@@ -177,6 +211,7 @@ export async function collectionSummary(tx: Tx, opportunityId: string): Promise<
     approvedTax,
     approvedNet,
     pendingGross,
+    pendingTax,
     reversedGross,
     unpaidGross: floor0(unpaid),
     availableToSubmitGross: floor0(available),
@@ -312,7 +347,10 @@ export async function submitCollection(tx: Tx, input: SubmitInput): Promise<Subm
     input.amountGross,
     summary.document,
     summary.approvedGross.plus(summary.pendingGross),
-    summary.approvedTax,
+    // P1 (pre-existing on main): "settles" counts the pending money, so the VAT already allocated must count the pending
+    // VAT too — subtracting only the approved VAT gave the settling payment all the remaining VAT (net 0.00 → the
+    // amounts-positive CHECK → HTTP 500) whenever a collection was pending.
+    summary.approvedTax.plus(summary.pendingTax),
   );
 
   const order = await tx.opportunityOrder.findFirst({
@@ -391,16 +429,21 @@ export async function assertDepositAccount(tx: Tx, accountId: string) {
  * whose accepted quotation is not fully claimed yet. While one exists the money is Sales' to record (commission), so the
  * accountant's receipt for an invoice with no deal is refused (owner, 2026-10-29).
  */
-export async function customerOpenDeal(tx: Pick<Tx, "$queryRaw">, customerId: string): Promise<{ id: string; title: string } | null> {
-  const rows = await tx.$queryRaw<{ id: string; title: string }[]>`
-    SELECT o."id", o."title" FROM "Opportunity" o
-     WHERE o."customerId" = ${customerId}
-       AND (o."outcome"::text = 'OPEN'
-            OR (o."outcome"::text = 'WON' AND EXISTS (
-                  SELECT 1 FROM (SELECT q."grandTotal" FROM "Quote" q WHERE q."opportunityId" = o."id" AND q."status" = 'ACCEPTED' ORDER BY q."revision" DESC LIMIT 1) q
-                   WHERE q."grandTotal" - coalesce((SELECT sum(c."amountGross") FROM "SalesCollection" c WHERE c."opportunityId" = o."id" AND c."status" IN ('APPROVED', 'PENDING_VERIFICATION')), 0) > 0)))
-     ORDER BY o."updatedAt" DESC LIMIT 1`;
-  return rows[0] ?? null;
+export async function customerOpenDeal(tx: Tx, customerId: string): Promise<{ id: string; title: string } | null> {
+  const open = await tx.opportunity.findFirst({ where: { customerId, outcome: "OPEN" }, orderBy: { updatedAt: "desc" }, select: { id: true, title: true } });
+  if (open) return open;
+  // A WON deal is still Sales' while its collectable document — the accepted quotation and / or its direct orders
+  // («طلب مباشر», gate H1) — is not fully claimed: the same `collectionSummary` the Sales side collects against.
+  const won = await tx.opportunity.findMany({
+    where: { customerId, outcome: "WON", OR: [{ quotes: { some: { status: "ACCEPTED" } } }, { orderLinks: { some: { quoteId: null, directGross: { not: null } } } }] },
+    orderBy: { updatedAt: "desc" },
+    select: { id: true, title: true },
+  });
+  for (const d of won) {
+    const s = await collectionSummary(tx, d.id);
+    if (s.document && s.availableToSubmitGross.greaterThan(0)) return d;
+  }
+  return null;
 }
 
 /**
@@ -484,7 +527,12 @@ export async function approveCollection(
   }
   // An invoice's receipt belongs to Sales when the customer has a deal; an opening-balance receipt (no invoice: the old
   // books' debt, ../invoicing/ar.ts) is the accountant's whatever deals are open — no deal ever owned that debt.
-  if (accountant && row.customerId && row.invoiceId) {
+  // A receipt on a DIRECT order's invoice («طلب مباشر», gate H1) is already counted in that deal's claims (it was capped
+  // by them when recorded, and the deal's document subtracts it): confirming it changes no ceiling, so it is not refused.
+  const directLink = accountant && row.orderId
+    ? await tx.opportunityOrder.findFirst({ where: { orderId: row.orderId, quoteId: null, directGross: { not: null } }, select: { id: true } })
+    : null;
+  if (accountant && row.customerId && row.invoiceId && !directLink) {
     const open = await customerOpenDeal(tx, row.customerId);
     if (open) throw bi("CUSTOMER_HAS_OPEN_DEAL", 409, `للعميل صفقة مفتوحة («${open.title}»)؛ يُسجّل التحصيل من المبيعات على الصفقة.`, `The customer has an open deal ("${open.title}"); Sales records the collection on the deal.`);
   }

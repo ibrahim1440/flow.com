@@ -3776,6 +3776,13 @@ model OpportunityOrder {
   isFirstOrder Boolean @default(false)
   requestKey   String  @unique
 
+  /// «طلب مباشر» (20261219090000_direct_order_deal): an order placed without a quotation, linked to a deal. Its value
+  /// at the moment of linking (VAT included / the VAT in it), priced like an invoice drafted from the order (the SKU's
+  /// catalogue price × the ordered quantity, VAT 15 %). NULL for a quotation-born link. A deal with no accepted
+  /// quotation collects against Σ of these (services/sales/collections.ts `eligibleDocument`).
+  directGross Decimal? @db.Decimal(18, 2)
+  directTax   Decimal? @db.Decimal(18, 2)
+
   createdById String?
   createdAt   DateTime @default(now())
 

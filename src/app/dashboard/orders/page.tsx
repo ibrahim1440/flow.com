@@ -24,6 +24,7 @@ import {
 import { OrderLines, ProgressChip, type PipelineInfo } from "./_parts/board";
 import { Btn, FilterChip, KV, OpsEmpty, OpsError, OpsLoading, OpsRoot, PageHeader, Tabs, kg, rowOpen, Kg, opsDate } from "@/components/ops/ui";
 import { SentMessagesLine } from "@/components/automation/SentMessages";
+import { DealLinkControl, OrderDealPicker } from "@/components/orders/DealLinkControl";
 
 /** The statuses a structural edit is accepted from (mirrors services/order-edit.ts, server-only). */
 const EDITABLE_ORDER_STATUSES = new Set(["Waiting Approval", "Waiting Preparation Review", "Preparing", "Ready for Shipping"]);
@@ -96,6 +97,8 @@ type Order = {
   status: string;
   ownerId: string | null;
   owner: { id: string; name: string; role: string } | null;
+  /** «طلب مباشر»: the order's deal (GET /api/orders, the first link), if any. */
+  opportunityLinks?: { opportunityId: string; opportunity: { id: string; title: string; outcome: string; ownerId: string } }[];
   activities: LifecycleActivity[];
   /** Phase B: the roast → QC → pack → delivery bar, computed by GET /api/orders. */
   pipeline?: PipelineInfo | null;
@@ -199,6 +202,8 @@ export default function OrdersPage() {
     approvalStatus: string;
     items: { productSkuId: string; quantityUnits: number }[];
   }>({ customerId: "", quotationNumber: "", approvalStatus: "Pending", items: [{ productSkuId: "", quantityUnits: 0 }] });
+  // «طلب مباشر»: the deal the order joins when the customer has several open deals ("" = the newest, the server's default).
+  const [dealChoice, setDealChoice] = useState("");
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ name: "", nameAr: "", phone: "", email: "", address: "" });
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -301,7 +306,7 @@ export default function OrdersPage() {
       const res = await fetch("/api/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, ...(dealChoice ? { opportunityId: dealChoice } : {}) }),
       });
       if (!res.ok) {
         const body = await res.json();
@@ -309,6 +314,7 @@ export default function OrdersPage() {
         return;
       }
       setShowForm(false);
+      setDealChoice("");
       setForm({ customerId: "", quotationNumber: "", approvalStatus: "Pending", items: [{ productSkuId: "", quantityUnits: 0 }] });
       setPreview(null);
       loadData();
@@ -410,6 +416,7 @@ export default function OrdersPage() {
     const created = await res.json();
     setCustomers((prev) => [created, ...prev]);
     setForm({ ...form, customerId: created.id });
+    setDealChoice("");
     setNewCustomer({ name: "", nameAr: "", phone: "", email: "", address: "" });
     setShowNewCustomer(false);
   }
@@ -536,7 +543,7 @@ export default function OrdersPage() {
               <div>
                 <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">{t("customer")}</label>
                 <div className="flex gap-2">
-                  <Select value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value })}
+                  <Select value={form.customerId} onChange={(e) => { setForm({ ...form, customerId: e.target.value }); setDealChoice(""); }}
                     aria-label={t("customer")} data-testid="order-customer"
                     className="flex-1 px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required>
                     <option value="">{t("selectCustomer")}</option>
@@ -575,6 +582,7 @@ export default function OrdersPage() {
                 )}
               </div>
               <CustomerCreditNotice customerId={form.customerId || null} ar={lang === "ar"} onHold={setCustomerHeld} testId="order-credit" />
+              <OrderDealPicker customerId={form.customerId || null} lang={lang === "ar" ? "ar" : "en"} value={dealChoice} onChange={setDealChoice} />
               <div>
                 <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">{t("quotationNumber")}</label>
                 <input type="text" value={form.quotationNumber} onChange={(e) => setForm({ ...form, quotationNumber: e.target.value })}
@@ -794,6 +802,11 @@ export default function OrdersPage() {
                   [t("quotationNumber"), order.quotationNumber || <span className="hr-muted">{t("noQuotation")}</span>],
                   [t("opsCreatedAt"), opsDate(order.createdAt, lang)],
                   [t("orderOwnerLabel"), <OwnerControl key="o" orderId={order.id} owner={order.owner} status={order.status} onSuccess={loadData} />],
+                  // «طلب مباشر»: the order's deal, or «اربط بصفقة» (the order's owner, a supervisor or the admin).
+                  ...(hasModuleAccess(user?.permissions ?? {}, "sales") ? [[lang === "ar" ? "الصفقة" : "Deal",
+                    <DealLinkControl key="d" orderId={order.id} orderNumber={order.orderNumber} lang={lang === "ar" ? "ar" : "en"} onSuccess={loadData}
+                      deal={order.opportunityLinks?.[0]?.opportunity ?? null}
+                      canLink={order.owner?.id === user?.id || hasSubPrivilege(user?.permissions ?? {}, "sales", "lead_assign")} />] as [string, React.ReactNode]] : []),
                   [t("lastActivityLabel"), lastActivityOf(order) ? opsDate(lastActivityOf(order)!.createdAt, lang) : "—"],
                   [t("opsPaymentCol"), <StatusBadge key="p" status={order.paymentStatus} />],
                 ]} />

@@ -113,6 +113,9 @@ export const ACTIVITY_TYPES = [
   // Workstations W4 (J-18): the order — or some of its lines — prepared at the packaging station and
   // handed to the dispatch team. No stock moved; the delivery is still recorded in the ERP.
   "ORDER_HANDED_TO_DISPATCH",
+  // «طلب مباشر» (20261219090000_direct_order_deal): the order joined a deal — the one the creator chose or the
+  // customer's open deal at creation, a deal opened for it (WON, «تلقائي: طلب مباشر»), or «اربط بصفقة» later.
+  "DEAL_LINKED",
 ] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 

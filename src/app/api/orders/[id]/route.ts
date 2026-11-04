@@ -21,6 +21,7 @@ import {
   type LiveLine,
 } from "@/lib/services/order-edit";
 import { orderInScope, orderCustomerAccess } from "@/lib/services/sales/customer-access";
+import { refreshDirectOrderDeal } from "@/lib/services/sales/direct-order-deal";
 
 /**
  * Structurally edit an existing order.
@@ -257,8 +258,18 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       }
 
       if (Object.keys(orderData).length > 0) {
+        // «طلب مباشر»: an order linked to a deal stays with that deal's customer.
+        if (typeof orderData.customerId === "string") {
+          const linked = await tx.opportunityOrder.findFirst({ where: { orderId: id }, select: { opportunity: { select: { customerId: true } } } });
+          if (linked && linked.opportunity.customerId !== orderData.customerId) {
+            throw { _appCode: 409, message: "الطلب مربوط بصفقة هذا العميل؛ لا يُنقل لعميل آخر." };
+          }
+        }
         await tx.order.update({ where: { id }, data: orderData });
       }
+      // «طلب مباشر» (gate M1): the lines changed — the deal's snapshot of this order is re-priced, refused below what is
+      // already collected on the deal (Arabic 409), and an auto deal's amount follows.
+      if (editingItems) await refreshDirectOrderDeal(tx, { orderId: id, actorId: user.id, change: "edit" });
 
       // Review D-1: orders:edit is not the contact right. Without the customers module the
       // edited order comes back with the customer's name only, as GET /api/orders does.
@@ -353,6 +364,12 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
       // counters are maintained only by the release helpers — letting the cascade run first
       // leaves stock permanently marked as promised to an order that no longer exists.
       for (const item of live) await releaseAllReservations(tx, item.id);
+
+      // «طلب مباشر»: an order with money recorded against it is not deleted (cancel it instead); otherwise its
+      // quotation-less deal link goes with it and an auto deal left with nothing becomes LOST.
+      const money = await tx.salesCollection.count({ where: { orderId: id, status: { in: ["APPROVED", "PENDING_VERIFICATION"] } } });
+      if (money > 0) throw { _appCode: 409, message: "على هذا الطلب تحصيل مسجّل؛ لا يُحذف — ألغِ الطلب بدلًا من ذلك." };
+      await refreshDirectOrderDeal(tx, { orderId: id, actorId: user.id, change: "end", remove: true });
 
       await tx.order.delete({ where: { id } });
     }, TX_OPTS);

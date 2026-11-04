@@ -4,6 +4,7 @@ import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { appendOrderActivity, APPROVAL_ENTRY_STATUSES, type OrderStatus } from "@/lib/services/order-operations";
 import { emitAutomationEvent } from "@/lib/automation/emit";
+import { refreshDirectOrderDeal } from "@/lib/services/sales/direct-order-deal";
 
 const APPROVAL_ENTRY_SET = new Set<string>(APPROVAL_ENTRY_STATUSES);
 
@@ -202,6 +203,8 @@ export async function POST(request: Request, { params }: Params) {
           authorId: user.id,
           authorName: user.name,
         });
+        // «طلب مباشر» (gate M1): a rejected order's value stops counting; its auto deal follows (LOST if nothing claimed).
+        await refreshDirectOrderDeal(tx, { orderId: id, actorId: user.id, change: "end" });
       } else {
         await appendOrderActivity(tx, {
           orderId: id,

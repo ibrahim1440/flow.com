@@ -11,7 +11,8 @@ import { deliveryLotsFor } from "@/lib/services/delivery-lots";
 import { autoPrepareOrder } from "@/lib/services/orders/preparation";
 import { orderPipelines } from "@/lib/services/orders/pipeline";
 import { parseBranchId } from "@/lib/accounting/locations";
-import { orderVisibilityWhere } from "@/lib/services/sales/scope";
+import { orderVisibilityWhere, seesAllSales } from "@/lib/services/sales/scope";
+import { linkDirectOrderDeal } from "@/lib/services/sales/direct-order-deal";
 import { orderCustomerAccess } from "@/lib/services/sales/customer-access";
 import { notifyUnassignedCustomerOrder } from "@/lib/services/orders/unassigned-order";
 
@@ -73,6 +74,8 @@ export async function GET(request: Request) {
       // Order Operations S0: minimal owner projection — no permissions/pin/credential fields.
       owner: { select: { id: true, name: true, role: true } },
       activities: { orderBy: { createdAt: "asc" } },
+      // «اربط بصفقة»: whether the order has a deal (the first link; a title and outcome only — the deal page has the rest).
+      opportunityLinks: { orderBy: { createdAt: "asc" }, take: 1, select: { opportunityId: true, opportunity: { select: { id: true, title: true, outcome: true, ownerId: true } } } },
     },
   });
   // Phase D: each delivery also names the lots it drew from (DeliveryLine, or for a delivery
@@ -119,6 +122,19 @@ export async function POST(request: Request) {
     // The fulfilment split is computed after creation — see
     // POST /api/orders/fulfillment-preview for the pre-submit view and the preparation
     // review for the binding reservation.
+    // «طلب مباشر»: a deal the creator chose on the form (the customer had several open deals) is checked BEFORE the order
+    // is created — same customer, OPEN, in the creator's scope; anything else is refused and nothing is written.
+    const chosenDealId = typeof body.opportunityId === "string" && body.opportunityId.trim() ? body.opportunityId.trim() : null;
+    if (chosenDealId) {
+      const d = await prisma.opportunity.findFirst({
+        where: { id: chosenDealId, ...(seesAllSales(user.permissions) ? {} : { ownerId: user.id }) },
+        select: { customerId: true, outcome: true },
+      });
+      if (!d) return NextResponse.json({ error: "الصفقة غير موجودة.", errorEn: "Deal not found.", code: "DEAL_NOT_FOUND" }, { status: 404 });
+      if (d.customerId !== body.customerId || d.outcome !== "OPEN") {
+        return NextResponse.json({ error: "اختر صفقة مفتوحة لنفس العميل.", errorEn: "Choose an open deal of the same customer.", code: "DEAL_NOT_ELIGIBLE" }, { status: 409 });
+      }
+    }
     const resolvedItems = await resolveOrderLines(prisma, items);
     // «الموقع» (WP-B): an explicit selling location, validated; absent = the creator's default (create-order.ts).
     const branchId = await parseBranchId(prisma, body.branchId);
@@ -156,6 +172,23 @@ export async function POST(request: Request) {
       TX_OPTS,
     );
 
+    // «طلب مباشر» (owner, option A): the order joins a deal — the chosen one, else the customer's newest open deal the
+    // creator can see, else a deal opened for it (WON) — so collections and commission work as on a quotation-born order.
+    // Its own transaction after the order committed (like preparation below): a missing Quotation-stage configuration
+    // must not lose the order; the order page's «اربط بصفقة» links it later. Not for an UNASSIGNED customer's order
+    // (owner decision 3 Nov 2026: no deal, no commission). Never twice for one order (the service locks the order).
+    let deal: { opportunityId: string; created: boolean } | null = null;
+    let dealError: string | null = null;
+    if (access !== "unassigned") {
+      try {
+        const r = await prisma.$transaction((tx) => linkDirectOrderDeal(tx, { orderId: order.id, actor: { id: user.id, name: user.name, permissions: user.permissions }, chosenOpportunityId: chosenDealId, mode: "create" }), TX_OPTS);
+        deal = r.linked || r.replayed ? { opportunityId: r.opportunityId, created: r.created } : null;
+      } catch (e) {
+        dealError = (e as { errorAr?: string; messageAr?: string; message?: string })?.errorAr ?? (e as { messageAr?: string })?.messageAr ?? (e as Error)?.message ?? "DEAL_LINK_FAILED";
+        console.error("[orders] direct-order deal link failed", { orderId: order.id, error: (e as Error)?.message ?? e });
+      }
+    }
+
     // Phase B item 4: preparation runs on creation — the shelf is reserved, the decision and the
     // status derived, production orders raised for any shortfall — after the order committed.
     // The response carries the result (status and line decisions), same shape as before.
@@ -166,10 +199,11 @@ export async function POST(request: Request) {
         ...order,
         status: prepared.order.status,
         items: order.items.map((i) => ({ ...i, ...(byId.get(i.id) ?? {}) })),
+        deal, dealError,
       }, { status: 201 });
     }
 
-    return NextResponse.json(order, { status: 201 });
+    return NextResponse.json({ ...order, deal, dealError }, { status: 201 });
   } catch (err) {
     return handleDomainError(err);
   }
