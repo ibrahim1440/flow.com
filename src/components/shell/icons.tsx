@@ -44,6 +44,8 @@ const PATHS = {
   flag: "<path d=\"M6 21V4h11l-2 4 2 4H6\"/>",
   edit: "<path d=\"M4 20h4L19 9l-4-4L4 16z\"/><path d=\"m13.5 6.5 4 4\"/>",
   tick: "<path d=\"m6.5 12.5 3.5 3.5 7.5-8\"/>",
+  // «مسار العميل» (Figma page 10): one customer.
+  user: "<circle cx=\"12\" cy=\"8.5\" r=\"3.8\"/><path d=\"M5 20.5c.8-3.8 3.6-6 7-6s6.2 2.2 7 6\"/>",
 } as const;
 
 export type D21IconName = keyof typeof PATHS;

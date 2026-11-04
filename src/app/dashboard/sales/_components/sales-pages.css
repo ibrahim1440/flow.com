@@ -1,0 +1,119 @@
+/* The rep's four linked pages — «العملاء المحتملون»، «العيّنات»، «عروض الأسعار»، «العملاء» (owner-approved Figma
+   page 10, 4 Nov 2026). Direction 2.1 tokens only; shares the `.mny-*` cards of money.css. */
+
+/* «مسار العميل»: the strip on top of each of the four pages. */
+.d21 .sj { display: grid; gap: 6px; margin-bottom: 18px }
+.d21 .spg > .sj { margin-bottom: 0 }
+.d21 .sj-l { font-size: 12px; font-weight: 600; color: var(--text-muted) }
+.d21 .sj ol { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin: 0; padding: 6px; list-style: none; border-radius: 14px; background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle) }
+.d21 .sj li { display: flex; align-items: center; gap: 4px; min-width: 0 }
+.d21 .sj-arrow { flex: none; color: var(--text-muted); opacity: .7 }
+[dir="rtl"] .d21 .sj-arrow, .d21[dir="rtl"] .sj-arrow { transform: scaleX(-1) }
+.d21 .sj-step { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 10px; border-radius: 10px; color: var(--text-secondary); font-size: 14px; font-weight: 500; text-decoration: none }
+.d21 .sj-step > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.d21 .sj-step:hover { background: var(--surface) }
+.d21 .sj-step[aria-current="page"] { background: var(--surface); color: var(--text-primary); font-weight: 700; box-shadow: inset 0 0 0 1px var(--border-strong) }
+.d21 .sj-step > b { min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; display: inline-grid; place-items: center; font-size: 12px; font-weight: 700; background: var(--action-primary-tint); color: var(--action-primary) }
+.d21 .sj-step[aria-current="page"] > b { background: var(--action-primary); color: #fff }
+
+/* Page head (title, line, primary action) and the status cards that also filter. */
+.d21 .spg { display: grid; gap: 16px; min-width: 0 }
+.d21 .spg-top { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap }
+.d21 .spg-top h1 { margin: 0; font-size: 28px } .d21 .spg-top p { margin: 2px 0 0; color: var(--text-muted); font-size: 14px }
+.d21 .spg-top .act { display: flex; gap: 8px; flex-wrap: wrap }
+.d21 .spg-cards { display: grid; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); gap: 14px }
+.d21 button.mny-stt { width: 100%; border: 0; font: inherit; text-align: center; cursor: pointer }
+.d21 button.mny-stt:hover { box-shadow: inset 0 0 0 1px var(--border-strong) }
+.d21 button.mny-stt[aria-pressed="true"] { box-shadow: inset 0 0 0 2px currentColor }
+.d21 .spg-tool { display: flex; align-items: center; gap: 10px; flex-wrap: wrap }
+.d21 .spg-tool .sp { flex: 1 }
+.d21 .spg-search { display: flex; align-items: center; gap: 8px; flex: 1 1 260px; max-width: 420px; min-height: 40px; padding: 0 12px; border-radius: 10px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-subtle); color: var(--text-muted) }
+.d21 .spg-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font: inherit; font-size: 14px; color: var(--text-primary) }
+.d21 .spg-search:focus-within { box-shadow: inset 0 0 0 2px var(--action-primary) }
+.d21 .spg-tip { display: flex; gap: 8px; align-items: center; margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--surface-subtle); font-size: 13px; color: var(--text-muted) }
+
+/* A row of a list (lead, quote, past sample): avatar or icon, two lines, a pill, the next step, actions. */
+.d21 .spg-list { display: grid }
+.d21 .spg-row { display: flex; align-items: center; gap: 14px; padding: 14px 20px; border-top: 1px solid var(--border-subtle); min-width: 0 }
+.d21 .spg-list > .spg-row:first-child { border-top: 0 }
+.d21 .spg-av { flex: none; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; font-size: 14px; font-weight: 700; background: var(--action-primary-tint); color: var(--action-primary) }
+.d21 .spg-main { flex: 1; min-width: 0; display: grid; gap: 3px }
+.d21 .spg-main > div { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap }
+.d21 .spg-main b, .d21 .spg-main a.who { font-size: 15px; font-weight: 700; color: var(--text-primary); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100% }
+.d21 .spg-main a.who:hover { text-decoration: underline }
+.d21 .spg-main small { font-size: 12.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.d21 .spg-next { flex: none; display: grid; gap: 1px; min-width: 140px; font-size: 12px; color: var(--text-muted) }
+.d21 .spg-next b { font-size: 13.5px; font-weight: 600; color: var(--text-primary) }
+.d21 .spg-next.late b { color: var(--status-danger) }
+.d21 .spg-amt { flex: none; display: grid; justify-items: end; gap: 1px; min-width: 110px; font-size: 12px; color: var(--text-muted) }
+.d21 .spg-amt b { font-size: 15px; font-weight: 700; color: var(--text-primary) }
+.d21 .spg-acts { flex: none; display: flex; align-items: center; gap: 6px }
+.d21 .spg-ib { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; border: 0; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-subtle); color: var(--text-secondary); cursor: pointer; text-decoration: none }
+.d21 .spg-ib:hover { color: var(--action-primary); box-shadow: inset 0 0 0 1px var(--border-strong) }
+.d21 .spg-cta { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 0 14px; border-radius: 10px; border: 0; font: inherit; font-size: 13px; font-weight: 700; white-space: nowrap; cursor: pointer; text-decoration: none; background: var(--surface); color: var(--action-primary); box-shadow: inset 0 0 0 1px var(--border-subtle) }
+.d21 .spg-cta.p { background: var(--action-primary); color: #fff; box-shadow: none }
+.d21 .spg-cta:hover { filter: brightness(.97) }
+.d21 .spg-cta:disabled { opacity: .55; cursor: default }
+
+/* «العيّنات»: one card per open sample, with its stepper. */
+.d21 .smp { display: grid; gap: 16px; padding: 20px; border-radius: 14px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-subtle) }
+.d21 .smp-h { display: flex; align-items: flex-start; gap: 12px }
+.d21 .smp-ic { flex: none; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--status-warning-tint); color: var(--status-warning) }
+.d21 .smp-steps { display: grid; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); margin: 0; padding: 0; list-style: none }
+.d21 .smp-steps li { position: relative; display: grid; justify-items: start; gap: 4px; font-size: 13px; color: var(--text-muted) }
+.d21 .smp-steps li::after { content: ""; position: absolute; top: 11px; inset-inline-start: 30px; inset-inline-end: 6px; height: 2px; border-radius: 2px; background: var(--border-strong) }
+.d21 .smp-steps li:last-child::after { display: none }
+.d21 .smp-steps li.done::after { background: var(--status-success) }
+.d21 .smp-steps i { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--surface); box-shadow: inset 0 0 0 2px var(--border-strong); color: #fff; font-style: normal }
+.d21 .smp-steps li.done i { background: var(--status-success); box-shadow: none }
+.d21 .smp-steps li.now i { box-shadow: inset 0 0 0 2px var(--status-warning) }
+.d21 .smp-steps li.done span, .d21 .smp-steps li.now span { color: var(--text-primary); font-weight: 700 }
+.d21 .smp-steps small { font-size: 11.5px; color: var(--text-muted) }
+.d21 .smp-next { display: flex; gap: 8px; align-items: center; margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--surface-subtle); font-size: 13px; color: var(--text-secondary) }
+.d21 .smp-next.wa { background: var(--status-warning-tint); color: var(--status-warning); font-weight: 600 }
+
+/* «العملاء»: the filter chips, «يحتاجون انتباهك», the table's quick actions. */
+.d21 .spg-attn { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px }
+.d21 .spg-attn > div { display: grid; gap: 8px; align-content: start; padding: 14px; border-radius: 12px; background: var(--surface-subtle) }
+.d21 .spg-attn b { font-size: 14.5px } .d21 .spg-attn small { font-size: 12.5px; color: var(--text-muted) }
+.d21 .spg-attn small.er { color: var(--status-danger); font-weight: 600 } .d21 .spg-attn small.wa { color: var(--status-warning); font-weight: 600 }
+
+@media (max-width: 1099.98px) {
+  .d21 .spg-cards { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+  .d21 .spg-attn { grid-template-columns: minmax(0, 1fr) }
+}
+@media (max-width: 767.98px) {
+  .d21 .sj ol { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+  .d21 .sj-arrow { display: none }
+  .d21 .sj-step { justify-content: flex-start; font-size: 13px }
+  .d21 .spg-top h1 { font-size: 22px }
+  .d21 .spg-cards { gap: 8px }
+  .d21 .spg-row { flex-wrap: wrap; padding: 12px 14px; gap: 10px }
+  .d21 .spg-main { flex: 1 1 calc(100% - 60px) }
+  .d21 .spg-next, .d21 .spg-amt { min-width: 0; flex: 1 1 40%; padding-inline-start: 50px }
+  .d21 .spg-amt + .spg-amt { padding-inline-start: 0 }
+  .d21 .spg-amt { justify-items: start }
+  .d21 .spg-acts { flex: 1 1 100%; justify-content: flex-end; flex-wrap: wrap }
+  .d21 .smp-h { flex-wrap: wrap } .d21 .smp-h > .spg-main { flex: 1 1 calc(100% - 56px) } .d21 .smp-h > .spg-cta { flex: 1 1 100% }
+  .d21 .spg-main b, .d21 .spg-main a.who { white-space: normal }
+  .d21 .smp-steps { grid-template-columns: minmax(0, 1fr); gap: 10px }
+  .d21 .smp-steps li { grid-template-columns: 24px minmax(0, 1fr); align-items: center; column-gap: 8px }
+  .d21 .smp-steps li::after { display: none }
+  .d21 .smp-steps small { grid-column: 2 }
+}
+
+/* «العملاء المحتملون»: the four stages as tiles that filter (Figma page 10). */
+.d21 .spg-stage { display: grid; gap: 4px; padding: 16px 18px; border: 0; border-radius: 14px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-subtle); font: inherit; color: inherit; text-align: start; cursor: pointer }
+.d21 .spg-stage:hover { box-shadow: inset 0 0 0 1px var(--border-strong) }
+.d21 .spg-stage[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--action-primary) }
+.d21 .spg-stage .h { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700 }
+.d21 .spg-stage .h i { width: 8px; height: 8px; border-radius: 50%; flex: none }
+.d21 .spg-stage b { font-size: 26px; font-weight: 700; line-height: 1.25 }
+.d21 .spg-stage small { font-size: 12.5px; color: var(--text-muted) }
+.d21 .spg-row.sel { background: var(--surface-subtle) }
+
+/* A segmented control (Figma page 10: «الكل / يحتاج منك / المفتوحة / المنتهية»). */
+.d21 .spg-seg { display: inline-flex; gap: 2px; margin: 0; padding: 4px; list-style: none; border-radius: 12px; background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle) }
+.d21 .spg-seg button { min-height: 32px; padding: 0 14px; border: 0; border-radius: 9px; background: none; font: inherit; font-size: 13px; color: var(--text-secondary); white-space: nowrap; cursor: pointer }
+.d21 .spg-seg button[aria-current="page"] { background: var(--surface); color: var(--text-primary); font-weight: 700; box-shadow: inset 0 0 0 1px var(--border-strong) }
+@media (max-width: 767.98px) { .d21 .spg-seg { width: 100%; overflow-x: auto } .d21 .spg-seg li { flex: 1 } .d21 .spg-seg button { width: 100%; padding: 0 8px } }

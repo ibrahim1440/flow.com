@@ -18,6 +18,10 @@ import { dueText, shortDate, dayCount, daysFromToday } from "@/components/d21/fo
 import { LeadPane } from "./LeadPane";
 import { useUnsavedGuard, isDirtyAgainst } from "../../_components/useUnsavedGuard";
 import ImportDialog from "./ImportDialog";
+import { SalesJourney } from "../_components/journey";
+import { telHref, waNumber } from "@/lib/services/search/normalize";
+import "../_components/money.css";
+import "../_components/sales-pages.css";
 
 /**
  * Leads — SC-02 in the Sales Screens design.
@@ -476,10 +480,146 @@ export default function LeadsPage() {
       onChanged={(message: string) => { setSuccess(message); load(); }} />
   ) : null;
 
+  // ── A rep's own leads (owner-approved Figma page 10, 4 Nov 2026): «مسار العميل», the four stages as tiles that
+  // filter, and one row per lead with «الخطوة الجاية», call / WhatsApp, and ONE action chosen by its stage. A manager
+  // (scope all) keeps the table with its owner column. ──
+  const STAGE_TILES: { key: string; ar: string; en: string; subAr: string; subEn: string; tone: string }[] = [
+    { key: "NEW", ar: "جديد", en: "New", subAr: "ما تواصلت معه للحين", subEn: "Not contacted yet", tone: "var(--status-info)" },
+    { key: "CONTACTED", ar: "تم التواصل", en: "Contacted", subAr: "ينتظر خطوة منك", subEn: "Waiting on your next step", tone: "var(--status-warning)" },
+    { key: "QUALIFIED", ar: "مؤهَّل", en: "Qualified", subAr: "جاهز يصير فرصة", subEn: "Ready to become a deal", tone: "var(--status-success)" },
+    { key: "CLOSED", ar: "المغلقة", en: "Closed", subAr: "تحوّلت أو انقفلت", subEn: "Converted or closed", tone: "var(--text-muted)" },
+  ];
+  const PILL: Record<string, string> = { NEW: "t-in", CONTACTED: "t-wa", QUALIFIED: "t-ok", CONVERTED: "t-ok", UNQUALIFIED: "t-pr" };
+  const nextStep = (lead: Lead) => {
+    if (lead.conversion || lead.status === "CONVERTED") return { text: ar ? "صار عميل — كمّل من صفحته" : "Now a customer", late: false };
+    if (lead.status === "UNQUALIFIED") return { text: ar ? "انقفل — غير مؤهَّل" : "Closed — unqualified", late: false };
+    const todo = lead.status === "NEW" ? (ar ? "أول تواصل" : "first contact") : lead.status === "QUALIFIED" ? (ar ? "حوّله لفرصة" : "convert it") : (ar ? "اتصل" : "call");
+    if (!lead.nextFollowUpAt) return { text: ar ? "ما فيه موعد — حدد خطوة" : "No date — set a next step", late: false };
+    const n = daysFromToday(lead.nextFollowUpAt);
+    const late = new Date(lead.nextFollowUpAt) < new Date();
+    if (late) return { text: ar ? `${n <= -2 ? `متأخرة ${dayCount(-n, lang)}` : "متأخرة"} — ${todo}` : `Overdue — ${todo}`, late: true };
+    const when = Math.abs(n) <= 1 ? dueText(lead.nextFollowUpAt, lang) : shortDate(lead.nextFollowUpAt, lang);
+    return { text: `${when} — ${todo}`, late: false };
+  };
+  const leadCta = (lead: Lead) => {
+    const href = `/dashboard/sales/leads/${lead.id}`;
+    if (lead.conversion) return <Link href={`/dashboard/customers/${lead.conversion.customerId}`} className="spg-cta"><Ico name="user" small />{ar ? "افتح العميل" : "Open customer"}</Link>;
+    if (lead.status === "UNQUALIFIED") return <Link href={href} className="spg-cta">{ar ? "افتح" : "Open"}</Link>;
+    if (lead.status === "QUALIFIED" && canConvert) {
+      return (
+        <button type="button" className="spg-cta p" onClick={() => convert(lead)} disabled={converting !== null}
+          aria-busy={converting === lead.id || undefined} data-testid={`convert-lead-${lead.id}`}>
+          <Ico name="trend" small />{converting === lead.id ? (ar ? "جارٍ التحويل…" : "Converting…") : ar ? "حوّله لفرصة" : "Make it a deal"}
+        </button>
+      );
+    }
+    return (
+      <Link href={href} className="spg-cta" data-testid={`lead-act-${lead.id}`}>
+        <Ico name="phone" small />{lead.status === "NEW" ? (ar ? "أول تواصل" : "First contact") : (ar ? "سجّل مكالمة" : "Log a call")}
+      </Link>
+    );
+  };
+  const repView = (
+    <div className="spg" data-testid="rep-leads">
+      {notices}
+      {!phone ? (
+        <div className="spg-top">
+          <div>
+            <h1>{t("leadsTitle")}</h1>
+            <p>
+              <span data-testid="leads-total">{openText(counts.OPEN ?? 0)}</span>
+              {" · "}<span data-testid="leads-overdue">{lateText(overdueAll)}</span>
+              {" · "}<span data-testid="count-no-commitment">{noCommitmentAll} {ar ? "بدون موعد قادم" : "with no next date"}</span>
+            </p>
+          </div>
+          <div className="act">
+            {canImport && <button type="button" onClick={() => setShowImport(true)} data-testid="import-leads" className="spg-cta"><Ico name="dl" small />{ar ? "استيراد" : "Import"}</button>}
+            {canWrite && <button type="button" onClick={openForm} className="spg-cta p" data-testid="new-lead"><Ico name="plus" small />{ar ? "عميل محتمل" : "Lead"}</button>}
+          </div>
+        </div>
+      ) : null}
+      <SalesJourney current="leads" ar={ar} />
+      <div className="spg-cards" role="group" aria-label={ar ? "المرحلة" : "Stage"} style={{ ["--n" as string]: 4 }}>
+        {STAGE_TILES.map((k) => {
+          const on = statusFilter === k.key;
+          return (
+            <button key={k.key} type="button" className="spg-stage" aria-pressed={on} data-testid={`lead-tab-${k.key}`}
+              onClick={() => setStatusFilter(on ? "OPEN" : k.key)}>
+              <span className="h"><i style={{ background: k.tone }} />{ar ? k.ar : k.en}</span>
+              <b>{counts[k.key] ?? 0}</b>
+              <small>{ar ? k.subAr : k.subEn}</small>
+            </button>
+          );
+        })}
+      </div>
+      <div className="spg-tool">
+        <label className="spg-search" style={{ maxWidth: "none" }}>
+          <Ico name="search" small />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} data-testid="lead-search"
+            placeholder={ar ? "ابحث بالشركة أو الجوال" : "Search by company or phone"} aria-label={ar ? "بحث في العملاء المحتملين" : "Search leads"} />
+        </label>
+        <button type="button" className="spg-cta" aria-pressed={statusFilter === "OPEN"} data-testid="lead-tab-OPEN" onClick={() => setStatusFilter("OPEN")}
+          style={statusFilter === "OPEN" ? { color: "var(--text-primary)" } : undefined}>
+          {ar ? "كل المفتوحة" : "All open"} · {counts.OPEN ?? 0}
+        </button>
+        <span className="spg-cta" style={{ cursor: "default", color: "var(--text-primary)" }}><Ico name="clock" small />{ar ? "الأقرب متابعة" : "Nearest follow-up"}</span>
+      </div>
+      {states ?? (
+        <section className="mny-card flush" aria-busy={paging || undefined} style={paging ? { opacity: .6 } : undefined}>
+          <div className="spg-list" data-testid="leads-table">
+            {rows.map((lead) => {
+              const name = ar && lead.companyNameAr ? lead.companyNameAr : lead.companyName;
+              const nx = nextStep(lead);
+              const tel = telHref(lead.phone);
+              const wa = waNumber(lead.phone);
+              return (
+                <div key={lead.id} className={`spg-row${selected === lead.id ? " sel" : ""}`} data-testid={`lead-${lead.id}`}>
+                  <span className="spg-av">{initials(name)}</span>
+                  <div className="spg-main">
+                    <div>
+                      <Link href={`/dashboard/sales/leads/${lead.id}`} className="who" data-testid={`open-lead-${lead.id}`}
+                        onClick={(e) => openPreview(e, lead.id)}><bdi>{name}</bdi></Link>
+                      <span className={`mny-pill ${PILL[lead.status] ?? "t-pr"}`} data-testid={`lead-status-${lead.id}`}>{label(STATUS_LABELS, lead.status)}</span>
+                    </div>
+                    <small>
+                      {[lead.contactName, lead.phone ? `\u2066${lead.phone}\u2069` : null, `${ar ? "من" : "from"} ${label(SOURCE_LABELS, lead.source)}`].filter(Boolean).join(" · ")}
+                    </small>
+                  </div>
+                  <div className={`spg-next${nx.late ? " late" : ""}`}>
+                    <span>{ar ? "الخطوة الجاية" : "Next step"}</span>
+                    <b data-testid={!lead.nextFollowUpAt && !lead.conversion ? `lead-no-commitment-${lead.id}` : undefined}>{nx.text}</b>
+                  </div>
+                  <div className="spg-acts">
+                    {tel ? <a className="spg-ib" href={tel} aria-label={ar ? `اتصل بـ ${name}` : `Call ${name}`}><Ico name="phone" small /></a> : null}
+                    {wa ? <a className="spg-ib" href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer" aria-label={ar ? `واتساب ${name}` : `WhatsApp ${name}`}><Ico name="chat" small /></a> : null}
+                    {leadCta(lead)}
+                    {canWrite && !lead.conversion && !phone ? (
+                      <button type="button" className="spg-ib" onClick={() => setDeleting(lead)} data-testid={`delete-lead-${lead.id}`}
+                        aria-label={ar ? `حذف ${lead.companyName}` : `Delete ${lead.companyName}`} title={ar ? "حذف" : "Delete"}>
+                        <Trash2 size={14} aria-hidden />
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+      {!states && lastPage > 1 ? pager : null}
+      <p className="spg-tip">
+        <Ico name="trend" small />
+        {ar
+          ? "لما يتأهّل العميل المحتمل اضغط «حوّله لفرصة» — يروح لـ«العيّنات» أو «عروض الأسعار» في المسار فوق، وكل شي يبقى مرتبط به."
+          : "Once a lead qualifies, «Make it a deal» — then samples or a quotation, all linked to it."}
+      </p>
+    </div>
+  );
+
   return (
     <div className={`split${pane ? " has-pane" : ""}`}>
     <div className="pg">
-      {phone ? (
+      {scope === "own" ? repView : phone ? (
         <>
           {notices}
           <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>{searchBox}</div>

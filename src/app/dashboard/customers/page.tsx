@@ -17,6 +17,7 @@ import { useAccountantView } from "../accounting/_ui/qoyod-pages";
 import { canViewInvoices } from "@/lib/services/invoicing/access";
 import { customersScopedToOwner } from "@/lib/services/sales/scope";
 import { isSalesPersona } from "@/lib/workspace/landing";
+import { RepBook } from "./_components/rep-book";
 import { MyBookPanel, filterLabel, inFilter, isBookFilter, statusOf, useMyBook, type BookFilter } from "./_components/my-book";
 import "./customers.css";
 
@@ -644,6 +645,12 @@ export default function CustomersPage() {
     <HrRoot>
       <div className={`split${pane ? " has-pane" : ""} cu-split`}>
         <div className="pg">
+          {bookOn && myBook && myBook.book.length > 0 ? (
+            // A rep's own book (Figma page 10): the linked «العملاء» view (rep-book.tsx).
+            <RepBook ar={ar} phone={phone} book={myBook} customers={customers} shown={filteredCustomers}
+              filter={bookFilter} onFilter={setBookFilter} search={searchBox} notice={notice} viewTabs={viewTabs}
+              addButton={addButton} onPreview={(id) => { const c = customers.find((x) => x.id === id); if (c) open(c); }} />
+          ) : (<>
           {notice}
           {phone ? (
             <>
@@ -758,6 +765,7 @@ export default function CustomersPage() {
               )}
             </>
           )}
+          </>)}
         </div>
         {pane}
       </div>

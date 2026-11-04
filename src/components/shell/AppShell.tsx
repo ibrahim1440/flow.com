@@ -354,6 +354,17 @@ export function AppShell({
     if (a.onCustomer) { returnTo.current = document.activeElement as HTMLElement | null; setPickFor(a); return; }
     router.push(a.href);
   }, [pageCustomer, router]);
+  // A page button that starts one of these menu actions (e.g. «اطلب عيّنة» on «العيّنات», Figma page 10) asks the
+  // shell through `requestShellCreate(id)`, so it gets the same «لأي عميل؟» picker and the same permission check.
+  useEffect(() => {
+    const on = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail;
+      const a = creates.find((c) => c.id === id);
+      if (a) runCreate(a);
+    };
+    window.addEventListener("d21:create", on);
+    return () => window.removeEventListener("d21:create", on);
+  }, [creates, runCreate]);
   const single = creates.length === 1 && !creates[0].onCustomer ? creates[0] : null;
   const singleHref = single?.href ?? null;
   const lettered = creates.some((c) => c.key);

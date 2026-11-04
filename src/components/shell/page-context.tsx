@@ -159,4 +159,9 @@ export function useCreateRequest(kind: string, open: () => void, enabled = true)
   }, [asked, enabled, search, pathname, router]);
 }
 
+/** Starts a shell «جديد» menu action by its id (creates.ts), e.g. "sales.sample.new" — opens «لأي عميل؟» first. */
+export function requestShellCreate(id: string) {
+  window.dispatchEvent(new CustomEvent("d21:create", { detail: id }));
+}
+
 export type { D21IconName };

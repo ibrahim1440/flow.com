@@ -11,6 +11,7 @@ import { shortDate } from "@/components/d21/format";
 import { QuotePane } from "./QuotePane";
 import { QuotePicker } from "./QuotePicker";
 import { useQuotesBase } from "./base";
+import { RepQuotes, type RepStage } from "./RepQuotes";
 
 /**
  * Quotations list, built to `crm-quotes` 1440 (`181:1609`, EN `1528:1930`) and 1024
@@ -48,11 +49,12 @@ type Quote = {
   /** NULL on a quotation from the accounting section with no deal («مسار المحاسب»). */
   opportunity: { id: string; title: string; outcome: string; owner: { id: string; name: string } | null } | null;
   _count: { lines: number; orderLinks: number };
+  orderLinks?: { order: { orderNumber: number } }[];
 };
 type Payload = {
   rows: Quote[]; total: number; scope: "own" | "all";
   counts: Record<string, number>;
-  summary: { issued: number; issuedValue: string; pendingApproval: number; expiringSoon: number };
+  summary: { issued: number; issuedValue: string; openValue?: string; pendingApproval: number; expiringSoon: number };
   owners: { id: string; name: string }[];
   discountThresholdPercent: string;
   can: { write: boolean; approveDiscount: boolean; createDeal: boolean };
@@ -112,6 +114,8 @@ export default function QuotesPage() {
 
   const [data, setData] = useState<Payload | null>(null);
   const [status, setStatus] = useState("");
+  // The rep's segment (Figma page 10): «يحتاج منك», «المفتوحة», «المنتهية», or a card's «انتهت أو انرفضت».
+  const [stage, setStage] = useState<RepStage>("");
   const [search, setSearch] = useState("");
   const [ownerId, setOwnerId] = useState("");
   const [approval, setApproval] = useState<Approval>("");
@@ -138,6 +142,7 @@ export default function QuotesPage() {
   const query = useCallback((withPage: boolean) => {
     const params = new URLSearchParams();
     if (status) params.set("status", status);
+    if (stage) params.set("stage", stage);
     if (search.trim()) params.set("q", search.trim());
     if (ownerId) params.set("ownerId", ownerId);
     if (approval) params.set("approval", approval);
@@ -145,7 +150,7 @@ export default function QuotesPage() {
     if (showSuperseded) params.set("includeSuperseded", "1");
     if (withPage && page > 1) params.set("page", String(page));
     return params;
-  }, [status, search, ownerId, approval, expiring, showSuperseded, page]);
+  }, [status, stage, search, ownerId, approval, expiring, showSuperseded, page]);
 
   const load = useCallback(async () => {
     const res = await api<Payload>(`/api/sales/quotes?${query(true)}`);
@@ -178,7 +183,7 @@ export default function QuotesPage() {
   const changeSearch = (s: string) => { setSearch(s); setPage(1); };
   const changeOwner = (s: string) => { setOwnerId(s); setPage(1); };
   const changeApproval = (s: Approval) => { setApproval(s); setPage(1); };
-  const clearAll = () => { setSearch(""); setStatus(""); setOwnerId(""); setApproval(""); setExpiring(false); setShowSuperseded(false); setPage(1); };
+  const clearAll = () => { setSearch(""); setStatus(""); setStage(""); setOwnerId(""); setApproval(""); setExpiring(false); setShowSuperseded(false); setPage(1); };
 
   if (loading) return <div className="pg"><Spinner /></div>;
   if (!data) return <div className="pg"><p className="notice er" role="alert" data-testid="alert-error">{error}</p></div>;
@@ -401,6 +406,18 @@ export default function QuotesPage() {
   );
 
   const pickerDialog = picker ? <QuotePicker lang={lang} onClose={() => { setPicker(false); setPickDismissed(true); }} /> : null;
+
+  // A rep's own list (not the accounting base, not a manager's whole team): the page-10 view — the status cards, one
+  // next step per quotation, «مسار العميل» on top. The table below stays for managers and the accountant.
+  if (!accountingBase && scope === "own") {
+    return (
+      <RepQuotes lang={lang} phone={phone} data={data} base={base} status={status} stage={stage} search={search}
+        onStatus={(s) => { setStatus(s); setStage(""); setPage(1); }}
+        onStage={(s) => { setStage(s); setStatus(""); setPage(1); }}
+        onSearch={changeSearch} notice={notice} pager={lastPage > 1 ? pager : null} exportLink={exportLink}
+        onNew={data.can.write ? () => setPicker(true) : null} picker={pickerDialog} paging={paging} />
+    );
+  }
 
   if (phone) {
     return (

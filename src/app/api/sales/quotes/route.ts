@@ -30,6 +30,8 @@ const ROW_SELECT = {
     select: { id: true, title: true, outcome: true, owner: { select: { id: true, name: true } } },
   },
   _count: { select: { lines: true, orderLinks: true } },
+  // «افتح الطلب» on an accepted quotation already turned into an order (Figma page 10): its order's number.
+  orderLinks: { take: 1, select: { order: { select: { orderNumber: true } } } },
 } as const;
 
 /**
@@ -58,6 +60,8 @@ export async function GET(request: Request) {
   const approval = (APPROVAL_FILTERS as readonly string[]).includes(approvalParam) ? approvalParam : null;
   const expiring = url.searchParams.get("expiring") === "1";
   const includeSuperseded = url.searchParams.get("includeSuperseded") === "1";
+  // The rep's segments (Figma page 10, 4 Nov 2026): «يحتاج منك», «المفتوحة», «المنتهية» — see STAGES below.
+  const stageParam = url.searchParams.get("stage") ?? "";
   const csv = url.searchParams.get("format") === "csv";
   const page = Math.max(1, Number(url.searchParams.get("page") ?? 1) || 1);
   const perPage = Math.min(100, Math.max(1, Number(url.searchParams.get("perPage") ?? 25) || 25));
@@ -108,8 +112,20 @@ export async function GET(request: Request) {
     const stateOf = new Map(flagged.map((f) => [f.id, f.state]));
     const pendingIds = flagged.filter((f) => f.state === "PENDING").map((f) => f.id);
 
+    // The rep's segments: what is waiting on the rep (a draft to finish, an accepted one to turn into an order, an issued
+    // one past its date), what is still open, and what has ended (refused, lapsed, or already an order).
+    const STAGES = {
+      need: [{ status: "DRAFT" as const }, { status: "ACCEPTED" as const, orderLinks: { none: {} } }, { status: "ISSUED" as const, validUntil: { lt: now } }],
+      open: [{ status: { in: ["DRAFT", "ISSUED"] as ("DRAFT" | "ISSUED")[] } }, { status: "ACCEPTED" as const, orderLinks: { none: {} } }],
+      ended: [{ status: { in: ["REJECTED", "EXPIRED"] as ("REJECTED" | "EXPIRED")[] } }, { status: "ACCEPTED" as const, orderLinks: { some: {} } }],
+      lost: [{ status: { in: ["REJECTED", "EXPIRED"] as ("REJECTED" | "EXPIRED")[] } }],
+    };
+    const stage = Object.hasOwn(STAGES, stageParam) ? (stageParam as keyof typeof STAGES) : null;
+
     const where = {
       ...base,
+      // AND, so the segment's OR does not replace the search's.
+      ...(stage ? { AND: [{ OR: STAGES[stage] }] } : {}),
       ...(status && STATUSES.includes(status)
         ? { status: status as never }
         : includeSuperseded || opportunityId ? {} : { status: { not: "SUPERSEDED" as never } }),
@@ -140,6 +156,11 @@ export async function GET(request: Request) {
       });
     }
 
+    const stageCount = (k: keyof typeof STAGES) => prisma.quote.count({ where: { ...base, AND: [{ OR: STAGES[k] }] } });
+    const [needCount, openCount, endedCount, lostCount, openValue] = await Promise.all([
+      stageCount("need"), stageCount("open"), stageCount("ended"), stageCount("lost"),
+      prisma.quote.aggregate({ where: { ...scope, OR: STAGES.open }, _sum: { grandTotal: true } }),
+    ]);
     const [rows, total, byStatus, scopeByStatus, expiringSoon, owners] = await Promise.all([
       prisma.quote.findMany({
         where,
@@ -167,6 +188,7 @@ export async function GET(request: Request) {
     for (const g of byStatus) counts[g.status] = g._count._all;
     // «الكل» is everything but the superseded revisions, which the footer counts on their own.
     counts.ALL = STATUSES.filter((s) => s !== "SUPERSEDED").reduce((a, s) => a + counts[s], 0);
+    counts.NEED = needCount; counts.OPEN = openCount; counts.ENDED = endedCount; counts.LOST = lostCount;
     const issued = scopeByStatus.find((g) => g.status === "ISSUED");
 
     return NextResponse.json({
@@ -178,6 +200,7 @@ export async function GET(request: Request) {
       summary: {
         issued: issued?._count._all ?? 0,
         issuedValue: (issued?._sum.grandTotal ?? new Decimal(0)).toFixed(2),
+        openValue: (openValue._sum.grandTotal ?? new Decimal(0)).toFixed(2),
         pendingApproval: pendingIds.length,
         expiringSoon,
       },
