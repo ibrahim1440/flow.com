@@ -8,7 +8,9 @@ import { ACCRUAL_STATUS_SPECS, formatMoney, formatDay, num, api } from "../_comp
 import {
   useInitialMonth, PerfHeader, Bar, MonthChip, PerfNotice, PerfSandbox, PerfLoading, PerfNote, Metrics, AccrualDot,
 } from "../_components/perf";
-import { MyPlan, type MyPlanPayload } from "./my-plan";
+import { type MyPlanPayload } from "./my-plan";
+import { Ico } from "@/components/shell/icons";
+import "../_components/money.css";
 
 /**
  * My commissions — Direction 2.1, GX A-P05 «أهدافي وعمولاتي» (`1225:3172` / EN `1230:128990`,
@@ -67,6 +69,8 @@ type Payload = Partial<MyPlanPayload> & {
   notice: string | null;
 };
 
+type DayTarget = { target: string | null; achieved: string; remaining: string | null; accrued: string | null; estimate: string | null; commissionVisible: boolean; daysLeft?: number };
+
 const LEDGER_LABELS: Record<string, { en: string; ar: string }> = {
   ACCRUAL: { en: "Accrual", ar: "استحقاق" },
   ADJUSTMENT: { en: "Adjustment", ar: "تسوية" },
@@ -121,10 +125,10 @@ export default function MyCommissionsPage() {
   const [openCalc, setOpenCalc] = useState<Record<string, boolean>>({});
   // The plain summary on top (council fix round 1, P0-12): the same figures as «يومي» — target, collected, remaining,
   // accrued and the ESTIMATE — for this month only.
-  const [day, setDay] = useState<{ target: string | null; achieved: string; remaining: string | null; accrued: string | null; estimate: string | null; commissionVisible: boolean } | null>(null);
+  const [day, setDay] = useState<DayTarget | null>(null);
   useEffect(() => {
     let off = false;
-    api<{ target: { target: string | null; achieved: string; remaining: string | null; accrued: string | null; estimate: string | null; commissionVisible: boolean } }>("/api/sales/my-day")
+    api<{ target: DayTarget }>("/api/sales/my-day")
       .then((r) => { if (!off && r.ok && r.data.target) setDay(r.data.target); });
     return () => { off = true; };
   }, []);
@@ -155,7 +159,6 @@ export default function MyCommissionsPage() {
   /** A bare amount — no currency — for the places the design writes a running sum. */
   const bare = (v: string) => formatMoney(v);
   const ccyText = (ccy = "SAR") => (ar ? (ccy === "SAR" ? "ريال" : ccy) : ccy);
-  const whole = (v: string | null | undefined) => (v == null ? "—" : Math.round(Number(v)).toLocaleString("en-US"));
   const money = (v: string, ccy = "SAR") => `${bare(v)} ${ccyText(ccy)}`;
   const pct = (v: string) => `${Number(v).toFixed(6).replace(/0+$/, "").replace(/\.$/, "")}%`;
 
@@ -174,7 +177,7 @@ export default function MyCommissionsPage() {
   ];
 
   const header = (
-    <PerfHeader ar={ar} title={ar ? "أهدافي وعمولاتي" : "My targets and commissions"} phoneTitle={t("commissionsTitle")}
+    <PerfHeader ar={ar} title={ar ? "أهدافي وعمولاتي" : "My targets and commissions"} phoneTitle={ar ? "الهدف والعمولة" : "Target & commission"}
       meta={meta}
       actions={
         <MonthChip value={month} lang={lang} testId="mc-month"
@@ -194,29 +197,12 @@ export default function MyCommissionsPage() {
       {data?.sandbox && <PerfSandbox notice={data.notice} ar={ar} />}
       <PerfNotice kind="error" ar={ar} onDismiss={() => setError("")}>{error}</PerfNotice>
 
-      {/* ── In plain words, first (council fix round 1, P0-12) ── */}
-      {day && month === initialMonth ? (
-        <section className="perf-card" data-testid="mc-summary" style={{ display: "grid", gap: 12, marginBottom: 20 }}>
-          <Metrics items={[
-            { label: ar ? "هدف الشهر" : "This month's target", testId: "mc-target", value: <span className="n">{day.target === null ? "—" : whole(day.target)}</span>, note: ar ? "ريال، من التحصيل" : "SAR, collections" },
-            { label: ar ? "حصّلت" : "Collected", testId: "mc-collected", value: <span className="n">{whole(day.achieved)}</span>, note: ar ? "ريال، بدون الضريبة" : "SAR, before VAT" },
-            { label: ar ? "باقي" : "Remaining", testId: "mc-remaining", value: <span className="n">{day.remaining === null ? "—" : whole(day.remaining)}</span>, note: ar ? "ريال توصل الهدف" : "SAR to the target" },
-            ...(day.commissionVisible ? [
-              { label: ar ? "عمولتك المستحقة" : "Your accrued commission", testId: "mc-accrued", value: <span className="n">{whole(day.accrued ?? "0")}</span>, note: ar ? "ريال، على اللي حصّلته" : "SAR, on what you collected", tone: "action" as const },
-              { label: ar ? "المتوقعة لو وصلت الهدف" : "If you reach the target", testId: "mc-estimate", value: <span className="n">{whole(day.estimate)}</span>, note: ar ? "ريال · تقدير" : "SAR · estimate" },
-            ] : []),
-          ]} />
-          <p className="sm" style={{ margin: 0, fontSize: 13, color: "var(--text-muted)" }} data-testid="mc-when">
-            {ar ? "متى تنصرف؟ بعد ما تعتمدها المالية، وتظهر هنا «صُرفت» مع المبلغ اللي انصرف." : "When is it paid? After finance approves it; it then shows here as «Paid» with the amount."}
-          </p>
-        </section>
-      ) : null}
-
       {loading ? <PerfLoading ar={ar} /> : !data ? null : (<>
-          {/* ── «خطتي»: the plan, this month's estimate and the computed months (plan builder) ── */}
-          {data.plan && <MyPlan ar={ar} data={{ plan: data.plan, builder: data.builder ?? null, history: data.history ?? [], fixedPay: data.fixedPay ?? null }} />}
-        <details data-testid="mc-details" open={!day || month !== initialMonth}>
-          <summary style={{ cursor: "pointer", fontWeight: 600, margin: "0 0 14px" }}>{ar ? "التفاصيل" : "Details"}</summary>
+          {/* «الهدف والعمولة» (owner-approved Figma page 09): the month's target and commission in plain words. «خطة عمولتي»
+              (MyPlan) is hidden by the owner's decision of 3 Nov 2026; the ledger stays below, folded, for whoever checks it. */}
+          <TargetAndCommission ar={ar} data={data} day={day && month === initialMonth ? day : null} />
+        <details data-testid="mc-details" className="mny-acct">
+          <summary style={{ cursor: "pointer", fontWeight: 600, margin: "18px 0 14px", color: "var(--text-muted)" }}>{ar ? "التفاصيل المحاسبية (للمراجعة)" : "Ledger details (for checking)"}</summary>
           {/* ── What the reader came for, and the statement that produced it ──────── */}
           <div style={{ display: "flex", alignItems: "flex-start", gap: "20px 40px", flexWrap: "wrap", margin: "4px 0 22px" }}>
             <div>
@@ -455,6 +441,94 @@ export default function MyCommissionsPage() {
           </div>
         </details>
       </>)}
+    </div>
+  );
+}
+
+const ACCRUAL_WORD: Record<string, [string, string, string]> = {
+  ACCRUED: ["مستحقة", "Accrued", "t-ok"], APPROVED: ["معتمدة", "Approved", "t-ok"], PAID: ["انصرفت", "Paid", "t-in"], REVERSED: ["معكوسة", "Reversed", "t-er"],
+};
+
+/**
+ * «الهدف والعمولة» (owner-approved Figma page 09, 3 Nov 2026): the month's target (and its bonus), the commission —
+ * owed, paid, left — how it was computed in one line of figures, and the commission of each collection. The figures
+ * are the statement and the accruals of GET /api/commissions/me, unchanged; nothing is recomputed but the sums shown.
+ */
+function TargetAndCommission({ ar, data, day }: { ar: boolean; data: Payload; day: DayTarget | null }) {
+  const sar = ar ? "ر.س" : "SAR";
+  const whole = (v: string | number | null | undefined) => (v === null || v === undefined ? "—" : Math.round(Number(v)).toLocaleString("en-US"));
+  const p = data.progress;
+  const pct = p?.percent ? Math.max(0, Math.min(100, Number(p.percent))) : 0;
+  const bonus = data.target && Number(data.target.bonusAmount) > 0 ? data.target.bonusAmount : null;
+  const net = (a: Accrual) => Number(a.collectionEvent.amountGross) - Number(a.collectionEvent.amountTax) - Number(a.collectionEvent.amountNonQualifying);
+  const live = data.accruals.filter((a) => a.status !== "REVERSED");
+  const same = (k: "sharePercent" | "effectiveRatePercent") => live.length > 0 && live.every((a) => Number(a[k]) === Number(live[0][k]));
+  const pctText = (v: string) => `${Number(v).toFixed(2).replace(/\.?0+$/, "")}%`;
+  const day2 = (iso: string) => new Date(iso).toLocaleDateString(ar ? "ar-SA-u-ca-gregory-nu-latn" : "en-GB", { day: "numeric", month: "long", timeZone: "Asia/Riyadh" });
+  return (
+    <div className="mny" data-testid="mc-summary">
+      <div className="mny-row">
+        <section className="mny-card" aria-labelledby="mc-goal-h" data-testid="mc-goal">
+          <div className="mny-h"><div><h2 id="mc-goal-h">{ar ? "هدف الشهر" : "This month's target"}</h2><small>{ar ? "يُقاس على اللي حصّلته بدون الضريبة" : "Measured on what you collected, before VAT"}</small></div></div>
+          {p && p.target !== null ? (
+            <>
+              <div className="mny-stats">
+                <span className="mny-stat"><small>{ar ? "الهدف" : "Target"}</small><b className="num" data-testid="mc-target">{whole(p.target)}</b><span>{sar}</span></span>
+                <span className="mny-stat"><small>{ar ? "حصّلت" : "Collected"}</small><b className="num" style={{ color: "var(--status-success)" }} data-testid="mc-collected">{whole(p.achieved)}</b><span>{sar} · {whole(p.percent)}%</span></span>
+                <span className="mny-stat"><small>{p.met ? (ar ? "فوق الهدف" : "Above") : (ar ? "باقي" : "Left")}</small><b className="num" style={{ color: p.met ? "var(--status-success)" : "var(--status-warning)" }} data-testid="mc-remaining">{p.met ? "✓" : whole(p.remaining)}</b><span>{p.met ? "" : sar}{!p.met && day?.daysLeft !== undefined ? (ar ? ` · ${day.daysLeft} يوم` : ` · ${day.daysLeft} days`) : ""}</span></span>
+              </div>
+              <span className="mny-bar ok" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${pct}%` }} /></span>
+              {bonus ? <p className="mny-note pr"><Ico name="flag" small />{ar ? `لو وصلت الهدف لك مكافأة ${whole(bonus)} ${sar} — تسجّلها الإدارة بعد نهاية الشهر` : `Reach the target for a ${whole(bonus)} ${sar} bonus — recorded by management after the month`}</p> : null}
+            </>
+          ) : <p className="mny-note box">{ar ? "ما فيه هدف مسجّل لهالشهر." : "No target for this month."}</p>}
+        </section>
+        <section className="mny-card" aria-labelledby="mc-com-h">
+          <div className="mny-h"><div><h2 id="mc-com-h">{ar ? "عمولتي هالشهر" : "My commission this month"}</h2><small>{ar ? "تنحسب بعد ما تعتمد المالية التحصيل" : "Counted once finance approves a collection"}</small></div></div>
+          <div className="mny-tiles">
+            <span className="mny-tile" data-testid="mc-accrued"><small>{ar ? "مستحقة لك" : "Owed to you"}</small><b className="num">{whole(data.statement.accrued)}</b><small>{sar}</small></span>
+            <span className="mny-tile"><small>{ar ? "انصرفت" : "Paid"}</small><b className="num">{whole(data.statement.paid)}</b><small>{sar}</small></span>
+            <span className="mny-tile ok" data-testid="outstanding-tile"><small>{ar ? "باقي لك" : "Left to you"}</small><b className="num">{whole(data.statement.outstanding)}</b><small>{sar}</small></span>
+          </div>
+          {day?.estimate ? <p className="mny-note"><Ico name="trend" small />{ar ? `لو وصلت الهدف تصير عمولتك تقريبًا ${whole(day.estimate)} ${sar}` : `At the target, about ${whole(day.estimate)} ${sar}`}</p> : null}
+          <p className="mny-note" data-testid="mc-when"><Ico name="clock" small />{ar ? "متى تنصرف؟ بعد ما تعتمدها المالية، وتتحول هنا إلى «انصرفت»." : "When is it paid? After finance approves it; it then shows here as «Paid»."}</p>
+        </section>
+      </div>
+      {live.length ? (
+        <section className="mny-card" aria-labelledby="mc-how-h">
+          <div className="mny-h"><div><h2 id="mc-how-h">{ar ? "كيف انحسبت عمولتك؟" : "How was it computed?"}</h2><small>{ar ? "نفس الحساب لكل تحصيل" : "The same for each collection"}</small></div></div>
+          {same("sharePercent") && same("effectiveRatePercent") ? (
+            <div className="mny-eq">
+              <span><small>{ar ? "حصّلت بدون الضريبة" : "Collected before VAT"}</small><b className="num">{whole(live.reduce((s, a) => s + net(a), 0))}</b></span><i>×</i>
+              <span><small>{ar ? "حصتك من الصفقات" : "Your share"}</small><b className="num">{pctText(live[0].sharePercent)}</b></span><i>×</i>
+              <span><small>{ar ? "نسبتك" : "Your rate"}</small><b className="num">{pctText(live[0].effectiveRatePercent)}</b></span><i>=</i>
+              <span className="ok"><small>{ar ? "عمولتك" : "Commission"}</small><b className="num">{whole(live.reduce((s, a) => s + Number(a.amount), 0))} {sar}</b></span>
+            </div>
+          ) : <p className="mny-note">{ar ? "التحصيل بدون الضريبة × حصتك من الصفقة × نسبتك = العمولة. النسبة أو الحصة تختلف بين التحصيلات — شوف كل تحصيل تحت." : "Collected before VAT × your share × your rate = commission. They differ between collections — see each below."}</p>}
+        </section>
+      ) : null}
+      <section className="mny-card flush" aria-labelledby="mc-rows-h" data-testid="mc-rows">
+        <div className="mny-h"><div><h2 id="mc-rows-h">{ar ? "عمولة كل تحصيل" : "Commission per collection"}</h2><small>{ar ? "الأحدث أولًا" : "Newest first"}</small></div></div>
+        {data.accruals.length ? (
+          <table className="mny-table">
+            <thead><tr><th>{ar ? "التاريخ" : "Date"}</th><th>{ar ? "العميل" : "Customer"}</th><th>{ar ? "المحصّل" : "Collected"}</th><th>{ar ? "العمولة" : "Commission"}</th><th>{ar ? "الحالة" : "Status"}</th></tr></thead>
+            <tbody>
+              {[...data.accruals].sort((x, y) => y.collectionEvent.collectedAt.localeCompare(x.collectionEvent.collectedAt)).map((a) => {
+                const w = ACCRUAL_WORD[a.status] ?? [a.status, a.status, ""];
+                return (
+                  <tr key={a.id}>
+                    <td>{day2(a.collectionEvent.collectedAt)}</td>
+                    <td><bdi>{a.collectionEvent.customer?.name ?? (ar ? "بدون عميل" : "No customer")}</bdi></td>
+                    <td className="n num">{whole(net(a))} {sar}</td>
+                    <td className="ok num">{whole(a.amount)} {sar}</td>
+                    <td><span className={`mny-pill ${w[2]}`}>{ar ? w[0] : w[1]}</span></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : <p className="mny-note" style={{ padding: "0 20px 16px" }}>{ar ? "ما فيه عمولة على تحصيلات هالشهر للحين." : "No commission on this month's collections yet."}</p>}
+        <p className="mny-note"><Ico name="note" small />{ar ? "التحصيل اللي «بانتظار المالية» ما له عمولة للحين — تنحسب أول ما يُعتمد. تتابعه من «التحصيل»." : "A collection awaiting finance has no commission yet — it counts once approved. Follow it on «Collections»."}</p>
+      </section>
     </div>
   );
 }

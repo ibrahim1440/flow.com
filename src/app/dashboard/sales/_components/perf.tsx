@@ -45,7 +45,8 @@ export function PerfHeader({
   const phone = usePhone();
   // The rep frames title every tab «أهدافي وعمولاتي» (gx.py perf_head rep=True).
   const own = usePerfOwnView();
-  const title = own ? (ar ? "أهدافي وعمولاتي" : "My targets and commissions") : given;
+  // «التحصيل والعمولات › هدفي وعمولتي» (Figma page 09): the rep titles every tab as the sidebar names it.
+  const title = own ? (ar ? "هدفي وعمولتي" : "My target & commission") : given;
   const section = own ? title : ar ? "الأداء والعمولات" : "Performance and commissions";
   useD21Phone({ title: phoneTitle, sub: title === phoneTitle ? undefined : section });
   if (phone) {

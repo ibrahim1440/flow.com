@@ -7,6 +7,7 @@ import {
   useLang, Spinner, Modal, Field, TextArea, Button, FocusDialog, api, formatDay, formatMoney, num, moneyText,
 } from "../_components/ui";
 import { Ico } from "@/components/shell/icons";
+import "../_components/money.css";
 import { usePhone, useD21Phone } from "@/components/shell/page-context";
 import { splitTitle } from "@/components/d21/labels";
 import { useUser } from "../../user-context";
@@ -174,13 +175,19 @@ export default function CollectionsPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  // The rep's view (owner-approved Figma page 09): a local filter over their own list.
+  const [repFilter, setRepFilter] = useState<"all" | "pending" | "approved" | "returned">("all");
   const [dialog, setDialog] = useState<{ kind: "reject" | "reverse"; row: Collection } | null>(null);
   /** The row a reviewer has opened to look at properly before deciding. */
   const [detail, setDetail] = useState<Collection | null>(null);
   const [reason, setReason] = useState("");
 
   const t = useTerm();
-  useD21Phone({ title: qoyod ? t("collections") : (ar ? "التحصيلات" : "Collections"), sub: ar ? "الفواتير والتحصيل" : "Invoicing & collections" });
+  // A viewer who only records reads «التحصيل» under «التحصيل والعمولات» (Figma page 09); Finance keeps its titles.
+  const recorderOnly = !!data && !(data.can.verify || data.can.reject || data.can.reverse);
+  useD21Phone(recorderOnly
+    ? { title: ar ? "التحصيل" : "Collections", sub: ar ? "التحصيل والعمولات" : "Collections & commissions" }
+    : { title: qoyod ? t("collections") : (ar ? "التحصيلات" : "Collections"), sub: ar ? "الفواتير والتحصيل" : "Invoicing & collections" });
   // Qoyod parity (accountant workspace only): a filter card (period, customer) over the rows already loaded, the dark
   // title bar and the pager. The status segments, the server's scope and every decision stay as they are.
   const cf = useFilters({ from: "", to: "", customer: "", locations: [] as string[] });
@@ -781,6 +788,101 @@ export default function CollectionsPage() {
       </div>
     );
   })() : null;
+
+  // «التحصيل» for whoever only records (owner-approved Figma page 09, 3 Nov 2026): what is waiting for finance, what
+  // was approved, what came back to fix, the customers who still owe, and the list — in plain words. Finance keeps its queue.
+  if (!isFinance) {
+    const returned = rows.filter((r) => r.status === "REJECTED" && r.decisionReasonCode === "RETURN_FOR_CORRECTION" && !r.correctedBy);
+    const returnedSum = returned.reduce((a, r) => a + Number(r.amountGross), 0);
+    const approvedCount = data.counts ? (data.counts.APPROVED ?? 0) : approved.length;
+    const whole = (v: string | number) => Math.round(Number(v)).toLocaleString("en-US");
+    const word = (r: Collection): [string, string] =>
+      r.status === "PENDING_VERIFICATION" ? [ar ? "بانتظار المالية" : "Awaiting finance", "t-wa"]
+        : r.status === "APPROVED" ? [ar ? "معتمد" : "Approved", "t-ok"]
+          : r.status === "REVERSED" ? [ar ? "معكوس" : "Reversed", "t-in"]
+            : returned.includes(r) ? [ar ? "رجع لك" : "Back to you", "t-er"] : [ar ? "مرفوض" : "Rejected", "t-er"];
+    const shown = rows.filter((r) => repFilter === "all" ? true : repFilter === "pending" ? r.status === "PENDING_VERIFICATION" : repFilter === "approved" ? r.status === "APPROVED" : returned.includes(r));
+    const count = (n: number, one: string, two: string, many: string) => (ar ? (n === 0 ? "ما فيه" : n === 1 ? one : n === 2 ? two : `${n} ${many}`) : `${n}`);
+    const recordHref = eligible.length === 1 ? `/dashboard/sales/deals/${eligible[0].id}#collections` : "#mny-owing";
+    const dayText = (iso: string) => new Date(iso).toLocaleDateString(ar ? "ar-SA-u-ca-gregory-nu-latn" : "en-GB", { day: "numeric", month: "long", timeZone: "Asia/Riyadh" });
+    return (
+      <div className="pg">
+        {notices}
+        {invoicesTabs ? (
+          <nav className="hr-tabs is-underline" aria-label={ar ? "الفواتير والتحصيل" : "Invoices & collections"} data-testid="hub-tabs" style={{ marginBottom: 12 }}>
+            <Link className="hr-tab" href="/dashboard/sales/invoices">{ar ? "فواتير المبيعات" : "Sales invoices"}</Link>
+            <span className="hr-tab" aria-selected="true" aria-current="page">{ar ? "التحصيل" : "Collections"}</span>
+          </nav>
+        ) : null}
+        <div className="mny" data-testid="collections-rep">
+          <div className="mny-top">
+            <div>{phone ? null : <h1>{ar ? "التحصيل" : "Collections"}</h1>}<p>{ar ? "الفلوس اللي استلمتها من العملاء، ووين وصلت" : "The money you received from customers, and where it got to"}</p></div>
+            {data.can.submit ? <Link className="btn p" href={recordHref} data-testid="record-collection" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Ico name="plus" small />{ar ? "سجّل تحصيل" : "Record a collection"}</Link> : null}
+          </div>
+          <div className="mny-row" style={{ ["--n" as string]: 3 }}>
+            <div className="mny-stt t-wa" data-testid="stat-pending"><span className="h"><Ico name="clock" small />{ar ? "بانتظار المالية" : "Awaiting finance"}</span><b className="num">{whole(pendingGross)} {unit}</b><small>{ar ? `${count(pendingCount, "تحصيل واحد", "تحصيلين", "تحصيلات")} · ما لها عمولة للحين` : `${pendingCount} · no commission yet`}</small></div>
+            <div className="mny-stt t-ok" data-testid="stat-approved"><span className="h"><Ico name="tick" small />{ar ? "اعتمدتها المالية" : "Approved"}</span><b className="num">{whole(approvedGross)} {unit}</b><small>{ar ? `${count(approvedCount, "تحصيل واحد", "تحصيلين", "تحصيلات")} · دخلت في عمولتك` : `${approvedCount} · counted in your commission`}</small></div>
+            <div className="mny-stt t-er" data-testid="stat-returned"><span className="h"><Ico name="back" small />{ar ? "رجعت لك" : "Back to you"}</span><b className="num">{whole(returnedSum)} {unit}</b><small>{returned.length ? (ar ? `${count(returned.length, "تحصيل واحد", "تحصيلين", "تحصيلات")} يحتاج تصحيح` : `${returned.length} to fix`) : (ar ? "ما فيه شي يحتاج تصحيح" : "Nothing to fix")}</small></div>
+          </div>
+          {returned.length ? (
+            <section className="mny-card" aria-labelledby="mny-need-h" style={{ boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--status-danger) 25%, transparent)" }} data-testid="collections-returned">
+              <div className="mny-h"><div><h2 id="mny-need-h">{ar ? "يحتاج منك" : "Needs you"}</h2><small>{ar ? "رجّعتها المالية — صحّحها وأرسلها من جديد" : "Finance sent these back — fix and resend"}</small></div></div>
+              {returned.map((r) => (
+                <div key={r.id} className="mny-need">
+                  <Ico name="back" small />
+                  <span className="mny-li-t"><b><bdi>{customerOf(r) ?? dealText(r)}</bdi> · <span className="num">{whole(r.amountGross)} {unit}</span></b>{r.decisionReason ? <small>{ar ? "السبب: " : "Reason: "}{r.decisionReason}</small> : null}</span>
+                  <button type="button" className="mny-btn" style={{ color: "var(--status-danger)" }} onClick={() => setDetail(r)} data-testid={`fix-${r.id}`}>{ar ? "صحّحه" : "Fix it"}</button>
+                </div>
+              ))}
+            </section>
+          ) : null}
+          <div className="mny-row side">
+            <section className="mny-card" aria-labelledby="mny-mine-h" data-testid="collections-table">
+              <div className="mny-h"><div><h2 id="mny-mine-h">{ar ? "تحصيلاتي" : "My collections"}</h2><small>{ar ? "الأحدث أولًا" : "Newest first"}</small></div>
+                <span className="mny-chips" role="group" aria-label={ar ? "الحالة" : "Status"}>
+                  {([["all", "الكل", "All"], ["pending", "بانتظار", "Waiting"], ["approved", "معتمد", "Approved"], ["returned", "رجع لي", "Back to me"]] as const).map(([k, a2, e]) => (
+                    <button key={k} type="button" aria-pressed={repFilter === k} onClick={() => setRepFilter(k)}>{ar ? a2 : e}</button>
+                  ))}
+                </span></div>
+              {shown.length ? (
+                <div className="mny-list">
+                  {shown.map((r) => {
+                    const w = word(r);
+                    return (
+                      <button key={r.id} type="button" className="mny-li" onClick={() => setDetail(r)} data-testid={`collection-${r.id}`}>
+                        <span className="mny-ib t-pr"><Ico name="wallet" small /></span>
+                        <span className="mny-li-t"><b><bdi>{customerOf(r) ?? dealText(r)}</bdi></b><small>{dayText(r.collectedAt)} · {methodText(r.paymentMethod)}</small></span>
+                        <span className="n num">{whole(r.amountGross)} {unit}</span>
+                        <span className={`mny-pill ${w[1]}`}>{w[0]}</span>
+                        <Ico name="chev" small style={{ transform: ar ? "scaleX(-1)" : undefined, color: "var(--text-muted)" }} />
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : <p className="mny-note box">{rows.length ? (ar ? "ما فيه تحصيلات بهالحالة." : "None in this state.") : (ar ? "ما سجّلت تحصيلات للحين. لما تستلم من عميل، سجّله من «عملاء عليهم مبالغ»." : "No collections yet.")}</p>}
+            </section>
+            <section className="mny-card" id="mny-owing" aria-labelledby="mny-owe-h" data-testid="eligible-deals">
+              <div className="mny-h"><div><h2 id="mny-owe-h">{ar ? "عملاء عليهم مبالغ" : "Customers who owe"}</h2><small>{ar ? "اضغط «سجّل» لما تستلم" : "Tap «Record» when you receive"}</small></div></div>
+              {eligible.length ? (
+                <div className="mny-list">
+                  {eligible.map((d) => (
+                    <div key={d.id} className="mny-li">
+                      <span className="mny-li-t"><b><bdi>{d.title}</bdi></b><small>{ar ? "عرض سعر مقبول" : "Accepted quotation"} · <bdi className="num">{d.quoteNumber}</bdi></small></span>
+                      <span className="n num">{whole(d.availableToSubmit)} {unit}</span>
+                      {data.can.submit ? <Link className="mny-btn" href={`/dashboard/sales/deals/${d.id}#collections`} data-testid={`eligible-deal-${d.id}`}><Ico name="plus" small />{ar ? "سجّل" : "Record"}</Link> : null}
+                    </div>
+                  ))}
+                </div>
+              ) : <p className="mny-note box" data-testid="no-eligible-deals">{ar ? "ما فيه عميل عليه مبلغ تقدر تسجّله الحين. التحصيل يكون على صفقة عرضها مقبول." : "No customer owes on an accepted quotation right now."}</p>}
+            </section>
+          </div>
+          <p className="mny-note box"><Ico name="note" small />{ar ? "كيف يمشي التحصيل؟ تسجّله أنت ← المالية تتأكد منه ← لما تعتمده تنحسب عمولتك. لو فيه شي ناقص يرجع لك هنا في «يحتاج منك»." : "You record it → finance checks it → once approved, your commission counts. If something is missing it comes back here."}</p>
+        </div>
+        {decisionDialog}
+        {drawer}
+      </div>
+    );
+  }
 
   if (phone) {
     return (

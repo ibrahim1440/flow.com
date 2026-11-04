@@ -409,7 +409,8 @@ export const NAV: NavNode[] = [
     // whose «الأداء» reads «هدفي وعمولتي»). A group label only (`groupText` with the viewer); the trail keeps «المالية».
     shell: {
       own: {
-        ar: "فلوسي", en: "My money",
+        // «التحصيل والعمولات» (owner, 3 Nov 2026 — Figma page 09): was «فلوسي».
+        ar: "التحصيل والعمولات", en: "Collections & commissions",
         unlessAny: [FINANCE, ACCOUNTING, ...DECIDES_COLLECTIONS, commissions("view_team"), commissions("approve"), commissions("record_payout"), commissions("manage_plans"), { module: "analytics" }],
       },
     },
@@ -476,6 +477,9 @@ export const NAV: NavNode[] = [
             ar: "الأهداف", en: "Targets",
             href: "/dashboard/sales/targets",
             anyOf: IN_SALES,
+            // A rep's target is on «الهدف والعمولة» (owner, 3 Nov 2026 — Figma page 09): one tab for the target and the
+            // commission. The page itself stays reachable (old links); the supervisor keeps it as before.
+            hideForRep: true,
           },
           {
             // The TEAM's reports: the sales manager (`lead_assign`, the permission that already
@@ -501,6 +505,8 @@ export const NAV: NavNode[] = [
             id: "finance.performance.mine",
             ar: "عمولاتي", en: "My commissions",
             href: "/dashboard/sales/my-commissions",
+            // The rep reads it «الهدف والعمولة» (the targets tab folded in, Figma page 09).
+            shell: { own: { ar: "الهدف والعمولة", en: "Target & commission", unlessAny: [sales("lead_assign"), { module: "sales", role: "admin" }] } },
             anyOf: [
               [commissions(), sales()],
               commissions("approve"), commissions("record_payout"), ...DECIDES_COLLECTIONS,

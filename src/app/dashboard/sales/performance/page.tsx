@@ -15,6 +15,8 @@ import { usePhone } from "@/components/shell/page-context";
 import { useUser } from "../../user-context";
 import { routeAllowed } from "@/lib/nav/registry";
 import { seesTeamReports } from "@/lib/services/sales/scope";
+import { Ico } from "@/components/shell/icons";
+import "../_components/money.css";
 
 /**
  * «لوحة الأداء» — the first tab of «الأداء والعمولات» (GX perf_tabs «dash», the rep's
@@ -102,6 +104,8 @@ export default function PerformancePage() {
 
   if (loading) return <PerfLoading ar={ar} />;
   if (!data) return <div className="pg"><PerfNotice kind="error" ar={ar}>{error}</PerfNotice></div>;
+  // A rep reading their own month (owner-approved Figma page 09): the redesigned board. The team view is unchanged.
+  if (own && !data.teamView) return <RepBoard ar={ar} data={data} month={month} lang={lang} onMonth={(v) => { setLoading(true); setMonth(v); }} can={can} />;
 
   const t = data.totals;
   const n = (v: number) => num(v, lang);
@@ -405,6 +409,108 @@ export default function PerformancePage() {
             : "Net collected = collections recorded in the month, net of tax and non-qualifying amounts, split across the deal's owners as Targets and the commission engine split them. Won and lost = deals closed in the month, at their pre-tax value. Win rate = won ÷ (won + lost). Open pipeline is a snapshot of the deals open now. Conversion = of the leads that arrived in the month, how many became a deal. Quotations = issued and accepted in the month. Commission accrued = the month's accrual and reversal entries in the commission ledger."}
         </span>
       </PerfNote>
+    </div>
+  );
+}
+
+/**
+ * «لوحة الأداء» for the rep (owner-approved Figma page 09, 3 Nov 2026): the month in one olive card — collected against
+ * the target, what is left and what it takes a day, the commission and the estimate — then four figures, the six months
+ * and the open deals by stage. The same figures as the team view (GET /api/sales/performance); the estimate and the
+ * days left are «يومي»'s (GET /api/sales/my-day), so the two pages never disagree.
+ */
+function RepBoard({ ar, data, month, lang, onMonth, can }: { ar: boolean; data: Payload; month: string; lang: "ar" | "en"; onMonth: (v: string) => void; can: (href: string) => boolean }) {
+  const [day, setDay] = useState<{ daysLeft: number; estimate: string | null; month: string } | null>(null);
+  useEffect(() => {
+    let off = false;
+    api<{ target: { daysLeft: number; estimate: string | null; month: string } }>("/api/sales/my-day").then((r) => { if (!off && r.ok && r.data.target) setDay(r.data.target); });
+    return () => { off = true; };
+  }, []);
+  const t = data.totals;
+  const sar = ar ? "ر.س" : "SAR";
+  const whole = (v: string | number | null | undefined) => (v === null || v === undefined ? "—" : Math.round(Number(v)).toLocaleString("en-US"));
+  const prog = t.target;
+  const pctN = prog.percent === null ? 0 : Math.max(0, Math.min(100, Number(prog.percent)));
+  const thisMonth = day?.month === month;
+  const daysLeft = thisMonth ? day!.daysLeft : null;
+  const perDay = daysLeft && prog.remaining && Number(prog.remaining) > 0 ? Number(prog.remaining) / Math.max(1, daysLeft) : null;
+  const line = prog.target === null ? (ar ? "ما فيه هدف مسجّل لهالشهر" : "No target for this month")
+    : prog.met ? (ar ? `حقّقت ${whole(prog.percent)}% — فوق الهدف` : `${whole(prog.percent)}% — above target`)
+      : [ar ? `حقّقت ${whole(prog.percent)}%` : `${whole(prog.percent)}% achieved`, ar ? `باقي ${whole(prog.remaining)} ${sar}` : `${whole(prog.remaining)} ${sar} to go`,
+        daysLeft !== null ? (ar ? `باقي ${daysLeft} يوم` : `${daysLeft} days left`) : null,
+        perDay ? (ar ? `تحتاج ${whole(perDay)} ${sar} يوميًا` : `${whole(perDay)} ${sar} a day`) : null].filter(Boolean).join(" · ");
+  const closed = t.won + t.lost;
+  const kpis: { icon: Parameters<typeof Ico>[0]["name"]; tone: string; label: string; value: string; sub: string; href?: string }[] = [
+    { icon: "deal", tone: "t-ok", label: ar ? "صفقات كسبتها" : "Deals won", value: String(t.won), sub: ar ? `بقيمة ${whole(t.wonValue)} ${sar}` : `worth ${whole(t.wonValue)} ${sar}` },
+    { icon: "trend", tone: "t-pr", label: ar ? "نسبة الكسب" : "Win rate", value: t.winRatePercent === null ? "—" : `${whole(t.winRatePercent)}%`, sub: closed ? (ar ? `${t.won} كسبت من ${closed} انقفلت` : `${t.won} of ${closed} closed`) : (ar ? "ما انقفلت صفقات هالشهر" : "No deal closed yet") },
+    { icon: "quote", tone: "t-sa", label: ar ? "عروض الأسعار" : "Quotations", value: String(t.quotesIssued), sub: ar ? `انقبل منها ${t.quotesAccepted}` : `${t.quotesAccepted} accepted`, href: "/dashboard/sales/quotes" },
+    { icon: "wallet", tone: "t-in", label: ar ? "صفقات مفتوحة" : "Open deals", value: String(t.openCount), sub: ar ? `بقيمة ${whole(t.openValue)} ${sar}` : `worth ${whole(t.openValue)} ${sar}`, href: "/dashboard/sales/deals" },
+  ];
+  const trend = data.trend.slice(-6);
+  const top = Math.max(1, ...trend.map((m) => Math.max(Number(m.netCollected), Number(m.target ?? 0))));
+  const monthName = (m: string) => new Date(`${m}-01T00:00:00Z`).toLocaleDateString(ar ? "ar-SA-u-ca-gregory-nu-latn" : "en-GB", { month: "long", timeZone: "UTC" });
+  const stages = data.pipelineByStage.filter((s) => s.count > 0);
+  const maxStage = Math.max(1, ...stages.map((s) => Number(s.value)));
+  const deals = (n: number) => (ar ? (n === 1 ? "صفقة وحدة" : n === 2 ? "صفقتين" : n <= 10 ? `${n} صفقات` : `${n} صفقة`) : `${n} deal${n === 1 ? "" : "s"}`);
+  return (
+    <div className="pg">
+      <PerfHeader ar={ar} title={ar ? "هدفي وعمولتي" : "My target & commission"} phoneTitle={ar ? "لوحة الأداء" : "Performance"} meta={[]}
+        actions={<MonthChip value={month} onChange={onMonth} lang={lang} testId="pf-month" />} />
+      {data.notice ? <PerfSandbox notice={data.notice} ar={ar} /> : null}
+      <div className="mny" data-testid="pf-rep">
+        <section className="mny-hero" data-testid="pf-collected">
+          <div className="mny-hero-l">
+            <small>{ar ? "المحصّل هذا الشهر · بدون الضريبة" : "Collected this month · before VAT"}</small>
+            <div className="mny-hero-n"><b className="num">{whole(t.netCollected)}</b>{prog.target !== null ? <span>{ar ? `من ${whole(prog.target)} ${sar}` : `of ${whole(prog.target)} ${sar}`}</span> : <span>{sar}</span>}</div>
+            <div className="mny-hero-bar" role="progressbar" aria-valuenow={Math.round(pctN)} aria-valuemin={0} aria-valuemax={100} data-testid="pf-progress"><i style={{ width: `${pctN}%` }} /></div>
+            <p data-testid="pf-progress-caption">{line}</p>
+          </div>
+          {data.commissionVisible ? (
+            <div className="mny-hero-r">
+              <div className="mny-hero-box" data-testid="pf-commission"><small>{ar ? "عمولتك المستحقة" : "Your commission"}</small><b className="num">{whole(t.commissionAccrued ?? 0)} {sar}</b><span>{ar ? "على اللي حصّلته" : "on what you collected"}</span></div>
+              {thisMonth && day?.estimate ? <div className="mny-hero-box"><small>{ar ? "لو وصلت الهدف" : "If you reach the target"}</small><b className="num">{whole(day.estimate)} {sar}</b><span>{ar ? "تقدير" : "estimate"}</span></div> : null}
+            </div>
+          ) : null}
+        </section>
+        <div className="mny-kpis">
+          {kpis.map((k) => {
+            const body = (<><span className="mny-kpi-h"><span className={`mny-ib ${k.tone}`}><Ico name={k.icon} small /></span>{k.label}</span><b className="num">{k.value}</b><small>{k.sub}</small></>);
+            return k.href && can(k.href) ? <Link key={k.label} href={k.href} className="mny-kpi">{body}</Link> : <div key={k.label} className="mny-kpi">{body}</div>;
+          })}
+        </div>
+        <div className="mny-row side">
+          <section className="mny-card" aria-labelledby="pf-trend-h">
+            <div className="mny-h"><div><h2 id="pf-trend-h">{ar ? "المحصّل مقابل الهدف" : "Collected against the target"}</h2><small>{ar ? "آخر 6 أشهر" : "The last six months"}</small></div></div>
+            {trend.length ? (
+              <div className="mny-plot" role="img" aria-label={trend.map((m) => `${monthName(m.month)} ${whole(m.netCollected)}`).join("، ")}>
+                {trend.map((m, i) => {
+                  const v = Number(m.netCollected); const tg = m.target === null ? null : Number(m.target);
+                  const now = i === trend.length - 1 && m.month === month;
+                  return (
+                    <div key={m.month} className={`mny-col${now ? " now" : tg !== null && v >= tg ? " met" : ""}`}>
+                      <small className="num">{v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : whole(v)}</small>
+                      <i style={{ height: `${Math.max(2, (v / top) * 160)}px` }} />
+                      <span>{monthName(m.month)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : <p className="mny-note">{ar ? "ما فيه تحصيل في الأشهر اللي فاتت." : "No collections in the last months."}</p>}
+            <span className="mny-leg"><span><i style={{ background: "color-mix(in srgb, var(--status-success) 55%, var(--surface))" }} />{ar ? "وصل الهدف" : "Reached"}</span><span><i style={{ background: "var(--border-strong)" }} />{ar ? "ما وصل" : "Not reached"}</span><span><i style={{ background: "var(--action-primary)" }} />{ar ? "هالشهر (للحين)" : "This month (so far)"}</span></span>
+          </section>
+          <section className="mny-card" aria-labelledby="pf-stages-h">
+            <div className="mny-h"><div><h2 id="pf-stages-h">{ar ? "صفقاتي المفتوحة" : "My open deals"}</h2><small>{ar ? "حسب المرحلة" : "By stage"}</small></div>
+              {can("/dashboard/sales/deals") ? <Link className="mny-lk" href="/dashboard/sales/deals">{ar ? "افتح الصفقات" : "Open deals"}<Ico name="chev" small style={{ transform: ar ? "scaleX(-1)" : undefined }} /></Link> : null}</div>
+            {stages.length ? stages.map((s) => (
+              <div key={s.stageId} className="mny-st">
+                <span className="mny-st-h"><b>{ar ? s.nameAr : s.nameEn}</b><span className="num">{deals(s.count)} · {whole(s.value)} {sar}</span></span>
+                <span className="mny-bar"><i style={{ width: `${Math.max(3, (Number(s.value) / maxStage) * 100)}%` }} /></span>
+              </div>
+            )) : <p className="mny-note">{ar ? "ما عندك صفقات مفتوحة الحين." : "No open deals right now."}</p>}
+          </section>
+        </div>
+        <p className="mny-note"><Ico name="note" small />{ar ? "الأرقام بدون الضريبة · التحصيل يدخل بعد ما تعتمده المالية." : "Figures before VAT · a collection counts once finance approves it."}</p>
+      </div>
     </div>
   );
 }

@@ -1,0 +1,77 @@
+/* «التحصيل والعمولات» — the rep's view of «لوحة الأداء», «الهدف والعمولة» and «التحصيل»
+   (owner-approved Figma page 09, 3 Nov 2026). Tokens only; scoped to `.mny`. */
+.d21 .mny { display: grid; gap: 18px; min-width: 0 }
+.d21 .mny-card { display: grid; gap: 14px; align-content: start; min-width: 0; padding: 20px; border-radius: 14px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-subtle) }
+.d21 .mny-h { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap }
+.d21 .mny-h h2 { margin: 0; font-size: 17px; font-weight: 700 } .d21 .mny-h small { display: block; font-size: 12.5px; color: var(--text-muted); margin-top: 2px }
+.d21 .mny-lk { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 700; color: var(--action-primary); text-decoration: none }
+.d21 .mny-row { display: grid; gap: 14px; grid-template-columns: repeat(var(--n, 2), minmax(0, 1fr)); align-items: stretch }
+.d21 .mny-row.side { grid-template-columns: minmax(0, 1fr) 400px }
+/* The olive hero (the same treatment as «يومي»'s target card). */
+.d21 .mny-hero { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; padding: 24px; border-radius: 18px; background: var(--action-primary); color: #fff }
+.d21 .mny-hero-l { display: grid; gap: 10px; align-content: center }
+.d21 .mny-hero-l > small { font-size: 13px; color: #e9e7d6; font-weight: 500 }
+.d21 .mny-hero-n { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap } .d21 .mny-hero-n b { font-size: 40px; line-height: 1.1; font-weight: 700 } .d21 .mny-hero-n span { font-size: 16px; color: #e9e7d6; font-weight: 500 }
+.d21 .mny-hero-bar { height: 10px; border-radius: 6px; background: rgba(255,255,255,.18); overflow: hidden } .d21 .mny-hero-bar > i { display: block; height: 100%; border-radius: 6px; background: #e9e7d6 }
+.d21 .mny-hero-l > p { margin: 0; font-size: 13px; color: #f3f1e4; font-weight: 500 }
+.d21 .mny-hero-r { display: grid; gap: 10px; align-content: center }
+.d21 .mny-hero-box { display: grid; gap: 2px; padding: 12px 14px; border-radius: 12px; background: rgba(255,255,255,.1) }
+.d21 .mny-hero-box small { font-size: 12.5px; color: #e9e7d6 } .d21 .mny-hero-box b { font-size: 22px; font-weight: 700 } .d21 .mny-hero-box span { font-size: 12px; color: #d9d7c3 }
+/* Figure tiles. */
+.d21 .mny-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px }
+.d21 .mny-kpi { display: grid; gap: 6px; padding: 18px; border-radius: 14px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-subtle); color: inherit; text-decoration: none }
+.d21 a.mny-kpi:hover { box-shadow: inset 0 0 0 1px var(--border-strong) }
+.d21 .mny-kpi-h { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; color: var(--text-muted) }
+.d21 .mny-ib { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; flex: none }
+.d21 .mny-kpi > b { font-size: 26px; font-weight: 700; line-height: 1.2 } .d21 .mny-kpi > small { font-size: 12.5px; color: var(--text-muted) }
+.d21 .t-ok { color: var(--status-success); background: var(--status-success-tint) } .d21 .t-in { color: var(--status-info); background: var(--status-info-tint) }
+.d21 .t-wa { color: var(--status-warning); background: var(--status-warning-tint) } .d21 .t-er { color: var(--status-danger); background: var(--status-danger-tint) }
+.d21 .t-pr { color: var(--action-primary); background: var(--action-primary-tint) } .d21 .t-sa { color: #7a5a2e; background: #f5ece0 }
+/* The six months. */
+.d21 .mny-plot { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px; align-items: end; height: 220px; padding-top: 8px }
+.d21 .mny-col { display: grid; justify-items: center; align-content: end; gap: 6px; height: 100%; min-width: 0 }
+.d21 .mny-col > i { width: min(40px, 70%); border-radius: 6px 6px 0 0; background: var(--border-strong); min-height: 2px }
+.d21 .mny-col.met > i { background: color-mix(in srgb, var(--status-success) 55%, var(--surface)) } .d21 .mny-col.now > i { background: var(--action-primary) }
+.d21 .mny-col > small { font-size: 11.5px; font-weight: 600; color: var(--text-muted) } .d21 .mny-col.now > small { color: var(--action-primary) }
+.d21 .mny-col > span { font-size: 12px; color: var(--text-muted) }
+.d21 .mny-leg { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--text-muted) } .d21 .mny-leg i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-inline-end: 6px; vertical-align: -1px }
+/* Bars of the stages / the goal. */
+.d21 .mny-st { display: grid; gap: 6px } .d21 .mny-st-h { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--text-muted) } .d21 .mny-st-h b { font-size: 14px; color: var(--text-primary) }
+.d21 .mny-bar { height: 10px; border-radius: 6px; background: var(--surface-subtle); overflow: hidden; box-shadow: inset 0 0 0 1px var(--border-subtle) } .d21 .mny-bar > i { display: block; height: 100%; border-radius: 6px; background: var(--status-info) } .d21 .mny-bar.ok > i { background: var(--status-success) }
+.d21 .mny-note { display: flex; gap: 8px; align-items: flex-start; margin: 0; font-size: 12.5px; color: var(--text-muted) }
+.d21 .mny-note.box { padding: 12px 14px; border-radius: 12px; background: var(--surface-subtle) }
+.d21 .mny-note.pr { padding: 12px; border-radius: 10px; background: var(--action-primary-tint); color: var(--action-primary); font-weight: 600; font-size: 13px }
+/* Three figures in a row (the goal card). */
+.d21 .mny-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px }
+.d21 .mny-stat { display: grid; gap: 2px } .d21 .mny-stat small { font-size: 13px; color: var(--text-muted); font-weight: 500 } .d21 .mny-stat b { font-size: 26px; font-weight: 700 } .d21 .mny-stat span { font-size: 12px; color: var(--text-muted) }
+.d21 .mny-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px }
+.d21 .mny-tile { display: grid; gap: 2px; padding: 12px 14px; border-radius: 12px; background: var(--surface-subtle) } .d21 .mny-tile small { font-size: 12.5px; color: var(--text-muted) } .d21 .mny-tile b { font-size: 22px; font-weight: 700 } .d21 .mny-tile.ok { background: var(--status-success-tint) } .d21 .mny-tile.ok b { color: var(--status-success) }
+/* The equation. */
+.d21 .mny-eq { display: flex; flex-wrap: wrap; align-items: center; gap: 10px }
+.d21 .mny-eq > span { display: grid; justify-items: center; gap: 0; padding: 10px 16px; border-radius: 12px; background: var(--surface-subtle) } .d21 .mny-eq > span small { font-size: 12px; color: var(--text-muted) } .d21 .mny-eq > span b { font-size: 18px } .d21 .mny-eq > span.ok { background: var(--status-success-tint) } .d21 .mny-eq > span.ok b, .d21 .mny-eq > span.ok small { color: var(--status-success) }
+.d21 .mny-eq > i { font-style: normal; font-size: 18px; color: var(--text-muted) }
+/* Lists and the table. */
+.d21 .mny-list { display: grid } .d21 .mny-li { display: flex; align-items: center; gap: 10px; padding: 11px 0; border-top: 1px solid var(--border-subtle); min-width: 0 } .d21 .mny-li:first-child { border-top: 0 }
+.d21 button.mny-li { width: 100%; border-inline: 0; border-bottom: 0; background: none; font: inherit; color: inherit; text-align: start; cursor: pointer }
+.d21 .mny-li-t { flex: 1; min-width: 0; display: grid } .d21 .mny-li-t b { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap } .d21 .mny-li-t small { font-size: 12px; color: var(--text-muted) }
+.d21 .mny-li > .n { font-weight: 700; font-size: 14px; white-space: nowrap }
+.d21 .mny-pill { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap }
+.d21 .mny-btn { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 0 12px; border-radius: 9px; box-shadow: inset 0 0 0 1px var(--border-subtle); background: var(--surface); font: inherit; font-size: 13px; font-weight: 700; color: var(--action-primary); text-decoration: none; cursor: pointer; border: 0 }
+.d21 .mny-table { width: 100%; border-collapse: collapse; font-size: 14px }
+.d21 .mny-table th { text-align: start; font-size: 12px; font-weight: 600; color: var(--text-muted); padding: 10px 20px; background: var(--surface-subtle) }
+.d21 .mny-table td { padding: 12px 20px; border-top: 1px solid var(--border-subtle) } .d21 .mny-table td.n { font-weight: 600 } .d21 .mny-table td.ok { color: var(--status-success); font-weight: 700 }
+.d21 .mny-card.flush { padding: 0; gap: 0; overflow: hidden } .d21 .mny-card.flush > .mny-h { padding: 18px 20px 12px } .d21 .mny-card.flush > .mny-note { padding: 12px 20px 14px }
+/* The status tiles of «التحصيل». */
+.d21 .mny-stt { display: grid; gap: 6px; padding: 18px; border-radius: 14px } .d21 .mny-stt .h { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700 } .d21 .mny-stt b { font-size: 26px; font-weight: 700; color: var(--text-primary) } .d21 .mny-stt small { font-size: 12.5px; color: var(--text-muted) }
+.d21 .mny-stt.t-wa { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--status-warning) 22%, transparent) } .d21 .mny-stt.t-ok { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--status-success) 22%, transparent) } .d21 .mny-stt.t-er { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--status-danger) 22%, transparent) }
+.d21 .mny-need { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--status-danger-tint) } .d21 .mny-need .mny-li-t small { color: var(--status-danger); font-weight: 500 }
+.d21 .mny-chips { display: flex; flex-wrap: wrap; gap: 6px } .d21 .mny-chips button { min-height: 30px; padding: 0 12px; border-radius: 999px; border: 0; box-shadow: inset 0 0 0 1px var(--border-subtle); background: var(--surface); font: inherit; font-size: 12.5px; color: var(--text-secondary); cursor: pointer } .d21 .mny-chips button[aria-pressed="true"] { background: var(--text-primary); color: var(--surface); box-shadow: none; font-weight: 700 }
+.d21 .mny-top { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap } .d21 .mny-top h1 { margin: 0; font-size: 28px } .d21 .mny-top p { margin: 2px 0 0; color: var(--text-muted); font-size: 14px }
+@media (max-width: 1099.98px) { .d21 .mny-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)) } .d21 .mny-row.side { grid-template-columns: minmax(0, 1fr) } }
+@media (max-width: 767.98px) {
+  .d21 .mny-hero { grid-template-columns: minmax(0, 1fr); padding: 18px } .d21 .mny-hero-n b { font-size: 32px }
+  .d21 .mny-row { grid-template-columns: minmax(0, 1fr) } .d21 .mny-plot { gap: 6px; height: 180px }
+  .d21 .mny-stats, .d21 .mny-tiles { gap: 6px } .d21 .mny-stat b { font-size: 20px } .d21 .mny-tile b { font-size: 18px }
+  .d21 .mny-table th:nth-child(1), .d21 .mny-table td:nth-child(1) { display: none } .d21 .mny-table th, .d21 .mny-table td { padding: 10px 12px }
+  .d21 .mny-top .btn { width: 100%; justify-content: center }
+}
