@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "prisma generate && next dev --webpack",
-    "build": "tsx scripts/validate-env.ts && prisma generate && next build",
+    "build": "tsx scripts/validate-env.ts && prisma generate && next typegen && tsc --noEmit && next build",
     "validate:env": "tsx scripts/validate-env.ts",
     "start": "next start",
     "lint": "eslint",

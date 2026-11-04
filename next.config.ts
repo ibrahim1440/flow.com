@@ -88,6 +88,10 @@ const SECURITY_HEADERS = [
 
 const nextConfig: NextConfig = {
   devIndicators: false,
+  // The type check runs as its own step BEFORE `next build` (package.json "build": next typegen && tsc --noEmit), so the
+  // build still fails on any type error; Next's in-build copy of the same check is skipped, because running it while
+  // Turbopack's compile memory is still resident is what took the build past Vercel's 8 GB machine (out_of_memory).
+  typescript: { ignoreBuildErrors: true },
   turbopack: {
     root: path.resolve(__dirname),
   },
