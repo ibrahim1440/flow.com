@@ -17,6 +17,9 @@ export type Customer = {
   whatsappOptOut: boolean; emailOptOut?: boolean; createdAt: string;
   commercialRegNo: string | null; vatNumber: string | null; segment: string | null; city: string | null; priceList: string | null;
   paymentTermsDays: number | null; creditLimit: string | null;
+  /** Soon batch round 2: the unified number and the national address («مسلّمات», changed with a reason). */
+  unifiedNumber?: string | null; nationalBuildingNo?: string | null; nationalStreet?: string | null; nationalDistrict?: string | null;
+  nationalCity?: string | null; nationalPostalCode?: string | null; nationalAdditionalNo?: string | null; nationalShortAddress?: string | null;
   /** «مدة الإيقاف الافتراضية» (feat/credit-hold), days; null = not set. */
   defaultHoldDays?: number | null;
   accountOwner: { id: string; name: string } | null;
@@ -162,6 +165,6 @@ export type Account = {
   orders: Order[] | null;
   collections: Collection[] | null;
   timeline: TimelineEntry[];
-  can: { edit: boolean; manageProfiles: boolean; manageFiles: boolean; logActivity: boolean; quote: boolean; createDeal: boolean; editOwner?: boolean; editCreditTerms?: boolean; editFileDates?: boolean };
+  can: { edit: boolean; editContact?: boolean; manageProfiles: boolean; manageFiles: boolean; logActivity: boolean; quote: boolean; createDeal: boolean; editOwner?: boolean; editCreditTerms?: boolean; editFileDates?: boolean };
   now: string;
 };

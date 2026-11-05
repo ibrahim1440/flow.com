@@ -3,6 +3,7 @@ import { readQcSettings } from "@/lib/services/settings/sections";
 import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
 import { anonymousOrder, canSeeCustomerDetail } from "@/lib/auth/customer-detail";
+import { orderVisibilityWhere } from "@/lib/services/sales/scope";
 
 function getDateFilter(timeframe: string): { gte: Date } | undefined {
   const now = new Date();
@@ -38,6 +39,10 @@ export async function GET(request: Request) {
   const timeframe = searchParams.get("timeframe") ?? "all";
   const dateFilter = getDateFilter(timeframe);
   const createdAtWhere = dateFilter ? { createdAt: dateFilter } : {};
+  // Readiness review P1-2 (belt and braces next to the rep template losing «لوحة التحكم»): a sales-scoped viewer sees
+  // the orders, customers and QC batches of their OWN book only — the same rule as GET /api/orders (scope.ts); everybody
+  // else (production, dispatch, QC, managers, the admin) keeps the whole company view. `{}` when not scoped.
+  const mine = orderVisibilityWhere(user);
 
   const [
     batchAgg,
@@ -68,7 +73,7 @@ export async function GET(request: Request) {
     }),
     // Distinct customers who placed orders in the timeframe
     prisma.order.findMany({
-      where: createdAtWhere,
+      where: { ...createdAtWhere, ...mine },
       select: { customerId: true },
       distinct: ["customerId"],
     }),
@@ -88,6 +93,7 @@ export async function GET(request: Request) {
     // Latest 7 orders that are not fully completed
     prisma.order.findMany({
       where: {
+        ...mine,
         items: { some: { productionStatus: { not: "Completed" } } },
       },
       include: {
@@ -105,7 +111,7 @@ export async function GET(request: Request) {
       take: 7,
     }),
     prisma.roastingBatch.findMany({
-      where: { status: "Pending QC" },
+      where: { status: "Pending QC", ...(Object.keys(mine).length ? { orderItem: { order: mine } } : {}) },
       include: {
         greenBean: true,
         orderItem: { include: { order: { include: { customer: true } } } },

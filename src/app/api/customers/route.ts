@@ -1,7 +1,11 @@
 import { parseEmailAddress } from "@/lib/automation/email-mode";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
-import { requireAnyModule, requireEdit } from "@/lib/auth-server";
+import { requireAnyModule, requireAuth } from "@/lib/auth-server";
+import { canEdit, hasSubPrivilege } from "@/lib/auth-shared";
+import { parseAccountFields } from "@/lib/services/customers/fields";
+import { DUPLICATE_CUSTOMER, parseNationalFields } from "@/lib/services/customers/customer-identity";
+import { findDuplicateCustomer } from "@/lib/services/customers/duplicates";
 import { handlePrismaError } from "@/lib/api-error";
 import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
 import { customerVisibilityWhere, customersScopedToOwner } from "@/lib/services/sales/scope";
@@ -31,35 +35,65 @@ export async function GET(request?: Request) {
   return NextResponse.json(customers);
 }
 
+/**
+ * «عميل جديد». Customers › edit as before; and (soon batch round 2, owner decision) a sales rep holding lead_write or
+ * lead_convert registers a customer of their own — the account owner is always the rep. Round 4 (owner decision): the
+ * NAME is the only required field, for everyone — a startup or a family business may have no VAT or CR yet; phone,
+ * e-mail, city, address, VAT, CR / unified number and the national address are optional. A value given is checked
+ * (VAT, CR, unified number, postal code, building and additional numbers); an empty one is stored as NULL. The
+ * duplicate check runs on the non-empty values only.
+ */
 export async function POST(request: Request) {
-  const { user, error } = await requireEdit("customers");
+  const { user, error } = await requireAuth();
   if (error) return error;
+  const fullEditor = canEdit(user.permissions, "customers");
+  const repRegistration = !fullEditor && (hasSubPrivilege(user.permissions, "sales", "lead_write") || hasSubPrivilege(user.permissions, "sales", "lead_convert"));
+  if (!fullEditor && !repRegistration) return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
 
   try {
-    const body = await request.json() as {
+    const raw = await request.json() as unknown;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
+    const body = raw as {
       name: string; nameAr?: string; phone?: string; email?: string; address?: string;
       whatsappOptOut?: boolean;
-    };
-    if (!body.name?.trim()) {
-      return NextResponse.json({ error: "name is required" }, { status: 400 });
+    } & Record<string, unknown>;
+    if (typeof body.name !== "string" || !body.name.trim()) {
+      return NextResponse.json({ error: "اسم العميل مطلوب.", errorEn: "name is required", code: "NAME_REQUIRED", field: "name" }, { status: 400 });
     }
     // Batch 25: one valid address (lower-cased) or none — automated e-mails go to it.
     const email = typeof body.email === "string" && body.email.trim() ? parseEmailAddress(body.email) : null;
     if (typeof body.email === "string" && body.email.trim() && !email) {
       return NextResponse.json({ error: "اكتب إيميل واحد صحيح، مثل orders@example.com", errorEn: "Enter one valid e-mail address.", code: "INVALID_EMAIL", field: "email" }, { status: 400 });
     }
+    // The registration particulars a creator may give (the rest of the account — credit, terms, owner — is the
+    // customers editors' own, on the account page).
+    const identityInput = Object.fromEntries(["vatNumber", "commercialRegNo", "city"].filter((k) => k in body).map((k) => [k, body[k]]));
+    const account = parseAccountFields(identityInput);
+    if (!account.ok) return NextResponse.json({ error: account.errorAr, errorEn: account.error, code: "INVALID_FIELD" }, { status: 400 });
+    const national = parseNationalFields(body);
+    if (!national.ok) return NextResponse.json({ error: national.errorAr, errorEn: national.error, code: "INVALID_FIELD", field: national.field }, { status: 400 });
+    // Round 3 (gate M1): no copy of an existing customer — the pool's and other reps' included — on the VAT, CR or
+    // unified number, or the exact normalised name. A rep is never told whose it is.
+    const dup = await findDuplicateCustomer({
+      name: body.name, nameAr: typeof body.nameAr === "string" ? body.nameAr : null,
+      vatNumber: account.data.vatNumber ?? null, commercialRegNo: account.data.commercialRegNo ?? null, unifiedNumber: national.data.unifiedNumber ?? null,
+    });
+    if (dup) return NextResponse.json({ ...DUPLICATE_CUSTOMER, field: dup.by }, { status: 409 });
 
     const customer = await prisma.customer.create({
       data: {
         name: body.name.trim(),
-        nameAr: body.nameAr?.trim() || null,
-        phone: body.phone?.trim() || null,
+        nameAr: typeof body.nameAr === "string" ? body.nameAr.trim() || null : null,
+        phone: typeof body.phone === "string" ? body.phone.trim() || null : null,
         email,
-        address: body.address?.trim() || null,
+        address: typeof body.address === "string" ? body.address.trim() || null : null,
         whatsappOptOut: body.whatsappOptOut === true,
+        ...account.data,
+        ...national.data,
         // Owner decision (3 Nov 2026): a rep's book no longer includes the unassigned pool, so a customer a scoped rep
-        // adds is theirs from the start (as a converted lead is) — it must not vanish from their own list.
-        ...(customersScopedToOwner(user) ? { accountOwnerId: user.id } : {}),
+        // adds is theirs from the start (as a converted lead is) — it must not vanish from their own list. A rep
+        // registering without customers › edit is always the account owner.
+        ...(repRegistration || customersScopedToOwner(user) ? { accountOwnerId: user.id } : {}),
       },
     });
     return NextResponse.json(customer, { status: 201 });

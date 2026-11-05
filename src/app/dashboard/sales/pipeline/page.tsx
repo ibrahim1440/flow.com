@@ -33,6 +33,8 @@ type Deal = {
   outcome: "OPEN" | "WON" | "LOST";
   lostReason: string | null;
   amount: string;
+  /** Soon batch round 2: «آخر عرض مرفوض» while the deal has no live quotation. */
+  lastClosedQuote?: { quoteNumber: string; grandTotal: string; status: string } | null;
   currency: string;
   probability?: number;
   expectedCloseAt: string | null;
@@ -287,6 +289,7 @@ export default function PipelinePage() {
           <span className="amt">{money(Number(d.amount))}</span>
         </div>
         {sub ? <div className="sub">{sub}</div> : null}
+        {d.lastClosedQuote ? <div className="sub" data-testid={`deal-last-closed-${d.id}`}>{closedLine(d.lastClosedQuote, ar)}</div> : null}
         <div className="r3">
           {d.pendingMove
             ? <Chip tone="warn" label={ar ? `طلب نقل إلى ${stageName(d.pendingMove.toStageId)}` : `Move to ${stageName(d.pendingMove.toStageId)} requested`} testId={`pending-move-${d.id}`} />
@@ -557,6 +560,7 @@ export default function PipelinePage() {
                             <Link href={`/dashboard/sales/deals/${d.id}`} data-testid={`open-deal-${d.id}`}>{top}</Link>
                             <span className="n">{whole(d.amount)}</span>
                           </div>
+                          {d.lastClosedQuote ? <div className="row sub" data-testid={`deal-last-closed-${d.id}`}>{closedLine(d.lastClosedQuote, ar)}</div> : null}
                           <div className="row">
                             <Chip tone={won ? "ok" : "neutral"} label={won ? (ar ? "رابحة" : "Won") : (ar ? "خاسرة" : "Lost")} />
                             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
@@ -582,4 +586,11 @@ export default function PipelinePage() {
       {dialogs}
     </div>
   );
+}
+
+/** «آخر عرض مرفوض: 1,150.00 ر.س» — the rejected offer stays on the card while the deal is worth 0.00 (soon batch round 2). */
+function closedLine(q: { status: string; grandTotal: string }, ar: boolean): string {
+  const word = q.status === "EXPIRED" ? (ar ? "آخر عرض منتهي" : "Last expired quotation") : (ar ? "آخر عرض مرفوض" : "Last rejected quotation");
+  const n = Number(q.grandTotal).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return ar ? `${word}: ${n} ر.س` : `${word}: SAR ${n}`;
 }

@@ -13,7 +13,7 @@ import { HrRoot } from "@/components/hr/ui";
 import { ACTIVITY_LABELS, OUTCOME_LABELS, initials, splitTitle } from "@/components/d21/labels";
 import { longDate, qtyText, dayCount, daysFromToday, dueText, money2, relativeDays, shortDate, whole } from "@/components/d21/format";
 import { api, pick, QUOTE_STATUS_SPECS, LEAD_SOURCE_LABELS } from "../../sales/_components/ui";
-import { ActivityDialog, ContactDialog, DealPickDialog, DetailsDialog, FileDialog, FILE_CATEGORY_LABELS, SEGMENT_LABELS, type ActivityKind } from "./dialogs";
+import { ActivityDialog, ContactDialog, DealPickDialog, DetailsDialog, FileDialog, FILE_CATEGORY_LABELS, OwnerContactDialog, SEGMENT_LABELS, type ActivityKind } from "./dialogs";
 import { MessagingCard } from "./_components/messaging";
 import type { Account, Activity, AgingKey, Contact, CustomerFile, TimelineEntry } from "./types";
 import { CreditBadges, CreditCallout, HoldDialog, LiftDialog, badgesOf, fullDate } from "@/components/credit/credit-ui";
@@ -26,6 +26,7 @@ import { ValidityDates, ValidityDialog, ValidityPill } from "./_components/contr
 import { hasValidity } from "@/lib/services/customers/contract-rules";
 import { ContractFact } from "./_components/contract-fact";
 import { SampleDialog } from "../../sales/_components/SampleDialog";
+import { nationalAddressLine } from "@/components/customers/identity-fields";
 import "../customers.css";
 import "./account.css";
 
@@ -103,7 +104,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   const search = useSearchParams();
   const [tab, setTab] = useState<Tab>(search?.get("tab") === "files" ? "files" : "overview");
   type QuickPick = { purpose: "quote" | "sample"; deals: { id: string; title: string; stageAr: string; stageEn: string; amount: string | null }[] };
-  const [dialog, setDialog] = useState<null | { activity: ActivityKind } | { pick: QuickPick } | { sample: { dealId: string | null; sampled: string[]; manager: boolean } } | "details" | "file" | "hold" | "holdDirect" | "lift" | { contact: Contact | null }>(null);
+  const [dialog, setDialog] = useState<null | { activity: ActivityKind } | { pick: QuickPick } | { sample: { dealId: string | null; sampled: string[]; manager: boolean } } | "details" | "ownerContact" | "file" | "hold" | "holdDirect" | "lift" | { contact: Contact | null }>(null);
   const [quickBusy, setQuickBusy] = useState(false);
   const [more, setMore] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -616,7 +617,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   const contacts = (
     <section data-testid="contacts" className="acc-card acc-side-card">
       <div className="acc-card-h"><h2><Ico name="users" small />{L("جهات الاتصال", "Contacts")}</h2>
-        {can.edit && <button type="button" className="lk-inline" onClick={() => setDialog({ contact: null })} data-testid="add-contact">+ {L("إضافة", "Add")}</button>}
+        {(can.edit || can.editContact) && <button type="button" className="lk-inline" onClick={() => setDialog({ contact: null })} data-testid="add-contact">+ {L("إضافة", "Add")}</button>}
       </div>
       {c.contacts.length === 0 ? (
         <p className="acc-muted" style={{ margin: 0 }}>{L("لا جهات اتصال مسجلة.", "No contacts recorded.")}{c.phone && <> {L("هاتف العميل:", "Customer phone:")} {telHref(c.phone) ? <a href={telHref(c.phone)!} dir="ltr" className="n">{c.phone}</a> : <bdi dir="ltr" className="n">{c.phone}</bdi>}</>}</p>
@@ -626,7 +627,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
             <li key={p.id} data-testid={`contact-${p.id}`}>
               <span className="av" aria-hidden>{initials(p.name).slice(0, 1)}</span>
               <div className="acc-contact-main">
-                {can.edit ? <button type="button" className="acc-contact-name" onClick={() => setDialog({ contact: p })}>{p.name}</button> : <div className="acc-contact-name">{p.name}</div>}
+                {can.edit || can.editContact ? <button type="button" className="acc-contact-name" onClick={() => setDialog({ contact: p })}>{p.name}</button> : <div className="acc-contact-name">{p.name}</div>}
                 {(p.phone || p.email) && <div className="acc-contact-sub">{p.phone ? <a href={`tel:${p.phone.replace(/\s/g, "")}`} dir="ltr" className="n">{p.phone}</a> : <a href={`mailto:${p.email}`} dir="ltr">{p.email}</a>}</div>}
               </div>
               {p.role && <span className="acc-contact-role">{p.role}</span>}
@@ -669,13 +670,29 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   const sourceText = data.source
     ? (data.source.sourceNote || pick(LEAD_SOURCE_LABELS, data.source.source, lang))
     : null;
+  // Soon batch round 2: what a ZATCA standard invoice needs of the buyer and this customer lacks (a converted lead starts
+  // from the lead's own details) — shown to whoever may complete it.
+  const identityMissing = [
+    !c.vatNumber && L("الرقم الضريبي", "VAT"),
+    !c.commercialRegNo && !c.unifiedNumber && L("السجل التجاري أو الرقم الموحد", "CR or unified number"),
+    (!c.nationalBuildingNo || !c.nationalStreet || !c.nationalDistrict || !c.nationalCity || !c.nationalPostalCode) && L("العنوان الوطني", "national address"),
+  ].filter((x): x is string => !!x);
   const details = (
     <section data-testid="details" className="acc-card acc-side-card">
       <div className="acc-card-h"><h2><Ico name="invoice" small />{L("البيانات", "Details")}</h2>
         {can.edit && <button type="button" className="lk-inline" onClick={() => setDialog("details")} data-testid="edit-details">{L("تعديل", "Edit")}</button>}
+        {!can.edit && can.editContact && <button type="button" className="lk-inline" onClick={() => setDialog("ownerContact")} data-testid="edit-owner-contact">{L("تعديل بيانات العميل", "Edit customer details")}</button>}
       </div>
+      {can.editContact && identityMissing.length > 0 && (
+        <p className="notice er" style={{ margin: "0 0 10px", fontSize: 13 }} data-testid="identity-missing">
+          {L(`بيانات ناقصة للفاتورة الضريبية: ${identityMissing.join("، ")}.`, `Missing for a tax invoice: ${identityMissing.length} item(s).`)}
+        </p>
+      )}
       <dl className="acc-kv">
         <div><dt>{L("الرقم الضريبي", "VAT number")}</dt><dd className="n" data-testid="detail-vat">{c.vatNumber ?? notSet}</dd></div>
+        <div><dt>{L("السجل التجاري", "CR number")}</dt><dd className="n" data-testid="detail-cr">{c.commercialRegNo ?? notSet}</dd></div>
+        <div><dt>{L("الرقم الموحد", "Unified number")}</dt><dd className="n" data-testid="detail-unified">{c.unifiedNumber ?? notSet}</dd></div>
+        <div><dt>{L("العنوان الوطني", "National address")}</dt><dd data-testid="detail-national-address">{nationalAddressLine(c, ar) ?? notSet}</dd></div>
         <div><dt>{L("المصدر", "Source")}</dt><dd>{sourceText ?? (sections.sales ? L("أُضيف مباشرة", "Added directly") : "—")}</dd></div>
       </dl>
       {data.newClientCommission && (
@@ -973,7 +990,8 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
       {dialog === "file" && <FileDialog ar={ar} customerId={id} maxBytes={data.fileLimits?.maxBytes} direct={data.fileLimits?.direct} canDates={can.editFileDates ?? false} onClose={() => setDialog(null)} onDone={(warning) => { setDialog(null); setNotice(warning ? { text: warning, ok: false } : { text: L("رُفع الملف.", "File uploaded."), ok: true }); setTab("files"); reload(); }} />}
       {validityFile && <ValidityDialog ar={ar} customerId={id} file={validityFile} onClose={() => setValidityFile(null)} onDone={() => { setValidityFile(null); setNotice({ text: L("حُفظت تواريخ العقد.", "Contract dates saved."), ok: true }); reload(); }} />}
       {dialog === "details" && <DetailsDialog ar={ar} customer={c} canOwner={can.editOwner ?? false} canCredit={can.editCreditTerms ?? false} onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("حُفظت البيانات.", "Saved."), ok: true }); reload(); }} />}
-      {dialog && typeof dialog === "object" && "contact" in dialog && <ContactDialog ar={ar} customerId={id} contact={dialog.contact} onClose={() => setDialog(null)} onDone={() => { setDialog(null); reload(); }} />}
+      {dialog && typeof dialog === "object" && "contact" in dialog && <ContactDialog ar={ar} customerId={id} contact={dialog.contact} canDelete={can.edit} onClose={() => setDialog(null)} onDone={() => { setDialog(null); reload(); }} />}
+      {dialog === "ownerContact" && <OwnerContactDialog ar={ar} customer={c} onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("حُفظت بيانات العميل.", "Customer details saved."), ok: true }); reload(); }} />}
     </>
   );
 

@@ -16,7 +16,8 @@ import { useAccountantView } from "../../../accounting/_ui/qoyod-pages";
 import { PartyCard } from "@/components/forms/QoyodForm";
 import { UNASSIGNED_LOCATION, useLocations } from "../../../accounting/_ui/locations";
 
-type Customer = { id: string; name: string; nameAr: string | null; vatNumber: string | null; commercialRegNo: string | null; city: string | null; address: string | null; paymentTermsDays: number | null };
+type Customer = { id: string; name: string; nameAr: string | null; vatNumber: string | null; commercialRegNo: string | null; city: string | null; address: string | null; paymentTermsDays: number | null;
+  nationalBuildingNo?: string | null; nationalStreet?: string | null; nationalDistrict?: string | null; nationalCity?: string | null; nationalPostalCode?: string | null };
 type OrderFacts = {
   order: { id: string; orderNumber: number; customerId: string; status: string };
   customer: { name: string; nameAr: string | null };
@@ -118,7 +119,8 @@ function Manual({ initialQ }: { initialQ?: string }) {
   const [key] = useState(newKey);
   const pickCustomer = (c: Customer) => {
     setCustomer(c);
-    setBuyer({ name: c.nameAr || c.name, vatNumber: c.vatNumber ?? "", crNumber: c.commercialRegNo ?? "", city: c.city ?? "", district: "", street: "", buildingNo: "", postalCode: "", address: c.address });
+    // The customer's national address (soon batch round 2) prefills the buyer address; still editable on the draft.
+    setBuyer({ name: c.nameAr || c.name, vatNumber: c.vatNumber ?? "", crNumber: c.commercialRegNo ?? "", city: c.nationalCity || c.city || "", district: c.nationalDistrict ?? "", street: c.nationalStreet ?? "", buildingNo: c.nationalBuildingNo ?? "", postalCode: c.nationalPostalCode ?? "", address: c.address });
     setTerms(c.paymentTermsDays != null ? String(c.paymentTermsDays) : "");
     // The type follows the customer (Qoyod derives it): a VAT number → tax invoice, none → simplified; still editable.
     setFamily(c.vatNumber ? "STANDARD" : "SIMPLIFIED");

@@ -67,6 +67,9 @@ export async function GET(_request: Request, { params }: Params) {
         whatsappOptOut: true, emailOptOut: true, createdAt: true,
         commercialRegNo: true, vatNumber: true, segment: true, city: true, priceList: true,
         paymentTermsDays: true, creditLimit: true, defaultHoldDays: true,
+        // Soon batch round 2: the buyer identity and national address.
+        unifiedNumber: true, nationalBuildingNo: true, nationalStreet: true, nationalDistrict: true, nationalCity: true,
+        nationalPostalCode: true, nationalAdditionalNo: true, nationalShortAddress: true,
         accountOwner: { select: { id: true, name: true } },
         contacts: { orderBy: [{ position: "asc" }, { createdAt: "asc" }], select: { id: true, name: true, role: true, phone: true, email: true, position: true } },
         roastPreferences: {
@@ -163,7 +166,8 @@ export async function GET(_request: Request, { params }: Params) {
       ? prisma.activity.findMany({
           where: {
             OR: [{ customerId: id }, { opportunity: { customerId: id } }],
-            ...(all ? {} : { ownerId: user.id }),
+            // A change of the customer's «مسلّمات» (soon batch round 2) is the customer's record, whoever made it.
+            ...(all ? {} : { AND: [{ OR: [{ ownerId: user.id }, { sourceKey: { startsWith: "customer-identity:" } }] }] }),
           },
           orderBy: [{ createdAt: "desc" }],
           take: 200,
@@ -448,6 +452,9 @@ export async function GET(_request: Request, { params }: Params) {
       timeline: timeline.slice(0, 200),
       can: {
         edit: canEdit(p, "customers"),
+        // Readiness review P1-3: the account owner corrects the contact details (phone, e-mail, address, city, contact
+        // people) without customers at edit — the same rule as PUT /api/customers/[id] (owner-contact.ts).
+        editContact: canEdit(p, "customers") || (!!customer.accountOwner?.id && customer.accountOwner.id === user.id),
         manageProfiles: hasSubPrivilege(p, "customers", "manage"),
         // The file routes' own rule (direct-upload.ts editableCustomer): the customer is in the viewer's book,
         // which this route has already established for a scoped rep.

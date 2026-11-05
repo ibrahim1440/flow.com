@@ -1,5 +1,6 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
+import { withLostQuoteValue } from "@/lib/services/sales/deal-amount";
 import { requireModule } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { seesTeamReports } from "@/lib/services/sales/scope";
@@ -154,7 +155,8 @@ export async function GET(request: Request) {
       roundMoney(rows.reduce((acc, r) => acc.plus(r.amount), ZERO));
 
     const wonValue = sumAmount(wonDeals);
-    const lostValue = sumAmount(lostDeals);
+    // Soon batch round 2: a deal lost after its quotation was rejected counts the offer it lost (deal-amount.ts).
+    const lostValue = sumAmount(await withLostQuoteValue(prisma, lostDeals));
     const closedCount = wonDeals.length + lostDeals.length;
     const winRate =
       closedCount === 0

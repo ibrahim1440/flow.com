@@ -30,9 +30,13 @@ export async function PATCH(request: Request, { params }: Params) {
   try {
     const existing = await prisma.activity.findUnique({
       where: { id },
-      select: { id: true, ownerId: true, completedAt: true, type: true, leadId: true, opportunityId: true },
+      select: { id: true, ownerId: true, completedAt: true, type: true, leadId: true, opportunityId: true, sourceKey: true },
     });
     if (!existing) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });
+    // Soon batch round 2: the record of a «مسلّمات» change and of a rejected quotation is the system's — never edited.
+    if (existing.sourceKey && /^(customer-identity|deal-quote-closed):/.test(existing.sourceKey)) {
+      return NextResponse.json({ error: "هذا القيد سجلّ يكتبه النظام ولا يُعدَّل.", errorEn: "This entry is a system record and cannot be edited.", code: "SYSTEM_RECORD" }, { status: 409 });
+    }
     if (existing.ownerId !== user.id) {
       return NextResponse.json(
         {

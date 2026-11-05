@@ -20,6 +20,7 @@ import { signAtIssue, type SignedAtIssue } from "@/lib/zatca/pipeline";
 import { defaultInvoiceBranch, orderBranchId, parseBranchId, sharedBranch } from "@/lib/accounting/locations";
 import { notifyIssued, notifyRequested, writeRequestEvent } from "./request-events";
 import { commercialChanges, correctionDiff } from "./request-math";
+import { recomputeFlagsForInvoice } from "@/lib/services/orders/order-flags";
 
 type Tx = Prisma.TransactionClient;
 const D = (v: { toString(): string } | null | undefined) => new Decimal(v == null ? 0 : v.toString());
@@ -73,7 +74,7 @@ export async function orderInvoicing(db: Tx | typeof prisma, orderId: string) {
     where: { id: orderId },
     select: {
       id: true, orderNumber: true, customerId: true, status: true, ownerId: true,
-      customer: { select: { id: true, name: true, nameAr: true, vatNumber: true, commercialRegNo: true, city: true, address: true, phone: true, paymentTermsDays: true, accountOwnerId: true } },
+      customer: { select: { id: true, name: true, nameAr: true, vatNumber: true, commercialRegNo: true, city: true, address: true, phone: true, paymentTermsDays: true, accountOwnerId: true, unifiedNumber: true, nationalBuildingNo: true, nationalStreet: true, nationalDistrict: true, nationalCity: true, nationalPostalCode: true, nationalAdditionalNo: true } },
       items: {
         orderBy: { createdAt: "asc" },
         select: {
@@ -122,8 +123,25 @@ export async function orderInvoicing(db: Tx | typeof prisma, orderId: string) {
 
 // ── drafts ──────────────────────────────────────────────────────────────────────────────────────────
 
-function buyerFromCustomer(c: { name: string; nameAr: string | null; vatNumber: string | null; commercialRegNo: string | null; city: string | null; address: string | null; phone: string | null }): BuyerParticulars {
-  return parseBuyer({}, { name: c.nameAr || c.name, nameEn: c.nameAr ? c.name : null, vatNumber: c.vatNumber, crNumber: c.commercialRegNo, city: c.city, address: c.address, phone: c.phone, countryCode: "SA" });
+type BuyerSource = {
+  name: string; nameAr: string | null; vatNumber: string | null; commercialRegNo: string | null; city: string | null; address: string | null; phone: string | null;
+  unifiedNumber?: string | null; nationalBuildingNo?: string | null; nationalStreet?: string | null; nationalDistrict?: string | null;
+  nationalCity?: string | null; nationalPostalCode?: string | null; nationalAdditionalNo?: string | null;
+};
+/**
+ * The buyer snapshot of a NEW draft from the customer record. Soon batch round 2: the customer's structured national
+ * address fills the ZATCA buyer address (BR-KSA-63: street, building, district, city, postal code, additional number);
+ * the unified number (700…) is the buyer's other ID when there is no CR. The snapshot is frozen in the document: an
+ * ISSUED invoice never changes when the customer record does.
+ */
+export function buyerFromCustomer(c: BuyerSource): BuyerParticulars {
+  return parseBuyer({}, {
+    name: c.nameAr || c.name, nameEn: c.nameAr ? c.name : null, vatNumber: c.vatNumber, crNumber: c.commercialRegNo,
+    otherId: c.commercialRegNo ? null : (c.unifiedNumber ?? null),
+    city: c.nationalCity || c.city, address: c.address, phone: c.phone, countryCode: "SA",
+    buildingNo: c.nationalBuildingNo ?? null, street: c.nationalStreet ?? null, district: c.nationalDistrict ?? null,
+    postalCode: c.nationalPostalCode ?? null, additionalNo: c.nationalAdditionalNo ?? null,
+  });
 }
 
 async function lockOrderItems(tx: Tx, ids: string[]) {
@@ -281,7 +299,7 @@ async function assetSaleBranch(tx: Tx, lines: CleanLine[]): Promise<string | nul
 }
 
 async function insertDraft(tx: Tx, input: DraftInput, lines: CleanLine[], ext: { channel: string; externalOrderRef: string } | null, ctx: AuditContext) {
-  const customer = await tx.customer.findUnique({ where: { id: input.customerId }, select: { id: true, name: true, nameAr: true, vatNumber: true, commercialRegNo: true, city: true, address: true, phone: true, paymentTermsDays: true } });
+  const customer = await tx.customer.findUnique({ where: { id: input.customerId }, select: { id: true, name: true, nameAr: true, vatNumber: true, commercialRegNo: true, city: true, address: true, phone: true, paymentTermsDays: true, unifiedNumber: true, nationalBuildingNo: true, nationalStreet: true, nationalDistrict: true, nationalCity: true, nationalPostalCode: true, nationalAdditionalNo: true } });
   if (!customer) throw refuseInv("CUSTOMER_NOT_FOUND");
   if (input.orderId) {
     const o = await tx.order.findUnique({ where: { id: input.orderId }, select: { customerId: true } });
@@ -669,6 +687,8 @@ export async function issueDocument(id: string, ctx: AuditContext, now: Date = n
       }
     }
     await emitAutomationEvent(tx, { eventType: "sales.invoice_status_changed", subjectType: "SalesInvoice", subjectId: id, payload: { from: "DRAFT", to: "ISSUED", kind: doc.kind }, actorId: ctx.actorId });
+    // P1-5: the order's «الفاتورة» / «الدفع» flags follow the issue (order-flags.ts).
+    await recomputeFlagsForInvoice(tx, id);
     // «طلب فاتورة ضريبية»: the history records the issue of a requested draft; the requester and the order's owner are
     // told it can be printed (Sales keeps view / print / PDF through invoices_view and its customer scope).
     if (doc.requestedAt) await writeRequestEvent(tx, { invoiceId: id, kind: "ISSUED", actorId: ctx.actorId });

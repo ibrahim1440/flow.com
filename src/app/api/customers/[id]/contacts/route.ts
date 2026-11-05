@@ -1,9 +1,11 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
-import { requireEdit, requireModule } from "@/lib/auth-server";
+import { requireModule } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { parseContact } from "@/lib/services/customers/fields";
 import { customerInScope } from "@/lib/services/sales/customer-access";
+import { requireContactEditor } from "@/lib/services/customers/owner-contact";
+import { writeSettingsAudit } from "@/lib/services/settings/audit";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -32,9 +34,10 @@ export async function GET(_req: Request, { params }: Params) {
 
 /** POST /api/customers/[id]/contacts — add a contact at the end of the list. */
 export async function POST(request: Request, { params }: Params) {
-  const { user, error } = await requireEdit("customers");
-  if (error) return error;
   const { id } = await params;
+  // Customers at edit, or the customer's account owner (readiness review P1-3: adding a contact person).
+  const { user, kind, error } = await requireContactEditor(id);
+  if (error) return error;
   // A scoped sales rep reaches only the customers in their own book (services/sales/scope.ts) — 404 otherwise.
   if (!(await customerInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   let body: unknown;
@@ -56,6 +59,13 @@ export async function POST(request: Request, { params }: Params) {
       },
       select: SELECT,
     });
+    if (kind === "owner") {
+      await writeSettingsAudit(prisma, {
+        section: "organisation", action: "SETTINGS_UPDATED", entityType: "Customer", entityId: id, changed: ["contact"],
+        before: null, after: { contactId: contact.id, name: parsed.data.name, role: parsed.data.role ?? null, phone: parsed.data.phone ?? null, email: parsed.data.email ?? null },
+        reason: "CUSTOMER_CONTACT_BY_OWNER", actor: { id: user.id, name: user.name },
+      });
+    }
     return NextResponse.json(contact, { status: 201 });
   } catch (err) {
     return handlePrismaError(err);

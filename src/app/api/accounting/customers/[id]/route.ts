@@ -15,7 +15,7 @@ export async function PATCH(request: Request, { params }: Params) {
   try {
     const { id } = await params;
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-    return NextResponse.json(await updateAccountingCustomer(id, body, user.id));
+    return NextResponse.json(await updateAccountingCustomer(id, body, { id: user.id, name: user.name }));
   } catch (err) {
     return handleDomainError(err);
   }

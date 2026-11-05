@@ -1,4 +1,5 @@
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
+import { recomputeOrderFlags } from "@/lib/services/orders/order-flags";
 import { resolveOrderLines, createOrderWithNumber } from "@/lib/services/orders/create-order";
 import { autoPrepareOrder } from "@/lib/services/orders/preparation";
 import { ownerForConvertedOrder } from "@/lib/services/orders/owner-access";
@@ -194,6 +195,8 @@ export async function createOrderFromQuote(
     },
     select: { id: true, isFirstOrder: true },
   });
+  // Soon batch round 2 (gate L1): a quotation-born order is worth the accepted quotation until it is invoiced.
+  await recomputeOrderFlags(tx, order.id);
 
   return {
     orderId: order.id,

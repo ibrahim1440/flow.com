@@ -6,6 +6,7 @@ import { emitAutomationEvent } from "@/lib/automation/emit";
 import { onCollectionApproved, onCollectionReversed, type ReceiptAllocation } from "@/lib/services/invoicing/ar";
 import { defaultCollectionBranch, parseBranchId } from "@/lib/accounting/locations";
 import { receiptSelfConfirmAllowed } from "./receipt-four-eyes";
+import { recomputeFlagsForCollection } from "@/lib/services/orders/order-flags";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -585,6 +586,8 @@ export async function approveCollection(
   // A2: apply the receipt to its open invoices and post it (a no-op before accounting's go-live).
   const application = await onCollectionApproved(tx, row.id, input.actorId, c.allocation !== undefined ? { allocation: c.allocation } : accountant ? { allocation: "AUTO" } : {});
   await emitCollectionStatus(tx, row.id, "PENDING_VERIFICATION", "APPROVED", input.actorId);
+  // P1-5: the orders this money touches update their «الدفع» flag (order-flags.ts).
+  await recomputeFlagsForCollection(tx, row.id);
 
   return {
     status: "APPROVED",
@@ -711,6 +714,7 @@ export async function reverseCollection(
   // A2: the receipt's AR applications and every ledger posting of it are reversed with it.
   await onCollectionReversed(tx, row.id, reason, input.actorId);
   await emitCollectionStatus(tx, row.id, "APPROVED", "REVERSED", input.actorId);
+  await recomputeFlagsForCollection(tx, row.id);
 
   return {
     status: "REVERSED",

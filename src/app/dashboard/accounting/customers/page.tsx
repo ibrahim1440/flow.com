@@ -12,11 +12,13 @@ import { Dialog } from "@/components/hr/ui";
 import { AcctShell, Msg, money, useApi, useLang, useWrite } from "../_ui/shell";
 
 type Row = {
-  id: string; name: string; nameAr: string | null; vatNumber: string | null; commercialRegNo: string | null; city: string | null; address: string | null;
+  id: string; name: string; nameAr: string | null; vatNumber: string | null; commercialRegNo: string | null; unifiedNumber?: string | null; city: string | null; address: string | null;
   phone: string | null; email: string | null; creditLimit: string | null; paymentTermsDays: number | null; repName: string | null; balance: string; overdue: string;
 };
-type Form = { name: string; nameAr: string; vatNumber: string; commercialRegNo: string; city: string; address: string; phone: string; email: string };
-const blank: Form = { name: "", nameAr: "", vatNumber: "", commercialRegNo: "", city: "", address: "", phone: "", email: "" };
+type Form = { name: string; nameAr: string; vatNumber: string; commercialRegNo: string; unifiedNumber: string; city: string; address: string; phone: string; email: string };
+const blank: Form = { name: "", nameAr: "", vatNumber: "", commercialRegNo: "", unifiedNumber: "", city: "", address: "", phone: "", email: "" };
+/** Soon batch round 3 (gate L5): the registration numbers — a change of one needs a reason (server: 400 REASON_REQUIRED). */
+const IDENTITY: (keyof Form)[] = ["vatNumber", "commercialRegNo", "unifiedNumber"];
 
 export default function AccountingCustomersPage() {
   return <Suspense fallback={null}><CustomersPage /></Suspense>;
@@ -28,7 +30,8 @@ function CustomersPage() {
   const [q, setQ] = useState("");
   const api = useApi<{ rows: Row[]; can: { write: boolean } }>(`/api/accounting/customers?q=${encodeURIComponent(q)}`);
   const w = useWrite();
-  const [edit, setEdit] = useState<{ id: string | null; form: Form } | null>(null);
+  const [edit, setEdit] = useState<{ id: string | null; form: Form; orig?: Form; reason?: string } | null>(null);
+  const identityChanged = !!edit?.id && !!edit.orig && IDENTITY.some((k) => edit.form[k].trim() !== edit.orig![k].trim());
   const rows = useMemo(() => api.data?.rows ?? [], [api.data]);
   const can = api.data?.can.write ?? false;
   // «+» of the sidebar (?new=1): the new-customer form, once the page knows the viewer may write.
@@ -41,7 +44,7 @@ function CustomersPage() {
   const save = async () => {
     if (!edit) return;
     const r = edit.id
-      ? await w.run("save", `/api/accounting/customers/${edit.id}`, "PATCH", edit.form, L("حُفظت بيانات العميل.", "Saved."))
+      ? await w.run("save", `/api/accounting/customers/${edit.id}`, "PATCH", { ...edit.form, ...(identityChanged ? { reason: edit.reason ?? "" } : {}) }, L("حُفظت بيانات العميل.", "Saved."))
       : await w.run("save", "/api/accounting/customers", "POST", edit.form, L("أُضيف العميل.", "Customer added."));
     if (r) { setEdit(null); api.reload(); }
   };
@@ -79,7 +82,7 @@ function CustomersPage() {
                   <Link className="hr-btn is-sm" href={`/dashboard/sales/receivables/${c.id}`}>{L("كشف الحساب", "Statement")}</Link>{" "}
                   <button type="button" className="hr-btn is-sm" disabled={!!w.busy} onClick={() => quote(c)} data-testid={`acust-quote-${c.id}`}>{L("عرض سعر", "Quotation")}</button>{" "}
                   <Link className="hr-btn is-sm" href={`/dashboard/sales/invoices/new?q=${encodeURIComponent(c.nameAr || c.name)}`}>{L("فاتورة", "Invoice")}</Link>{" "}
-                  {can ? <button type="button" className="hr-btn is-sm" onClick={() => setEdit({ id: c.id, form: { name: c.name, nameAr: c.nameAr ?? "", vatNumber: c.vatNumber ?? "", commercialRegNo: c.commercialRegNo ?? "", city: c.city ?? "", address: c.address ?? "", phone: c.phone ?? "", email: c.email ?? "" } })} data-testid={`acust-edit-${c.id}`}>{L("تعديل", "Edit")}</button> : null}
+                  {can ? <button type="button" className="hr-btn is-sm" onClick={() => { const form = { name: c.name, nameAr: c.nameAr ?? "", vatNumber: c.vatNumber ?? "", commercialRegNo: c.commercialRegNo ?? "", unifiedNumber: c.unifiedNumber ?? "", city: c.city ?? "", address: c.address ?? "", phone: c.phone ?? "", email: c.email ?? "" }; setEdit({ id: c.id, form, orig: form, reason: "" }); }} data-testid={`acust-edit-${c.id}`}>{L("تعديل", "Edit")}</button> : null}
                 </td>
               </tr>
             ))}</tbody>
@@ -92,10 +95,16 @@ function CustomersPage() {
           actions={<><button type="button" className="hr-btn" onClick={() => setEdit(null)}>{L("تراجع", "Back")}</button><button type="button" className="hr-btn is-primary" disabled={!!w.busy} onClick={save} data-testid="acust-save">{L("حفظ", "Save")}</button></>}>
           <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
             {f("name", "الاسم (كما في السجل)", "Name", false)}{f("nameAr", "الاسم بالعربي", "Arabic name")}
-            {f("vatNumber", "الرقم الضريبي", "VAT number", true)}{f("commercialRegNo", "السجل التجاري", "CR number", true)}
+            {f("vatNumber", "الرقم الضريبي", "VAT number", true)}{f("commercialRegNo", "السجل التجاري", "CR number", true)}{f("unifiedNumber", "الرقم الموحد", "Unified number", true)}
             {f("city", "المدينة", "City")}{f("address", "العنوان", "Address")}
             {f("phone", "الجوال", "Phone", true)}{f("email", "الإيميل", "E-mail", true)}
           </div>
+          {identityChanged ? (
+            <label className="hr-field" style={{ marginTop: 10 }}><span className="hr-label">{L("سبب التعديل *", "Reason for the change *")}</span>
+              <textarea className="hr-textarea" rows={2} required minLength={5} value={edit.reason ?? ""} onChange={(e) => setEdit({ ...edit, reason: e.target.value })} data-testid="acust-reason" />
+              <span className="hr-help">{L("تعديل الرقم الضريبي أو السجل أو الرقم الموحد يُسجَّل في سجل نشاط العميل مع السبب.", "A change of the VAT / CR / unified number is logged on the customer's activity with its reason.")}</span>
+            </label>
+          ) : null}
         </Dialog>
       ) : null}
     </AcctShell>

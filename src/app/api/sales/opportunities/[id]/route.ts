@@ -1,4 +1,5 @@
 import { NextResponse } from "@/lib/api-response";
+import { lastClosedQuote } from "@/lib/services/sales/deal-amount";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
@@ -223,7 +224,7 @@ export async function GET(_request: Request, { params }: Params) {
       nextStep,
       pendingMove,
       rejectedMove,
-      deal: { ...deal, quotes, samples: samplesWithState, customerBalance: balance },
+      deal: { ...deal, quotes, samples: samplesWithState, customerBalance: balance, lastClosedQuote: await lastClosedQuote(prisma, deal.id) },
       sampledProductIds: sampledProducts,
       stages,
       actors,

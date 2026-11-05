@@ -1,4 +1,5 @@
 import { NextResponse } from "@/lib/api-response";
+import { lastClosedQuotes } from "@/lib/services/sales/deal-amount";
 import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
@@ -91,6 +92,8 @@ export async function GET() {
     const gm = await isGeneralManager(prisma, user.id);
     const decider = approvesMove({ id: user.id, permissions: user.permissions, generalManager: gm });
     const now = new Date();
+    // Soon batch round 2 (B): «آخر عرض مرفوض» for a deal left with no ACCEPTED / ISSUED quotation (read from Quote).
+    const closed = await lastClosedQuotes(prisma, deals.map((x) => x.id));
     return NextResponse.json({
       stages,
       me: user.id,
@@ -109,6 +112,7 @@ export async function GET() {
           ...d,
           // Unchanged shape for existing readers: the accepted quotation, if any.
           quotes: accepted ? [{ id: accepted.id }] : [],
+          lastClosedQuote: closed.get(d.id) ?? null,
           latestQuote: quotes[0] ? { id: quotes[0].id, quoteNumber: quotes[0].quoteNumber, revision: quotes[0].revision, status: quotes[0].status, acceptedAt: quotes[0].acceptedAt } : null,
           acceptedQuote: accepted ? { id: accepted.id, quoteNumber: accepted.quoteNumber, revision: accepted.revision, status: accepted.status, acceptedAt: accepted.acceptedAt } : null,
           nextActivity: activities[0] ?? null,

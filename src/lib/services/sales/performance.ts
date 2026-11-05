@@ -2,6 +2,7 @@ import type { PrismaClient } from "@/generated/prisma/client";
 import {
   Decimal, ZERO, roundMoney, riyadhMonthStart, riyadhMonthEnd, qualifyingBase,
 } from "@/lib/services/commissions/engine";
+import { withLostQuoteValue } from "./deal-amount";
 
 /**
  * «لوحة الأداء» — the monthly performance figures of a rep and of the team, computed from the
@@ -219,8 +220,8 @@ export async function performanceSummary(db: Db, opts: {
     }),
     db.opportunity.findMany({
       where: { ...mine, outcome: "LOST", closedAt: { gte: start, lt: end } },
-      select: { ownerId: true, amount: true },
-    }),
+      select: { id: true, ownerId: true, amount: true },
+    }).then((rows) => withLostQuoteValue(db, rows)),
     db.opportunity.findMany({
       where: { ...mine, outcome: "OPEN" },
       select: { ownerId: true, amount: true, stageId: true },

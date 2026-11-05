@@ -33,6 +33,8 @@ import { appendOrderActivity } from "@/lib/services/order-operations";
 import { DEFAULT_VAT_RATE } from "@/lib/services/invoicing/pricing";
 import { seesAllSales } from "./scope";
 import { requireStageFor } from "./stages";
+import { syncDealAmount } from "./deal-amount";
+import { recomputeOrderFlags } from "@/lib/services/orders/order-flags";
 
 type Tx = Prisma.TransactionClient;
 const Decimal = Prisma.Decimal;
@@ -153,6 +155,10 @@ export async function linkDirectOrderDeal(tx: Tx, input: { orderId: string; acto
   await tx.opportunityOrder.create({
     data: { opportunityId, quoteId: null, orderId, isFirstOrder: prior === 0, requestKey: directOrderRequestKey(orderId), createdById: actor.id, directGross: value.gross.toFixed(2), directTax: value.tax.toFixed(2) },
   });
+  // P1-4 / M2: a deal that also carries a quotation is valued quotation + direct orders (an auto deal keeps its own).
+  if (!created) await syncDealAmount(tx, opportunityId);
+  // Soon batch round 2 (gate L1): the deal's money is now shared with this order (oldest order first).
+  await recomputeOrderFlags(tx, orderId);
   await appendOrderActivity(tx, {
     orderId, type: "DEAL_LINKED", authorId: actor.id, authorName: actor.name,
     message: created ? `فُتحت صفقة للطلب (${DIRECT_ORDER_REASON})` : "رُبط الطلب بصفقة",
@@ -237,7 +243,7 @@ export async function refreshDirectOrderDeal(tx: Tx, input: { orderId: string; a
         `لا يمكن ${input.remove ? "حذف" : "إلغاء"} الطلب وعلى صفقته تحصيل مسجّل (${claims.total.toFixed(2)} ر.س) أكبر مما يبقى بدونه (${documentGross.toFixed(2)} ر.س) — ارفض التحصيل المعلّق أو اعكس المعتمد أولًا، أو أصدر إشعارًا دائنًا.`,
         `The order cannot be ${input.remove ? "deleted" : "cancelled"}: its deal carries ${claims.total.toFixed(2)} SAR of collections, more than the ${documentGross.toFixed(2)} SAR left without it. Reject the pending collection or reverse the approved one first, or issue a credit note.`);
     }
-    if (!(await isAutoDeal(tx, link.opportunityId))) continue;
+    if (!(await isAutoDeal(tx, link.opportunityId))) { await syncDealAmount(tx, link.opportunityId); continue; }
     const deal = await tx.opportunity.findUnique({ where: { id: link.opportunityId }, select: { outcome: true, stageId: true } });
     if (!deal) continue;
     // Past the rule above, claims ≤ the remaining document: the auto deal's amount is the remaining value; with no live

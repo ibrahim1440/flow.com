@@ -109,6 +109,9 @@ export async function requestStageMove(
   const request = await tx.stageMoveRequest.create({
     data: { opportunityId: deal.id, fromStageId: deal.stageId, toStageId: to.id, reason, requestedById: input.requestedById, status: "PENDING" },
   });
+  // Readiness review P1-6: the approvers are told (lead_assign holders, «مدير عام» members, the admins).
+  const { notifyStageMovePending } = await import("./sample-stage-notify");
+  await notifyStageMovePending(tx, request.id, input.requestedById);
   return { request, replaced: replaced.count };
 }
 
@@ -149,6 +152,7 @@ export async function decideStageMove(
   if (input.decision === "REJECT") {
     if (!note || note.length < 2) throw refuse(400, "STAGE_MOVE_REASON", "اذكر سبب الرفض؛ يقرؤه المندوب.", "Give the reason for rejecting; the rep reads it.");
     await tx.stageMoveRequest.update({ where: { id: r.id }, data: { status: "REJECTED", decidedById: input.actor.id, decidedAt: now, decisionNote: note } });
+    { const { notifyStageMoveDecided } = await import("./sample-stage-notify"); await notifyStageMoveDecided(tx, r.id, input.actor.id, "REJECT"); }
     return { status: "REJECTED" as const, request: r, moved: null, stale: null };
   }
   // APPROVED first: the move below must not cancel the very request it applies (transitionOpportunity cancels pending ones).
@@ -163,6 +167,7 @@ export async function decideStageMove(
     canReopen: false,
     manualNote: `يدوي — باعتماد ${approverName}${requester?.name ? ` · بطلب ${requester.name}` : ""}${r.reason ? ` · ${r.reason}` : ""}`,
   });
+  { const { notifyStageMoveDecided } = await import("./sample-stage-notify"); await notifyStageMoveDecided(tx, r.id, input.actor.id, "APPROVE"); }
   return { status: "APPROVED" as const, request: r, moved, stale: null };
 }
 

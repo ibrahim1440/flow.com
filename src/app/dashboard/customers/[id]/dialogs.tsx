@@ -8,6 +8,21 @@ import { api } from "../../sales/_components/ui";
 import { OUTCOME_LABELS } from "@/components/d21/labels";
 import { ACTIVITY_OUTCOMES } from "@/lib/services/sales/qualification";
 import type { Contact, Customer, Deal } from "./types";
+import { IdentityFields, changedIdentityKeys, identityFrom, type IdentityForm } from "@/components/customers/identity-fields";
+
+/**
+ * «سبب التعديل» — shown only when a «مسلّمة» (VAT, CR, unified number, national address) changed; the server refuses the
+ * change without it (400 REASON_REQUIRED, at least 5 characters) and logs it on the activity log and in the audit log.
+ */
+function IdentityReason({ ar, changed, value, onChange }: { ar: boolean; changed: string[]; value: string; onChange: (v: string) => void }) {
+  if (!changed.length) return null;
+  return (
+    <Field label={ar ? "سبب التعديل *" : "Reason for the change *"} wide
+      help={ar ? "تعديل الرقم الضريبي أو السجل أو الرقم الموحد أو العنوان الوطني يُسجَّل في سجل النشاط مع السبب." : "A change of the VAT / CR / unified number or national address is logged with its reason."}>
+      <textarea className="hr-textarea" rows={2} required minLength={5} value={value} onChange={(e) => onChange(e.target.value)} data-testid="identity-reason" />
+    </Field>
+  );
+}
 import { DIRECT_UPLOAD_MAX_BYTES, pickUploadPath } from "@/lib/services/customers/direct-upload-rules";
 import { directUpload } from "./direct-upload-client";
 import { ValidityFields, draftProblem, saveValidity, type DateDraft } from "./_components/contract-validity";
@@ -311,12 +326,15 @@ export function DetailsDialog({ ar, customer, canOwner, canCredit, onClose, onDo
   const [f, setF] = useState({
     name: customer.name, nameAr: customer.nameAr ?? "", phone: customer.phone ?? "", email: customer.email ?? "",
     address: customer.address ?? "", whatsappOptOut: customer.whatsappOptOut, emailOptOut: customer.emailOptOut ?? false,
-    commercialRegNo: customer.commercialRegNo ?? "", vatNumber: customer.vatNumber ?? "", segment: customer.segment ?? "",
+    segment: customer.segment ?? "",
     city: customer.city ?? "", priceList: customer.priceList ?? "",
     paymentTermsDays: customer.paymentTermsDays != null ? String(customer.paymentTermsDays) : "",
     creditLimit: customer.creditLimit ?? "", accountOwnerId: customer.accountOwner?.id ?? "",
     defaultHoldDays: customer.defaultHoldDays != null ? String(customer.defaultHoldDays) : "",
   });
+  const [idf, setIdf] = useState<IdentityForm>(identityFrom(customer));
+  const [reason, setReason] = useState("");
+  const idChanged = changedIdentityKeys(idf, customer);
   const [employees, setEmployees] = useState<{ id: string; name: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -337,7 +355,7 @@ export function DetailsDialog({ ar, customer, canOwner, canCredit, onClose, onDo
     // Fix round 1 (council b25): the opt-outs are sent ONLY when changed here — saving another field never rewrites a
     // choice the customer (or a colleague) made since this dialog was opened.
     const { whatsappOptOut, emailOptOut, ...rest } = f;
-    const body: Record<string, unknown> = { ...rest };
+    const body: Record<string, unknown> = { ...rest, ...idf, ...(idChanged.length ? { reason } : {}) };
     if (whatsappOptOut !== customer.whatsappOptOut) body.whatsappOptOut = whatsappOptOut;
     if (emailOptOut !== (customer.emailOptOut ?? false)) body.emailOptOut = emailOptOut;
     const res = await api<{ field?: string }>(`/api/customers/${customer.id}`, { method: "PUT", body });
@@ -375,12 +393,8 @@ export function DetailsDialog({ ar, customer, canOwner, canCredit, onClose, onDo
             {employees.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
           </Select>
         </Field>
-        <Field label={L("السجل التجاري", "Commercial registration")} help={L("10 أرقام", "10 digits")}>
-          <input className="hr-input" dir="ltr" style={{ textAlign: "start" }} inputMode="numeric" value={f.commercialRegNo} onChange={set("commercialRegNo")} data-testid="details-cr" />
-        </Field>
-        <Field label={L("الرقم الضريبي", "VAT number")} help={L("15 رقمًا، يبدأ بـ 3 وينتهي بـ 3", "15 digits, starting and ending with 3")}>
-          <input className="hr-input" dir="ltr" style={{ textAlign: "start" }} inputMode="numeric" value={f.vatNumber} onChange={set("vatNumber")} data-testid="details-vat" />
-        </Field>
+        <IdentityFields value={idf} onChange={setIdf} ar={ar} testPrefix="details" />
+        <IdentityReason ar={ar} changed={idChanged} value={reason} onChange={setReason} />
         <Field label={L("قائمة الأسعار", "Price list")} help={L("نص يصف الاتفاق، لا يغيّر أي سعر.", "Text recording the agreement; it changes no price.")}>
           <input className="hr-input" value={f.priceList} onChange={set("priceList")} maxLength={80} disabled={!canCredit} />
         </Field>
@@ -407,8 +421,8 @@ export function DetailsDialog({ ar, customer, canOwner, canCredit, onClose, onDo
 }
 
 // ── A contact ─────────────────────────────────────────────────────────────────────────────
-export function ContactDialog({ ar, customerId, contact, onClose, onDone }: {
-  ar: boolean; customerId: string; contact: Contact | null; onClose: () => void; onDone: () => void;
+export function ContactDialog({ ar, customerId, contact, canDelete = true, onClose, onDone }: {
+  ar: boolean; customerId: string; contact: Contact | null; canDelete?: boolean; onClose: () => void; onDone: () => void;
 }) {
   const L = (a: string, e: string) => (ar ? a : e);
   const [f, setF] = useState({ name: contact?.name ?? "", role: contact?.role ?? "", phone: contact?.phone ?? "", email: contact?.email ?? "" });
@@ -439,7 +453,7 @@ export function ContactDialog({ ar, customerId, contact, onClose, onDone }: {
     <Dialog open title={contact ? L("تعديل جهة اتصال", "Edit contact") : L("جهة اتصال جديدة", "New contact")} onClose={onClose} testId="contact-dialog"
       actions={<>
         <button type="submit" form="acc-contact" className="hr-btn is-primary" disabled={busy || !f.name.trim()} data-testid="save-contact">{busy ? L("جارٍ الحفظ…", "Saving…") : L("حفظ", "Save")}</button>
-        {contact && <button type="button" className="hr-btn is-danger" onClick={remove} disabled={busy} data-testid="delete-contact">{L("حذف", "Remove")}</button>}
+        {contact && canDelete && <button type="button" className="hr-btn is-danger" onClick={remove} disabled={busy} data-testid="delete-contact">{L("حذف", "Remove")}</button>}
         <button type="button" className="hr-btn" onClick={onClose}>{L("إلغاء", "Cancel")}</button>
       </>}>
       <form id="acc-contact" className="hr-form" onSubmit={save}>
@@ -448,6 +462,49 @@ export function ContactDialog({ ar, customerId, contact, onClose, onDone }: {
         <Field label={L("الدور", "Role")}><input className="hr-input" value={f.role} onChange={set("role")} maxLength={80} placeholder={L("مدير المشتريات", "Purchasing manager")} data-testid="contact-role" /></Field>
         <Field label={L("الهاتف", "Phone")}><input className="hr-input" dir="ltr" style={{ textAlign: "start" }} value={f.phone} onChange={set("phone")} maxLength={40} data-testid="contact-phone" /></Field>
         <Field label={L("البريد", "Email")}><input className="hr-input" dir="ltr" style={{ textAlign: "start" }} type="email" value={f.email} onChange={set("email")} maxLength={160} /></Field>
+      </form>
+    </Dialog>
+  );
+}
+
+// ── The account owner's contact details (readiness review P1-3) ─────────────────────────────────────────────────────
+/** Phone, e-mail, address and city only — what PUT /api/customers/[id] accepts from the account owner. */
+export function OwnerContactDialog({ ar, customer, onClose, onDone }: {
+  ar: boolean; customer: Customer; onClose: () => void; onDone: () => void;
+}) {
+  const L = (a: string, e: string) => (ar ? a : e);
+  const [f, setF] = useState({ phone: customer.phone ?? "", email: customer.email ?? "", address: customer.address ?? "", city: customer.city ?? "" });
+  const [idf, setIdf] = useState<IdentityForm>(identityFrom(customer));
+  const [reason, setReason] = useState("");
+  const idChanged = changedIdentityKeys(idf, customer);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true); setErr("");
+    // Only the «مسلّمات» that changed are sent (each change needs the reason).
+    const idBody = Object.fromEntries(idChanged.map((k) => [k, idf[k as keyof IdentityForm]]));
+    const res = await api(`/api/customers/${customer.id}`, { method: "PUT", body: { ...f, ...idBody, ...(idChanged.length ? { reason } : {}) } });
+    setBusy(false);
+    if (res.ok) onDone(); else setErr(errorOf(res.data as never, ar, L("تعذّر الحفظ.", "Could not save.")));
+  }
+  return (
+    <Dialog open title={L("بيانات العميل", "Customer details")} onClose={onClose} testId="owner-contact-dialog"
+      actions={<>
+        <button type="submit" form="acc-owner-contact" className="hr-btn is-primary" disabled={busy} data-testid="save-owner-contact">{busy ? L("جارٍ الحفظ…", "Saving…") : L("حفظ", "Save")}</button>
+        <button type="button" className="hr-btn" onClick={onClose}>{L("إلغاء", "Cancel")}</button>
+      </>}>
+      <form id="acc-owner-contact" className="hr-form" onSubmit={save}>
+        <Err text={err} />
+        <p className="acc-muted" style={{ margin: 0 }}>{L("بصفتك المندوب المسؤول تعدّل بيانات التواصل بحرية، والأرقام الرسمية والعنوان الوطني مع ذكر السبب؛ الاسم والائتمان والشروط يعدّلها المشرف.", "As the account owner you edit the contact details freely, and the registration numbers and national address with a reason; the name, credit and terms are edited by a supervisor.")}</p>
+        <Field label={L("الجوال", "Phone")}><input className="hr-input" dir="ltr" style={{ textAlign: "start" }} value={f.phone} onChange={set("phone")} maxLength={40} data-testid="owner-phone" /></Field>
+        <Field label={L("الإيميل", "Email")}><input className="hr-input" dir="ltr" style={{ textAlign: "start" }} type="email" value={f.email} onChange={set("email")} maxLength={160} data-testid="owner-email" /></Field>
+        <Field label={L("المدينة", "City")}><input className="hr-input" value={f.city} onChange={set("city")} maxLength={80} data-testid="owner-city" /></Field>
+        <Field label={L("العنوان", "Address")}><input className="hr-input" value={f.address} onChange={set("address")} maxLength={300} data-testid="owner-address" /></Field>
+        <IdentityFields value={idf} onChange={setIdf} ar={ar} testPrefix="owner" />
+        <IdentityReason ar={ar} changed={idChanged} value={reason} onChange={setReason} />
       </form>
     </Dialog>
   );

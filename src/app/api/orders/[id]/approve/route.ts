@@ -1,4 +1,5 @@
 import { NextResponse } from "@/lib/api-response";
+import { recomputeOrderFlags } from "@/lib/services/orders/order-flags";
 import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
@@ -205,6 +206,8 @@ export async function POST(request: Request, { params }: Params) {
         });
         // «طلب مباشر» (gate M1): a rejected order's value stops counting; its auto deal follows (LOST if nothing claimed).
         await refreshDirectOrderDeal(tx, { orderId: id, actorId: user.id, change: "end" });
+        // Gate L4 (soon batch round 2): the rejected order's flags — and its deal's other orders — are recomputed.
+        await recomputeOrderFlags(tx, id);
       } else {
         await appendOrderActivity(tx, {
           orderId: id,

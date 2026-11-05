@@ -4,6 +4,7 @@ import { Decimal, ZERO, roundMoney, parseFiniteDecimal } from "../commissions/en
 import { DISCOUNT_APPROVAL_THRESHOLD, DISCOUNT_MAX } from "./discount-limits";
 import { settingsFromRow } from "./quote-settings";
 import { netFromGross } from "../invoicing/pricing";
+import { dealOfQuote, noteQuoteClosed, syncDealAmount } from "./deal-amount";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -757,6 +758,8 @@ export async function issueQuote(
     },
   });
 
+  // P1-4: the deal's value follows its quotations (deal-amount.ts).
+  await syncDealAmount(tx, quote.opportunityId);
   return { quoteNumber: quote.quoteNumber, grandTotal: priced.grandTotal, discountApproved };
 }
 
@@ -806,6 +809,10 @@ export async function decideQuote(
       rejectionNote: input.to === "REJECTED" ? (input.note ?? "").trim() : undefined,
     },
   });
+  await syncDealAmount(tx, await dealOfQuote(tx, input.quoteId));
+  // Soon batch round 2 (B): a rejected / expired quotation that leaves the deal with no live one is written on the
+  // deal's activity log (the deal's value just dropped to 0.00 + its direct orders).
+  if (input.to !== "ACCEPTED") await noteQuoteClosed(tx, { quoteId: input.quoteId, actorId: input.actorId, at });
 
   return { status: input.to };
 }
@@ -892,6 +899,7 @@ export async function reviseQuote(
   });
 
   await tx.quote.update({ where: { id: input.quoteId }, data: { status: "SUPERSEDED" } });
+  await syncDealAmount(tx, await dealOfQuote(tx, input.quoteId));
 
   return created;
 }

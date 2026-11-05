@@ -66,6 +66,8 @@ type Deal = {
   expectedMonthlyKg: string | null;
   agreedNextStep: string | null;
   amount: string;
+  /** Soon batch round 2: the latest rejected / expired quotation while the deal has no live one (from the Quote table). */
+  lastClosedQuote?: { id: string; quoteNumber: string; status: string; grandTotal: string; currency: string } | null;
   currency: string;
   probability: number;
   expectedCloseAt: string | null;
@@ -1013,6 +1015,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
         {can.write && open && <button type="button" className="lk" data-testid="edit-deal" onClick={() => setDialog("edit")}>{ar ? "تعديل" : "Edit"}</button>}
       </div>
       <div className="kv">{ar ? "القيمة المتوقعة" : "Expected value"}<b>{money(deal.amount)}</b></div>
+      {deal.lastClosedQuote && <div className="kv" data-testid="deal-metric-last-closed">{deal.lastClosedQuote.status === "EXPIRED" ? (ar ? "آخر عرض منتهي" : "Last expired quotation") : (ar ? "آخر عرض مرفوض" : "Last rejected quotation")}<b>{money(deal.lastClosedQuote.grandTotal)}</b></div>}
       <div className="kv">{ar ? "الاحتمال" : "Probability"}<b><span className="n">{deal.probability}%</span></b></div>
       <div className="kv">{ar ? "الكمية الشهرية المتوقعة" : "Expected monthly volume"}<b>{deal.expectedMonthlyKg !== null ? <><span className="n">{Number(deal.expectedMonthlyKg)}</span> {ar ? "كغ" : "kg"}</> : (ar ? "لم تُحدّد" : "Not set")}</b></div>
       {open
@@ -1211,6 +1214,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
           {headSub ? <div className="sub">{headSub}</div> : null}
           <div className="meta">
             <span className="amt">{money(deal.amount)}{open ? (ar ? " متوقعة" : " expected") : ""}</span>
+            {deal.lastClosedQuote && <><i>·</i><span data-testid="deal-last-closed-quote">{lastClosedLine(deal.lastClosedQuote, ar)}</span></>}
             {deal.owner && <><i>·</i><span>{ar ? "المالك: " : "Owner: "}{deal.owner.name}</span></>}
             <i>·</i><span>{ar ? "أُنشئت " : "Created "}{longDate(deal.createdAt, lang)}</span>
           </div>
@@ -1611,4 +1615,11 @@ function SplitDialog({
       </p>
     </Modal>
   );
+}
+
+/** «آخر عرض مرفوض: 1,150.00 ر.س» (soon batch round 2): the offer stays visible while the deal is worth 0.00. */
+function lastClosedLine(q: { status: string; quoteNumber: string; grandTotal: string }, ar: boolean): string {
+  const word = q.status === "EXPIRED" ? (ar ? "آخر عرض منتهي" : "Last expired quotation") : (ar ? "آخر عرض مرفوض" : "Last rejected quotation");
+  const n = Number(q.grandTotal).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return ar ? `${word}: ${n} ر.س` : `${word}: SAR ${n}`;
 }

@@ -107,6 +107,11 @@ export async function PATCH(request: Request, { params }: Params) {
       if (data.status === "FEEDBACK_RECEIVED" || data.status === "CANCELLED") {
         await closeSampleFollowUp(tx, { sampleId: id, opportunityId: sample.opportunityId }, now);
       }
+      // Readiness review P1-6: the deal owner hears the sample went out / what the customer said.
+      if (data.status === "SENT" || data.status === "FEEDBACK_RECEIVED") {
+        const n = await import("@/lib/services/sales/sample-stage-notify");
+        if (data.status === "SENT") await n.notifySampleSent(tx, id, user.id); else await n.notifySampleFeedback(tx, id, user.id);
+      }
 
       return tx.sampleShipment.findUniqueOrThrow({
         where: { id },

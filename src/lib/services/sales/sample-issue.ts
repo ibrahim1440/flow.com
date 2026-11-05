@@ -267,6 +267,9 @@ export async function issueSample(sampleId: string, actorId: string, db: typeof 
     // Pipeline v2 T2b: issued is sent — the deal is at Sample Evaluation (idempotent with the request's T2).
     await advanceToPurpose(tx, s.opportunityId, "SAMPLE_EVALUATION", actorId, "the sample was issued by dispatch");
 
+    // Readiness review P1-6: the deal owner (and the requester) learn the sample went out.
+    const { notifySampleSent } = await import("./sample-stage-notify");
+    await notifySampleSent(tx, s.id, actorId);
     // Accounting A3: the queued SAMPLES_EXPENSE entry posts last, after every row this transaction locks (flushPostings).
     await flushPostings(tx);
     return outcomeOf({ ...s, status: "SENT", issuedAt: now, sentAt: now, issueLots: issued, costValue: cost ? new Prisma.Decimal(cost.toFixed(2)) : null }, false);

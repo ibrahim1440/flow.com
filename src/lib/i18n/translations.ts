@@ -605,6 +605,10 @@ export const translations = {
   statusPaid:         { en: "Paid",                  ar: "مدفوع" },
   statusNotPaid:      { en: "Not Paid",              ar: "غير مدفوع" },
   statusPartialPaid:  { en: "Partial Paid",          ar: "مدفوع جزئياً" },
+  // P1-5: the order's invoice flag (Order.vatInvoiceStatus) on the order card.
+  opsInvoiceCol:      { en: "Tax invoice",           ar: "الفاتورة الضريبية" },
+  statusInvoiceSent:  { en: "Issued",                ar: "صدرت" },
+  statusInvoiceNotYet:{ en: "Not issued yet",        ar: "لم تصدر بعد" },
   // fix/status-labels (owner 2026-10-22): the order line DELIVERY status. «Not Yet» has its own
   // key so the Arabic says what has not happened yet (it read «لم يبدأ»).
   statusPartDeliv:    { en: "Partial Delivered",     ar: "سُلِّم جزئياً" },

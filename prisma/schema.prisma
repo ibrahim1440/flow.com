@@ -289,6 +289,24 @@ model Customer {
   commercialRegNo  String?
   /// VAT registration number (الرقم الضريبي): 15 digits, starting and ending with 3.
   vatNumber        String?
+  // ─── Buyer identity and national address (additive, 20261220090000_soon_batch) ─────────────
+  // The «مسلّمات» of a customer registered by a rep (owner decision, Nov 2026): every later change needs a reason
+  // (services/customers/customer-identity.ts), logged on the customer's activity log and in the audit log. They feed
+  // the buyer snapshot of a NEW invoice (ZATCA standard invoice buyer address, BR-KSA-63); an issued invoice keeps its
+  // frozen snapshot. Nullable, no default: existing customers read "not set". CHECKs in the migration.
+  /// «الرقم الموحد» (unified national number, 700…): 10 digits starting with 7.
+  unifiedNumber          String?
+  /// «العنوان الوطني» — رقم المبنى: 4 digits.
+  nationalBuildingNo     String?
+  nationalStreet         String?
+  nationalDistrict       String?
+  nationalCity           String?
+  /// الرمز البريدي: 5 digits.
+  nationalPostalCode     String?
+  /// الرقم الإضافي: 4 digits.
+  nationalAdditionalNo   String?
+  /// العنوان المختصر (e.g. RRRD2929), optional.
+  nationalShortAddress   String?
   /// Account category code: WHOLESALE | RETAIL | CAFE | DISTRIBUTOR | OTHER (validated by the API).
   segment          String?
   city             String?

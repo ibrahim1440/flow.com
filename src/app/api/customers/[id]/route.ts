@@ -11,6 +11,9 @@ import { protectedAccountChanges } from "@/lib/services/customers/account-guard"
 import { writeSettingsAudit } from "@/lib/services/settings/audit";
 import { parseEmailAddress } from "@/lib/automation/email-mode";
 import { customersScopedToOwner } from "@/lib/services/sales/scope";
+import { forbiddenOwnerKeys, requireContactEditor } from "@/lib/services/customers/owner-contact";
+import { describeIdentityChanges, DUPLICATE_CUSTOMER, identityChanges, IDENTITY_FIELDS, parseChangeReason, parseNationalFields } from "@/lib/services/customers/customer-identity";
+import { findDuplicateCustomer } from "@/lib/services/customers/duplicates";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { user, error } = await requireAnyModule("customers", "orders");
@@ -35,16 +38,22 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 }
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { user, error } = await requireEdit("customers");
-  if (error) return error;
-
   const { id } = await params;
+  // Customers at edit, or (readiness review P1-3) the customer's account owner for its contact fields only.
+  const { user, kind, error } = await requireContactEditor(id);
+  if (error) return error;
   if (!(await customerInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   try {
     const body = await request.json() as {
       name?: string; nameAr?: string; phone?: string; email?: string; address?: string;
       whatsappOptOut?: boolean; emailOptOut?: boolean;
     };
+    if (kind === "owner") {
+      const refused = forbiddenOwnerKeys((body ?? {}) as Record<string, unknown>);
+      if (refused.length) {
+        return NextResponse.json({ error: `يعدّل المندوب المسؤول بيانات التواصل، والرقم الضريبي والسجل والرقم الموحد والعنوان الوطني مع ذكر السبب — فقط (${refused.join("، ")} غير مسموح).`, errorEn: `The account owner changes the contact details, and the VAT / CR / unified number and national address with a reason — nothing else (${refused.join(", ")} refused).`, code: "FIELD_NOT_ALLOWED", fields: refused }, { status: 403 });
+      }
+    }
     if (body.name !== undefined && !body.name?.trim()) {
       return NextResponse.json({ error: "name cannot be empty" }, { status: 400 });
     }
@@ -58,6 +67,26 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     // the rest of this record: customers at edit. Absent keys are unchanged; "" clears one.
     const account = parseAccountFields(body as Record<string, unknown>);
     if (!account.ok) return NextResponse.json({ error: account.errorAr, errorEn: account.error }, { status: 400 });
+    // Round 2 (owner decision): the unified number and the national address; a change of any «مسلّمة» needs a reason —
+    // for everyone (services/customers/customer-identity.ts).
+    const national = parseNationalFields(body as Record<string, unknown>);
+    if (!national.ok) return NextResponse.json({ error: national.errorAr, errorEn: national.error, code: "INVALID_FIELD", field: national.field }, { status: 400 });
+    const identityBefore = await prisma.customer.findUnique({ where: { id }, select: Object.fromEntries(IDENTITY_FIELDS.map((f) => [f, true])) as Record<(typeof IDENTITY_FIELDS)[number], true> });
+    const identity = identityChanges((identityBefore ?? {}) as Record<string, unknown>, { ...account.data, ...national.data } as Record<string, unknown>);
+    const identityReason = parseChangeReason((body as Record<string, unknown>).reason);
+    if (identity.length && !identityReason) {
+      return NextResponse.json({
+        error: "اكتب سبب تعديل الرقم الضريبي أو السجل أو الرقم الموحد أو العنوان الوطني (5 أحرف على الأقل).",
+        errorEn: "State the reason for changing the VAT / CR / unified number or the national address (at least 5 characters).",
+        code: "REASON_REQUIRED", fields: identity.map((c) => c.field),
+      }, { status: 400 });
+    }
+    // Round 3 (gate M1): a changed VAT / CR / unified number may not collide with another customer's.
+    const newNumber = (f: "vatNumber" | "commercialRegNo" | "unifiedNumber") => identity.find((c) => c.field === f)?.to ?? null;
+    if (newNumber("vatNumber") || newNumber("commercialRegNo") || newNumber("unifiedNumber")) {
+      const dup = await findDuplicateCustomer({ vatNumber: newNumber("vatNumber"), commercialRegNo: newNumber("commercialRegNo"), unifiedNumber: newNumber("unifiedNumber") }, { excludeId: id });
+      if (dup) return NextResponse.json({ ...DUPLICATE_CUSTOMER, field: dup.by }, { status: 409 });
+    }
     if (account.data.accountOwnerId) {
       const owner = await prisma.employee.findFirst({ where: { id: account.data.accountOwnerId, active: true }, select: { id: true } });
       if (!owner) return NextResponse.json({ error: "المسؤول غير موجود أو غير نشط.", errorEn: "The account owner is not an active employee." }, { status: 400 });
@@ -91,6 +120,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const guarded = protectedAccountChanges(user, current, account.data as Record<string, unknown>);
     if (!guarded.ok) return NextResponse.json({ error: guarded.errorAr, errorEn: guarded.error, code: "PROTECTED_ACCOUNT_FIELD" }, { status: 403 });
 
+    const before = kind === "owner" ? await prisma.customer.findUnique({ where: { id }, select: { phone: true, address: true, city: true } }) : null;
     const customer = await prisma.$transaction(async (tx) => {
      // «يستقبل إيميلات» goes through the one consent rule (a customer's own opt-out is turned back on by a manager with a
      // reason, from the «الرسائل» card — this form carries no reason, so such a change is refused here).
@@ -106,8 +136,35 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         ...(body.address !== undefined && { address: body.address.trim() || null }),
         ...(body.whatsappOptOut !== undefined && { whatsappOptOut: body.whatsappOptOut }),
         ...account.data,
+        ...national.data,
       },
      });
+     if (identity.length) {
+       // The customer's «سجل النشاط» (customer page) and the audit log: who, when, why, before → after.
+       await tx.activity.create({
+         data: {
+           type: "NOTE", customerId: id, ownerId: user.id, completedAt: new Date(), sourceKey: `customer-identity:${id}`,
+           subject: "تعديل بيانات العميل الأساسية",
+           body: `السبب: ${identityReason}\n${describeIdentityChanges(identity)}`,
+         },
+       });
+       await writeSettingsAudit(tx, {
+         section: "organisation", action: "SETTINGS_UPDATED", entityType: "Customer", entityId: id, changed: identity.map((c) => c.field),
+         before: Object.fromEntries(identity.map((c) => [c.field, c.from])), after: Object.fromEntries(identity.map((c) => [c.field, c.to])),
+         reason: `CUSTOMER_IDENTITY_CHANGE: ${identityReason}`, actor: { id: user.id, name: user.name },
+       });
+     }
+     if (kind === "owner") {
+       const changed = (["phone", "address", "city"] as const).filter((k) => (body as Record<string, unknown>)[k] !== undefined).concat(emailChanged ? ["email" as never] : []);
+       if (changed.length) {
+         await writeSettingsAudit(tx, {
+           section: "organisation", action: "SETTINGS_UPDATED", entityType: "Customer", entityId: id, changed: [...changed],
+           before: { phone: before?.phone ?? null, email: current.email ?? null, address: before?.address ?? null, city: before?.city ?? null },
+           after: { phone: updated.phone ?? null, email: updated.email ?? null, address: updated.address ?? null, city: updated.city ?? null },
+           reason: "CUSTOMER_CONTACT_BY_OWNER", actor: { id: user.id, name: user.name },
+         });
+       }
+     }
      if (guarded.changed.length) {
        await writeSettingsAudit(tx, {
          section: "organisation", action: "SETTINGS_UPDATED", entityType: "Customer", entityId: id,

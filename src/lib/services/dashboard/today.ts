@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import type { Prisma } from "@/generated/prisma/client";
 import { countsAsDelivered, riyadhDay, stageCardOf, stageOf, TERMINAL_ORDER_STATUSES, type PipelineStage, type Stage } from "@/lib/order-stage";
 
 /**
@@ -71,13 +72,19 @@ export type TodayData = {
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
-export async function loadToday(now = new Date(), opts: { customerDetail: boolean } = { customerDetail: false }): Promise<TodayData> {
+/**
+ * `orderScope` (gate L3, soon batch round 2): the viewer's order visibility (services/sales/scope.ts
+ * orderVisibilityWhere — `{}` for whoever sees every order), applied to the open orders and today's deliveries exactly
+ * as /api/dashboard/stats applies it; the roasting and green-bean figures are the roastery's, not a customer's.
+ */
+export async function loadToday(now = new Date(), opts: { customerDetail: boolean; orderScope?: Prisma.OrderWhereInput } = { customerDetail: false }): Promise<TodayData> {
+  const mine = opts.orderScope ?? {};
   const { start, end } = riyadhDay(now);
   const windowStart = new Date(now.getTime() - COVER_WINDOW_DAYS * DAY_MS);
 
   const [openOrders, deliveries, batchesToday, beans, usage] = await Promise.all([
     prisma.order.findMany({
-      where: { status: { notIn: TERMINAL } },
+      where: { status: { notIn: TERMINAL }, ...mine },
       select: {
         id: true, orderNumber: true, status: true, createdAt: true,
         customer: { select: { name: true, nameAr: true } },
@@ -91,7 +98,7 @@ export async function loadToday(now = new Date(), opts: { customerDetail: boolea
       orderBy: [{ createdAt: "asc" }, { orderNumber: "asc" }],
     }),
     prisma.delivery.findMany({
-      where: { date: { gte: start, lt: end } },
+      where: { date: { gte: start, lt: end }, ...(Object.keys(mine).length ? { orderItem: { order: mine } } : {}) },
       select: { quantityKg: true, orderItem: { select: { orderId: true, order: { select: { id: true, orderNumber: true, status: true, createdAt: true, customer: { select: { name: true, nameAr: true } } } } } } },
     }),
     prisma.roastingBatch.findMany({ where: { isBlend: false, date: { gte: start, lt: end } }, select: { greenBeanQuantity: true, roastedBeanQuantity: true } }),

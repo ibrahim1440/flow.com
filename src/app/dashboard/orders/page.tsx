@@ -808,7 +808,8 @@ export default function OrdersPage() {
                       deal={order.opportunityLinks?.[0]?.opportunity ?? null}
                       canLink={order.owner?.id === user?.id || hasSubPrivilege(user?.permissions ?? {}, "sales", "lead_assign")} />] as [string, React.ReactNode]] : []),
                   [t("lastActivityLabel"), lastActivityOf(order) ? opsDate(lastActivityOf(order)!.createdAt, lang) : "—"],
-                  [t("opsPaymentCol"), <StatusBadge key="p" status={order.paymentStatus} />],
+                  [t("opsInvoiceCol"), <span key="v" className={`status-badge ${order.vatInvoiceStatus === "Sent" ? "status-completed" : "status-not-yet"}`} data-testid={`order-vat-${order.orderNumber}`}>{order.vatInvoiceStatus === "Sent" ? t("statusInvoiceSent") : t("statusInvoiceNotYet")}</span>],
+                  [t("opsPaymentCol"), <span key="p" data-testid={`order-pay-${order.orderNumber}`}><StatusBadge status={order.paymentStatus} /></span>],
                 ]} />
 
                 {/* Sales invoicing A2: «إنشاء فاتورة من الطلب» (invoices_create) and the order's invoices (invoices_view). */}

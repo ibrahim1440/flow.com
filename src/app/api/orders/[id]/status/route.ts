@@ -24,6 +24,7 @@ import {
 } from "@/lib/services/order-operations";
 import { emitAutomationEvent } from "@/lib/automation/emit";
 import { refreshDirectOrderDeal } from "@/lib/services/sales/direct-order-deal";
+import { recomputeOrderFlags } from "@/lib/services/orders/order-flags";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -196,6 +197,8 @@ export async function POST(request: Request, { params }: Params) {
       // «طلب مباشر» (gate M1): a cancelled order's value stops counting on its deal; an auto deal with nothing claimed
       // becomes LOST «تلقائي: إلغاء الطلب», one with money recorded keeps WON at the claimed amount.
       if (action === "cancel") await refreshDirectOrderDeal(tx, { orderId: id, actorId: user.id, change: "end" });
+      // P1-5: the order's «الفاتورة» / «الدفع» flags are recomputed on a cancel (the money and invoices stay what they are).
+      if (action === "cancel") await recomputeOrderFlags(tx, id);
 
       // A terminal order must stop holding shelf stock, otherwise its reservations sit
       // there forever and quietly starve every other order of coffee that is physically

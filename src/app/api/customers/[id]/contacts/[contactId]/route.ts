@@ -4,6 +4,8 @@ import { requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { parseContact } from "@/lib/services/customers/fields";
 import { customerInScope } from "@/lib/services/sales/customer-access";
+import { requireContactEditor } from "@/lib/services/customers/owner-contact";
+import { writeSettingsAudit } from "@/lib/services/settings/audit";
 
 type Params = { params: Promise<{ id: string; contactId: string }> };
 
@@ -15,7 +17,10 @@ const SELECT = { id: true, name: true, role: true, phone: true, email: true, pos
  * a contact id from another customer reads as 404, never as somebody else's record.
  */
 export async function PUT(request: Request, { params }: Params) {
-  const { user, error } = await requireEdit("customers");
+  // Customers at edit, or the customer's account owner (readiness review P1-3: correcting a contact). DELETE stays
+  // customers at edit.
+  const { id: cid } = await params;
+  const { user, kind, error } = await requireContactEditor(cid);
   if (error) return error;
   const { id, contactId } = await params;
   // A scoped sales rep reaches only the customers in their own book (services/sales/scope.ts) — 404 otherwise.
@@ -40,6 +45,12 @@ export async function PUT(request: Request, { params }: Params) {
       data: { ...parsed.data, ...(position !== undefined ? { position } : {}) },
       select: SELECT,
     });
+    if (kind === "owner") {
+      await writeSettingsAudit(prisma, {
+        section: "organisation", action: "SETTINGS_UPDATED", entityType: "Customer", entityId: id, changed: ["contact"],
+        before: { contactId }, after: { contactId, ...parsed.data }, reason: "CUSTOMER_CONTACT_BY_OWNER", actor: { id: user.id, name: user.name },
+      });
+    }
     return NextResponse.json(contact);
   } catch (err) {
     return handlePrismaError(err);

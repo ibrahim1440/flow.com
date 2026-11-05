@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     const rows = await prisma.customer.findMany({
       where: { ...(scope ? { id: { in: scope } } : {}), ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { nameAr: { contains: q } }, { vatNumber: { contains: q } }] } : {}) },
       orderBy: { name: "asc" }, take: 50,
-      select: { id: true, name: true, nameAr: true, vatNumber: true, commercialRegNo: true, city: true, address: true, phone: true, paymentTermsDays: true },
+      select: { id: true, name: true, nameAr: true, vatNumber: true, commercialRegNo: true, city: true, address: true, phone: true, paymentTermsDays: true, unifiedNumber: true, nationalBuildingNo: true, nationalStreet: true, nationalDistrict: true, nationalCity: true, nationalPostalCode: true, nationalAdditionalNo: true },
     });
     return NextResponse.json({ items: rows });
   } catch (err) {

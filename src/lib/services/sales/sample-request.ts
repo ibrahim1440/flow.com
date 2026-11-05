@@ -164,6 +164,9 @@ export async function requestStockSampleIn(
       },
       select: SAMPLE_SELECT,
     });
+    // Readiness review P1-6: dispatch is told a sample waits — or, for a second sample still to approve, the approvers.
+    const { notifySampleRequested } = await import("./sample-stage-notify");
+    await notifySampleRequested(tx, created.id, actor.id, approvalRequired && !selfApproved);
     return { replayed: false, sample: withState(created), priorSamples: prior };
   }
 }
@@ -230,6 +233,8 @@ export async function decideSampleApproval(
       const row = await tx.sampleShipment.findUniqueOrThrow({ where: { id: s.id }, select: { opportunityId: true } });
       await closeSampleFollowUp(tx, { sampleId: s.id, opportunityId: row.opportunityId }, now);
     }
+    const { notifySampleDecided } = await import("./sample-stage-notify");
+    await notifySampleDecided(tx, s.id, actor.id, decision, reason ?? null);
     return { replayed: false, sample: withState(await read()) };
   }, TX_OPTS);
 }
