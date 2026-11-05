@@ -390,7 +390,7 @@ export default function LeadDetailPage() {
       <Link
         href="/dashboard/sales/leads"
         data-testid="back-to-leads"
-        className="inline-flex items-center gap-1.5 text-[13px] font-medium text-oo-text-secondary hover:text-oo-text-primary hover:underline"
+        className="inline-flex items-center gap-1.5 text-[13px] font-medium text-oo-text-secondary hover:text-oo-text-primary"
       >
         <ArrowRight size={15} className="rtl:rotate-0 rotate-180" aria-hidden />
         {ar ? "العملاء المحتملون" : "Leads"}

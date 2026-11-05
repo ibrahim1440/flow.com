@@ -246,7 +246,6 @@
   .hr-table.ops-prep td[colspan] { display: block; }
 }
 .ops-link { color: var(--text-link); text-decoration: none; font-weight: 500; }
-.ops-link:hover { text-decoration: underline; }
 
 /* Queue tables whose rows open an inline detail row (QC backlog and history). */
 .hr-table tr.ops-detailrow > td { background: var(--surface-subtle); padding: 14px 16px 16px; height: auto; }

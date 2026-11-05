@@ -20,7 +20,6 @@
 .nf-dot { flex: none; width: 8px; height: 8px; margin-top: 7px; border-radius: 50%; background: var(--action-primary); }
 .nf-foot { position: sticky; bottom: 0; display: flex; justify-content: space-between; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border-subtle); background: var(--surface); font-size: 13px; }
 .nf-foot a { color: var(--text-link, var(--text-primary)); text-decoration: none; font-weight: 500; }
-.nf-foot a:hover { text-decoration: underline; }
 
 /* The page */
 .nf-page-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; min-width: 0; }

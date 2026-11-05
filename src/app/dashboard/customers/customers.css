@@ -6,7 +6,6 @@
  * the phone sheet and the form's checkbox. No colour is defined here.
  */
 .d21 .cu-open { appearance: none; border: 0; background: none; padding: 0; font: inherit; font-weight: 500; color: var(--text-primary); text-align: start; cursor: pointer; overflow-wrap: anywhere; }
-.d21 .cu-open:hover { text-decoration: underline; }
 .d21 .cu-table td { height: 52px; }
 .d21 .cu-danger { color: var(--status-danger); }
 .d21 .btn.cu-danger:hover { background: var(--status-danger-tint); }
@@ -68,7 +67,6 @@
 
 /* UI batch 3: the preview's «فتح الصفحة» (forward arrow: mirrored in RTL) and the name link. */
 .d21 a.cu-open { text-decoration: none }
-.d21 a.cu-open:hover { text-decoration: underline }
 [dir="rtl"] .d21 .cu-fwd, .d21[dir="rtl"] .cu-fwd { transform: scaleX(-1) }
 
 /* «لوحة دفتري» (owner-approved Figma «عملائي — لوحة دفتري», 3 Nov 2026). Tokens only. */

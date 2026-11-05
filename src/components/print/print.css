@@ -182,7 +182,6 @@
 .pp-card-meta { font-size: 12px; color: var(--hr-muted); line-height: 1.5; }
 .pp-card-links { display: flex; gap: 16px; }
 .pp-card-links button { appearance: none; background: none; border: 0; padding: 0; font: inherit; font-size: 12px; font-weight: 500; color: var(--hr-link); cursor: pointer; line-height: 1.5; }
-.pp-card-links button:hover { text-decoration: underline; }
 .pp-cap-edit { display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
 .pp-cap-edit .pp-input { width: 140px; flex: none; }
 .pp-form { display: flex; flex-direction: column; gap: 12px; padding: 18px 20px; background: var(--hr-surface); border: 1px solid var(--hr-border-subtle); border-radius: 8px; min-width: 0; }

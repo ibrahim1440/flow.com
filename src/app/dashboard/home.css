@@ -32,7 +32,6 @@
 .dh-lk { margin-inline-start: auto; display: inline-flex; align-items: center; gap: 4px; font: 500 13px/22px var(--f-ui); color: var(--action-primary); text-decoration: none; white-space: nowrap; }
 .dh-lk svg { width: 16px; height: 16px; stroke-width: 1.5; }
 [dir="rtl"] .dh-lk svg { transform: scaleX(-1); }
-.dh-lk:hover { text-decoration: underline; }
 
 /* Order pipeline (20:303): one row, hairlines top and bottom, 9 px inset; cells 16/20/18 inset,
    value Number/Flow 30/33 −0.3, label UI/Body S secondary.

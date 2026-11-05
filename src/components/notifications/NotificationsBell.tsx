@@ -63,7 +63,7 @@ function Bell({ lang, phone }: { lang: "ar" | "en"; phone: boolean }) {
     if (n.link) router.push(n.link);
   };
   return (
-    <div className={`d21-bell nf-bell${phone ? " ph" : ""}`} ref={box} data-testid="notifications-bell">
+    <div className={`d21-bell nf-bell${phone ? " d21-bell-ph" : ""}`} ref={box} data-testid="notifications-bell">
       <button type="button" className="d21-ib d21-bell-btn" aria-haspopup="dialog" aria-expanded={open}
         aria-label={ar ? `التنبيهات${unread ? ` (${unread} غير مقروء)` : ""}` : `Notifications${unread ? ` (${unread} unread)` : ""}`}
         onClick={() => { setOpen((v) => !v); if (!open) load(); }}>

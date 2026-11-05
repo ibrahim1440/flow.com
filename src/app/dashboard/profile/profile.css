@@ -51,7 +51,6 @@
 [data-hr-root] .pf-bcap { font-size: 13px; line-height: 22px; color: var(--hr-muted); }
 [data-hr-root] .pf-bact { margin-inline-start: auto; }
 [data-hr-root] .pf-link { appearance: none; border: 0; background: none; padding: 0; font: inherit; font-size: 13px; font-weight: 500; line-height: 22px; color: var(--hr-primary); cursor: pointer; }
-[data-hr-root] .pf-link:hover:not(:disabled) { text-decoration: underline; }
 [data-hr-root] .pf-link:disabled { color: var(--hr-disabled); cursor: not-allowed; }
 [data-hr-root] .pf-lead { margin: 0 0 -16px; font-size: 13.5px; line-height: 22px; color: var(--hr-text-2); }
 [data-hr-root] .pf-foot { margin: -16px 0 0; font-size: 12.5px; line-height: 20px; color: var(--hr-muted); }

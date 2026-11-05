@@ -192,7 +192,7 @@
 .d21-crumb li { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .d21-crumb li + li::before { content: "/"; color: var(--text-disabled); }
 .d21-crumb a { color: inherit; text-decoration: none; }
-.d21-crumb a:hover { color: var(--text-primary); text-decoration: underline; }
+.d21-crumb a:hover { color: var(--text-primary) }
 .d21-crumb [aria-current] { color: var(--text-primary); font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
 .d21-top .sp { flex: 1; }
 /* «جديد» and its «C» (reference top bar: .btn.g.sm + .kbd with margin 0). */

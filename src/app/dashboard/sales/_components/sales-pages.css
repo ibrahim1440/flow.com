@@ -40,7 +40,6 @@
 .d21 .spg-main { flex: 1; min-width: 0; display: grid; gap: 3px }
 .d21 .spg-main > div { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap }
 .d21 .spg-main b, .d21 .spg-main a.who { font-size: 15px; font-weight: 700; color: var(--text-primary); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100% }
-.d21 .spg-main a.who:hover { text-decoration: underline }
 .d21 .spg-main small { font-size: 12.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .d21 .spg-next { flex: none; display: grid; gap: 1px; min-width: 140px; font-size: 12px; color: var(--text-muted) }
 .d21 .spg-next b { font-size: 13.5px; font-weight: 600; color: var(--text-primary) }

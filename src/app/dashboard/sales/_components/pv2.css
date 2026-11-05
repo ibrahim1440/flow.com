@@ -159,7 +159,6 @@
 .d21 .pv2-panel > .h .c { font: 400 13px/22px var(--f-num); color: var(--text-muted); white-space: nowrap; flex: none }
 .d21 .pv2-panel > .h h2 { min-width: 0 }
 .d21 .pv2-panel > .h .lk, .d21 .pv2-lk { margin-inline-start: auto; font: 500 13px/22px var(--f-ui); color: var(--text-link); border: 0; background: none; padding: 0; cursor: pointer; text-decoration: none }
-.d21 .pv2-lk:hover { text-decoration: underline }
 .d21 .pv2-panel .kv { display: flex; align-items: baseline; gap: 8px; font: 400 13px/22px var(--f-ui); color: var(--text-secondary) }
 .d21 .pv2-panel .kv b { margin-inline-start: auto; font-weight: 500; color: var(--text-primary); text-align: end }
 .d21 .pv2-panel .note { font: 400 12px/18px var(--f-ui); color: var(--text-muted) }

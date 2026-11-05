@@ -60,7 +60,6 @@
 /* Revision chain rows. */
 .d21 .q-props .st.x { font-size: 12.5px }
 .d21 .q-props a { color: var(--action-primary); text-decoration: none }
-.d21 .q-props a:hover { text-decoration: underline }
 
 /* ── Phone (390 frames): lines as rows, figures as label/value rows, a muted band. ── */
 .d21 .q-mline { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 12px 0; border-bottom: 1px solid var(--border-subtle) }
@@ -75,7 +74,6 @@
 /* ── The document (A-12): the screen toolbar, then an A4 sheet on the canvas. ── */
 .d21 .q-doc-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; max-width: 795px; margin: 0 auto 16px }
 .d21 .q-doc-bar .num { font: 500 14px/22px var(--f-num); color: var(--text-primary); text-decoration: none }
-.d21 .q-doc-bar .num:hover { text-decoration: underline }
 .d21 .q-doc-bar .sp { flex: 1 }
 .d21 .q-doc-bar .why { font-size: 12.5px; color: var(--text-muted) }
 .d21 .q-doc-wrap { max-width: 795px; margin: 0 auto }

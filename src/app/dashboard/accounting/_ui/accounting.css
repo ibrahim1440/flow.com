@@ -77,7 +77,6 @@
 .acct .hr-table tr.is-sub td { font-weight: 500; background: var(--hr-subtle); }
 .acct .hr-table tr.is-grand td { font-size: 15px; }
 .acct .hr-table tr.is-clickable a { color: inherit; text-decoration: none; }
-.acct .hr-table tr.is-clickable a:hover { text-decoration: underline; }
 .acct .acct-status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
 .acct .acct-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .acct .acct-status.is-PASS { color: var(--hr-success); }

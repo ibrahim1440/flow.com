@@ -11,7 +11,7 @@
 .qc-crumb li { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .qc-crumb li + li::before { content: "/"; color: var(--text-disabled); }
 .qc-crumb a { color: var(--text-secondary); text-decoration: none; }
-.qc-crumb a:hover { color: var(--text-link); text-decoration: underline; }
+.qc-crumb a:hover { color: var(--text-link) }
 .qc-crumb [aria-current="page"] { color: var(--text-primary); font-weight: 500; }
 
 /* The filter card */

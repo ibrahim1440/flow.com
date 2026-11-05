@@ -677,7 +677,7 @@ export default function OrdersPage() {
                           </div>
                         );
                       })}
-                      <button type="button" onClick={addItem} className="text-sm text-brown hover:underline">
+                      <button type="button" onClick={addItem} className="text-sm text-brown">
                         {t("addItem")}
                       </button>
                     </div>
@@ -952,7 +952,7 @@ export default function OrdersPage() {
                           </div>
                         ))}
                         <button type="button" onClick={() => setEditForm({ ...editForm, items: [...editForm.items, { beanTypeName: "", quantityKg: 0, greenBeanId: "", productId: "", productSkuId: "" }] })}
-                          className="text-sm text-brown hover:underline">{t("addItem")}</button>
+                          className="text-sm text-brown">{t("addItem")}</button>
                       </div>
                       <div className="flex gap-2 justify-end">
                         <button onClick={() => setEditingId(null)}

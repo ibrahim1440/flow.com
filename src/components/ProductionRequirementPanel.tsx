@@ -243,7 +243,7 @@ export function ProductionRequirementPanel({ itemIds }: { itemIds: string[] }) {
                   <li key={p.id} className="text-[11px] text-oo-text-secondary flex items-center gap-1.5 flex-wrap">
                     <a
                       href={`/dashboard/production-orders/${p.id}`}
-                      className="font-mono font-bold text-oo-action-primary hover:underline"
+                      className="font-mono font-bold text-oo-action-primary"
                     >
                       {p.productionNumber}
                     </a>

@@ -57,7 +57,6 @@
 .d21 .bh { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px }
 .d21 .bh .sub { color: var(--text-muted); font-size: 13px }
 .d21 .bh .lk { margin-inline-start: auto; font: inherit; font-size: 13px; color: var(--action-primary); font-weight: 500; display: flex; align-items: center; gap: 4px; background: none; border: 0; padding: 0; text-decoration: none; cursor: pointer }
-.d21 .bh .lk:hover { text-decoration: underline }
 .d21 .lbl { font-size: 12.5px; color: var(--text-muted); font-weight: 500 }
 .d21 .mid { font: 400 26px/1.1 var(--f-num); letter-spacing: -.01em; font-variant-numeric: tabular-nums }
 .d21 .mid.ar { font-family: var(--f-ui) }
@@ -92,7 +91,6 @@
 .d21 .t .sm:not(.btn) { font-size: 12.5px; color: var(--text-muted) }
 .d21 .t.dense td { height: 40px }
 .d21 .t a { color: inherit; text-decoration: none }
-.d21 .t a:hover { text-decoration: underline }
 
 .d21 .tl { position: relative; list-style: none; margin: 0; padding: 0 }
 .d21 .tl > li { position: relative; padding: 0 0 22px; padding-inline-start: 28px }
@@ -123,7 +121,7 @@
 .d21 .track small { display: block; font-size: 12.5px; color: var(--text-muted); margin-top: 2px }
 .d21 .track button { all: unset; display: block; cursor: pointer; border-radius: 6px; padding-inline-end: 8px }
 .d21 .track button:disabled { cursor: default }
-.d21 .track button:not(:disabled):hover b { color: var(--text-primary); text-decoration: underline }
+.d21 .track button:not(:disabled):hover b { color: var(--text-primary) }
 .d21 .track button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }
 
 .d21 .callout { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 10px; background: var(--surface-subtle); font-size: 14px }
@@ -150,7 +148,6 @@
 
 /* A small olive text action next to a label (edit beside «التفاصيل», the split beside its row). */
 .d21 .lk-inline { margin-inline-start: auto; font: inherit; font-size: 12.5px; font-weight: 500; color: var(--action-primary); background: none; border: 0; padding: 0; cursor: pointer }
-.d21 .lk-inline:hover { text-decoration: underline }
 .d21 .props dd .lk-inline { margin-inline-start: 8px }
 
 /* Narrow widths: a pipeline with more stages than fit scrolls inside its own strip rather than
@@ -263,7 +260,6 @@
 .d21 .pane-h { display: flex; align-items: center; gap: 12px; height: 52px; padding: 0 24px; border-bottom: 1px solid var(--border-subtle); flex: none }
 .d21 .pane-h .sp { flex: 1 }
 .d21 .pane-h .lk { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: var(--text-primary); text-decoration: none }
-.d21 .pane-h .lk:hover { text-decoration: underline }
 .d21 .pane-b { flex: 1; overflow-y: auto; padding: 24px 24px 16px }
 .d21 .pane-t { font: 600 24px/1.3 var(--f-ui); margin: 0 0 6px; outline: 0 }
 .d21 .pane-f { display: flex; gap: 8px; padding: 16px 24px; border-top: 1px solid var(--border-subtle); flex: none }
@@ -330,7 +326,6 @@
 .d21 .d63-row .flag { flex: none }
 .d21 .d63-more { display: block; width: 100%; height: 34px; text-align: start; font: 500 13.5px/22px var(--f-ui); color: var(--text-primary); background: none; border: 0; padding: 0 14px; border-radius: 9px; cursor: pointer }
 .d21 .d63-more .n { color: var(--action-primary) }
-.d21 .d63-more:hover { text-decoration: underline }
 /* Footer 43. */
 .d21 .d63-ft { display: flex; align-items: center; gap: 14px; padding: 10px 20px; border-top: 1px solid var(--border-subtle); font-size: 12px; line-height: 22px; color: var(--text-muted); flex: none }
 .d21 .d63-ft .hint { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap }
