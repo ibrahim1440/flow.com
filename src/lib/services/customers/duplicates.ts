@@ -30,13 +30,15 @@ export async function findDuplicateCustomer(probe: DuplicateProbe, opts: { exclu
     )
     SELECT c."id", c."name",
            CASE WHEN ${vat}::text IS NOT NULL AND c."vatNumber" = ${vat} THEN 'vatNumber'
-                WHEN ${cr}::text IS NOT NULL AND c."commercialRegNo" = ${cr} THEN 'commercialRegNo'
-                WHEN ${uni}::text IS NOT NULL AND c."unifiedNumber" = ${uni} THEN 'unifiedNumber'
+                WHEN ${cr}::text IS NOT NULL AND (c."commercialRegNo" = ${cr} OR c."unifiedNumber" = ${cr}) THEN 'commercialRegNo'
+                WHEN ${uni}::text IS NOT NULL AND (c."unifiedNumber" = ${uni} OR c."commercialRegNo" = ${uni}) THEN 'unifiedNumber'
                 ELSE 'name' END AS by
       FROM c
      WHERE (${vat}::text IS NOT NULL AND c."vatNumber" = ${vat})
-        OR (${cr}::text IS NOT NULL AND c."commercialRegNo" = ${cr})
-        OR (${uni}::text IS NOT NULL AND c."unifiedNumber" = ${uni})
+        -- One «السجل التجاري / الرقم الموحد» field (5 Nov 2026): a number is compared against BOTH columns, so a CR
+        -- kept in the unified slot (or the reverse) still collides.
+        OR (${cr}::text IS NOT NULL AND (c."commercialRegNo" = ${cr} OR c."unifiedNumber" = ${cr}))
+        OR (${uni}::text IS NOT NULL AND (c."unifiedNumber" = ${uni} OR c."commercialRegNo" = ${uni}))
         OR (${n1}::text IS NOT NULL AND (c.n = ${n1} OR c.nar = ${n1}))
         OR (${n2}::text IS NOT NULL AND (c.n = ${n2} OR c.nar = ${n2}))
      LIMIT 1`;

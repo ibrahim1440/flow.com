@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireQuoteWrite } from "@/lib/services/sales/quote-guard";
 import { canQuoteWithoutDeal, quotesSeeAll } from "@/lib/services/sales/quote-access";
 import { handleDomainError } from "@/lib/api-error";
-import { hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
+import { canEdit, hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
 import { customersScopedToOwner, ownedCustomerWhere } from "@/lib/services/sales/scope";
 
 /**
@@ -30,6 +30,8 @@ export async function GET(request: Request) {
   if (error) return error;
   const url = new URL(request.url);
   const q = (url.searchParams.get("q") ?? "").trim().slice(0, 80);
+  // The phone search reads «٠٥٥…» as «055…» (Arabic-Indic and Persian digits).
+  const qDigits = q.replace(/[٠-٩]/g, (c) => String(c.charCodeAt(0) - 0x0660)).replace(/[۰-۹]/g, (c) => String(c.charCodeAt(0) - 0x06f0)).replace(/[\s-]/g, "");
   const customerId = url.searchParams.get("customerId");
 
   const scopeAll = quotesSeeAll(user.permissions);
@@ -43,7 +45,7 @@ export async function GET(request: Request) {
 
   try {
     const nameMatch = q
-      ? { OR: [{ name: { contains: q, mode: "insensitive" as const } }, { nameAr: { contains: q, mode: "insensitive" as const } }] }
+      ? { OR: [{ name: { contains: q, mode: "insensitive" as const } }, { nameAr: { contains: q, mode: "insensitive" as const } }, ...(/\d{3,}/.test(qDigits) ? [{ phone: { contains: qDigits } }] : [])] }
       : {};
     const customers = await prisma.customer.findMany({
       // AND, not a spread: the name match and the scope are both top-level `OR`s, and a spread would let the scope
@@ -77,6 +79,9 @@ export async function GET(request: Request) {
         createDeal: hasSubPrivilege(user.permissions, "sales", "lead_convert") && hasModuleAccess(user.permissions, "customers"),
         // A quotation with no deal (accounting › quotes_issue).
         noDeal,
+        // «عميل جديد» in the picker (5 Nov 2026): the rules of POST /api/customers — customers › edit, or a rep who
+        // registers their own customer (lead_write / lead_convert).
+        createCustomer: canEdit(user.permissions, "customers") || hasSubPrivilege(user.permissions, "sales", "lead_write") || hasSubPrivilege(user.permissions, "sales", "lead_convert"),
       },
     });
   } catch (err) {

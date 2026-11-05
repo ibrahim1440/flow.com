@@ -19,7 +19,7 @@ import { customersScopedToOwner } from "@/lib/services/sales/scope";
 import { isSalesPersona } from "@/lib/workspace/landing";
 import { RepBook } from "./_components/rep-book";
 import { MyBookPanel, filterLabel, inFilter, isBookFilter, statusOf, useMyBook, type BookFilter } from "./_components/my-book";
-import { IdentityFields, blankIdentity, type IdentityForm } from "@/components/customers/identity-fields";
+import { NewCustomerDialog } from "@/components/customers/new-customer-form";
 import "./customers.css";
 
 /**
@@ -156,8 +156,10 @@ export default function CustomersPage() {
   // Customer add/edit form
   const [showCustomerForm, setShowCustomerForm] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
-  const [customerForm, setCustomerForm] = useState({ name: "", nameAr: "", phone: "", email: "", address: "", city: "", whatsappOptOut: false });
-  const [identityForm, setIdentityForm] = useState<IdentityForm>(blankIdentity());
+  const [customerForm, setCustomerForm] = useState({ name: "", nameAr: "", phone: "", email: "", address: "", whatsappOptOut: false });
+  // «إضافة عميل» is the one shared form (components/customers/new-customer-form.tsx, 5 Nov 2026); this page's own
+  // dialog below is the contact edit only.
+  const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [savingCustomer, setSavingCustomer] = useState(false);
 
   // Profile form
@@ -229,10 +231,7 @@ export default function CustomersPage() {
 
   // ── Customer CRUD ──────────────────────────────────────────────────────────
   function openAddCustomer() {
-    setEditingCustomer(null);
-    setCustomerForm({ name: "", nameAr: "", phone: "", email: "", address: "", city: "", whatsappOptOut: false });
-    setIdentityForm(blankIdentity());
-    setShowCustomerForm(true);
+    setShowNewCustomer(true);
   }
 
   // «+» beside «العملاء» in the accountant workspace (?new=customer): the same form as «عميل جديد», for the API's audience (customers › edit).
@@ -240,23 +239,19 @@ export default function CustomersPage() {
 
   function openEditCustomer(c: Customer) {
     setEditingCustomer(c);
-    setCustomerForm({ name: c.name, nameAr: c.nameAr ?? "", phone: c.phone ?? "", email: c.email ?? "", address: c.address ?? "", city: "", whatsappOptOut: c.whatsappOptOut ?? false });
+    setCustomerForm({ name: c.name, nameAr: c.nameAr ?? "", phone: c.phone ?? "", email: c.email ?? "", address: c.address ?? "", whatsappOptOut: c.whatsappOptOut ?? false });
     setShowCustomerForm(true);
   }
 
   async function handleSaveCustomer(e: React.FormEvent) {
     e.preventDefault();
     setSavingCustomer(true);
-    const url = editingCustomer ? `/api/customers/${editingCustomer.id}` : "/api/customers";
-    const method = editingCustomer ? "PUT" : "POST";
-    const res = await fetch(url, {
-      method,
+    if (!editingCustomer) { setSavingCustomer(false); return; }
+    const res = await fetch(`/api/customers/${editingCustomer.id}`, {
+      method: "PUT",
       headers: { "Content-Type": "application/json" },
-      // A new customer carries its registration data; an edit here keeps to the contact record (the «مسلّمات» are
-      // changed on the customer page, with a reason).
-      body: JSON.stringify(editingCustomer
-        ? { name: customerForm.name, nameAr: customerForm.nameAr, phone: customerForm.phone, email: customerForm.email, address: customerForm.address, whatsappOptOut: customerForm.whatsappOptOut }
-        : { ...customerForm, ...identityForm }),
+      // An edit here keeps to the contact record (the «مسلّمات» are changed on the customer page, with a reason).
+      body: JSON.stringify({ name: customerForm.name, nameAr: customerForm.nameAr, phone: customerForm.phone, email: customerForm.email, address: customerForm.address, whatsappOptOut: customerForm.whatsappOptOut }),
     });
     setSavingCustomer(false);
     if (!res.ok) { const d = await res.json(); showToast(localizeApiError(d) || t("error"), "err"); return; }
@@ -777,8 +772,11 @@ export default function CustomersPage() {
           : L(`إلغاء إسناد ${picked.size} عميل؟ يصيرون بدون مندوب.`, `Unassign ${picked.size} customer(s)? They will have no rep.`)}</p>
       </Dialog>
 
-      {/* ── Customer form ── */}
-      <Dialog open={showCustomerForm} title={editingCustomer ? t("editCustomer") : t("addCustomer")} onClose={() => setShowCustomerForm(false)} testId="customer-form"
+      <NewCustomerDialog open={showNewCustomer} ar={ar} onClose={() => setShowNewCustomer(false)}
+        onCreated={() => { setShowNewCustomer(false); showToast(t("customerSaved")); void loadData(); }} />
+
+      {/* ── Customer form (contact edit) ── */}
+      <Dialog open={showCustomerForm} title={t("editCustomer")} onClose={() => setShowCustomerForm(false)} testId="customer-edit-form"
         actions={<>
           <button type="submit" form="customer-form-el" className="hr-btn is-primary" disabled={savingCustomer}>{savingCustomer ? t("saving") : t("save")}</button>
           <button type="button" className="hr-btn" onClick={() => setShowCustomerForm(false)}>{t("cancel")}</button>
@@ -799,14 +797,6 @@ export default function CustomersPage() {
           <Field label={t("customerAddress")} wide>
             <textarea value={customerForm.address} onChange={(e) => setCustomerForm({ ...customerForm, address: e.target.value })} rows={2} className="hr-textarea" data-testid="cf-address" />
           </Field>
-          {!editingCustomer ? (
-            <>
-              <Field label={L("المدينة", "City")}>
-                <input value={customerForm.city} onChange={(e) => setCustomerForm({ ...customerForm, city: e.target.value })} className="hr-input" data-testid="cf-city" />
-              </Field>
-              <IdentityFields value={identityForm} onChange={setIdentityForm} ar={ar} testPrefix="cf" />
-            </>
-          ) : null}
           {/* Respected by every automated WhatsApp message: the message is recorded as not
               sent, with the reason, instead of being sent. */}
           <label className="cu-check is-wide">

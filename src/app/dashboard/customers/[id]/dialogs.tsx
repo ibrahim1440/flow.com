@@ -8,7 +8,7 @@ import { api } from "../../sales/_components/ui";
 import { OUTCOME_LABELS } from "@/components/d21/labels";
 import { ACTIVITY_OUTCOMES } from "@/lib/services/sales/qualification";
 import type { Contact, Customer, Deal } from "./types";
-import { IdentityFields, changedIdentityKeys, identityFrom, type IdentityForm } from "@/components/customers/identity-fields";
+import { IdentityFields, changedIdentityBody, changedIdentityKeys, identityFrom, legacyRegistrationNote, showsLegacyAddress, type IdentityForm } from "@/components/customers/identity-fields";
 
 /**
  * «سبب التعديل» — shown only when a «مسلّمة» (VAT, CR, unified number, national address) changed; the server refuses the
@@ -335,6 +335,7 @@ export function DetailsDialog({ ar, customer, canOwner, canCredit, onClose, onDo
   const [idf, setIdf] = useState<IdentityForm>(identityFrom(customer));
   const [reason, setReason] = useState("");
   const idChanged = changedIdentityKeys(idf, customer);
+  const legacyAddress = showsLegacyAddress(customer);
   const [employees, setEmployees] = useState<{ id: string; name: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -354,8 +355,10 @@ export function DetailsDialog({ ar, customer, canOwner, canCredit, onClose, onDo
     setBusy(true); setErr(""); setEmailErr("");
     // Fix round 1 (council b25): the opt-outs are sent ONLY when changed here — saving another field never rewrites a
     // choice the customer (or a colleague) made since this dialog was opened.
-    const { whatsappOptOut, emailOptOut, ...rest } = f;
-    const body: Record<string, unknown> = { ...rest, ...idf, ...(idChanged.length ? { reason } : {}) };
+    const { whatsappOptOut, emailOptOut, address, city, ...rest } = f;
+    // 5 Nov 2026: only the «مسلّمات» that changed are sent (the merged CR / unified number above all), and the free
+    // address / city only for a legacy customer — otherwise the server derives them from the national address.
+    const body: Record<string, unknown> = { ...rest, ...(legacyAddress ? { address, city } : {}), ...changedIdentityBody(idf, customer), ...(idChanged.length ? { reason } : {}) };
     if (whatsappOptOut !== customer.whatsappOptOut) body.whatsappOptOut = whatsappOptOut;
     if (emailOptOut !== (customer.emailOptOut ?? false)) body.emailOptOut = emailOptOut;
     const res = await api<{ field?: string }>(`/api/customers/${customer.id}`, { method: "PUT", body });
@@ -377,7 +380,7 @@ export function DetailsDialog({ ar, customer, canOwner, canCredit, onClose, onDo
         <Field label={L("الاسم بالعربية", "Arabic name")}><input className="hr-input" dir="rtl" value={f.nameAr} onChange={set("nameAr")} /></Field>
         <Field label={L("الهاتف", "Phone")}><input className="hr-input" dir="ltr" style={{ textAlign: "start" }} value={f.phone} onChange={set("phone")} /></Field>
         <Field label={L("الإيميل", "Email")} error={emailErr || undefined} help={L("تروح له الإيميلات التلقائية (عروض الأسعار).", "Automated e-mails (quotations) go here.")}><input className="hr-input" dir="ltr" style={{ textAlign: "start" }} type="text" inputMode="email" value={f.email} onChange={set("email")} data-testid="details-email" /></Field>
-        <Field label={L("التوصيل (العنوان)", "Delivery (address)")} wide><textarea className="hr-textarea" rows={2} value={f.address} onChange={set("address")} /></Field>
+        {legacyAddress ? <Field label={L("التوصيل (العنوان)", "Delivery (address)")} wide help={L("عنوان قديم — بعد إدخال العنوان الوطني يصير هو العنوان.", "A legacy address — once the national address is entered it becomes the address.")}><textarea className="hr-textarea" rows={2} value={f.address} onChange={set("address")} /></Field> : null}
         <p className="cu-formsec is-wide">{L("الحساب", "Account")}</p>
         <Field label={L("الفئة", "Category")}>
           <Select className="hr-select" value={f.segment} onChange={set("segment")} data-testid="details-segment">
@@ -385,7 +388,7 @@ export function DetailsDialog({ ar, customer, canOwner, canCredit, onClose, onDo
             {Object.entries(SEGMENT_LABELS).map(([k, v]) => <option key={k} value={k}>{ar ? v.ar : v.en}</option>)}
           </Select>
         </Field>
-        <Field label={L("المدينة", "City")}><input className="hr-input" value={f.city} onChange={set("city")} maxLength={80} /></Field>
+        {legacyAddress ? <Field label={L("المدينة", "City")}><input className="hr-input" value={f.city} onChange={set("city")} maxLength={80} /></Field> : null}
         <Field label={L("المسؤول", "Account owner")}>
           <Select className="hr-select" value={f.accountOwnerId} onChange={set("accountOwnerId")} disabled={!canOwner} data-testid="details-owner">
             <option value="">{L("بلا مسؤول", "None")}</option>
@@ -393,7 +396,7 @@ export function DetailsDialog({ ar, customer, canOwner, canCredit, onClose, onDo
             {employees.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
           </Select>
         </Field>
-        <IdentityFields value={idf} onChange={setIdf} ar={ar} testPrefix="details" />
+        <IdentityFields value={idf} onChange={setIdf} ar={ar} testPrefix="details" registrationHint={legacyRegistrationNote(customer, ar) ?? undefined} />
         <IdentityReason ar={ar} changed={idChanged} value={reason} onChange={setReason} />
         <Field label={L("قائمة الأسعار", "Price list")} help={L("نص يصف الاتفاق، لا يغيّر أي سعر.", "Text recording the agreement; it changes no price.")}>
           <input className="hr-input" value={f.priceList} onChange={set("priceList")} maxLength={80} disabled={!canCredit} />
@@ -474,6 +477,7 @@ export function OwnerContactDialog({ ar, customer, onClose, onDone }: {
 }) {
   const L = (a: string, e: string) => (ar ? a : e);
   const [f, setF] = useState({ phone: customer.phone ?? "", email: customer.email ?? "", address: customer.address ?? "", city: customer.city ?? "" });
+  const legacyAddress = showsLegacyAddress(customer);
   const [idf, setIdf] = useState<IdentityForm>(identityFrom(customer));
   const [reason, setReason] = useState("");
   const idChanged = changedIdentityKeys(idf, customer);
@@ -485,8 +489,8 @@ export function OwnerContactDialog({ ar, customer, onClose, onDone }: {
     if (busy) return;
     setBusy(true); setErr("");
     // Only the «مسلّمات» that changed are sent (each change needs the reason).
-    const idBody = Object.fromEntries(idChanged.map((k) => [k, idf[k as keyof IdentityForm]]));
-    const res = await api(`/api/customers/${customer.id}`, { method: "PUT", body: { ...f, ...idBody, ...(idChanged.length ? { reason } : {}) } });
+    const { address, city, ...contact } = f;
+    const res = await api(`/api/customers/${customer.id}`, { method: "PUT", body: { ...contact, ...(legacyAddress ? { address, city } : {}), ...changedIdentityBody(idf, customer), ...(idChanged.length ? { reason } : {}) } });
     setBusy(false);
     if (res.ok) onDone(); else setErr(errorOf(res.data as never, ar, L("تعذّر الحفظ.", "Could not save.")));
   }
@@ -501,9 +505,11 @@ export function OwnerContactDialog({ ar, customer, onClose, onDone }: {
         <p className="acc-muted" style={{ margin: 0 }}>{L("بصفتك المندوب المسؤول تعدّل بيانات التواصل بحرية، والأرقام الرسمية والعنوان الوطني مع ذكر السبب؛ الاسم والائتمان والشروط يعدّلها المشرف.", "As the account owner you edit the contact details freely, and the registration numbers and national address with a reason; the name, credit and terms are edited by a supervisor.")}</p>
         <Field label={L("الجوال", "Phone")}><input className="hr-input" dir="ltr" style={{ textAlign: "start" }} value={f.phone} onChange={set("phone")} maxLength={40} data-testid="owner-phone" /></Field>
         <Field label={L("الإيميل", "Email")}><input className="hr-input" dir="ltr" style={{ textAlign: "start" }} type="email" value={f.email} onChange={set("email")} maxLength={160} data-testid="owner-email" /></Field>
-        <Field label={L("المدينة", "City")}><input className="hr-input" value={f.city} onChange={set("city")} maxLength={80} data-testid="owner-city" /></Field>
-        <Field label={L("العنوان", "Address")}><input className="hr-input" value={f.address} onChange={set("address")} maxLength={300} data-testid="owner-address" /></Field>
-        <IdentityFields value={idf} onChange={setIdf} ar={ar} testPrefix="owner" />
+        {legacyAddress ? <>
+          <Field label={L("المدينة", "City")}><input className="hr-input" value={f.city} onChange={set("city")} maxLength={80} data-testid="owner-city" /></Field>
+          <Field label={L("العنوان", "Address")}><input className="hr-input" value={f.address} onChange={set("address")} maxLength={300} data-testid="owner-address" /></Field>
+        </> : null}
+        <IdentityFields value={idf} onChange={setIdf} ar={ar} testPrefix="owner" registrationHint={legacyRegistrationNote(customer, ar) ?? undefined} />
         <IdentityReason ar={ar} changed={idChanged} value={reason} onChange={setReason} />
       </form>
     </Dialog>

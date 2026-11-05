@@ -12,7 +12,7 @@ import { writeSettingsAudit } from "@/lib/services/settings/audit";
 import { parseEmailAddress } from "@/lib/automation/email-mode";
 import { customersScopedToOwner } from "@/lib/services/sales/scope";
 import { forbiddenOwnerKeys, requireContactEditor } from "@/lib/services/customers/owner-contact";
-import { describeIdentityChanges, DUPLICATE_CUSTOMER, identityChanges, IDENTITY_FIELDS, parseChangeReason, parseNationalFields } from "@/lib/services/customers/customer-identity";
+import { addressFromNational, describeIdentityChanges, DUPLICATE_CUSTOMER, expandRegistrationNo, identityChanges, IDENTITY_FIELDS, NATIONAL_ADDRESS_FIELDS, parseChangeReason, parseNationalFields } from "@/lib/services/customers/customer-identity";
 import { findDuplicateCustomer } from "@/lib/services/customers/duplicates";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -44,7 +44,12 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   if (error) return error;
   if (!(await customerInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   try {
-    const body = await request.json() as {
+    const rawBody = await request.json() as Record<string, unknown>;
+    // «السجل التجاري / الرقم الموحد» is one field (owner decision, 5 Nov 2026): `registrationNo` lands in its column
+    // and clears the other (a change of either needs the reason below).
+    const expanded = expandRegistrationNo(rawBody ?? {});
+    if (!expanded.ok) return NextResponse.json({ error: expanded.errorAr, errorEn: expanded.error, code: "INVALID_FIELD", field: expanded.field }, { status: 400 });
+    const body = expanded.body as {
       name?: string; nameAr?: string; phone?: string; email?: string; address?: string;
       whatsappOptOut?: boolean; emailOptOut?: boolean;
     };
@@ -81,6 +86,13 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         code: "REASON_REQUIRED", fields: identity.map((c) => c.field),
       }, { status: 400 });
     }
+    // Owner decision (5 Nov 2026): the address and city are derived from the national address — recomputed whenever
+    // a national-address field changes (a legacy free address stays until then).
+    const nationalMoved = identity.some((c) => (NATIONAL_ADDRESS_FIELDS as readonly string[]).includes(c.field));
+    // Gate M1 (5 Nov 2026): the address only from a COMPLETE national address, the city only from a given national
+    // city; otherwise the stored values (or a free value sent in this request) stay. Never cleared from an empty one.
+    const derivedRaw = nationalMoved ? addressFromNational({ ...(identityBefore ?? {}), ...national.data } as Record<string, string | null>) : null;
+    const derivedAddress = derivedRaw ? { ...(derivedRaw.address ? { address: derivedRaw.address } : {}), ...(derivedRaw.city ? { city: derivedRaw.city } : {}) } : null;
     // Round 3 (gate M1): a changed VAT / CR / unified number may not collide with another customer's.
     const newNumber = (f: "vatNumber" | "commercialRegNo" | "unifiedNumber") => identity.find((c) => c.field === f)?.to ?? null;
     if (newNumber("vatNumber") || newNumber("commercialRegNo") || newNumber("unifiedNumber")) {
@@ -120,7 +132,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const guarded = protectedAccountChanges(user, current, account.data as Record<string, unknown>);
     if (!guarded.ok) return NextResponse.json({ error: guarded.errorAr, errorEn: guarded.error, code: "PROTECTED_ACCOUNT_FIELD" }, { status: 403 });
 
-    const before = kind === "owner" ? await prisma.customer.findUnique({ where: { id }, select: { phone: true, address: true, city: true } }) : null;
+    const before = kind === "owner" || derivedAddress ? await prisma.customer.findUnique({ where: { id }, select: { phone: true, address: true, city: true } }) : null;
     const customer = await prisma.$transaction(async (tx) => {
      // «يستقبل إيميلات» goes through the one consent rule (a customer's own opt-out is turned back on by a manager with a
      // reason, from the «الرسائل» card — this form carries no reason, so such a change is refused here).
@@ -137,20 +149,28 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         ...(body.whatsappOptOut !== undefined && { whatsappOptOut: body.whatsappOptOut }),
         ...account.data,
         ...national.data,
+        ...(derivedAddress ?? {}),
       },
      });
+     // The address / city recomputed from the national address are logged with the change (gate M1).
+     const addrNorm = (x: string | null | undefined) => (x == null || x === "" ? null : x);
+     const addrChanges = derivedAddress
+       ? (["address", "city"] as const).filter((k) => k in derivedAddress && addrNorm(before?.[k]) !== addrNorm(updated[k]))
+           .map((k) => ({ field: k as unknown as (typeof identity)[number]["field"], from: addrNorm(before?.[k]), to: addrNorm(updated[k]) }))
+       : [];
+     const logged = [...identity, ...addrChanges];
      if (identity.length) {
        // The customer's «سجل النشاط» (customer page) and the audit log: who, when, why, before → after.
        await tx.activity.create({
          data: {
            type: "NOTE", customerId: id, ownerId: user.id, completedAt: new Date(), sourceKey: `customer-identity:${id}`,
            subject: "تعديل بيانات العميل الأساسية",
-           body: `السبب: ${identityReason}\n${describeIdentityChanges(identity)}`,
+           body: `السبب: ${identityReason}\n${describeIdentityChanges(logged)}`,
          },
        });
        await writeSettingsAudit(tx, {
-         section: "organisation", action: "SETTINGS_UPDATED", entityType: "Customer", entityId: id, changed: identity.map((c) => c.field),
-         before: Object.fromEntries(identity.map((c) => [c.field, c.from])), after: Object.fromEntries(identity.map((c) => [c.field, c.to])),
+         section: "organisation", action: "SETTINGS_UPDATED", entityType: "Customer", entityId: id, changed: logged.map((c) => c.field),
+         before: Object.fromEntries(logged.map((c) => [c.field, c.from])), after: Object.fromEntries(logged.map((c) => [c.field, c.to])),
          reason: `CUSTOMER_IDENTITY_CHANGE: ${identityReason}`, actor: { id: user.id, name: user.name },
        });
      }

@@ -120,3 +120,50 @@ export const DUPLICATE_CUSTOMER = {
   error: "هذا العميل مسجّل مسبقًا — اطلب من مشرفك إسناده لك.",
   errorEn: "This customer is already registered — ask your supervisor to assign it to you.",
 } as const;
+
+/**
+ * «السجل التجاري / الرقم الموحد» — ONE field (owner decision, 5 Nov 2026): to the owner the CR and the unified number
+ * are the same registration. The body key `registrationNo` (10 digits after normalising Arabic / Persian digits, spaces
+ * and dashes) is stored in one of the two columns: a value starting with 7 is the unified number (ZATCA buyer scheme
+ * "700"), anything else the CR ("CRN"); the other column is cleared. "" / null clears both. Absent: the body is returned
+ * as is (the legacy `commercialRegNo` / `unifiedNumber` keys still work). Pure.
+ */
+export function expandRegistrationNo<T extends Record<string, unknown>>(b: T): { ok: true; body: Record<string, unknown> } | Problem {
+  if (!b || typeof b !== "object" || !("registrationNo" in b)) return { ok: true, body: b };
+  const { registrationNo: raw, ...rest } = b as Record<string, unknown>;
+  if (raw === null || raw === undefined || (typeof raw === "string" && !raw.trim())) {
+    return { ok: true, body: { ...rest, commercialRegNo: null, unifiedNumber: null } };
+  }
+  if (typeof raw !== "string" && typeof raw !== "number") return fail("registrationNo", "registrationNo must be text.", "السجل التجاري / الرقم الموحد: قيمة غير صالحة.");
+  const d = digits(String(raw).trim());
+  if (!/^\d{10}$/.test(d)) return fail("registrationNo", "The CR / unified number is 10 digits.", "السجل التجاري / الرقم الموحد 10 أرقام.");
+  return { ok: true, body: d.startsWith("7") ? { ...rest, commercialRegNo: null, unifiedNumber: d } : { ...rest, commercialRegNo: d, unifiedNumber: null } };
+}
+
+/** The one value the merged field shows: the unified number, else the CR (a legacy customer may have both). Pure. */
+export function registrationNoOf(c: { commercialRegNo?: string | null; unifiedNumber?: string | null } | null | undefined): string {
+  return c?.unifiedNumber || c?.commercialRegNo || "";
+}
+
+type NationalAddress = Partial<Record<"nationalBuildingNo" | "nationalStreet" | "nationalDistrict" | "nationalCity" | "nationalPostalCode" | "nationalShortAddress", string | null>>;
+
+/**
+ * The customer's address and city derived from the national address (owner decision, 5 Nov 2026: the free «العنوان» and
+ * «المدينة» are no longer entered — the national address is the customer's one address).
+ *   · address: ONLY when the national address is complete (building, street, district, city, postal code) —
+ *     «1234 الشارع، الحي، المدينة 12345، RRRD2929»; otherwise null = «keep what is there» (gate M1: a partial national
+ *     address never overwrites a legacy customer's address).
+ *   · city: the national city when given; otherwise null = «keep what is there» (never cleared from an empty one).
+ * Pure.
+ */
+export function addressFromNational(n: NationalAddress): { address: string | null; city: string | null } {
+  const v = (k: keyof NationalAddress) => (typeof n[k] === "string" ? (n[k] as string).trim() : "");
+  const complete = (["nationalBuildingNo", "nationalStreet", "nationalDistrict", "nationalCity", "nationalPostalCode"] as const).every((k) => v(k));
+  const address = complete
+    ? [`${v("nationalBuildingNo")} ${v("nationalStreet")}`, v("nationalDistrict"), `${v("nationalCity")} ${v("nationalPostalCode")}`, v("nationalShortAddress")].filter(Boolean).join("، ").slice(0, 300)
+    : null;
+  return { address, city: v("nationalCity") || null };
+}
+
+/** The national-address fields (the address is recomputed when one of them changes). */
+export const NATIONAL_ADDRESS_FIELDS = ["nationalBuildingNo", "nationalStreet", "nationalDistrict", "nationalCity", "nationalPostalCode", "nationalAdditionalNo", "nationalShortAddress"] as const;

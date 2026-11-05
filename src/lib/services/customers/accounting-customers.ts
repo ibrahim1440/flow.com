@@ -9,7 +9,7 @@ import { parseEmailAddress } from "@/lib/automation/email-mode";
 import { audit } from "@/lib/hr/core";
 import { agingReport } from "@/lib/services/invoicing/ar";
 import { isKsaVatNumber, normDigits } from "@/lib/services/invoicing/pricing";
-import { describeIdentityChanges, identityChanges, parseChangeReason, parseNationalFields } from "./customer-identity";
+import { describeIdentityChanges, expandRegistrationNo, identityChanges, parseChangeReason, parseNationalFields } from "./customer-identity";
 import { findDuplicateCustomer } from "./duplicates";
 import { writeSettingsAudit } from "@/lib/services/settings/audit";
 
@@ -24,7 +24,11 @@ export type Particulars = { name?: string; nameAr?: string | null; vatNumber?: s
 const clean = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]/g, " ").trim().replace(/\s+/g, " ").slice(0, max) : "");
 
 /** The body → the columns to write, or a refusal naming the field. Pure. `create` requires the name. */
-export function parseParticulars(b: Record<string, unknown>, create: boolean): Particulars {
+export function parseParticulars(input: Record<string, unknown>, create: boolean): Particulars {
+  // «السجل التجاري / الرقم الموحد» is one field (owner decision, 5 Nov 2026): `registrationNo` lands in its column.
+  const expanded = expandRegistrationNo(input);
+  if (!expanded.ok) throw refuse(400, "CR_INVALID", expanded.errorAr, expanded.error, expanded.field);
+  const b = expanded.body;
   const out: Particulars = {};
   if (create || "name" in b) {
     const name = clean(b.name, 200);

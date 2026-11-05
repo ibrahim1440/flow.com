@@ -2,9 +2,9 @@
 
 import { CustomerCreditNotice } from "@/components/credit/credit-ui";
 import { Select } from "@/components/ui/Select";
-import { useState, useEffect, useMemo, use } from "react";
+import { useState, useEffect, useMemo, useRef, use } from "react";
 import Link from "next/link";
-import { Printer, FileText } from "lucide-react";
+import { Printer, FileText, Send, Trash2, Plus } from "lucide-react";
 import { usePrintDocuments } from "@/components/print/Certification";
 // The stored unit, as the frames write it («800 عبوة»); the printed document uses the same labels.
 import { UNIT_LABELS } from "@/lib/print/quote-document";
@@ -23,6 +23,7 @@ import { useQuotesBase } from "../base";
 import { IssueOutcome, SentMessagesLine } from "@/components/automation/SentMessages";
 import { useUser } from "../../../user-context";
 import { CommissionPanel, type CommissionInfo } from "./CommissionPanel";
+import { ProductCombo } from "./ProductCombo";
 
 /**
  * The quotation — editor while it is a draft (GX A-10, Figma 1230:121651 / EN 1230:147423,
@@ -48,6 +49,7 @@ type Sku = {
   nameAr: string | null;
   unitOfMeasure: string;
   price: number;
+  availableUnits?: number;
 };
 
 type Line = {
@@ -116,6 +118,15 @@ type SnapLine = { position: number; name: string | null; nameAr: string | null; 
 const STATUS_DOT: Record<string, string> = {
   ISSUED: "in", ACCEPTED: "ok", REJECTED: "er", EXPIRED: "wa", SUPERSEDED: "x",
 };
+
+/** The quote date + n days, as the date box's yyyy-mm-dd (Riyadh calendar day of the quote date). */
+function plusDays(fromIso: string | null | undefined, n: number): string {
+  const base = fromIso ? new Date(fromIso) : new Date();
+  const day = new Date(base.toLocaleString("en-US", { timeZone: "Asia/Riyadh" }));
+  day.setDate(day.getDate() + n);
+  const p2 = (x: number) => String(x).padStart(2, "0");
+  return `${day.getFullYear()}-${p2(day.getMonth() + 1)}-${p2(day.getDate())}`;
+}
 
 /** A new line. `vat`: Settings › Invoicing & tax («النسبة الافتراضية للبند الجديد»), else the built-in 15. */
 const emptyLine = (vat = "15"): Line => ({
@@ -190,6 +201,15 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   }, []);
 
   const [lines, setLines] = useState<Line[]>([]);
+  // «+ إضافة بند» sits under the last line (owner, round 3): the new line's product box takes the focus and comes into view.
+  const focusLine = useRef<number | null>(null);
+  useEffect(() => {
+    const i = focusLine.current;
+    if (i == null) return;
+    focusLine.current = null;
+    const el = document.querySelector<HTMLInputElement>(`[data-testid="line-product-${i}"]`);
+    if (el) { el.scrollIntoView({ block: "center", behavior: "smooth" }); el.focus({ preventScroll: true }); }
+  }, [lines.length]);
   const [validUntil, setValidUntil] = useState("");
   const [dirty, setDirty] = useState(false);
 
@@ -489,7 +509,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       onClick={() => transition("ISSUED")}
       data-testid="issue-quote"
     >
-      {issueLabel}
+      <Send size={15} aria-hidden /> {issueLabel}
     </button>
   ) : null;
   // Accepting closes the deal Won, so it follows the deal-close privilege.
@@ -625,11 +645,11 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   const addLine = editable && (!phone || phoneEdit) ? (
     <button
       type="button"
-      className="lk-inline"
-      onClick={() => { setLines([...lines, emptyLine(defaultVat)]); setDirty(true); }}
+      className={phone ? "lk-inline" : "btn q-addline"}
+      onClick={() => { focusLine.current = lines.length; setLines([...lines, emptyLine(defaultVat)]); setDirty(true); }}
       data-testid="add-line"
     >
-      {ar ? "إضافة بند" : "Add line"}
+      {phone ? null : <Plus size={16} aria-hidden />}{ar ? "إضافة بند" : "Add line"}
     </button>
   ) : null;
 
@@ -643,7 +663,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       ) : quote.issuedAt ? (
         <span className="sub">{ar ? "مثبّتة كما أُرسلت للعميل" : "Frozen as sent to the customer"}</span>
       ) : null}
-      {addLine}
+      {phone ? addLine : null}
     </div>
   );
 
@@ -677,28 +697,10 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
             return (
               <tr key={i} data-testid={`line-${i}`}>
                 <td className="prod">
-                  <Select
-                    aria-label={ar ? `المنتج للبند ${i + 1}` : `Product for line ${i + 1}`}
-                    value={l.productSkuId}
-                    onChange={(e) => chooseSku(i, e.target.value)}
-                    className="qi prodsel"
-                  >
-                    <option value="">{ar ? "— وصف حر —" : "— free text —"}</option>
-                    {skus.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {(ar ? s.nameAr : null) ?? s.name ?? s.skuCode}
-                      </option>
-                    ))}
-                  </Select>
-                  {!l.productSkuId && (
-                    <input
-                      aria-label={ar ? `وصف البند ${i + 1}` : `Description for line ${i + 1}`}
-                      value={l.description}
-                      placeholder={ar ? "وصف البند" : "What is being quoted"}
-                      onChange={(e) => setLine(i, { description: e.target.value })}
-                      className="qi desc"
-                    />
-                  )}
+                  {/* Quotes v2: a product list with a search (Figma «٤ · خانة المنتج»); same choices as the old list. */}
+                  <ProductCombo skus={skus} value={l.productSkuId} ar={ar} label={ar ? `المنتج للبند ${i + 1}` : `Product for line ${i + 1}`}
+                    onPick={(skuId) => chooseSku(i, skuId)} testId={`line-product-${i}`}
+                    freeText={l.description} onFreeText={(t) => setLine(i, { productSkuId: "", description: t })} />
                 </td>
                 <td>
                   <input
@@ -764,7 +766,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                     data-testid={`remove-line-${i}`}
                     onClick={() => { setLines(lines.filter((_, j) => j !== i)); setDirty(true); }}
                   >
-                    <Ico name="close" small />
+                    <Trash2 size={17} aria-hidden />
                   </button>
                 </td>
               </tr>
@@ -847,7 +849,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         <dt>{ar ? (editable || hasDiscount ? "المبلغ قبل الضريبة" : "قبل الضريبة") : "Before VAT"}</dt>
         <dd><bdi className="n">{formatMoney(taxableBase)}</bdi></dd>
         <dt>{vatLabel}</dt><dd><bdi className="n">{formatMoney(fig.tax)}</bdi></dd>
-        <dt>{ar ? "الإجمالي" : "Total"}</dt>
+        <dt className="grand">{ar ? "الإجمالي" : "Total"}</dt>
         <dd className="grand"><bdi>{formatMoney(fig.grand)}</bdi><span className="unit">{unit}</span></dd>
       </dl>
       {previewNote}
@@ -873,14 +875,28 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         <dt>{ar ? "العملة" : "Currency"}</dt><dd>{ar ? "ريال سعودي (SAR) فقط" : "Saudi riyal (SAR) only"}</dd>
         <dt><label htmlFor="q-valid">{ar ? "صالح حتى" : "Valid until"}</label></dt>
         <dd>
-          <input
-            id="q-valid"
-            type="date"
-            className="q-date"
-            aria-describedby="q-valid-hint"
-            value={validUntil}
-            onChange={(e) => { setValidUntil(e.target.value); setDirty(true); }}
-          />
+          <span className="q-valid-row">
+            <input
+              id="q-valid"
+              type="date"
+              className="q-date"
+              aria-describedby="q-valid-hint"
+              value={validUntil}
+              onChange={(e) => { setValidUntil(e.target.value); setDirty(true); }}
+            />
+            {/* Quotes v2: a quick validity — 7 / 15 / 30 days from the quote date (Figma «مدة سريعة»). */}
+            <span className="q-chips" role="group" aria-label={ar ? "مدة سريعة" : "Quick validity"}>
+              {[7, 15, 30].map((d) => {
+                const v = plusDays(quote.createdAt, d);
+                return (
+                  <button key={d} type="button" className={`q-chip${validUntil === v ? " on" : ""}`} aria-pressed={validUntil === v}
+                    onClick={() => { setValidUntil(v); setDirty(true); }} data-testid={`q-valid-${d}`}>
+                    {ar ? (d === 7 ? "7 أيام" : `${d} يوم`) : `${d} days`}
+                  </button>
+                );
+              })}
+            </span>
+          </span>
           {/* The browser's date box may read mm/dd; the date is said here in words (council fix round 2, item 8),
               and «مطلوب» only while it is still empty. */}
           <span id="q-valid-hint" className="q-note" style={{ display: "block", marginTop: 4 }} data-testid="q-valid-text">
@@ -929,6 +945,77 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       )}
     </div>
   ) : null;
+
+  /* ── Quotes v2: where the quotation is (أُنشئ · أُصدر · رد العميل · طلب) and the one next step, with its buttons. ── */
+  const ordered = quote.orderLinks.length > 0;
+  const steps: { key: string; label: string; state: "done" | "now" | "todo" | "bad"; when?: string | null }[] = [
+    { key: "made", label: ar ? "أُنشئ" : "Created", state: "done", when: quote.createdAt },
+    { key: "issued", label: ar ? "أُصدر" : "Issued", state: quote.issuedAt ? "done" : "now", when: quote.issuedAt },
+    {
+      key: "reply", label: quote.rejectedAt ? (ar ? "رفض" : "Rejected") : quote.acceptedAt ? (ar ? "وافق" : "Accepted") : (ar ? "رد العميل" : "Customer reply"),
+      state: quote.rejectedAt ? "bad" : quote.acceptedAt ? "done" : quote.issuedAt ? "now" : "todo", when: quote.acceptedAt ?? quote.rejectedAt,
+    },
+    { key: "order", label: ar ? "طلب" : "Order", state: ordered ? "done" : quote.acceptedAt ? "now" : "todo" },
+  ];
+  const nextStep =
+    quote.status === "SUPERSEDED" ? (ar ? "استُبدل هذا العرض بمراجعة أحدث — افتحها من سجلّ المراجعات." : "A newer revision replaced this quotation — open it from the revisions.")
+    : quote.status === "REJECTED" ? (ar ? "العميل رفض العرض. تقدر تنشئ مراجعة بسعر أو كمية جديدة." : "The customer rejected it. You can raise a revision with a new price or quantity.")
+    : quote.status === "ACCEPTED" && ordered ? (ar ? `صار طلب ${quote.orderLinks.map((l) => `#${l.order.orderNumber}`).join("، ")}.` : `Order ${quote.orderLinks.map((l) => `#${l.order.orderNumber}`).join(", ")} raised.`)
+    : quote.status === "ACCEPTED" ? (ar ? "الخطوة الجاية: العميل وافق — حوّله لطلب بضغطة." : "Next: the customer accepted — convert it to an order.")
+    : state.expired ? (ar ? "انتهت صلاحية العرض. أنشئ مراجعة بتاريخ صلاحية جديد قبل ما تكلّم العميل." : "The quotation has lapsed. Raise a revision with a new validity date.")
+    : quote.status === "ISSUED" ? (ar ? "الخطوة الجاية: كلّم العميل واسأله عن العرض. لو وافق، سجّل الموافقة وحوّله لطلب بضغطة." : "Next: call the customer about the quotation. If they accept, record it and convert it to an order.")
+    : null;
+  const progressBlock = (withActs: boolean) => (
+    <div className="q-progress" data-testid="quote-progress">
+      <ol className="q-steps">
+        {steps.map((st, i) => (
+          <li key={st.key} className={`q-step is-${st.state}`}>
+            {i > 0 ? <span className="q-step-bar" aria-hidden /> : null}
+            <span className="q-step-dot" aria-hidden>{st.state === "done" ? <Ico name="tick" small /> : st.state === "bad" ? <Ico name="close" small /> : null}</span>
+            <span className="q-step-l">{st.label}</span>
+            {st.when ? <span className="q-step-w">{shortDate(st.when, lang)}</span> : null}
+          </li>
+        ))}
+      </ol>
+      {nextStep ? <p className="q-next" data-testid="quote-next-step">{nextStep}</p> : null}
+      {withActs && (acceptBtn || rejectBtn || orderBtn) ? <div className="q-next-acts">{rejectBtn}{acceptBtn}{orderBtn}</div> : null}
+    </div>
+  );
+  const progress = progressBlock(true);
+  const readFacts = (
+    <div>
+      <div className="q-bh"><h2 className="bt">{ar ? "البيانات" : "Facts"}</h2></div>
+      <dl className="q-props facts" data-testid="quote-facts">
+        <dt>{ar ? "العميل" : "Customer"}</dt><dd><bdi>{customerName ?? "—"}</bdi></dd>
+        <dt>{ar ? "الصفقة" : "Deal"}</dt>
+        <dd>
+          {quote.opportunity ? <Link href={dealHref} style={{ color: "inherit" }}><bdi>{quote.opportunity.title}</bdi></Link> : <bdi>{dealTitle}</bdi>}
+          {quote.opportunity?.owner && <> · {quote.opportunity.owner.name}</>}
+        </dd>
+        <dt>{ar ? "تاريخ العرض" : "Quote date"}</dt><dd><bdi className="n">{formatDay(quote.createdAt ?? null, lang)}</bdi></dd>
+        <dt>{ar ? "صالح حتى" : "Valid until"}</dt><dd><bdi className="n">{quote.validUntil ? formatDay(quote.validUntil, lang) : "—"}</bdi></dd>
+        <dt>{ar ? "العملة" : "Currency"}</dt><dd>{ar ? "ريال سعودي (SAR) فقط" : "Saudi riyal (SAR) only"}</dd>
+      </dl>
+    </div>
+  );
+  // The record of what happened, from the quotation's own dates (the WhatsApp/e-mail line sits under the totals).
+  const historyRows: [string, string, React.ReactNode][] = [
+    ...(ordered ? quote.orderLinks.map((l) => [`o-${l.id}`, "", <>{ar ? "صار طلب " : "Order "}<bdi className="n">#{l.order.orderNumber}</bdi></>] as [string, string, React.ReactNode]) : []),
+    ...(quote.acceptedAt ? [["acc", quote.acceptedAt, ar ? "سُجّلت موافقة العميل" : "Customer acceptance recorded"] as [string, string, React.ReactNode]] : []),
+    ...(quote.rejectedAt ? [["rej", quote.rejectedAt, ar ? "سُجّل رفض العميل" : "Customer rejection recorded"] as [string, string, React.ReactNode]] : []),
+    ...(quote.issuedAt ? [["iss", quote.issuedAt, <>{ar ? "أُصدر" : "Issued"}{issuer ? <> · {issuer}</> : null}</>] as [string, string, React.ReactNode]] : []),
+    ["made", quote.createdAt, ar ? "أُنشئ العرض" : "Quotation created"],
+  ];
+  const history = (
+    <div>
+      <div className="q-bh"><h2 className="bt">{ar ? "السجل" : "History"}</h2></div>
+      <ul className="q-hist" data-testid="quote-history">
+        {historyRows.map(([k, when, what]) => (
+          <li key={k}><span>{what}</span>{when ? <span className="q-hist-w">{shortDate(when, lang)}</span> : null}</li>
+        ))}
+      </ul>
+    </div>
+  );
 
   const dialogs = (
     <>
@@ -1005,10 +1092,42 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         </div>
         {discountBand}
         {recordNotes}
+        {/* Quotes v2: the phone shows where the quotation is too; its buttons stay in the sticky bar. */}
+        {!editable && quote.status !== "DRAFT" ? progressBlock(false) : null}
         {linesHeader}
         {phoneRows.length === 0 ? emptyLines : editingHere ? (
           <>
-            {editTable}
+            {/* Quotes v2 (Figma «٧ · جوال — تحرير العرض»): each line a card with the same fields as the desktop columns. */}
+            <div className="q-pcards" data-testid="quote-lines-phone-edit">
+              {lines.map((l, i) => {
+                const gross = (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0);
+                const net = gross - (gross * (Number(l.discountPercent) || 0)) / 100;
+                const lineTotal = net + (net * (Number(l.taxRatePercent) || 0)) / 100;
+                const over = Number(l.discountPercent) > Number(threshold);
+                const lab = (a: string, e: string) => (ar ? `${a} · البند ${i + 1}` : `${e} · line ${i + 1}`);
+                return (
+                  <div key={i} className="q-pcard" data-testid={`line-${i}`}>
+                    <div className="q-pcard-h">
+                      <ProductCombo skus={skus} value={l.productSkuId} ar={ar} label={lab("المنتج", "Product")} onPick={(skuId) => chooseSku(i, skuId)} testId={`line-product-${i}`}
+                        freeText={l.description} onFreeText={(t) => setLine(i, { productSkuId: "", description: t })} />
+                      <button type="button" className="ib" aria-label={ar ? `حذف البند ${i + 1}` : `Remove line ${i + 1}`} data-testid={`remove-line-${i}`}
+                        onClick={() => { setLines(lines.filter((_, j) => j !== i)); setDirty(true); }}><Ico name="close" small /></button>
+                    </div>
+                    <div className="q-pcard-g">
+                      <label><span>{ar ? "الكمية" : "Qty"}</span><input aria-label={lab("الكمية", "Qty")} value={l.quantity} inputMode="decimal" onChange={(e) => setLine(i, { quantity: e.target.value })} className="qi num" /></label>
+                      <label><span>{ar ? "الوحدة" : "Unit"}</span>
+                        <Select aria-label={lab("الوحدة", "Unit")} value={l.unit} onChange={(e) => setLine(i, { unit: e.target.value })} className="qi unitsel">
+                          <option value="KG">{unitLabel("KG")}</option><option value="UNIT">{unitLabel("UNIT")}</option><option value="GRAM">{unitLabel("GRAM")}</option>
+                        </Select></label>
+                      <label><span>{ar ? "سعر الوحدة" : "Unit price"}</span><input aria-label={lab("سعر الوحدة", "Unit price")} value={l.unitPrice} inputMode="decimal" onChange={(e) => setLine(i, { unitPrice: e.target.value })} className="qi num" /></label>
+                      <label className={over ? "wa" : undefined}><span>{ar ? "خصم %" : "Disc. %"}</span><input aria-label={lab("الخصم", "Discount")} value={l.discountPercent} inputMode="decimal" onChange={(e) => setLine(i, { discountPercent: e.target.value })} className="qi num" /></label>
+                      <label><span>{ar ? "ضريبة %" : "Tax %"}</span><input aria-label={lab("الضريبة", "Tax")} value={l.taxRatePercent} inputMode="decimal" onChange={(e) => setLine(i, { taxRatePercent: e.target.value })} className="qi num" /></label>
+                      <div className="q-pcard-t"><span>{ar ? "الإجمالي شامل الضريبة" : "Total incl. VAT"}</span><b data-testid={`line-total-${i}`}><bdi className="n">{formatMoney(lineTotal.toFixed(2))}</bdi></b></div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
             <div style={{ marginTop: 16 }}>{facts}</div>
           </>
         ) : (
@@ -1086,30 +1205,90 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
           {docLink}
           {reviseBtn}
           {collectionLink}
-          {rejectBtn}
-          {saveBtn}
-          {issueBtn}
-          {acceptBtn}
-          {orderBtn}
+          {editable || quote.status === "DRAFT" ? <>{rejectBtn}{saveBtn}{issueBtn}{acceptBtn}{orderBtn}</> : null}
         </div>
       </div>
 
       {discountBand}
       {recordNotes}
 
-      <div className="q-cols">
-        <section aria-label={ar ? "البنود" : "Lines"} style={{ minWidth: 0 }}>
-          {linesHeader}
-          {(editable ? lines.length === 0 : quote.lines.length === 0) ? emptyLines : editable ? editTable : readTable}
-          {issuedNote}
-          {notesBlock}
-        </section>
-        <aside className="q-side">
-          {totals}
-          {facts}
-          {chain}
-        </aside>
-      </div>
+      {editable ? (
+        /* Quotes v2 (Figma «٣ · تحرير العرض»): the facts in one strip on top, the lines across the full width
+           (the same columns as before — Qoyod's), then the notes beside the totals. */
+        <>
+          <div className="q-card q-strip2" data-testid="quote-facts-strip">
+            <div className="q-f q-f-wide">
+              <span className="q-f-l">{ar ? "العميل" : "Customer"}</span>
+              <span className="q-box"><bdi>{customerName ?? "—"}</bdi></span>
+            </div>
+            <div className="q-f q-f-wide">
+              <span className="q-f-l">{ar ? "الصفقة" : "Deal"}</span>
+              {quote.opportunity
+                ? <Link className="q-box" href={dealHref}><bdi>{quote.opportunity.title}</bdi>{quote.opportunity.owner && <> · {quote.opportunity.owner.name}</>}</Link>
+                : <span className="q-box"><bdi>{dealTitle}</bdi></span>}
+            </div>
+            <div className="q-f">
+              <span className="q-f-l">{ar ? "تاريخ العرض" : "Quote date"}</span>
+              <span className="q-box"><bdi className="n">{formatDay(quote.createdAt ?? null, lang)}</bdi></span>
+            </div>
+            <div className="q-f">
+              <label className="q-f-l" htmlFor="q-valid">{ar ? "صالح حتى" : "Valid until"}</label>
+              <input id="q-valid" type="date" className="q-box q-box-in" aria-describedby="q-valid-hint" value={validUntil}
+                onChange={(e) => { setValidUntil(e.target.value); setDirty(true); }} />
+              <span id="q-valid-hint" className="q-f-h" data-testid="q-valid-text">
+                {validUntil ? (ar ? `حتى ${longDate(`${validUntil}T00:00:00`, "ar")}` : `Until ${longDate(`${validUntil}T00:00:00`, "en")}`) : (ar ? "مطلوب قبل الإصدار." : "Required before issue.")}
+              </span>
+            </div>
+            <div className="q-f">
+              <span className="q-f-l">{ar ? "مدة سريعة" : "Quick validity"}</span>
+              <span className="q-chips" role="group" aria-label={ar ? "مدة سريعة" : "Quick validity"}>
+                {[7, 15, 30].map((d) => {
+                  const v = plusDays(quote.createdAt, d);
+                  return (
+                    <button key={d} type="button" className={`q-chip${validUntil === v ? " on" : ""}`} aria-pressed={validUntil === v}
+                      onClick={() => { setValidUntil(v); setDirty(true); }} data-testid={`q-valid-${d}`}>
+                      {ar ? (d === 7 ? "7 أيام" : d === 30 ? "30 يوم" : "15") : `${d} d`}
+                    </button>
+                  );
+                })}
+              </span>
+            </div>
+            <div className="q-f">
+              <span className="q-f-l">{ar ? "العملة" : "Currency"}</span>
+              <span className="q-box">{ar ? "ريال سعودي (SAR)" : "Saudi riyal (SAR)"}</span>
+            </div>
+          </div>
+          <section aria-label={ar ? "البنود" : "Lines"} className="q-card q-wide q-linescard">
+            {linesHeader}
+            {lines.length === 0 ? emptyLines : editTable}
+            <div className="q-addrow">{addLine}</div>
+          </section>
+          <div className="q-foot">
+            <div className="q-card" style={{ minWidth: 0 }}>{notesBlock}</div>
+            <div className="q-card q-foot-totals">{totals}</div>
+          </div>
+          {chain ? <div className="q-wide">{chain}</div> : null}
+        </>
+      ) : (
+        /* Quotes v2 (Figma «٥ · بعد الإصدار»): where the quotation is and the next step first, then the record. */
+        <>
+          {progress}
+          <div className="q-cols">
+            <section aria-label={ar ? "البنود" : "Lines"} style={{ minWidth: 0 }}>
+              {linesHeader}
+              {quote.lines.length === 0 ? emptyLines : readTable}
+              {issuedNote}
+              {notesBlock}
+            </section>
+            <aside className="q-side">
+              {totals}
+              {readFacts}
+              {history}
+              {chain}
+            </aside>
+          </div>
+        </>
+      )}
       {dialogs}
     </div>
   );

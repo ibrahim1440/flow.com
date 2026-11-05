@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireAnyModule, requireAuth } from "@/lib/auth-server";
 import { canEdit, hasSubPrivilege } from "@/lib/auth-shared";
 import { parseAccountFields } from "@/lib/services/customers/fields";
-import { DUPLICATE_CUSTOMER, parseNationalFields } from "@/lib/services/customers/customer-identity";
+import { addressFromNational, DUPLICATE_CUSTOMER, expandRegistrationNo, parseNationalFields } from "@/lib/services/customers/customer-identity";
 import { findDuplicateCustomer } from "@/lib/services/customers/duplicates";
 import { handlePrismaError } from "@/lib/api-error";
 import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
@@ -53,7 +53,10 @@ export async function POST(request: Request) {
   try {
     const raw = await request.json() as unknown;
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
-    const body = raw as {
+    // «السجل التجاري / الرقم الموحد» is one field (owner decision, 5 Nov 2026): `registrationNo` lands in its column.
+    const expanded = expandRegistrationNo(raw as Record<string, unknown>);
+    if (!expanded.ok) return NextResponse.json({ error: expanded.errorAr, errorEn: expanded.error, code: "INVALID_FIELD", field: expanded.field }, { status: 400 });
+    const body = expanded.body as {
       name: string; nameAr?: string; phone?: string; email?: string; address?: string;
       whatsappOptOut?: boolean;
     } & Record<string, unknown>;
@@ -80,16 +83,23 @@ export async function POST(request: Request) {
     });
     if (dup) return NextResponse.json({ ...DUPLICATE_CUSTOMER, field: dup.by }, { status: 409 });
 
+    const fromNational = addressFromNational(national.data);
+    const freeAddress = typeof body.address === "string" ? body.address.trim() || null : null;
+    const derived = { address: freeAddress ?? fromNational.address, city: account.data.city ?? fromNational.city };
+
     const customer = await prisma.customer.create({
       data: {
         name: body.name.trim(),
         nameAr: typeof body.nameAr === "string" ? body.nameAr.trim() || null : null,
         phone: typeof body.phone === "string" ? body.phone.trim() || null : null,
         email,
-        address: typeof body.address === "string" ? body.address.trim() || null : null,
         whatsappOptOut: body.whatsappOptOut === true,
         ...account.data,
         ...national.data,
+        // Owner decision (5 Nov 2026): the form no longer asks for a free address or city — the national address is
+        // the customer's address, and the address / city everything else reads (delivery, print, invoice, Qoyod) are
+        // derived from it. A caller that still sends them (import, API) keeps its own.
+        ...derived,
         // Owner decision (3 Nov 2026): a rep's book no longer includes the unassigned pool, so a customer a scoped rep
         // adds is theirs from the start (as a converted lead is) — it must not vanish from their own list. A rep
         // registering without customers › edit is always the account owner.

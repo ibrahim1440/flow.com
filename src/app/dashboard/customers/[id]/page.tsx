@@ -690,8 +690,11 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
       )}
       <dl className="acc-kv">
         <div><dt>{L("الرقم الضريبي", "VAT number")}</dt><dd className="n" data-testid="detail-vat">{c.vatNumber ?? notSet}</dd></div>
-        <div><dt>{L("السجل التجاري", "CR number")}</dt><dd className="n" data-testid="detail-cr">{c.commercialRegNo ?? notSet}</dd></div>
-        <div><dt>{L("الرقم الموحد", "Unified number")}</dt><dd className="n" data-testid="detail-unified">{c.unifiedNumber ?? notSet}</dd></div>
+        {/* One «السجل التجاري / الرقم الموحد» (5 Nov 2026); a legacy customer holding both shows both. */}
+        {c.commercialRegNo && c.unifiedNumber ? <>
+          <div><dt>{L("السجل التجاري", "CR number")}</dt><dd className="n" data-testid="detail-cr">{c.commercialRegNo}</dd></div>
+          <div><dt>{L("الرقم الموحد", "Unified number")}</dt><dd className="n" data-testid="detail-unified">{c.unifiedNumber}</dd></div>
+        </> : <div><dt>{L("السجل التجاري / الرقم الموحد", "CR / unified number")}</dt><dd className="n" data-testid="detail-cr">{c.unifiedNumber || c.commercialRegNo || notSet}</dd></div>}
         <div><dt>{L("العنوان الوطني", "National address")}</dt><dd data-testid="detail-national-address">{nationalAddressLine(c, ar) ?? notSet}</dd></div>
         <div><dt>{L("المصدر", "Source")}</dt><dd>{sourceText ?? (sections.sales ? L("أُضيف مباشرة", "Added directly") : "—")}</dd></div>
       </dl>

@@ -10,15 +10,23 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { OpsLoading } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
 import { AcctShell, Msg, money, useApi, useLang, useWrite } from "../_ui/shell";
+import { registrationNoOf } from "@/lib/services/customers/customer-identity";
 
 type Row = {
   id: string; name: string; nameAr: string | null; vatNumber: string | null; commercialRegNo: string | null; unifiedNumber?: string | null; city: string | null; address: string | null;
   phone: string | null; email: string | null; creditLimit: string | null; paymentTermsDays: number | null; repName: string | null; balance: string; overdue: string;
 };
-type Form = { name: string; nameAr: string; vatNumber: string; commercialRegNo: string; unifiedNumber: string; city: string; address: string; phone: string; email: string };
-const blank: Form = { name: "", nameAr: "", vatNumber: "", commercialRegNo: "", unifiedNumber: "", city: "", address: "", phone: "", email: "" };
+// «السجل التجاري / الرقم الموحد» is ONE field (owner decision, 5 Nov 2026): `registrationNo`, stored by the server in
+// its column (7… → unified number, else CR).
+type Form = { name: string; nameAr: string; vatNumber: string; registrationNo: string; city: string; address: string; phone: string; email: string };
+const blank: Form = { name: "", nameAr: "", vatNumber: "", registrationNo: "", city: "", address: "", phone: "", email: "" };
 /** Soon batch round 3 (gate L5): the registration numbers — a change of one needs a reason (server: 400 REASON_REQUIRED). */
-const IDENTITY: (keyof Form)[] = ["vatNumber", "commercialRegNo", "unifiedNumber"];
+const IDENTITY: (keyof Form)[] = ["vatNumber", "registrationNo"];
+/** The edit body: every field, except the merged number when it is unchanged (a legacy customer may hold both). */
+const editBody = (form: Form, orig: Form | undefined) => {
+  const { registrationNo, ...rest } = form;
+  return orig && registrationNo.trim() === orig.registrationNo.trim() ? rest : form;
+};
 
 export default function AccountingCustomersPage() {
   return <Suspense fallback={null}><CustomersPage /></Suspense>;
@@ -44,7 +52,7 @@ function CustomersPage() {
   const save = async () => {
     if (!edit) return;
     const r = edit.id
-      ? await w.run("save", `/api/accounting/customers/${edit.id}`, "PATCH", { ...edit.form, ...(identityChanged ? { reason: edit.reason ?? "" } : {}) }, L("حُفظت بيانات العميل.", "Saved."))
+      ? await w.run("save", `/api/accounting/customers/${edit.id}`, "PATCH", { ...editBody(edit.form, edit.orig), ...(identityChanged ? { reason: edit.reason ?? "" } : {}) }, L("حُفظت بيانات العميل.", "Saved."))
       : await w.run("save", "/api/accounting/customers", "POST", edit.form, L("أُضيف العميل.", "Customer added."));
     if (r) { setEdit(null); api.reload(); }
   };
@@ -68,13 +76,13 @@ function CustomersPage() {
         <div className="hr-tablewrap">
           <table className="hr-table is-dense" data-testid="acust-table">
             <thead><tr>
-              <th>{L("العميل", "Customer")}</th><th>{L("الرقم الضريبي", "VAT")}</th><th>{L("السجل التجاري", "CR")}</th><th>{L("المدينة", "City")}</th><th>{L("الجوال", "Phone")}</th>
+              <th>{L("العميل", "Customer")}</th><th>{L("الرقم الضريبي", "VAT")}</th><th>{L("السجل / الموحد", "CR / unified")}</th><th>{L("المدينة", "City")}</th><th>{L("الجوال", "Phone")}</th>
               <th className="num">{L("الرصيد", "Balance")}</th><th className="num">{L("المتأخر", "Overdue")}</th><th className="num">{L("حد الائتمان", "Credit limit")}</th><th>{L("المندوب", "Rep")}</th><th />
             </tr></thead>
             <tbody>{rows.map((c) => (
               <tr key={c.id}>
                 <td><bdi>{c.nameAr || c.name}</bdi>{c.nameAr && c.nameAr !== c.name ? <span className="acct-hint"> · <bdi dir="ltr">{c.name}</bdi></span> : null}</td>
-                <td className="acct-code"><bdi dir="ltr">{c.vatNumber ?? "—"}</bdi></td><td className="acct-code"><bdi dir="ltr">{c.commercialRegNo ?? "—"}</bdi></td>
+                <td className="acct-code"><bdi dir="ltr">{c.vatNumber ?? "—"}</bdi></td><td className="acct-code"><bdi dir="ltr">{registrationNoOf(c) || "—"}</bdi></td>
                 <td>{c.city ?? "—"}</td><td><bdi dir="ltr">{c.phone ?? "—"}</bdi></td>
                 <td className="num">{money(c.balance)}</td><td className="num">{Number(c.overdue) > 0 ? <b>{money(c.overdue)}</b> : money(c.overdue, true) || "—"}</td>
                 <td className="num">{c.creditLimit ? money(c.creditLimit) : "—"}</td><td>{c.repName ?? <span className="acct-hint">{L("بدون مندوب", "No rep")}</span>}</td>
@@ -82,7 +90,7 @@ function CustomersPage() {
                   <Link className="hr-btn is-sm" href={`/dashboard/sales/receivables/${c.id}`}>{L("كشف الحساب", "Statement")}</Link>{" "}
                   <button type="button" className="hr-btn is-sm" disabled={!!w.busy} onClick={() => quote(c)} data-testid={`acust-quote-${c.id}`}>{L("عرض سعر", "Quotation")}</button>{" "}
                   <Link className="hr-btn is-sm" href={`/dashboard/sales/invoices/new?q=${encodeURIComponent(c.nameAr || c.name)}`}>{L("فاتورة", "Invoice")}</Link>{" "}
-                  {can ? <button type="button" className="hr-btn is-sm" onClick={() => { const form = { name: c.name, nameAr: c.nameAr ?? "", vatNumber: c.vatNumber ?? "", commercialRegNo: c.commercialRegNo ?? "", unifiedNumber: c.unifiedNumber ?? "", city: c.city ?? "", address: c.address ?? "", phone: c.phone ?? "", email: c.email ?? "" }; setEdit({ id: c.id, form, orig: form, reason: "" }); }} data-testid={`acust-edit-${c.id}`}>{L("تعديل", "Edit")}</button> : null}
+                  {can ? <button type="button" className="hr-btn is-sm" onClick={() => { const form = { name: c.name, nameAr: c.nameAr ?? "", vatNumber: c.vatNumber ?? "", registrationNo: registrationNoOf(c), city: c.city ?? "", address: c.address ?? "", phone: c.phone ?? "", email: c.email ?? "" }; setEdit({ id: c.id, form, orig: form, reason: "" }); }} data-testid={`acust-edit-${c.id}`}>{L("تعديل", "Edit")}</button> : null}
                 </td>
               </tr>
             ))}</tbody>
@@ -95,10 +103,13 @@ function CustomersPage() {
           actions={<><button type="button" className="hr-btn" onClick={() => setEdit(null)}>{L("تراجع", "Back")}</button><button type="button" className="hr-btn is-primary" disabled={!!w.busy} onClick={save} data-testid="acust-save">{L("حفظ", "Save")}</button></>}>
           <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
             {f("name", "الاسم (كما في السجل)", "Name", false)}{f("nameAr", "الاسم بالعربي", "Arabic name")}
-            {f("vatNumber", "الرقم الضريبي", "VAT number", true)}{f("commercialRegNo", "السجل التجاري", "CR number", true)}{f("unifiedNumber", "الرقم الموحد", "Unified number", true)}
+            {f("vatNumber", "الرقم الضريبي", "VAT number", true)}{f("registrationNo", "السجل التجاري / الرقم الموحد", "CR / unified number", true)}
             {f("city", "المدينة", "City")}{f("address", "العنوان", "Address")}
             {f("phone", "الجوال", "Phone", true)}{f("email", "الإيميل", "E-mail", true)}
           </div>
+          {(() => { const c = edit.id ? rows.find((r) => r.id === edit.id) : null; return c?.commercialRegNo && c?.unifiedNumber ? (
+            <p className="hr-help" style={{ marginTop: 8 }} data-testid="acust-legacy-reg">{L("مسجّل له رقمان", "Two numbers on file")}: {L("السجل", "CR")} <bdi dir="ltr">{c.commercialRegNo}</bdi> · {L("الموحد", "Unified")} <bdi dir="ltr">{c.unifiedNumber}</bdi>. {L("إذا عدّلت الخانة يبقى الرقم الجديد فقط.", "Editing the field keeps only the new number.")}</p>
+          ) : null; })()}
           {identityChanged ? (
             <label className="hr-field" style={{ marginTop: 10 }}><span className="hr-label">{L("سبب التعديل *", "Reason for the change *")}</span>
               <textarea className="hr-textarea" rows={2} required minLength={5} value={edit.reason ?? ""} onChange={(e) => setEdit({ ...edit, reason: e.target.value })} data-testid="acust-reason" />
