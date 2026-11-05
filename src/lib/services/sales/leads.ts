@@ -1,3 +1,5 @@
+import { findDuplicateCustomerIn } from "@/lib/services/customers/duplicates-core";
+import { addressFromNational, DUPLICATE_CUSTOMER } from "@/lib/services/customers/customer-identity";
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 import { resolveLostReason, type LostReasonCode } from "./needs";
 import { sampleSkipRequired, sampleSkipReasonText, SAMPLE_SKIP_REFUSAL, resolveSampleSkip, requireStageFor } from "./stages";
@@ -50,7 +52,7 @@ export function normalizePhone(raw: string | null | undefined): string | null {
 export type DuplicateCandidate = {
   leadId: string;
   companyName: string;
-  contactName: string;
+  contactName: string | null;
   matchedOn: ("phone" | "company")[];
   /** True only for a phone match, which identifies a person rather than an organisation. */
   strong: boolean;
@@ -167,7 +169,10 @@ export async function convertLead(
     where: { id: input.leadId },
     select: {
       companyName: true, companyNameAr: true, contactName: true,
-      phone: true, email: true, address: true, ownerId: true,
+      phone: true, email: true, address: true, city: true, ownerId: true,
+      // The registration and national address (20261221090000_lead_identity) become the customer's.
+      vatNumber: true, commercialRegNo: true, unifiedNumber: true, nationalBuildingNo: true, nationalStreet: true,
+      nationalDistrict: true, nationalCity: true, nationalPostalCode: true, nationalAdditionalNo: true, nationalShortAddress: true,
       // The needs analysis gathered on the lead travels with it (20261204100000_pipeline_qualification).
       businessType: true, needSummary: true, expectedMonthlyKg: true, agreedNextStep: true,
     },
@@ -176,13 +181,34 @@ export async function convertLead(
   let customerId = input.linkToCustomerId ?? null;
   let customerCreated = false;
   if (!customerId) {
+    // The customer rules start here (orchestrator, 5 Nov 2026): the same duplicate check as every other path that creates a
+    // customer — VAT, CR / unified number in both columns, the exact normalised name — BEFORE the customer exists. A match
+    // refuses the conversion with DUPLICATE_CUSTOMER, never naming the other customer or its owner.
+    const dup = await findDuplicateCustomerIn(tx, {
+      name: full.companyName, nameAr: full.companyNameAr,
+      vatNumber: full.vatNumber, commercialRegNo: full.commercialRegNo, unifiedNumber: full.unifiedNumber,
+    });
+    if (dup) throw { _appCode: 409, message: DUPLICATE_CUSTOMER.error, errorEn: DUPLICATE_CUSTOMER.errorEn, code: DUPLICATE_CUSTOMER.code, field: dup.by };
+    // The address and city come only from a COMPLETE national address (gate M1); otherwise the lead's own.
+    const fromNational = addressFromNational(full);
     const customer = await tx.customer.create({
       data: {
         name: full.companyName,
         nameAr: full.companyNameAr,
         phone: full.phone,
         email: full.email,
-        address: full.address,
+        address: fromNational.address ?? full.address,
+        city: fromNational.city ?? full.city,
+        vatNumber: full.vatNumber,
+        commercialRegNo: full.commercialRegNo,
+        unifiedNumber: full.unifiedNumber,
+        nationalBuildingNo: full.nationalBuildingNo,
+        nationalStreet: full.nationalStreet,
+        nationalDistrict: full.nationalDistrict,
+        nationalCity: full.nationalCity,
+        nationalPostalCode: full.nationalPostalCode,
+        nationalAdditionalNo: full.nationalAdditionalNo,
+        nationalShortAddress: full.nationalShortAddress,
         // The lead's owner is responsible for the new account («المسؤول»): without it the customer
         // sat in nobody's book, so invoice scope and the account page could not attribute it.
         accountOwnerId: full.ownerId,

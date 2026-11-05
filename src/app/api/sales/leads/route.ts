@@ -1,3 +1,4 @@
+import { parseLeadIdentity, leadCityFrom } from "@/lib/services/sales/lead-identity";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
@@ -120,9 +121,13 @@ export async function POST(request: Request) {
   if (companyName.length < 2) {
     return NextResponse.json({ error: "The company name is required." }, { status: 400 });
   }
-  if (contactName.length < 2) {
-    return NextResponse.json({ error: "A contact name is required." }, { status: 400 });
+  // The contact person is optional (owner, Figma page 12: only «اسم المنشأة» is required); a given one is ≥ 2 characters.
+  if (contactName && contactName.length < 2) {
+    return NextResponse.json({ error: "The contact name is too short.", errorAr: "اسم الشخص المسؤول قصير." }, { status: 400 });
   }
+  // The customer's registration and national address, same formats as the customer form (services/sales/lead-identity.ts).
+  const ident = parseLeadIdentity(b);
+  if (!ident.ok) return NextResponse.json({ error: ident.errorAr, errorEn: ident.error, field: ident.field }, { status: 400 });
 
   const SOURCES = ["WALK_IN", "REFERRAL", "PHONE", "SOCIAL", "EXHIBITION", "WEBSITE", "OTHER"];
   const source = typeof b.source === "string" && SOURCES.includes(b.source) ? b.source : "OTHER";
@@ -175,10 +180,11 @@ export async function POST(request: Request) {
         data: {
           companyName,
           companyNameAr: typeof b.companyNameAr === "string" ? b.companyNameAr.trim() || null : null,
-          contactName,
+          contactName: contactName || null,
           phone: typeof b.phone === "string" ? b.phone.trim() || null : null,
           email: typeof b.email === "string" ? b.email.trim() || null : null,
-          city: typeof b.city === "string" ? b.city.trim() || null : null,
+          city: (typeof b.city === "string" ? b.city.trim() || null : null) ?? leadCityFrom(ident.data),
+          ...ident.data,
           address: typeof b.address === "string" ? b.address.trim() || null : null,
           source: source as never,
           sourceNote: typeof b.sourceNote === "string" ? b.sourceNote.trim() || null : null,

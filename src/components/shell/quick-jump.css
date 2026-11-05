@@ -29,3 +29,10 @@
 @media (hover: none) and (pointer: coarse), (max-width: 767.98px) {
   .d21-pal .d21-pal-foot, .d21-pal .d21-pal-hint, .d21-pal .d21-kbd { display: none; }
 }
+/* «عميل جديد» beside the search in «لأي عميل؟» (Figma page 12): the search on the right, the button on the left. */
+.d21-pal-new { flex: none; display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px; border-radius: 10px;
+  border: 1px solid var(--border-default, #d9d3c3); background: var(--surface); color: var(--text-primary); font: inherit; font-size: 14px;
+  font-weight: 600; cursor: pointer; white-space: nowrap; }
+.d21-pal-new:hover { background: var(--surface-hover); }
+.d21-pal-new:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.d21-pal-new svg { width: 16px; height: 16px; }

@@ -3210,7 +3210,8 @@ model Lead {
   /// people and none of them is the customer.
   companyName   String
   companyNameAr String?
-  contactName   String
+  /// Optional since 20261221090000_lead_identity (owner: the contact person, mobile and e-mail are optional).
+  contactName   String?
   phone         String?
   email         String?
   city          String?
@@ -3236,6 +3237,20 @@ model Lead {
   needSummary       String?
   expectedMonthlyKg Decimal? @db.Decimal(12, 3)
   agreedNextStep    String?
+
+  /// «عميل محتمل جديد» = the customer form (additive, 20261221090000_lead_identity; all nullable, same formats and
+  /// CHECKs as Customer): the registration (CR or unified number — one field «السجل التجاري / الرقم الموحد» in the form),
+  /// the VAT number and the national address. Copied onto the Customer the conversion creates (services/sales/leads.ts).
+  vatNumber            String?
+  commercialRegNo      String?
+  unifiedNumber        String?
+  nationalBuildingNo   String?
+  nationalStreet       String?
+  nationalDistrict     String?
+  nationalCity         String?
+  nationalPostalCode   String?
+  nationalAdditionalNo String?
+  nationalShortAddress String?
 
   /// Normalised duplicate-detection keys. Written by the service, never by a client.
   /// Deliberately NOT unique: two genuine contacts can share a company, and merging

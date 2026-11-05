@@ -282,7 +282,7 @@ type ResultInput = { outcome: string; note: string; next: { dueAt: string; chann
  * (services/sales/follow-through.ts suggestNextStep: «لم يرد» → call again tomorrow, «تم الاتفاق على
  * اجتماع» → the meeting in two days …). The rep confirms or changes it; nothing longer is asked.
  */
-type ResultResponse = { activityId?: string | null; qualification?: { converted?: boolean; missing?: string[] } | null };
+type ResultResponse = { activityId?: string | null; qualification?: { converted?: boolean; missing?: string[]; duplicateCustomer?: boolean } | null };
 
 function RecordResultDialog({ sub, defaultChannel, leadId, submit, onClose, onDone }: {
   sub?: string; defaultChannel: string; leadId?: string | null; submit: (r: ResultInput) => Promise<unknown>; onClose: () => void; onDone: (m: string) => void;
@@ -320,6 +320,8 @@ function RecordResultDialog({ sub, defaultChannel, leadId, submit, onClose, onDo
         setQualify({ activityId: res.activityId, missing: res.qualification.missing, saved });
         return;
       }
+      // Gate M1: saved; the lead matches an existing customer, so it was not converted.
+      if (res?.qualification?.duplicateCustomer) { onDone(`${saved} ${L("لكن هذا العميل مسجّل مسبقًا — اطلب من مشرفك إسناده لك.", "But this customer is already registered — ask your supervisor to assign it to you.")}`); return; }
       onDone(saved);
     } catch (e) { setErr(messageOf(e, L)); } finally { setBusy(false); }
   };

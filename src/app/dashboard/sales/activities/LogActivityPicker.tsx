@@ -346,6 +346,8 @@ function StepTwo({
   const asksQualification = target.kind !== "deal" && !isTask && qualifies(outcome);
   const [qual, setQual] = useState<QualificationDraft>(EMPTY_QUALIFICATION);
   const [pending, setPending] = useState<{ activityId: string; missing: string[] } | null>(null);
+  // Gate M1: the activity was saved, but the lead matches an existing customer, so it did not become one.
+  const [dupSaved, setDupSaved] = useState(false);
 
   async function save() {
     if (busy) return;
@@ -357,7 +359,7 @@ function StepTwo({
       setErr(done?.data?.error ?? (ar ? "تعذّر الحفظ. حاول مرة أخرى." : "Could not save. Try again."));
       return;
     }
-    const res = await api<{ activity?: { id: string }; qualification?: { converted?: boolean; missing?: string[] } | null }>("/api/sales/activities", {
+    const res = await api<{ activity?: { id: string }; qualification?: { converted?: boolean; missing?: string[]; duplicateCustomer?: boolean } | null }>("/api/sales/activities", {
       method: "POST",
       body: {
         type, subject, body,
@@ -370,6 +372,7 @@ function StepTwo({
     }).catch(() => null);
     setBusy(false);
     const q = res?.ok ? res.data.qualification : null;
+    if (res?.ok && q?.duplicateCustomer) { setDupSaved(true); return; }
     if (res?.ok && q && q.converted === false && q.missing?.length && res.data.activity?.id) {
       setPending({ activityId: res.data.activity.id, missing: q.missing });
       return;
@@ -392,7 +395,12 @@ function StepTwo({
           <button type="button" className="lk-inline" onClick={onChange} data-testid="picker-change">{ar ? "تغيير" : "Change"}</button>
         </div>
         {err && <Alert kind="error">{err}</Alert>}
-        <div className="d63-form">
+        {dupSaved ? (
+          <div data-testid="picker-dup-saved">
+            <Alert kind="info">{ar ? "النشاط انحفظ، لكن هذا العميل مسجّل مسبقًا في النظام — اطلب من مشرفك إسناده لك." : "The activity is saved, but this customer is already registered — ask your supervisor to assign it to you."}</Alert>
+          </div>
+        ) : null}
+        <div className="d63-form" hidden={dupSaved}>
           <div className="d63-grid2">
             <Field id="pk-type" label={ar ? "النوع" : "Type"}>
               <span className="d63-sel">
@@ -445,9 +453,10 @@ function StepTwo({
       </div>
       <div className="d63-acts">
         {!phone && <button type="button" className="btn" onClick={onCancel} data-testid="picker-cancel">{ar ? "إلغاء" : "Cancel"}</button>}
+        {dupSaved ? <button type="button" className="btn p" onClick={() => onDone(target)} data-testid="picker-dup-ok">{ar ? "تم" : "OK"}</button> : (
         <button type="button" className="btn p" disabled={!canSave} aria-busy={busy || undefined} onClick={save} data-testid="picker-save">
           {busy ? (ar ? "جارٍ الحفظ…" : "Saving…") : pending ? (ar ? "تحويل إلى فرصة" : "Make it an opportunity") : ar ? "حفظ" : "Save"}
-        </button>
+        </button>)}
       </div>
     </>
   );

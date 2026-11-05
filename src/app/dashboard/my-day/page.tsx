@@ -625,7 +625,7 @@ function TiersCard({ d, lang }: { d: Day; lang: Lang }) {
       {d.counts.total === 0 ? <NoBook lang={lang} />
         : d.tiers.totalKg <= 0 ? <Empty>{ar ? "ما فيه طلبات آخر 3 شهور، فالتصنيف يطلع بعد أول طلبات عملائك." : "No orders in the last 3 months — tiers appear after your customers order."}</Empty>
           : (
-            <div className="md-tiers" style={{ display: "grid", gap: 8 }}>
+            <div className="md-tiers" style={{ display: "grid" }}>
               <div className="md-tierbar" role="img" aria-label={d.tiers.groups.map((g) => `${ar ? TIER_LABEL[g.tier].ar : TIER_LABEL[g.tier].en} ${g.share}%`).join("، ")}>
                 {d.tiers.groups.filter((g) => g.share > 0).map((g) => <span key={g.tier} className={cls[g.tier]} style={{ width: `${g.share}%` }} />)}
               </div>

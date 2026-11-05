@@ -1,0 +1,21 @@
+/* «عميل محتمل جديد» (Figma page 12): the customer form's frame (hr-form) plus the olive «تسجيل نشاط» bar on top and the
+   section headings on the 8 / 16 / 24 rhythm. */
+.hr-form.lf { gap: 16px; }
+.hr-form.lf > [role="alert"] { order: -2; }
+.hr-form.lf .lf-act { order: -1; grid-column: 1 / -1; display: grid; gap: 8px; margin-bottom: 8px; }
+.hr-form.lf .lf-act-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 48px; padding: 0 20px;
+  border: 0; border-radius: 12px; background: var(--action-primary, #5c5c38); color: var(--text-inverse, #fff);
+  font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
+}
+.hr-form.lf .lf-act-btn:hover:not(:disabled) { background: var(--action-primary-hover, #4c4c2e); }
+.hr-form.lf .lf-act-btn:focus-visible { outline: 2px solid var(--focus-ring, #5c5c38); outline-offset: 2px; }
+.hr-form.lf .lf-act-btn:disabled { opacity: .55; cursor: not-allowed; }
+.hr-form.lf .lf-act > span { font-size: 12.5px; line-height: 20px; color: var(--text-muted, #6e6a61); }
+.hr-form.lf .lf-h, .hr-form.lf .hr-label.is-wide { grid-column: 1 / -1; margin: 8px 0 0; font-size: 14px; line-height: 22px; font-weight: 700; color: var(--text-primary, #28241a); }
+.hr-form.lf .lf-dup { grid-column: 1 / -1; display: grid; gap: 8px; padding: 12px 16px; border-radius: 10px;
+  background: var(--status-warning-tint, #fbf3e5); color: var(--status-warning, #95651e); font-size: 13px; line-height: 20px; }
+.hr-form.lf .lf-dup ul { margin: 0; padding-inline-start: 18px; }
+.hr-form.lf .lf-dup .hr-btn { justify-self: start; }
+.lf-foot-hint { margin-inline-start: auto; font-size: 12.5px; line-height: 20px; color: var(--text-muted, #6e6a61); }
+@media (max-width: 767px) { .lf-foot-hint { display: none; } }

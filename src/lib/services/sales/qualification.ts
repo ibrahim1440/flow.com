@@ -115,6 +115,12 @@ export type QualificationResult =
       missing: QualificationField[];
       opportunityId: null;
       leadStatus: string;
+      /**
+       * The lead matches an existing customer (VAT / CR / unified number / name — services/customers/duplicates-core.ts):
+       * the conversion was refused, the ACTIVITY IS KEPT and the lead stays as it is. The form says so softly
+       * (DUPLICATE_CUSTOMER's wording: ask the supervisor to assign it); `missing` is empty.
+       */
+      duplicateCustomer?: true;
     };
 
 /**
@@ -237,11 +243,23 @@ export async function qualifyLeadFromActivity(
   // Where a newly-qualified lead lands, resolved from configuration rather than guessed.
   const stage = await requireStageFor(tx, "QUALIFICATION");
 
-  const conversion = await convertLead(tx, {
-    leadId: input.leadId,
-    stageId: stage.id,
-    actorId: input.actorId,
-  });
+  // A lead matching an existing customer is not converted (gate M1, 5 Nov 2026) — but the call the rep just logged must
+  // not be lost with it: the refusal is returned, not thrown, so the activity's transaction commits. convertLead refuses
+  // BEFORE writing anything (the duplicate check is its first write-free step), so nothing half-done is left behind.
+  let conversion: Awaited<ReturnType<typeof convertLead>>;
+  try {
+    conversion = await convertLead(tx, {
+      leadId: input.leadId,
+      stageId: stage.id,
+      actorId: input.actorId,
+    });
+  } catch (err) {
+    if (err && typeof err === "object" && (err as { code?: string }).code === "DUPLICATE_CUSTOMER") {
+      const lead = await tx.lead.findUniqueOrThrow({ where: { id: input.leadId }, select: { status: true } });
+      return { converted: false, missing: [], opportunityId: null, leadStatus: lead.status, duplicateCustomer: true };
+    }
+    throw err;
+  }
 
   // The activity that caused it is linked to the deal it caused, so the history reads as
   // cause and effect rather than as two unrelated rows with similar timestamps.

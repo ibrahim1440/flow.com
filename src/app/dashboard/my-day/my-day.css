@@ -467,3 +467,20 @@
   .d21 .md { gap: 16px }
   .d21 .md-card.pl-main { padding: 16px }
 }
+
+/* ── Cards follow their column, never their longest line (owner, 5 Nov 2026: «لما نسوي اكسباند يتلخبط الكلام
+   ويطلع خارج الإطار»). A card is a one-column grid; its implicit «auto» column used to grow to the widest
+   unbreakable line (a long customer name inside «عملائي حسب التصنيف»), pushing everything past the frame.
+   minmax(0, 1fr) pins it to the card's width, and long names wrap (two lines at most) instead. */
+.d21 .md-card, .d21 .md-tiers { grid-template-columns: minmax(0, 1fr) }
+.d21 .md-tiers > *, .d21 .md-tiers details { min-width: 0 }
+.d21 .md-mini > a { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 22px }
+.d21 .md-mini > .sub { flex: none }
+/* The same 8 / 16 rhythm inside the cards: header 16 · 12, rows 8, legend 8 · 16. */
+.d21 .md-card > .md-h { padding: 16px 16px 12px }
+.d21 .md-card > :last-child { margin-bottom: 16px }
+.d21 .md-tiers { gap: 12px }
+.d21 .md-legend { gap: 8px 16px; line-height: 20px }
+.d21 .md-tiers details { padding-top: 8px }
+.d21 .md-tiers summary { padding: 4px 0 8px }
+.d21 .md-mini { padding: 8px 0; gap: 12px }

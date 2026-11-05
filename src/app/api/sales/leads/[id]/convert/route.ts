@@ -87,8 +87,9 @@ export async function POST(request: Request, { params }: Params) {
     return NextResponse.json(result, { status: result.replayed ? 200 : 201 });
   } catch (err) {
     if (err && typeof err === "object" && "_appCode" in err) {
-      const e = err as { _appCode: number; message: string };
-      return NextResponse.json({ error: e.message }, { status: e._appCode });
+      const e = err as { _appCode: number; message: string; errorEn?: string; code?: string; field?: string };
+      // DUPLICATE_CUSTOMER (409) carries its code and field, never the other customer.
+      return NextResponse.json({ error: e.message, ...(e.code ? { code: e.code, errorEn: e.errorEn, field: e.field } : {}) }, { status: e._appCode });
     }
     return handlePrismaError(err);
   }

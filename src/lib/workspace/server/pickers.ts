@@ -37,7 +37,7 @@ export async function links(actor: WsActor, q: string | null) {
   return {
     items: [
       ...customers.map((c) => ({ type: "customer", id: c.id, label: c.name })),
-      ...leads.map((l) => ({ type: "lead", id: l.id, label: `${l.companyName} · ${l.contactName}` })),
+      ...leads.map((l) => ({ type: "lead", id: l.id, label: l.contactName ? `${l.companyName} · ${l.contactName}` : l.companyName })),
       ...deals.map((d) => ({ type: "deal", id: d.id, label: d.title, customerId: d.customerId })),
     ],
   };

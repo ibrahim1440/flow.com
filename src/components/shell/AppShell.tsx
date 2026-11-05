@@ -10,7 +10,7 @@ import {
   shellText, crumbText, groupText, shellGroupOf, shellTrail, dedupeTrail,
   type NavNode, type Viewer,
 } from "@/lib/nav/registry";
-import { ROLE_LABELS, ROLE_LABELS_AR } from "@/lib/auth-shared";
+import { ROLE_LABELS, ROLE_LABELS_AR, canEdit, hasSubPrivilege } from "@/lib/auth-shared";
 import { NotificationsBell } from "@/components/notifications/NotificationsBell";
 import { LanguageToggle } from "./LanguageToggle";
 import "./alerts-bell.css";
@@ -706,7 +706,10 @@ export function AppShell({
       </div>
 
       {palette ? <QuickJump lang={lang} userId={user.id} pages={palPages} actions={quickActions} onClose={() => setPalette(false)} /> : null}
-      {pickFor ? <QuickJump lang={lang} userId={user.id} pages={[]} actions={[]} pick={pickFor} onClose={() => setPickFor(null)} /> : null}
+      {pickFor ? <QuickJump lang={lang} userId={user.id} pages={[]} actions={[]} pick={pickFor} onClose={() => setPickFor(null)}
+        // «عميل جديد» beside the search (Figma page 12): the rules of POST /api/customers — customers › edit, or a rep who
+        // registers their own customer (lead_write / lead_convert).
+        canCreateCustomer={canEdit(viewer.permissions, "customers") || hasSubPrivilege(viewer.permissions, "sales", "lead_write") || hasSubPrivilege(viewer.permissions, "sales", "lead_convert")} /> : null}
       {keysOpen ? <ShortcutsSheet lang={lang} creates={creates} onClose={() => setKeysOpen(false)} /> : null}
       {more ? (
         <MoreSheet lang={lang} onClose={() => setMore(false)}>

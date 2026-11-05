@@ -1,5 +1,8 @@
 "use client";
 
+import { HrRoot } from "@/components/hr/ui";
+import { IdentityFields, blankIdentity, identityFrom, changedIdentityBody, nationalAddressLine, type IdentityForm } from "@/components/customers/identity-fields";
+import { registrationNoOf } from "@/lib/services/customers/customer-identity";
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -51,7 +54,11 @@ type Activity = {
 };
 
 type Lead = {
-  id: string; companyName: string; companyNameAr: string | null; contactName: string;
+  id: string; companyName: string; companyNameAr: string | null; contactName: string | null;
+  /** The registration and national address (20261221090000_lead_identity). */
+  vatNumber?: string | null; commercialRegNo?: string | null; unifiedNumber?: string | null;
+  nationalBuildingNo?: string | null; nationalStreet?: string | null; nationalDistrict?: string | null; nationalCity?: string | null;
+  nationalPostalCode?: string | null; nationalAdditionalNo?: string | null; nationalShortAddress?: string | null;
   phone: string | null; email: string | null; city: string | null; address: string | null;
   source: string; sourceNote: string | null; status: string; notes: string | null;
   nextFollowUpAt: string | null; createdAt: string; updatedAt: string;
@@ -128,6 +135,8 @@ export default function LeadDetailPage() {
   // The edit panel holds a draft of the whole lead until Save. Leaving with it open and
   // changed used to lose every edit silently.
   useUnsavedGuard(isDirtyAgainst(editing, form, saved));
+  // The registration and national address — the customer form's fields (Figma page 12); only changes are sent.
+  const [idf, setIdf] = useState<IdentityForm>(blankIdentity());
 
   const [logType, setLogType] = useState("CALL");
   const [logOutcome, setLogOutcome] = useState<string>("NOTE_ONLY");
@@ -178,7 +187,7 @@ export default function LeadDetailPage() {
       // while the panel is open and silently discarding what has been typed. React's
       // StrictMode makes that concrete in development by running the mount effect twice —
       // the second response used to land on top of the first keystrokes.
-      if (!editing) setForm(fromServer);
+      if (!editing) { setForm(fromServer); setIdf(identityFrom(data.lead)); }
     } else {
       setLead(null);
       // 404 covers "does not exist" and "not yours" with one message on purpose: telling a
@@ -198,10 +207,10 @@ export default function LeadDetailPage() {
       const res = await fetch(`/api/sales/leads/${params.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, ...changedIdentityBody(idf, lead) }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setError(localizeApiError(data) ?? (ar ? "تعذّر الحفظ." : "Could not save.")); return; }
+      if (!res.ok) { setError(localizeApiError(data) ?? (ar ? data.error : data.errorEn ?? data.error) ?? (ar ? "تعذّر الحفظ." : "Could not save.")); return; }
       setSuccess(ar ? "حُفظت التعديلات." : "Changes saved.");
       setEditing(false);
       await load();
@@ -247,7 +256,13 @@ export default function LeadDetailPage() {
    * the pipeline and names the deal it created — the difference between automation and a
    * surprise — or, since the qualification minimum, what it still needs to know.
    */
-  function showQualification(q: { converted?: boolean; alreadyInPipeline?: boolean; opportunityId?: string | null; missing?: string[] } | null, activityId: string | null) {
+  function showQualification(q: { converted?: boolean; alreadyInPipeline?: boolean; opportunityId?: string | null; missing?: string[]; duplicateCustomer?: boolean } | null, activityId: string | null) {
+    // Gate M1: saved, but the lead matches an existing customer — it stays a lead; the supervisor assigns the customer.
+    if (q?.duplicateCustomer) {
+      setPendingQual(null); setQualifiedDealId(null);
+      setSuccess(ar ? "النشاط انحفظ، لكن هذا العميل مسجّل مسبقًا في النظام — اطلب من مشرفك إسناده لك." : "The activity is saved, but this customer is already registered — ask your supervisor to assign it to you.");
+      return;
+    }
     if (q && q.converted === false && activityId) {
       setPendingQual({ activityId, missing: q.missing ?? [] });
       setSuccess(ar ? `سُجِّل النشاط. ${missingText(q.missing ?? [], true)}` : `Recorded. ${missingText(q.missing ?? [], false)}`);
@@ -401,7 +416,7 @@ export default function LeadDetailPage() {
         subtitle={
           <span className="flex items-center gap-2 flex-wrap">
             <LeadStatusBadge status={lead.status} testId="lead-detail-status" />
-            <span>{lead.contactName}</span>
+            {lead.contactName ? <span>{lead.contactName}</span> : null}
             {lead.owner && <span>· {lead.owner.name}</span>}
           </span>
         }
@@ -476,13 +491,13 @@ export default function LeadDetailPage() {
             <SectionTitle>{ar ? "البيانات" : "Details"}</SectionTitle>
             {editing && !readOnly ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-                <Field id="companyName" label={ar ? "اسم الشركة" : "Company"} required>
+                <Field id="companyName" label={ar ? "اسم المنشأة" : "Business name"} required>
                   <TextInput id="companyName" value={form.companyName} onChange={(v) => setForm({ ...form, companyName: v })} />
                 </Field>
                 <Field id="companyNameAr" label={ar ? "الاسم بالعربية" : "Arabic name"}>
                   <TextInput id="companyNameAr" value={form.companyNameAr} onChange={(v) => setForm({ ...form, companyNameAr: v })} />
                 </Field>
-                <Field id="contactName" label={ar ? "جهة الاتصال" : "Contact"} required>
+                <Field id="contactName" label={ar ? "الشخص المسؤول" : "Contact person"}>
                   <TextInput id="contactName" value={form.contactName} onChange={(v) => setForm({ ...form, contactName: v })} />
                 </Field>
                 <Field id="phone" label={ar ? "الجوال" : "Phone"}>
@@ -512,6 +527,9 @@ export default function LeadDetailPage() {
                   </Field>
                 </div>
                 <div className="sm:col-span-2">
+                  <HrRoot><div className="hr-form"><IdentityFields value={idf} onChange={setIdf} ar={ar} testPrefix="lead-edit" /></div></HrRoot>
+                </div>
+                <div className="sm:col-span-2">
                   <Field id="notes" label={ar ? "ملاحظات" : "Notes"}>
                     <TextArea id="notes" value={form.notes} onChange={(v) => setForm({ ...form, notes: v })} rows={3} />
                   </Field>
@@ -527,12 +545,15 @@ export default function LeadDetailPage() {
               </div>
             ) : (
               <dl className="mt-3 grid grid-cols-[118px_minmax(0,1fr)] gap-x-3 gap-y-[11px] text-[13.5px]">
-                <Row label={ar ? "جهة الاتصال" : "Contact"} value={lead.contactName} />
+                <Row label={ar ? "الشخص المسؤول" : "Contact person"} value={lead.contactName} />
                 <Row label={ar ? "الجوال" : "Phone"} value={lead.phone} ltr icon={<Phone size={13} />} />
                 <Row label={ar ? "البريد" : "Email"} value={lead.email} ltr icon={<Mail size={13} />} />
                 <Row label={ar ? "المدينة" : "City"} value={lead.city} icon={<MapPin size={13} />} />
                 <Row label={ar ? "المصدر" : "Source"} value={label(SOURCE_LABELS, lead.source)} />
                 <Row label={ar ? "العنوان" : "Address"} value={lead.address} />
+                <Row label={ar ? "الرقم الضريبي" : "VAT number"} value={lead.vatNumber ?? null} ltr />
+                <Row label={ar ? "السجل / الموحد" : "CR / unified no."} value={registrationNoOf(lead) || null} ltr />
+                <Row label={ar ? "العنوان الوطني" : "National address"} value={nationalAddressLine(lead, ar)} />
                 <Row label={ar ? "أُنشئ" : "Created"} value={formatDay(lead.createdAt, lang)} />
                 <Row label={ar ? "آخر تعديل" : "Updated"} value={formatDay(lead.updatedAt, lang)} />
                 {lead.notes && (

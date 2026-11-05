@@ -1,3 +1,4 @@
+import { parseLeadIdentity, leadCityFrom } from "@/lib/services/sales/lead-identity";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
@@ -25,6 +26,8 @@ export async function GET(_request: Request, { params }: Params) {
         id: true, companyName: true, companyNameAr: true, contactName: true,
         phone: true, email: true, city: true, address: true, source: true, sourceNote: true,
         status: true, notes: true, nextFollowUpAt: true, createdAt: true, updatedAt: true,
+        vatNumber: true, commercialRegNo: true, unifiedNumber: true, nationalBuildingNo: true, nationalStreet: true,
+        nationalDistrict: true, nationalCity: true, nationalPostalCode: true, nationalAdditionalNo: true, nationalShortAddress: true,
         // The qualification answers gathered so far (20261204100000_pipeline_qualification).
         businessType: true, needSummary: true, expectedMonthlyKg: true, agreedNextStep: true,
         owner: { select: { id: true, name: true } },
@@ -109,10 +112,20 @@ export async function PATCH(request: Request, { params }: Params) {
       if (v.length < 2) throw { _appCode: 400, message: "The company name is required." };
       data.companyName = v;
     }
-    if (typeof b.contactName === "string") {
+    // Optional since 20261221090000_lead_identity: "" clears it; a given name is ≥ 2 characters.
+    if (b.contactName === null) data.contactName = null;
+    else if (typeof b.contactName === "string") {
       const v = b.contactName.trim();
-      if (v.length < 2) throw { _appCode: 400, message: "A contact name is required." };
-      data.contactName = v;
+      if (v.length === 1) throw { _appCode: 400, message: "The contact name is too short." };
+      data.contactName = v || null;
+    }
+    // The registration and national address: free on a lead (format checks only — services/sales/lead-identity.ts).
+    const ident = parseLeadIdentity(b);
+    if (!ident.ok) return NextResponse.json({ error: ident.errorAr, errorEn: ident.error, field: ident.field }, { status: 400 });
+    Object.assign(data, ident.data);
+    if ("nationalCity" in ident.data && typeof b.city !== "string") {
+      const c = leadCityFrom(ident.data);
+      if (c) data.city = c;
     }
     str("companyNameAr");
     str("phone");

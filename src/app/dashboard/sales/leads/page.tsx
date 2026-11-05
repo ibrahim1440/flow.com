@@ -5,7 +5,7 @@ import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, X, Download, Trash2 } from "lucide-react";
+import { Download, Trash2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
@@ -16,7 +16,9 @@ import { usePhone, useD21Phone } from "@/components/shell/page-context";
 import { initials } from "@/components/d21/labels";
 import { dueText, shortDate, dayCount, daysFromToday } from "@/components/d21/format";
 import { LeadPane } from "./LeadPane";
-import { useUnsavedGuard, isDirtyAgainst } from "../../_components/useUnsavedGuard";
+import { NewLeadDialog } from "./NewLeadDialog";
+import { LogActivityPicker } from "../activities/LogActivityPicker";
+import type { Target } from "@/lib/services/sales/activity-targets";
 import ImportDialog from "./ImportDialog";
 import { SalesJourney } from "../_components/journey";
 import { telHref, waNumber } from "@/lib/services/search/normalize";
@@ -48,28 +50,9 @@ type Lead = {
   conversion: { customerId: string; opportunityId: string } | null;
 };
 
-type DuplicateCandidate = { leadId: string; companyName: string; contactName: string; strong: boolean };
-
-const SOURCES = ["WALK_IN", "REFERRAL", "PHONE", "SOCIAL", "EXHIBITION", "WEBSITE", "OTHER"] as const;
 
 // The shared map, so this screen and the settings screen name a source identically.
 const SOURCE_LABELS = LEAD_SOURCE_LABELS;
-
-/** An untouched create form. Also the baseline the unsaved-work guard compares against. */
-const EMPTY_LEAD_FORM = {
-  companyName: "", companyNameAr: "", contactName: "", phone: "",
-  email: "", city: "", source: "REFERRAL", nextFollowUpAt: "", notes: "",
-};
-
-/**
- * «وسيلة التواصل»: one box for the primary way to reach the person — a mobile number or an e-mail,
- * told apart by the «@». The short form asks for three things only (company, person, how to reach
- * them); everything else waits under «تفاصيل إضافية».
- */
-function splitReach(v: string): { phone: string; email: string } {
-  const t = v.trim();
-  return t.includes("@") ? { phone: "", email: t } : { phone: t, email: "" };
-}
 
 // Status labels and colours now come from the shared map in `_components/ui`, so this screen
 // and every other one render a stored value identically. The local copy this replaced painted
@@ -174,10 +157,8 @@ export default function LeadsPage() {
   const requestSeq = useRef(0);
 
   const [showForm, setShowForm] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState("");
-  const [duplicates, setDuplicates] = useState<DuplicateCandidate[]>([]);
-  const [form, setForm] = useState(EMPTY_LEAD_FORM);
+  // «تسجيل نشاط» in the new-lead form: the saved lead the activity form opens on.
+  const [logOn, setLogOn] = useState<Target | null>(null);
 
   // `?new=1` opens the form on arrival — the shell's «+ جديد» menu links here. Derived, not
   // set in an effect; closing the form marks the request handled and drops the parameter.
@@ -193,9 +174,6 @@ export default function LeadsPage() {
     }
   }
 
-  // Nine fields somebody may have spent a minute filling in. Navigating away used to
-  // discard them without a word.
-  useUnsavedGuard(isDirtyAgainst(formOpen, form, EMPTY_LEAD_FORM));
 
   const [converting, setConverting] = useState<string | null>(null);
   /**
@@ -267,52 +245,7 @@ export default function LeadsPage() {
   }
 
   function openForm() {
-    setForm({ ...EMPTY_LEAD_FORM });
-    setDuplicates([]);
-    setFormError("");
     setShowForm(true);
-  }
-
-  const formValid = form.companyName.trim().length >= 2 && form.contactName.trim().length >= 2
-    && (form.phone.trim().length >= 5 || form.email.includes("@"));
-
-  async function submit(acknowledgeDuplicate: boolean) {
-    if (!formValid || saving) return;
-    setSaving(true);
-    setFormError("");
-    try {
-      const res = await fetch("/api/sales/leads", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...form,
-          companyNameAr: form.companyNameAr || null,
-          nextFollowUpAt: form.nextFollowUpAt || null,
-          acknowledgeDuplicate,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.status === 409 && Array.isArray(data.duplicates)) {
-        // Surfaced, not silently blocked and not merged: the operator decides.
-        setDuplicates(data.duplicates);
-        setFormError("");
-        return;
-      }
-      if (!res.ok) {
-        setFormError(localizeApiError(data) ?? (lang === "ar" ? "تعذّر الحفظ." : "Could not save."));
-        return;
-      }
-      closeForm();
-      // A name-only resemblance does not stop the save; it is said once, so the rep can look.
-      const weak = Array.isArray(data.weakDuplicates) ? (data.weakDuplicates as { companyName: string }[]) : [];
-      setSuccess(
-        (lang === "ar" ? "تم إنشاء العميل المحتمل." : "Lead created.")
-        + (weak.length ? (lang === "ar" ? ` يوجد اسم مشابه: ${weak.slice(0, 2).map((w) => w.companyName).join("، ")}.` : ` A similar name exists: ${weak.slice(0, 2).map((w) => w.companyName).join(", ")}.`) : ""),
-      );
-      load();
-    } finally {
-      setSaving(false);
-    }
   }
 
   async function convert(lead: Lead) {
@@ -823,186 +756,21 @@ export default function LeadsPage() {
         </div>
       )}
 
-      {formOpen && (
-        <div
-          data-ui="dialog-scrim"
-          className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 overflow-y-auto"
-          role="presentation"
-        >
-          <FocusDialog
-            onClose={() => { if (!saving) closeForm(); }}
-            labelledBy="lead-form-title"
-            testId="lead-form"
-            className="bg-oo-bg-default w-full max-w-lg my-8"
-          >
-            <div className="flex items-center justify-between border-b">
-              <h2 id="lead-form-title" className="text-oo-text-primary">{t("newLeadBtn")}</h2>
-              <button type="button" onClick={() => closeForm()} aria-label={ar ? "إغلاق" : "Close"} disabled={saving}
-                className="grid size-8 place-items-center rounded-lg text-oo-text-muted hover:bg-[var(--d-surface-hover)]">
-                <X size={18} aria-hidden />
-              </button>
-            </div>
-
-            <form
-              className="py-4 space-y-3"
-              onSubmit={(e) => { e.preventDefault(); submit(false); }}
-              noValidate
-            >
-              {/* Required first, optional after: a short form gets filled, a long one gets
-                  abandoned halfway and leaves a half-built record. */}
-              <label className="block space-y-1.5" data-ui="field">
-                <span className="block text-[13px] font-medium text-oo-text-primary">{t("leadCompany")} <span aria-hidden className="text-oo-status-rejected">*</span></span>
-                <input
-                  aria-label={t("leadCompany")}
-                  aria-required="true"
-                  autoFocus
-                  data-ui="input"
-                  value={form.companyName}
-                  onChange={(e) => { setForm({ ...form, companyName: e.target.value }); setDuplicates([]); }}
-                  className="w-full"
-                />
-              </label>
-              <label className="block space-y-1.5" data-ui="field">
-                <span className="block text-[13px] font-medium text-oo-text-primary">{t("leadContact")} <span aria-hidden className="text-oo-status-rejected">*</span></span>
-                <input
-                  aria-label={t("leadContact")}
-                  aria-required="true"
-                  data-ui="input"
-                  value={form.contactName}
-                  onChange={(e) => setForm({ ...form, contactName: e.target.value })}
-                  className="w-full"
-                />
-              </label>
-              <label className="block space-y-1.5" data-ui="field">
-                <span className="block text-[13px] font-medium text-oo-text-primary">{ar ? "وسيلة التواصل (جوال أو بريد)" : "How to reach them (mobile or e-mail)"} <span aria-hidden className="text-oo-status-rejected">*</span></span>
-                <input
-                  dir="ltr"
-                  inputMode="email"
-                  aria-label={ar ? "وسيلة التواصل" : "How to reach them"}
-                  aria-required="true"
-                  data-ui="input"
-                  data-testid="lead-reach"
-                  value={form.phone || form.email}
-                  onChange={(e) => { setForm({ ...form, ...splitReach(e.target.value) }); setDuplicates([]); }}
-                  className="w-full text-start"
-                />
-              </label>
-              <details className="rounded-[9px] border border-oo-border-default px-3 py-2" data-testid="lead-more">
-                <summary className="cursor-pointer text-[13px] font-medium text-oo-text-secondary">{ar ? "تفاصيل إضافية (اختياري)" : "More details (optional)"}</summary>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3">
-                <label className="block space-y-1.5" data-ui="field">
-                  <span className="block text-[13px] font-medium text-oo-text-primary">{t("leadCity")}</span>
-                  <input
-                    aria-label={t("leadCity")}
-                    data-ui="input"
-                    value={form.city}
-                    onChange={(e) => setForm({ ...form, city: e.target.value })}
-                    className="w-full"
-                  />
-                </label>
-                <label className="block space-y-1.5" data-ui="field">
-                  <span className="block text-[13px] font-medium text-oo-text-primary">{t("leadSource")}</span>
-                  <Select
-                    // Named explicitly. Without this the wrapping label hands the control an
-                    // accessible name assembled from every option in the list, which is
-                    // unusable to a screen reader and ambiguous to anything else looking the
-                    // control up by name.
-                    aria-label={t("leadSource")}
-                    data-ui="input"
-                    value={form.source}
-                    onChange={(e) => setForm({ ...form, source: e.target.value })}
-                    className="w-full"
-                  >
-                    {SOURCES.map((s) => (
-                      <option key={s} value={s}>{label(SOURCE_LABELS, s)}</option>
-                    ))}
-                  </Select>
-                </label>
-                <label className="block space-y-1.5" data-ui="field">
-                  <span className="block text-[13px] font-medium text-oo-text-primary">{t("leadNextFollowUp")}</span>
-                  <input
-                    type="date"
-                    aria-label={t("leadNextFollowUp")}
-                    data-ui="input"
-                    value={form.nextFollowUpAt}
-                    onChange={(e) => setForm({ ...form, nextFollowUpAt: e.target.value })}
-                    className="w-full"
-                  />
-                </label>
-                  <label className="block space-y-1.5 sm:col-span-2" data-ui="field">
-                    <span className="block text-[13px] font-medium text-oo-text-primary">{ar ? "ملاحظات" : "Notes"}</span>
-                    <textarea
-                      aria-label={ar ? "ملاحظات" : "Notes"}
-                      data-ui="input"
-                      rows={2}
-                      maxLength={2000}
-                      value={form.notes}
-                      onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                      className="w-full"
-                    />
-                  </label>
-                </div>
-              </details>
-              <p className="text-[12px] text-oo-text-muted">
-                {ar ? "الحقول المعلّمة بـ * مطلوبة. المسؤول ومصدر الإدخال يُعبَّآن تلقائياً." : "Fields marked * are required. The owner and the entry source are filled in for you."}
-              </p>
-
-              {duplicates.length > 0 && (
-                <div className="rounded-[9px] border border-oo-status-waiting bg-oo-status-waiting-bg p-3" role="alert">
-                  <p className="text-[13px] font-medium text-oo-status-hold mb-1 flex items-center gap-1.5">
-                    <AlertTriangle size={14} aria-hidden /> {t("leadDuplicateTitle")}
-                  </p>
-                  <p className="text-[12.5px] text-oo-status-hold leading-relaxed mb-2">{t("leadDuplicateBody")}</p>
-                  <ul className="space-y-1 mb-2">
-                    {duplicates.map((d) => (
-                      <li key={d.leadId} className="text-[12.5px] text-oo-status-hold font-medium">
-                        {d.companyName} — {d.contactName}
-                      </li>
-                    ))}
-                  </ul>
-                  <button
-                    type="button"
-                    onClick={() => submit(true)}
-                    disabled={saving}
-                    data-ui="btn"
-                    className="inline-flex items-center"
-                  >
-                    {t("leadCreateAnyway")}
-                  </button>
-                </div>
-              )}
-
-              {formError && (
-                <p className="text-[12.5px] font-medium text-oo-status-rejected flex items-start gap-1.5" role="alert">
-                  <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" aria-hidden /> {formError}
-                </p>
-              )}
-
-              <div className="flex justify-end gap-2 pt-4 border-t border-[var(--d-border-subtle)] -mx-6 px-6">
-                <button
-                  type="button"
-                  onClick={() => closeForm()}
-                  disabled={saving}
-                  data-ui="btn"
-                  className="inline-flex items-center"
-                >
-                  {ar ? "إلغاء" : "Cancel"}
-                </button>
-                <button
-                  type="submit"
-                  disabled={!formValid || saving}
-                  aria-busy={saving || undefined}
-                  data-ui="btn"
-                  data-variant="primary"
-                  className="inline-flex items-center"
-                >
-                  {saving ? (ar ? "جارٍ الحفظ…" : "Saving…") : ar ? "حفظ" : "Save"}
-                </button>
-              </div>
-            </form>
-          </FocusDialog>
-        </div>
-      )}
+      {formOpen ? (
+        <NewLeadDialog ar={ar} sourceLabel={(k) => label(SOURCE_LABELS, k)} onClose={closeForm}
+          onSaved={(lead, { logActivity, weak }) => {
+            closeForm();
+            // A name-only resemblance does not stop the save; it is said once, so the rep can look.
+            setSuccess((ar ? "تم إنشاء العميل المحتمل." : "Lead created.")
+              + (weak.length ? (ar ? ` يوجد اسم مشابه: ${weak.slice(0, 2).join("، ")}.` : ` A similar name exists: ${weak.slice(0, 2).join(", ")}.`) : ""));
+            if (logActivity) setLogOn({ kind: "lead", id: lead.id, name: lead.companyName, nameAr: lead.companyNameAr, customer: null, stage: null, subject: null, dueAt: null });
+            load();
+          }} />
+      ) : null}
+      {logOn ? (
+        <LogActivityPicker lang={ar ? "ar" : "en"} initial={logOn} onClose={() => setLogOn(null)}
+          onDone={() => { setLogOn(null); setSuccess(ar ? "تم تسجيل النشاط." : "Activity logged."); load(); }} />
+      ) : null}
     </div>
     {pane}
     </div>

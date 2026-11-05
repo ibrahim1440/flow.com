@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Ico } from "./icons";
+import { NewCustomerDialog } from "@/components/customers/new-customer-form";
 import { customerActionHref, type CreateAction } from "./creates";
 import { readRecent, rememberRecent, type RecentRecord } from "./recent";
 import { foldArabic } from "@/lib/services/search/normalize";
@@ -56,8 +57,10 @@ export function useTrap(onClose: () => void) {
   return ref;
 }
 
-export function QuickJump({ lang, userId, pages, actions, pick, onClose }: {
+export function QuickJump({ lang, userId, pages, actions, pick, onClose, canCreateCustomer = false }: {
   lang: string; userId: string; pages: PalPage[];
+  /** «لأي عميل؟» only: offer «عميل جديد» (the shared customer form), then carry on with `pick` on the new customer. */
+  canCreateCustomer?: boolean;
   /** The permitted on-customer actions (N, Q, S) offered under a highlighted customer. */
   actions: CreateAction[];
   /** «لأي عميل؟»: pick a customer, then do this. */
@@ -75,6 +78,8 @@ export function QuickJump({ lang, userId, pages, actions, pick, onClose }: {
   const [failed, setFailed] = useState(false);
   const [recent] = useState<RecentRecord[]>(() => readRecent(userId));
   const query = q.trim();
+  // «عميل جديد» (Figma page 12): the shared «إضافة عميل» form; after its save the action continues on the new customer.
+  const [newCustomer, setNewCustomer] = useState(false);
 
   // Records: debounced 150 ms; the newest answer wins.
   useEffect(() => {
@@ -176,6 +181,15 @@ export function QuickJump({ lang, userId, pages, actions, pick, onClose }: {
     ? (query ? L("ما لقينا عميل بهذا الاسم ضمن عملائك.", "No customer of yours by that name.") : L("اكتب اسم العميل أو رقم جواله.", "Type the customer's name or phone number."))
     : L("ما لقينا شي بهذا الاسم ضمن صلاحياتك. جرّب جزء من الاسم أو رقم الجوال.", "Nothing by that name in your access. Try part of the name or the phone number.");
 
+  // «عميل جديد»: the picker steps aside for the shared form; after the save, the chosen action opens on the new customer
+  // (a sample request, a quotation or an activity — customerActionHref, the same target as picking an existing one).
+  if (pick && newCustomer) {
+    return (
+      <NewCustomerDialog open ar={ar} initialName={query} onClose={() => setNewCustomer(false)}
+        onCreated={(c) => { router.push(customerActionHref(pick, c.id)); onClose(); }} />
+    );
+  }
+
   return (
     <>
       <div className="d21-scrim" onClick={onClose} />
@@ -202,7 +216,11 @@ export function QuickJump({ lang, userId, pages, actions, pick, onClose }: {
             }}
           />
           {searching ? <span className="d21-pal-busy" role="status" aria-label={L("جارٍ البحث…", "Searching…")} /> : null}
-          <span className="d21-kbd" aria-hidden>Esc</span>
+          {pick && canCreateCustomer ? (
+            <button type="button" className="d21-pal-new" onClick={() => setNewCustomer(true)} data-testid="picker-new-customer">
+              <Ico name="plus" small />{L("عميل جديد", "New customer")}
+            </button>
+          ) : <span className="d21-kbd" aria-hidden>Esc</span>}
         </div>
         {failed ? <p className="empty" role="alert">{L("تعذّر البحث الآن. حاول مرة ثانية.", "Search failed. Try again.")}</p> : null}
         {full.length === 0 && !searching ? <p className="empty" role="status" data-testid="quick-jump-empty">{emptyText}</p> : (
