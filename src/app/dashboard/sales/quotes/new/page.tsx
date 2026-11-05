@@ -27,20 +27,13 @@ export default function NewQuotePage() {
 
   const [createError, setCreateError] = useState("");
 
-  /**
-   * "You arrived without a deal" is derived from the URL, not stored.
-   *
-   * It used to be written with setError inside the effect, which is a synchronous state write
-   * during an effect and causes a cascading render — and it was never really state anyway: it
-   * is a fact about the current URL, knowable at render time. Only the failure of the create
-   * call is genuine state, because only that is discovered asynchronously.
-   */
-  const missingDeal = !opportunityId;
-  const error = missingDeal
-    ? (ar
-        ? "عرض السعر يُنشأ من صفقة. افتح الصفقة واضغط «عرض سعر جديد»."
-        : "A quotation is raised from a deal. Open the deal and use “New quotation”.")
-    : createError;
+  // Arriving without a deal («يومي», «+ جديد», any old link): open the quotation page's customer picker (QuotePicker —
+  // pick the customer, its open deal is linked or opened, then the editor) instead of a dead end (owner, 5 Nov 2026:
+  // «خلي الاختصارات شغالة»).
+  useEffect(() => {
+    if (!opportunityId) router.replace(`${base}?pick=1`);
+  }, [opportunityId, router, base]);
+  const error = createError;
 
   useEffect(() => {
     if (!opportunityId) return;
