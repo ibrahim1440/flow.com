@@ -262,6 +262,8 @@ export function AppShell({
   const [phoneHeader, setPhoneHeader] = useState<PhoneHeader | null>(null);
   // One bar only (council fix round 2, item 5): a page whose action bar replaces the rep's bar (the customer page).
   const repTabs = repBar && !phoneHeader?.replacesRepBar;
+  // «تسجيل الخروج؟» (owner-approved Figma D9, 6 Nov 2026): the shell's own sheet, not the browser's confirm.
+  const [askOut, setAskOut] = useState(false);
   const setTitleStable = useCallback((t: string | null) => setTitle(t), []);
   const [extraCrumbs, setExtraCrumbs] = useState<Crumb[] | null>(null);
   const setCrumbsStable = useCallback((c: Crumb[] | null) => setExtraCrumbs(c), []);
@@ -520,6 +522,7 @@ export function AppShell({
     <SectionPagesContext value={sectionPages}>
     <WorkspaceModeContext value={workspaceMode}>
     <div className="d21" lang={lang} dir={ar ? "rtl" : "ltr"} data-shell="d21" data-repbar={repTabs ? "true" : undefined}>
+      {askOut ? <LogoutSheet ar={ar} name={user.name} role={roleLabel} onCancel={() => setAskOut(false)} onConfirm={() => { setAskOut(false); onLogout(); }} /> : null}
       {/* IBM Plex, self-hosted (public/fonts): the same faces, files and unicode-range subsets
           Google Fonts served, so nothing is fetched from a third party. */}
       <link rel="stylesheet" precedence="default" href="/fonts/ibm-plex.css" />
@@ -617,7 +620,7 @@ export function AppShell({
               6 Nov 2026). One confirm, so a stray tap never signs the rep out mid-visit. */}
           {repTabs ? (
             <button type="button" className="d21-ib" aria-label={ar ? "تسجيل الخروج" : "Sign out"} title={ar ? "تسجيل الخروج" : "Sign out"} data-testid="ph-logout"
-              onClick={() => { if (window.confirm(ar ? "تبي تسجّل خروج؟" : "Sign out?")) onLogout(); }}><LogOut aria-hidden size={20} /></button>
+              onClick={() => setAskOut(true)}><LogOut aria-hidden size={20} /></button>
           ) : null}
         </header>
 
@@ -774,6 +777,33 @@ export function AppShell({
 }
 
 /** The phone's «المزيد» sheet (reference `shell-390` More): the person, then every section. */
+/**
+ * «تسجيل الخروج؟» — a bottom sheet (Figma D9-A): the icon, the question, one reassuring line, who is signed in on this
+ * phone, a red «تسجيل الخروج» and «إلغاء». Esc / the scrim cancel; focus starts on «إلغاء» (a stray tap stays in).
+ */
+function LogoutSheet({ ar, name, role, onCancel, onConfirm }: { ar: boolean; name: string; role: string; onCancel: () => void; onConfirm: () => void }) {
+  const ref = useTrap(onCancel);
+  const cancelRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => { cancelRef.current?.focus(); }, []);
+  return (
+    <div className="d21-out-scrim" onClick={onCancel} data-testid="logout-sheet-scrim">
+      <div ref={ref} className="d21-out" role="alertdialog" aria-modal="true" aria-labelledby="d21-out-h" aria-describedby="d21-out-p" dir={ar ? "rtl" : "ltr"}
+        onClick={(e) => e.stopPropagation()} data-testid="logout-sheet">
+        <span className="d21-out-grab" aria-hidden />
+        <span className="d21-out-ico" aria-hidden><LogOut size={22} /></span>
+        <h2 id="d21-out-h">{ar ? "تسجيل الخروج؟" : "Sign out?"}</h2>
+        <p id="d21-out-p">{ar ? "بترجع لصفحة الدخول. كل اللي سجّلته محفوظ، وتقدر تدخل مرة ثانية برقمك السري." : "You will go back to the sign-in page. Everything you recorded is saved; sign in again any time."}</p>
+        <div className="d21-out-who">
+          <span className="d21-av" aria-hidden>{initials(name)}</span>
+          <span><b>{name}</b><small>{role}{ar ? " · مسجّل دخول على هذا الجوال" : " · signed in on this phone"}</small></span>
+        </div>
+        <button type="button" className="d21-out-go" onClick={onConfirm} data-testid="logout-confirm">{ar ? "تسجيل الخروج" : "Sign out"}</button>
+        <button ref={cancelRef} type="button" className="d21-out-no" onClick={onCancel} data-testid="logout-cancel">{ar ? "إلغاء" : "Cancel"}</button>
+      </div>
+    </div>
+  );
+}
+
 function MoreSheet({ lang, onClose, children }: { lang: string; onClose: () => void; children: ReactNode }) {
   const ar = lang === "ar";
   const ref = useTrap(onClose);

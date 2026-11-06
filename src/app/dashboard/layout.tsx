@@ -46,7 +46,7 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
   async function handleLogout() {
     clearRecent(); // Ctrl K «فتحتها مؤخرًا» never outlives the session (council fix round 1)
     await fetch("/api/auth/me", { method: "DELETE" });
-    router.push("/login");
+    router.push("/login?out=1"); // «سجّلت خروجك» on the sign-in page (Figma D9-B)
   }
 
   return (

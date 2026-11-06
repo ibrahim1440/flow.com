@@ -99,6 +99,8 @@
 .lg-note.tone-danger b { color: var(--status-danger); }
 .lg-note.tone-warning { background: var(--status-warning-tint); }
 .lg-note.tone-warning b { color: var(--text-primary); }
+.lg-note.tone-success { background: var(--status-success-tint); }
+.lg-note.tone-success b { color: var(--status-success); }
 .lg-note.tone-info { background: var(--surface-subtle); }
 .lg-note.tone-info b { color: var(--text-primary); }
 

@@ -110,6 +110,11 @@ export default function LoginPage() {
 
   // Reached because a session ended (idle 4 h, absolute 12 h, logout elsewhere, revocation).
   const [expired, setExpired] = useState(false);
+  // Signed out on purpose from the shell (Figma D9-B): a friendly line, not the «session ended» warning.
+  const [signedOut, setSignedOut] = useState(false);
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("out") === "1") setSignedOut(true); // eslint-disable-line react-hooks/set-state-in-effect -- the query string exists only in the browser
+  }, []);
   useEffect(() => {
     // A station that signed itself out after 5 idle minutes (Workstations W1, D3) shows the same notice.
     if (cameForExpiredSession(window.location.search) || new URLSearchParams(window.location.search).get("reason") === "station_idle") setExpired(true); // eslint-disable-line react-hooks/set-state-in-effect -- the query string exists only in the browser
@@ -281,6 +286,14 @@ export default function LoginPage() {
             <div className="lg-note-txt">
               <b lang="ar" dir="rtl">{SESSION_EXPIRED_AR}</b>
               <span lang="en" dir="ltr">{SESSION_EXPIRED_EN}</span>
+            </div>
+          </div>
+        ) : null}
+        {signedOut && !expired ? (
+          <div role="status" data-testid="login-signed-out" className="lg-note tone-success">
+            <div className="lg-note-txt">
+              <b lang="ar" dir="rtl">✓ سجّلت خروجك — نشوفك بكرة</b>
+              <span lang="en" dir="ltr">You are signed out.</span>
             </div>
           </div>
         ) : null}

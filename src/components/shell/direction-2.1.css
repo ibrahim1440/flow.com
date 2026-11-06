@@ -360,3 +360,23 @@
   .d21[data-repbar] .d21 .sticky-act, .d21[data-repbar] .sticky-act { bottom: var(--d21-tabbar); padding-bottom: 12px; }
   .d21[data-repbar] .d21-body { padding-bottom: calc(var(--d21-tabbar) + 76px); }
 }
+
+/* «تسجيل الخروج؟» (owner-approved Figma D9-A, 6 Nov 2026): a bottom sheet in the shell's own look. */
+.d21-out-scrim { position: fixed; inset: 0; z-index: 90; background: var(--overlay-scrim-sheet, rgba(31, 27, 22, .42)); display: flex; align-items: flex-end; justify-content: center }
+.d21-out { width: 100%; max-width: 480px; background: var(--surface); border-radius: 24px 24px 0 0; padding: 10px 20px calc(24px + env(safe-area-inset-bottom)); display: grid; justify-items: center; gap: 12px; box-shadow: 0 -12px 40px rgba(0, 0, 0, .12); animation: d21-out-up .2s var(--ease, ease-out) }
+@media (prefers-reduced-motion: reduce) { .d21-out { animation: none } }
+@keyframes d21-out-up { from { transform: translateY(24px); opacity: 0 } to { transform: none; opacity: 1 } }
+.d21-out-grab { width: 36px; height: 4px; border-radius: 2px; background: var(--border-strong); margin-bottom: 4px }
+.d21-out-ico { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; background: var(--status-danger-tint); color: var(--status-danger) }
+[dir="rtl"] .d21-out-ico svg { transform: scaleX(-1) }
+.d21-out h2 { margin: 0; font-size: 20px; font-weight: 700; color: var(--text-primary) }
+.d21-out p { margin: 0; text-align: center; font-size: 14px; line-height: 24px; color: var(--text-secondary); max-width: 34ch }
+.d21-out-who { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 12px; background: var(--surface-subtle) }
+.d21-out-who > span:last-child { display: grid; gap: 2px; min-width: 0 }
+.d21-out-who b { font-size: 14px; font-weight: 600; color: var(--text-primary) }
+.d21-out-who small { font-size: 12.5px; color: var(--text-muted) }
+.d21-out-go, .d21-out-no { width: 100%; min-height: 48px; border-radius: 12px; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer }
+.d21-out-go { border: 0; background: var(--action-danger); color: var(--text-inverse, #fff) }
+.d21-out-go:hover { background: var(--action-danger-hover, var(--action-danger)) }
+.d21-out-no { background: var(--surface); color: var(--text-primary); border: 1px solid var(--border-subtle) }
+.d21-out-go:focus-visible, .d21-out-no:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }
