@@ -240,10 +240,10 @@ function MyDay() {
           {hello}
           {tabsBar}
           {empty ? <NoBookNotice lang={lang} /> : null}
-          {/* D8.1 (owner): on a phone «كلّمهم اليوم» comes first — the rep's swipe list. */}
+          {/* Owner (6 Nov 2026): on a phone the target first — it is what gets the rep going — then «كلّمهم اليوم». */}
+          <TargetCard d={data} lang={lang} who={who} compact />
           <CallCard d={data} lang={lang} items={shown} total={listed} all={full} onAll={() => setAll((v) => !v)} ro={ro} empty={empty}
             filter={filter} onFilter={setFilter} onDone={openLog} onSnooze={snooze} phone />
-          <TargetCard d={data} lang={lang} who={who} compact />
           <AttentionStrip d={data} lang={lang} ro={ro} />
           {!ro ? <TodaySchedule ar={ar} reloadKey={tick} /> : null}
           {!ro ? <PlanCard ar={ar} /> : null}
