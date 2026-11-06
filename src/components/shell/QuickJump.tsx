@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Ico } from "./icons";
 import { NewCustomerDialog } from "@/components/customers/new-customer-form";
 import { customerActionHref, type CreateAction } from "./creates";
@@ -70,6 +70,9 @@ export function QuickJump({ lang, userId, pages, actions, pick, onClose, canCrea
   const ar = lang === "ar";
   const L = (a: string, e: string) => (ar ? a : e);
   const router = useRouter();
+  const pathname = usePathname();
+  // D8.1: an activity started on «يومي» comes back to «يومي» after it is saved (the customer page reads `back`).
+  const backTo = (a: CreateAction, href: string) => (a.onCustomer === "activity" && pathname?.startsWith("/dashboard/my-day") ? `${href}&back=my-day` : href);
   const ref = useTrap(onClose);
   const [q, setQ] = useState("");
   // The highlighted row by its key, so it stays put when the quick actions move.
@@ -148,7 +151,7 @@ export function QuickJump({ lang, userId, pages, actions, pick, onClose, canCrea
     if (!r) return;
     remember(r);
     const customerId = r.t === "hit" ? r.hit.customerId : r.t === "rec" ? r.customerId : r.t === "act" ? r.customerId : null;
-    if (pick) { if (customerId) router.push(customerActionHref(pick, customerId)); }
+    if (pick) { if (customerId) router.push(backTo(pick, customerActionHref(pick, customerId))); }
     else if (r.t === "act") router.push(customerActionHref(r.action, r.customerId));
     else router.push(r.t === "hit" ? r.hit.href : r.t === "rec" ? r.href : r.page.href);
     onClose();
@@ -186,7 +189,7 @@ export function QuickJump({ lang, userId, pages, actions, pick, onClose, canCrea
   if (pick && newCustomer) {
     return (
       <NewCustomerDialog open ar={ar} initialName={query} onClose={() => setNewCustomer(false)}
-        onCreated={(c) => { router.push(customerActionHref(pick, c.id)); onClose(); }} />
+        onCreated={(c) => { router.push(backTo(pick, customerActionHref(pick, c.id))); onClose(); }} />
     );
   }
 

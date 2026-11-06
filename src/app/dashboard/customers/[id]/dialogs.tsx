@@ -162,9 +162,18 @@ const KINDS: { id: ActivityKind; ar: string; en: string }[] = [
   { id: "VISIT", ar: "زيارة", en: "Visit" },
   { id: "MEETING", ar: "اجتماع", en: "Meeting" },
   { id: "NOTE", ar: "ملاحظة", en: "Note" },
-  { id: "TASK", ar: "مهمة", en: "Task" },
   { id: "SAMPLE_FOLLOW_UP", ar: "متابعة عيّنة", en: "Sample follow-up" },
 ];
+// D8.1 (owner, 6 Nov 2026): «مهمة» left «وش سويت؟» — what the rep wants to come back to is ONE thing, «تذكير»: the
+// logged activity is saved as done and the reminder is a separate open follow-up (POST …/activities `next`, one
+// transaction). «ذكّرني بعد»: بكرة / ٣ أيام / أسبوع at 9:00 Riyadh, or a date and time the rep picks.
+const REMIND: { days: number; ar: string; en: string }[] = [{ days: 1, ar: "بكرة", en: "Tomorrow" }, { days: 3, ar: "٣ أيام", en: "3 days" }, { days: 7, ar: "أسبوع", en: "A week" }];
+/** 9:00 Riyadh (06:00 UTC), `days` from today. Pure. */
+export function remindAt(days: number, now = new Date()): string {
+  const riyadh = new Date(now.getTime() + 3 * 3_600_000);
+  const d = new Date(Date.UTC(riyadh.getUTCFullYear(), riyadh.getUTCMonth(), riyadh.getUTCDate() + days, 6, 0, 0));
+  return d.toISOString();
+}
 /** The outcomes a rep reaches for first, as one-tap chips; the rest stay in «نتيجة أخرى». */
 const QUICK_OUTCOMES = ["INTERESTED", "NO_ANSWER", "LEFT_MESSAGE", "FOLLOW_UP_REQUIRED", "NOT_INTERESTED"] as const;
 
@@ -185,7 +194,10 @@ export function ActivityDialog({ ar, customerId, customerName, deals, defaultDea
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [dueAt, setDueAt] = useState("");
-  const [later, setLater] = useState(false);
+  // «ذكّرني بعد»: null = no reminder; a number = days ahead; "date" = the rep's own date and time (`dueAt`).
+  const [remind, setRemind] = useState<null | number | "date">(null);
+  // A reminder is written with the activity on the customer (`next`); a deal with no customer has no reminder here.
+  const canRemind = !!customerId;
   const [dealId, setDealId] = useState(defaultDealId ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -194,7 +206,8 @@ export function ActivityDialog({ ar, customerId, customerName, deals, defaultDea
   const kindWord = (k: ActivityKind) => { const x = KINDS.find((i) => i.id === k)!; return ar ? x.ar : x.en; };
   // The subject is optional for the rep: an empty one becomes «مكالمة — مقهى السدرة».
   const autoSubject = `${kindWord(kind)}${customerName ? ` — ${customerName}` : ""}`;
-  const ready = (!isTask || !!dueAt) && (subject.trim().length >= 2 || autoSubject.length >= 2) && (!isNote || subject.trim().length >= 2);
+  const ready = (!isTask || !!dueAt) && (remind !== "date" || !!dueAt) && (subject.trim().length >= 2 || autoSubject.length >= 2) && (!isNote || subject.trim().length >= 2);
+  const reminderAt = remind === null ? null : remind === "date" ? (dueAt ? new Date(dueAt).toISOString() : null) : remindAt(remind);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -208,8 +221,12 @@ export function ActivityDialog({ ar, customerId, customerName, deals, defaultDea
         subject: typed,
         body, opportunityId: dealId || null,
         outcome: isTask ? undefined : isNote ? "NOTE_ONLY" : outcome,
-        dueAt: dueAt ? new Date(dueAt).toISOString() : null,
-        completed: isTask ? false : !later,
+        // The activity is what happened: done. A legacy «مهمة» (still reachable through an old link) keeps its date.
+        dueAt: isTask && dueAt ? new Date(dueAt).toISOString() : null,
+        completed: !isTask,
+        ...(canRemind && !isTask && reminderAt ? {
+          next: { channel: kind === "VISIT" ? "VISIT" : kind === "WHATSAPP" ? "WHATSAPP" : "CALL", subject: `${ar ? "متابعة" : "Follow up"}${customerName ? ` — ${customerName}` : ""}`, dueAt: reminderAt },
+        } : {}),
       },
     });
     setBusy(false);
@@ -254,7 +271,7 @@ export function ActivityDialog({ ar, customerId, customerName, deals, defaultDea
         ) : null}
         <Field label={isNote ? `${L("الملاحظة", "Note")} *` : L("ملاحظة قصيرة (اختياري)", "Short note (optional)")} wide>
           <input className="hr-input" value={subject} onChange={(e) => setSubject(e.target.value)} maxLength={500} data-testid="activity-subject"
-            placeholder={isNote ? "" : L("مثلًا: يبغون كولومبي للشتاء", "e.g. they want a Colombian for winter")} autoFocus />
+            placeholder={isNote ? "" : L("مثلًا: يبغون كولومبي للشتاء", "e.g. they want a Colombian for winter")} />
         </Field>
         {deals.length > 0 ? (
           <Field label={L("الصفقة", "Deal")} help={L("اختياري", "Optional")}>
@@ -264,16 +281,30 @@ export function ActivityDialog({ ar, customerId, customerName, deals, defaultDea
             </Select>
           </Field>
         ) : null}
-        {!isTask ? (
-          <label className="cu-check is-wide" style={{ gridColumn: "1 / -1" }}>
-            <input type="checkbox" checked={later} onChange={(e) => setLater(e.target.checked)} data-testid="activity-later" />
-            {L("ما صار بعد — أبغى أذكّر نفسي", "Not done yet — remind me")}
-          </label>
+        {canRemind && !isTask ? (
+          <div className="is-wide" style={{ gridColumn: "1 / -1" }}>
+            <div className="hr-label" id="act-rem-l">{L("ذكّرني بعد", "Remind me in")}</div>
+            <div className="acc-chips" role="radiogroup" aria-labelledby="act-rem-l" data-testid="activity-remind">
+              <button type="button" role="radio" aria-checked={remind === null} className={`acc-chip${remind === null ? " on" : ""}`} onClick={() => setRemind(null)} data-testid="activity-remind-none">{L("لا", "No")}</button>
+              {REMIND.map((r) => (
+                <button key={r.days} type="button" role="radio" aria-checked={remind === r.days} className={`acc-chip${remind === r.days ? " on" : ""}`}
+                  onClick={() => setRemind(r.days)} data-testid={`activity-remind-${r.days}`}>{ar ? r.ar : r.en}</button>
+              ))}
+              <button type="button" role="radio" aria-checked={remind === "date"} className={`acc-chip${remind === "date" ? " on" : ""}`} onClick={() => setRemind("date")} data-testid="activity-remind-date">{L("تاريخ ثاني", "Another date")}</button>
+            </div>
+          </div>
         ) : null}
-        {isTask || later ? (
-          <Field label={`${L("متى؟", "When?")}${isTask ? " *" : ""}`} help={isTask ? L("المهمة بلا موعد ما تظهر في المتأخرات.", "A task with no date never shows as overdue.") : undefined}>
+        {isTask || remind === "date" ? (
+          <Field label={`${L("متى؟", "When?")} *`} help={isTask ? L("المهمة بلا موعد ما تظهر في المتأخرات.", "A task with no date never shows as overdue.") : undefined}>
             <input className="hr-input" type="datetime-local" value={dueAt} onChange={(e) => setDueAt(e.target.value)} dir="ltr" data-testid="activity-due" />
           </Field>
+        ) : null}
+        {reminderAt && canRemind && !isTask ? (
+          <p className="hr-help is-wide" style={{ gridColumn: "1 / -1", margin: 0 }} data-testid="activity-remind-line">
+            {L("ينحفظ النشاط إنه صار، وينضاف تذكير «متابعة» في ", "The activity is saved as done, and a follow-up reminder is added for ")}
+            <bdi>{new Date(reminderAt).toLocaleString(ar ? "ar-SA-u-nu-latn" : "en-GB", { weekday: "long", day: "numeric", month: "long", hour: "numeric", minute: "2-digit", timeZone: "Asia/Riyadh" })}</bdi>
+            {L(" — يطلع في «مهام اليوم» وفي صفحة العميل.", " — it shows in «Today's tasks» and on the customer page.")}
+          </p>
         ) : null}
         {!isNote && !more && !body ? (
           <button type="button" className="hr-btn is-wide" style={{ gridColumn: "1 / -1", justifySelf: "start" }} onClick={() => setMore(true)} data-testid="activity-more">{L("+ أضف تفاصيل", "+ Add details")}</button>

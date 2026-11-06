@@ -53,7 +53,7 @@ export type PillTone = "bad" | "warn" | "info" | "pri" | "ok";
 export function reasonPill(r: Reason, lang: Lang): { text: string; tone: PillTone } {
   const ar = lang === "ar";
   switch (r.code) {
-    case "LATE": return { tone: "bad", text: ar ? `متأخر ${days(r.daysLate, lang)}` : `${days(r.daysLate, lang)} late` };
+    case "LATE": return { tone: "bad", text: ar ? `تأخر الطلب ${days(r.daysLate, lang)}` : `Order ${days(r.daysLate, lang)} late` };
     case "DUE": return { tone: "warn", text: ar ? "حان موعد طلبه" : "Order due" };
     case "EXPECTED": return { tone: "warn", text: r.inDays === 0 ? (ar ? "متوقع يطلب اليوم" : "Expected to order today") : ar ? `متوقع يطلب خلال ${days(r.inDays, lang)}` : `Expected to order within ${days(r.inDays, lang)}` };
     case "SAMPLE": return { tone: "info", text: ar ? "عيّنة بدون رد" : "Sample, no feedback" };
@@ -71,7 +71,7 @@ export function whyLine(item: { reason: Reason; tier: Tier | null; intervalDays:
   if (r.code === "SAMPLE") parts.push(ar ? (third ? `أرسل عيّنة قبل ${days(r.daysSinceSent, lang)}، وما سجّل رأيهم` : `أرسلت عيّنة قبل ${days(r.daysSinceSent, lang)}، وما سجّلت رأيهم`) : `Sample sent ${days(r.daysSinceSent, lang)} ago, no feedback recorded`);
   else if (r.code === "FOLLOW_UP") parts.push(ar ? `${r.dealTitle} · ${n(r.amount)} ريال` : `${r.dealTitle} · SAR ${n(r.amount)}`);
   else if (r.code === "NO_CONTACT") parts.push(ar ? `المعتاد ${third ? "يتواصل" : "تتواصل"} كل ${days(r.thresholdDays, lang)}` : `Usually in touch every ${days(r.thresholdDays, lang)}`);
-  else if (r.code === "CALLED") parts.push(ar ? `متأخر ${days(r.daysLate, lang)} · يطلع من القائمة لما يطلب، أو يرجع بعد ${days(r.awaitDays, lang)} بدون طلب`
+  else if (r.code === "CALLED") parts.push(ar ? `تأخر الطلب ${days(r.daysLate, lang)} · يطلع من القائمة لما يطلب، أو يرجع بعد ${days(r.awaitDays, lang)} بدون طلب`
     : `${days(r.daysLate, lang)} late · leaves the list when the order comes, or is back after ${days(r.awaitDays, lang)} without one`);
   else if (item.intervalDays) parts.push(ar ? `عادةً يطلب كل ${days(item.intervalDays, lang)}` : `Usually orders every ${days(item.intervalDays, lang)}`);
   if (item.kgPerMonth > 0 && r.code !== "FOLLOW_UP") parts.push(ar ? `${n(item.kgPerMonth)} كجم بالشهر` : `${n(item.kgPerMonth)} kg/month`);

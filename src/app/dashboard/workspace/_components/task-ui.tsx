@@ -476,16 +476,23 @@ export function LinkPicker({ value, onChange }: { value: Link | null; onChange: 
 }
 
 const QUICK: [string, string, string][] = [["h4", "خلال 4 ساعات", "In 4 hours"], ["h5", "خلال 5 ساعات", "In 5 hours"], ["eod", "نهاية اليوم", "End of day"], ["tomorrow", "غدًا", "Tomorrow"], ["exact", "تاريخ ووقت…", "Date & time…"]];
+// «تذكير» (D8.1): the same presets as «ذكّرني بعد» in the activity form — at 9:00 Riyadh — or a date the rep picks.
+const REMIND_QUICK: [string, string, string][] = [["r1", "بكرة", "Tomorrow"], ["r3", "٣ أيام", "3 days"], ["r7", "أسبوع", "A week"], ["exact", "تاريخ ثاني", "Another date"]];
+const remindDueAt = (days: number) => { const r = new Date(Date.now() + 3 * 3_600_000); return new Date(Date.UTC(r.getUTCFullYear(), r.getUTCMonth(), r.getUTCDate() + days, 6, 0, 0)).toISOString(); };
 
 /** Create a task. The deadline actually computed is shown before saving (POST /api/workspace/due-preview). */
-export function CreateTaskDialog({ onClose, onCreated, preset }: { onClose: () => void; onCreated: (t: Task, msg: string) => void; preset?: { kind?: "FOLLOW_UP"; link?: Link | null } }) {
+export function CreateTaskDialog({ onClose, onCreated, preset, reminder }: {
+  onClose: () => void; onCreated: (t: Task, msg: string) => void; preset?: { kind?: "FOLLOW_UP"; link?: Link | null };
+  /** «تذكير» (the rep's «يومي», D8.1): the same task, named a reminder — a follow-up with a customer or a free one. */
+  reminder?: boolean;
+}) {
   const L = useL();
   const lang = useLang();
   const people = usePeople("assign");
   const invitees = usePeople("invite");
   const [title, setTitle] = useState("");
   const [assigneeId, setAssigneeId] = useState("");
-  const [quick, setQuick] = useState("h4");
+  const [quick, setQuick] = useState(reminder ? "r1" : "h4");
   const [business, setBusiness] = useState(false);
   const [exact, setExact] = useState(() => toRiyadhLocal(new Date(Date.now() + 3_600_000)).slice(0, 14) + "00");
   const [priority, setPriority] = useState("NORMAL");
@@ -507,6 +514,7 @@ export function CreateTaskDialog({ onClose, onCreated, preset }: { onClose: () =
 
   const due = useMemo(() => {
     if (quick === "exact") { const at = parseRiyadhLocal(exact); return at ? { dueAt: at.toISOString() } : null; }
+    if (/^r\d+$/.test(quick)) return { dueAt: remindDueAt(Number(quick.slice(1))) };
     return { due: { quick, basis: business ? "BUSINESS" : "CLOCK" } };
   }, [quick, business, exact]);
   const dueKey = JSON.stringify(due);
@@ -518,7 +526,8 @@ export function CreateTaskDialog({ onClose, onCreated, preset }: { onClose: () =
       .catch(() => { if (alive) setPreviewOf({ key: dueKey, dueAt: null }); });
     return () => { alive = false; };
   }, [due, dueKey]);
-  const preview = due && previewOf.key === dueKey && previewOf.dueAt ? { dueAt: previewOf.dueAt } : null;
+  // A reminder's preset is an exact time already (9:00 Riyadh): shown as is, not asked of the preview.
+  const preview = reminder && due && "dueAt" in due && due.dueAt ? { dueAt: due.dueAt } : due && previewOf.key === dueKey && previewOf.dueAt ? { dueAt: previewOf.dueAt } : null;
 
   const save = async () => {
     setBusy(true); setErr(null);
@@ -535,32 +544,32 @@ export function CreateTaskDialog({ onClose, onCreated, preset }: { onClose: () =
         ...(recur ? { recurRule: recur, recurInterval: 1 } : {}),
       };
       const t = await wsFetch<Task>("/api/workspace/tasks", { json: body });
-      onCreated(t, owner && owner !== self?.id ? L(`أُسندت المهمة إلى ${t.assignee.name} وأُبلغ.`, `Assigned to ${t.assignee.name}; they were told.`) : L("أُنشئت المهمة.", "Task created."));
+      onCreated(t, owner && owner !== self?.id ? L(`أُسندت المهمة إلى ${t.assignee.name} وأُبلغ.`, `Assigned to ${t.assignee.name}; they were told.`) : reminder ? L("انحفظ التذكير.", "Reminder saved.") : L("أُنشئت المهمة.", "Task created."));
     } catch (e) { setErr(messageOf(e, L)); } finally { setBusy(false); }
   };
 
   return (
-    <Dialog open title={kind === "FOLLOW_UP" ? L("متابعة عميل جديدة", "New customer follow-up") : L("مهمة جديدة", "New task")} onClose={onClose} testId="create-task" className="ws-dialog" actions={<>
+    <Dialog open title={reminder ? L("تذكير جديد", "New reminder") : kind === "FOLLOW_UP" ? L("متابعة عميل جديدة", "New customer follow-up") : L("مهمة جديدة", "New task")} onClose={onClose} testId="create-task" className="ws-dialog" actions={<>
       <Btn onClick={onClose}>{L("تراجع", "Back")}</Btn>
-      <Btn variant="primary" busy={busy} disabled={!title.trim() || !due || (kind === "FOLLOW_UP" && !link)} onClick={() => void save()} data-testid="create-task-save">{L("إنشاء المهمة", "Create task")}</Btn>
+      <Btn variant="primary" busy={busy} disabled={!title.trim() || !due || (kind === "FOLLOW_UP" && !link)} onClick={() => void save()} data-testid="create-task-save">{reminder ? L("حفظ التذكير", "Save reminder") : L("إنشاء المهمة", "Create task")}</Btn>
     </>}>
       {err ? <Notice tone="danger">{err}</Notice> : null}
-      <Field label={L("عنوان المهمة", "Title")}><input className="hr-input" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} required data-testid="task-title" /></Field>
-      <div className="ws-row2">
+      <Field label={reminder ? L("وش تبي تتذكر؟", "Remind me to…") : L("عنوان المهمة", "Title")}><input className="hr-input" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} required data-testid="task-title" /></Field>
+      {reminder ? null : <div className="ws-row2">
         <Field label={L("المسؤول", "Owner")}><Select className="hr-select" value={owner} onChange={(e) => setAssigneeId(e.target.value)}>
           {people.map((p) => <option key={p.id} value={p.id}>{p.self ? L(`أنا (${p.name})`, `Me (${p.name})`) : p.name}</option>)}
         </Select></Field>
         <Field label={L("الأولوية", "Priority")}><Select className="hr-select" value={priority} onChange={(e) => setPriority(e.target.value)}>
           {PRIORITIES.map((p) => <option key={p} value={p}>{L(PRIORITY_LABEL[p].ar, PRIORITY_LABEL[p].en)}</option>)}
         </Select></Field>
-      </div>
+      </div>}
       <fieldset className="ws-choices">
-        <legend className="hr-label">{L("الموعد النهائي", "Deadline")}</legend>
-        {QUICK.map(([v, a, e]) => <label key={v} className={`ws-choice${quick === v ? " is-on" : ""}`}><input type="radio" name="quick" value={v} checked={quick === v} onChange={() => setQuick(v)} /> {L(a, e)}</label>)}
+        <legend className="hr-label">{reminder ? L("ذكّرني بعد", "Remind me in") : L("الموعد النهائي", "Deadline")}</legend>
+        {(reminder ? REMIND_QUICK : QUICK).map(([v, a, e]) => <label key={v} className={`ws-choice${quick === v ? " is-on" : ""}`}><input type="radio" name="quick" value={v} checked={quick === v} onChange={() => setQuick(v)} /> {L(a, e)}</label>)}
       </fieldset>
       {quick === "exact" ? (
         <Field label={L("التاريخ والوقت (بتوقيت الرياض)", "Date and time (Riyadh)")}><input type="datetime-local" className="hr-input" value={exact} onChange={(e) => setExact(e.target.value)} /></Field>
-      ) : (
+      ) : reminder ? null : (
         <label className="ws-check-line"><input type="checkbox" checked={business} onChange={(e) => setBusiness(e.target.checked)} /> {L("احسب بساعات الدوام", "Count working hours only")}</label>
       )}
       <p className="ws-due-preview" aria-live="polite" data-testid="due-preview">{preview ? <>{L("يُستحق: ", "Due: ")}<b>{dueLabel(preview.dueAt, lang)}</b></> : L("اختر موعدًا صالحًا في المستقبل.", "Choose a valid future time.")}</p>

@@ -23,9 +23,8 @@ import { hasSubPrivilege } from "@/lib/auth-shared";
 import { Ico } from "@/components/shell/icons";
 import { AddMenu, HubTabs, TodaySchedule, hubTabOf } from "./_components/hub";
 import { PlanCard, PlanSection } from "./_components/plan";
-import WsTasksPage from "../workspace/tasks/page";
 import WsCalendarPage from "../workspace/calendar/page";
-import ActivitiesPage from "../sales/activities/page";
+import { TasksCard } from "./_components/tasks-card";
 import { filterCallList, callFilterOf, type CallFilter } from "@/lib/services/sales/my-day/filters";
 import {
   TIER_LABEL, days, greeting, streakText, monthName, n, reasonPill, telHref, todayLine, waNumber, whyLine,
@@ -89,6 +88,12 @@ function MyDay() {
     try { return window.localStorage.getItem(introKey) !== "seen"; } catch { return false; }
   });
   const closeIntro = useCallback(() => { setIntro(false); try { if (introKey) window.localStorage.setItem(introKey, "seen"); } catch { /* private window */ } }, [introKey]);
+
+  // D8.1: back from logging on a customer page («＋ جديد › نشاط» started here): say it was saved, then drop the flag.
+  const logged = sp.get("logged") === "1";
+  const [seenLogged, setSeenLogged] = useState(false);
+  if (logged && !seenLogged) { setSeenLogged(true); setFlash({ text: ar ? "انحفظ النشاط ✓ — وتلقاه في صفحة العميل." : "Activity saved ✓ — it is on the customer's page." }); }
+  useEffect(() => { if (logged) router.replace(tab === "today" ? "/dashboard/my-day" : `/dashboard/my-day?tab=${tab}`, { scroll: false }); }, [logged, router, tab]);
 
   useD21Title(ar ? "يومي" : "My day");
   // The phone bar is the shell's rep bar (AppShell, council fix round 1): the same on every sales page.
@@ -192,8 +197,7 @@ function MyDay() {
       </div>
       <div className="md-hello-side">
         <Streak d={data} lang={lang} third={ro} />
-        {/* The rep's own overdue tasks are «مساحة عملي»'s; this is the way there (never on a manager's read-only view). */}
-        {!ro ? <OverdueTasksLink lang={lang} /> : null}
+        {/* D8.1: no overdue pill — overdue items show once, in «مهام اليوم» / «مهامي», with a red «متأخرة» badge. */}
         {!ro ? <AddMenu ar={ar} links={acts.map((a) => ({ href: a.href, ar: a.ar.replace(/^\+ /, ""), en: a.en.replace(/^\+ /, ""), id: a.id }))} onDone={(m) => { setFlash({ text: m }); reload(); setTick((t) => t + 1); }} /> : null}
       </div>
     </div>
@@ -209,10 +213,10 @@ function MyDay() {
           {flashBar}
           {hello}
           {tabsBar}
-          {tab === "tasks" ? <PlanSection ar={ar} /> : null}
-          <div className="md-embed" data-testid={`md-embed-${tab}`}>{tab === "tasks" ? <WsTasksPage /> : <WsCalendarPage />}</div>
-          {/* «أنشطتي» lives here now: the follow-ups with customers, under the tasks. */}
-          {tab === "tasks" ? <div className="md-embed md-embed-acts" id="activities" data-testid="md-embed-activities"><ActivitiesPage /></div> : null}
+          {/* «مهامي وخطتي» (owner-approved Figma D8 / 07): the plan, the week beside it and the «مهامي» card under the
+              week — the full tasks page and «الأنشطة والمتابعات» are one tap away, no longer embedded here. */}
+          {tab === "tasks" ? <PlanSection ar={ar} openAdd={sp.get("plan") === "new"} onAddOpened={() => router.replace("/dashboard/my-day?tab=tasks", { scroll: false })} side={<TasksCard ar={ar} mode="plan" onChanged={(m) => setFlash({ text: m })} />} /> : null}
+          {tab === "calendar" ? <div className="md-embed" data-testid="md-embed-calendar"><WsCalendarPage /></div> : null}
         </div>
       </div>
     );
@@ -236,12 +240,14 @@ function MyDay() {
           {hello}
           {tabsBar}
           {empty ? <NoBookNotice lang={lang} /> : null}
+          {/* D8.1 (owner): on a phone «كلّمهم اليوم» comes first — the rep's swipe list. */}
+          <CallCard d={data} lang={lang} items={shown} total={listed} all={full} onAll={() => setAll((v) => !v)} ro={ro} empty={empty}
+            filter={filter} onFilter={setFilter} onDone={openLog} onSnooze={snooze} phone />
           <TargetCard d={data} lang={lang} who={who} compact />
           <AttentionStrip d={data} lang={lang} ro={ro} />
           {!ro ? <TodaySchedule ar={ar} reloadKey={tick} /> : null}
           {!ro ? <PlanCard ar={ar} /> : null}
-          <CallCard d={data} lang={lang} items={shown} total={listed} all={full} onAll={() => setAll((v) => !v)} ro={ro} empty={empty}
-            filter={filter} onFilter={setFilter} onDone={openLog} onSnooze={snooze} phone />
+          {!ro ? <TasksCard ar={ar} mode="today" onChanged={(m) => { setFlash({ text: m }); reload(); }} /> : null}
           <DealsCard d={data} lang={lang} />
           <CustomersCard d={data} lang={lang} />
           {/* Under the four main cards (council fix round 1, P0-5): contracts, the book by tier with each one's share, growing. */}
@@ -265,17 +271,15 @@ function MyDay() {
         {empty ? <NoBookNotice lang={lang} /> : null}
         <TargetCard d={data} lang={lang} who={who} />
         <AttentionStrip d={data} lang={lang} ro={ro} />
-        {!ro ? <div className="md-grid2 md-today-row"><TodaySchedule ar={ar} reloadKey={tick} /><PlanCard ar={ar} /></div> : null}
+        {/* Figma 06 (160:107): «جدول اليوم» wide, the plan and «مهام اليوم» stacked beside it; «كلّمهم اليوم» on its own row. */}
+        {!ro ? <div className="md-grid2 md-today-row"><TodaySchedule ar={ar} reloadKey={tick} /><div className="md-today-side"><PlanCard ar={ar} /><TasksCard ar={ar} mode="today" onChanged={(m) => { setFlash({ text: m }); reload(); }} /></div></div> : null}
+        <CallCard d={data} lang={lang} items={shown} total={listed} all={full} onAll={() => setAll((v) => !v)} ro={ro} empty={empty}
+          filter={filter} onFilter={setFilter} onDone={openLog} onSnooze={snooze} />
+        {/* What the owner kept from after the design (6 Nov 2026), under the rows Figma draws. */}
         <div className="md-grid2">
-          <CallCard d={data} lang={lang} items={shown} total={listed} all={full} onAll={() => setAll((v) => !v)} ro={ro} empty={empty}
-            filter={filter} onFilter={setFilter} onDone={openLog} onSnooze={snooze} />
-          <div className="md-stack">
-            <DealsCard d={data} lang={lang} />
-            <GrowingCard d={data} lang={lang} />
-          </div>
+          <DealsCard d={data} lang={lang} />
+          <GrowingCard d={data} lang={lang} />
         </div>
-        {/* The bottom row follows the row above's columns (owner, Figma 3 Nov 2026): tiers + customers under the call list,
-            contracts under deals / growing. */}
         <div className="md-grid2 md-row3">
           <div className="md-pair">
             <TiersCard d={data} lang={lang} />
@@ -286,31 +290,6 @@ function MyDay() {
       </div>
       {quick}
     </div>
-  );
-}
-
-/**
- * «عندك 3 مهام متأخرة ←» — the viewer's own overdue tasks, counted with the tasks list's own filter
- * (GET /api/workspace/tasks?scope=mine&status=open&due=overdue) and opening that same filtered list. Shown only when
- * there is something overdue; a failed count shows nothing (the tasks stay one menu away), never a wrong number.
- */
-function OverdueTasksLink({ lang }: { lang: Lang }) {
-  const [count, setCount] = useState<{ n: number; more: boolean } | null>(null);
-  useEffect(() => {
-    let off = false;
-    fetch("/api/workspace/tasks?scope=mine&status=open&due=overdue&limit=100", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { items: unknown[]; next: string | null } | null) => { if (!off && d) setCount({ n: d.items.length, more: !!d.next }); })
-      .catch(() => undefined);
-    return () => { off = true; };
-  }, []);
-  if (!count || count.n === 0) return null;
-  const n = count.more ? `+${count.n}` : String(count.n);
-  const ar = lang === "ar";
-  return (
-    <Link className="md-pill bad md-overdue" href="/dashboard/my-day?tab=tasks&due=overdue" data-testid="md-overdue-tasks">
-      {ar ? <>{count.n === 1 && !count.more ? "عندك مهمة متأخرة" : count.n === 2 && !count.more ? "عندك مهمتين متأخرتين" : <>عندك <bdi className="num">{n}</bdi> {count.n <= 10 ? "مهام متأخرة" : "مهمة متأخرة"}</>} ←</> : <><bdi className="num">{n}</bdi> overdue {count.n === 1 ? "task" : "tasks"} →</>}
-    </Link>
   );
 }
 

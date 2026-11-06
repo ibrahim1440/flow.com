@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { foldArabic } from "@/lib/services/search/normalize";
 import { pick, api, useModalFocus, Alert, Field, Select, TextInput } from "../_components/ui";
 import { Ico } from "@/components/shell/icons";
 import { usePhone } from "@/components/shell/page-context";
@@ -95,6 +97,28 @@ export function LogActivityPicker({
   const [active, setActive] = useState(0);
   const [reloadToken, setReloadToken] = useState(0);
 
+  // D8.1 («أبو فهد»): the rep's own CUSTOMERS are found here too. Picking one opens the customer page's activity form
+  // (with «ذكّرني بعد»), coming back to «يومي» when started there; leads and deals keep step 2 (with qualification).
+  const router = useRouter();
+  const pathname = usePathname();
+  const [customers, setCustomers] = useState<{ id: string; name: string; nameAr: string | null; city: string | null }[]>([]);
+  useEffect(() => {
+    let off = false;
+    fetch("/api/customers?owner=me", { cache: "no-store" }).then((r) => (r.ok ? r.json() : []))
+      .then((j: { id: string; name: string; nameAr?: string | null; city?: string | null }[]) => { if (!off && Array.isArray(j)) setCustomers(j.map((c) => ({ id: c.id, name: c.name, nameAr: c.nameAr ?? null, city: c.city ?? null }))); })
+      .catch(() => undefined);
+    return () => { off = true; };
+  }, []);
+  const custHits = useMemo(() => {
+    const needle = foldArabic(q.trim());
+    if (!needle || scope !== "all") return [];
+    return customers.filter((c) => foldArabic(`${c.nameAr ?? ""} ${c.name}`).includes(needle)).slice(0, 5);
+  }, [customers, q, scope]);
+  const openCustomer = (id: string) => {
+    const back = pathname?.startsWith("/dashboard/my-day") ? "&back=my-day" : "";
+    onClose();
+    router.push(`/dashboard/customers/${encodeURIComponent(id)}?new=activity${back}`);
+  };
   const search = useRef<HTMLInputElement | null>(null);
   const body = useRef<HTMLDivElement | null>(null);
 
@@ -182,7 +206,7 @@ export function LogActivityPicker({
   }
 
   const scopeLabel = ar ? SCOPES.find((s) => s.key === scope)!.ar : SCOPES.find((s) => s.key === scope)!.en;
-  const noResults = !loading && !failed && q.trim() !== "" && flat.length === 0;
+  const noResults = !loading && !failed && q.trim() !== "" && flat.length === 0 && custHits.length === 0;
   const nothingDue = !loading && !failed && q.trim() === "" && flat.length === 0;
 
   const kbd = (k: string, label: string) => (
@@ -209,7 +233,7 @@ export function LogActivityPicker({
                   className={`d63-row${i === sel ? " on" : ""}`} data-testid={`picker-row-${t.kind}-${t.id}`}
                   onMouseEnter={() => setActive(i)} onClick={() => choose(t)}>
                   <Ico name={t.kind === "deal" ? "deal" : "users"} />
-                  <span className="t"><b><bdi>{targetName(t, ar)}</bdi></b><span className="s"><bdi>{targetSub(t, ar)}</bdi></span></span>
+                  <span className="t"><b><span className={`d63-badge ${t.kind}`}>{t.kind === "deal" ? (ar ? "صفقة" : "Deal") : (ar ? "محتمل" : "Lead")}</span><bdi>{targetName(t, ar)}</bdi></b><span className="s"><bdi>{targetSub(t, ar)}</bdi></span></span>
                   {flag && <span className="flag">{flag}</span>}
                 </div>
               );
@@ -226,8 +250,8 @@ export function LogActivityPicker({
       <div className="q">
         <Ico name="search" />
         <input ref={search} value={q} onChange={(e) => { setQ(e.target.value); setShowAll(false); }}
-          placeholder={ar ? "ابحث باسم العميل المحتمل أو الصفقة" : "Search by lead or deal name"}
-          aria-label={ar ? "ابحث باسم العميل المحتمل أو الصفقة" : "Search by lead or deal name"}
+          placeholder={ar ? "ابحث باسم العميل أو العميل المحتمل أو الصفقة" : "Search a customer, lead or deal"}
+          aria-label={ar ? "ابحث باسم العميل أو العميل المحتمل أو الصفقة" : "Search a customer, lead or deal"}
           data-testid="picker-search"
           role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls={`${uid}-list-0`}
           aria-activedescendant={flat[sel] ? optionId(sel) : undefined}
@@ -282,10 +306,21 @@ export function LogActivityPicker({
         ) : nothingDue ? (
           <div className="d63-empty" data-testid="picker-nothing-due">
             <b>{ar ? "لا متابعات متأخرة أو مستحقة اليوم" : "Nothing overdue or due today"}</b>
-            <p>{ar ? "ابحث باسم العميل المحتمل أو الصفقة لتسجيل نشاط عليه." : "Search by lead or deal name to log an activity on it."}</p>
+            <p>{ar ? "ابحث باسم العميل أو العميل المحتمل أو الصفقة لتسجيل نشاط عليه." : "Search a customer, lead or deal to log an activity on it."}</p>
           </div>
         ) : (
           <>
+            {custHits.length ? (
+              <div role="group" aria-labelledby={`${uid}-g-cust`} data-testid="picker-group-customers">
+                <div className="d63-grp" id={`${uid}-g-cust`}>{ar ? "عملاء" : "Customers"} · <span className="n">{custHits.length}</span></div>
+                {custHits.map((c) => (
+                  <button key={c.id} type="button" className="d63-row d63-cust" onClick={() => openCustomer(c.id)} data-testid={`picker-row-customer-${c.id}`}>
+                    <Ico name="users" />
+                    <span className="t"><b><span className="d63-badge customer">{ar ? "عميل" : "Customer"}</span><bdi>{ar ? c.nameAr ?? c.name : c.name}</bdi></b><span className="s">{[ar ? "عميل" : "Customer", c.city].filter(Boolean).join(" · ")}</span></span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
             {renderList(lists[0], `${uid}-list-0`, 0)}
             {showAllTotal !== null && (
               <button type="button" className="d63-more" onClick={() => setShowAll(true)} data-testid="picker-show-all">

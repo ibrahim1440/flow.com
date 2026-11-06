@@ -382,7 +382,7 @@ export const NAV: NavNode[] = [
         href: "/dashboard/sales/activities",
         anyOf: IN_SALES,
         unlessAny: [sales("lead_assign")],
-        hideForRep: true,
+        // Shown to the rep again (D8, 6 Nov 2026): «يومي» no longer embeds the follow-ups list, so this is its way in.
         shell: { ar: "أنشطتي", en: "My activities", icon: "cal" },
       },
       {

@@ -302,8 +302,6 @@
 }
 /* The embedded «مساحة عملي» screens: their own tab row is «يومي»'s tabs now. */
 .d21 .md-embed .ws-tabs { display: none }
-.d21 .md-embed-acts { margin-top: 8px }
-.d21 .md-embed-acts .pg { padding: 0 }
 .d21 .md-sched-late { display: flex; align-items: center; gap: 6px; margin: 0 16px 8px; padding: 9px 12px; border-radius: 10px; background: var(--status-danger-tint); color: var(--status-danger); font-size: 13.5px; font-weight: 600; text-decoration: none }
 .d21 .md-embed .hr-split, .d21 .md-embed .ws-root { min-height: 0 !important; height: auto !important }
 
@@ -484,3 +482,51 @@
 .d21 .md-tiers details { padding-top: 8px }
 .d21 .md-tiers summary { padding: 4px 0 8px }
 .d21 .md-mini { padding: 8px 0; gap: 12px }
+
+/* ── D8 (owner-approved Figma «D8 · يومي — مطابقة Figma», 6 Nov 2026) ──────────────────────────────────────────
+   The plan's side column holds the week AND the «مهامي» card under it; the arrows move the plan a period at a time. */
+.d21 .pl-side { display: grid; gap: 16px; align-content: start; min-width: 0 }
+@media (max-width: 1099.98px) { .d21 .pl-side { display: contents } }
+.d21 .pl-nav { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--border-subtle); background: var(--surface) }
+.d21 .pl-nav > b { font-size: 13px; font-weight: 600; padding: 0 8px; white-space: nowrap }
+.d21 .pl-nav > button { width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 8px; background: none; color: var(--text-secondary); cursor: pointer }
+.d21 .pl-nav > button:hover { background: var(--surface-hover) }
+.d21 .pl-nav > button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px }
+/* The arrows point the reading way (the chevron icon points right): in Arabic «السابق» is on the right and points
+   right, «التالي» on the left points left; in English the other way round. */
+.d21 .pl-nav > button:last-child svg { transform: scaleX(-1) }
+[dir="ltr"] .d21 .pl-nav > button:last-child svg { transform: none }
+[dir="ltr"] .d21 .pl-nav > button:first-child svg { transform: scaleX(-1) }
+.d21 .pl-now { font-size: 13px; font-weight: 600 }
+@media (max-width: 767.98px) {
+  .d21 .pl-nav { width: 100%; justify-content: space-between } .d21 .pl-nav > button { width: 44px; height: 40px }
+}
+
+/* «مهامي» / «مهام اليوم» — the small tasks card (Figma 07 188:106). */
+.d21 .md-tasks { align-content: start }
+.d21 .md-tasks-g { display: grid; gap: 2px }
+.d21 .md-tasks-g + .md-tasks-g { margin-top: 6px }
+.d21 .md-tasks-gt { font-size: 12.5px; font-weight: 600; color: var(--text-secondary) }
+.d21 .md-tasks-gt.bad { color: var(--status-danger) }
+.d21 .md-tasks ul { list-style: none; margin: 0; padding: 0; display: grid }
+.d21 .md-task { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border-subtle) }
+.d21 .md-tasks-g .md-task:first-child { border-top: 0 }
+.d21 .md-task-box { flex: none; width: 20px; height: 20px; margin-top: 2px; border-radius: 5px; border: 1.5px solid var(--border-strong); background: var(--surface); cursor: pointer }
+.d21 .md-task-box:hover:not(:disabled) { border-color: var(--action-primary); background: var(--action-primary-tint) }
+.d21 .md-task-box:disabled { opacity: .45; cursor: default }
+.d21 .md-task-box:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }
+.d21 .md-task-main { display: grid; gap: 2px; min-width: 0; color: inherit; text-decoration: none }
+.d21 .md-task-main b { font-size: 14px; font-weight: 600; overflow-wrap: anywhere }
+.d21 .md-task-main small { font-size: 12.5px; color: var(--text-muted) }
+.d21 .md-task-main small.bad { color: var(--status-danger) }
+.d21 .md-tasks-more { justify-self: start; font-size: 13px; font-weight: 600 }
+.d21 .md-tasks-err { color: var(--status-danger) }
+@media (max-width: 767.98px) { .d21 .md-task { padding: 10px 0 } .d21 .md-task-box { width: 24px; height: 24px } }
+
+/* «اليوم»: the plan and «مهام اليوم» stacked beside «جدول اليوم»; «كلّمهم اليوم» on its own full row (Figma 06 160:107). */
+.d21 .md-today-side { display: grid; gap: 16px; align-content: start; min-width: 0 }
+/* «خطّط بند»: which week first (this week and the three after it), then its days. */
+.d21 .pl-weeks, .pl-weeks { margin-bottom: 8px }
+/* D8.1: a row's title line carries its badges — «متأخرة» (red) and «تذكير». */
+.d21 .md-task-t { display: flex; align-items: center; gap: 6px; flex-wrap: wrap }
+.d21 .md-task-t .md-pill { height: 20px; font-size: 11.5px; padding: 0 7px }

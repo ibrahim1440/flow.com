@@ -6,14 +6,15 @@
 // ticking a planned visit or call opens «سجّل الزيارة» and the record is what ticks it (services/sales/plans.ts
 // `matchPlan`); a visit nobody planned still counts and shows «خارج الخطة». What the supervisor set or put in the plan
 // carries «من المشرف · <name>» directly under its title, and any update under that; the rep's own carries nothing.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { D21Dialog } from "@/components/ui/Dialog";
 import { Ico, type D21IconName } from "@/components/shell/icons";
 import { OUTCOME_LABELS } from "@/components/d21/labels";
 import { useMyBook, type BookRow } from "../../customers/_components/my-book";
+import { DAY, addDays, addWeek, dayName, dayNum, MONTH_AR, periodStartOfDay, periodTitle, pickDays, stepPeriod, wd, weekLabel, weekOf, type Period } from "./plan-dates";
+export { periodTitle, stepPeriod };
 
-type Period = "DAY" | "WEEK" | "MONTH";
 type Metric = "VISITS" | "CALLS" | "QUOTES" | "COLLECTION" | "NEW_CUSTOMERS" | "SAMPLES" | "CUSTOM";
 type AMetric = "VISITS" | "CALLS" | "QUOTES" | "COLLECTION" | "SAMPLES";
 type Who = { id: string; name: string };
@@ -42,41 +43,7 @@ const KIND: Record<Exclude<Metric, "CUSTOM">, { icon: D21IconName; title: [strin
 export const METRIC_AR: Record<Metric, string> = { VISITS: "زيارات عملاء", CALLS: "مكالمات", QUOTES: "عروض أسعار", COLLECTION: "تحصيل", NEW_CUSTOMERS: "عملاء جدد", SAMPLES: "عيّنات مرسلة", CUSTOM: "رقم خاص" };
 const PERIOD_T: Record<Period, [string, string]> = { DAY: ["خطة اليوم", "Today's plan"], WEEK: ["خطة هذا الأسبوع", "This week's plan"], MONTH: ["خطة هذا الشهر", "This month's plan"] };
 const PERIOD_SEG: Record<Period, [string, string]> = { DAY: ["اليوم", "Today"], WEEK: ["الأسبوع", "Week"], MONTH: ["الشهر", "Month"] };
-const WD_AR = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
-const WD_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTH_AR = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
-
-const DAY = 86_400_000;
-const addDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
-const wd = (iso: string) => new Date(`${iso}T00:00:00Z`).getUTCDay();
-const dayNum = (iso: string) => Number(iso.slice(8, 10));
-const dayName = (iso: string, ar: boolean) => (ar ? WD_AR : WD_EN)[wd(iso)];
-const weekOf = (iso: string) => addDays(iso, -wd(iso));
-/** The week new items go to: the week shown, or (on «اليوم» / «الشهر») this week. */
-const addWeek = (p: { period: Period; weekStart: string; today: string }) => (p.period === "WEEK" ? p.weekStart : weekOf(p.today));
-/**
- * The days «خطّط بند» offers, from the period on screen: «اليوم» → today; «الأسبوع» → the days left in the week;
- * «الشهر» → the days left in the month, week by week. Working days (Sunday–Thursday); a past period offers this week.
- */
-function pickDays(p: { period: Period; start: string; end: string; today: string }): { week: string; days: string[] }[] {
-  let from = p.start > p.today ? p.start : p.today;
-  let to = p.period === "DAY" ? addDays(p.start, 1) : p.end;
-  if (from >= to) { from = p.today; to = addDays(weekOf(p.today), 7); }
-  const out: { week: string; days: string[] }[] = [];
-  for (let d = from; d < to; d = addDays(d, 1)) {
-    if (wd(d) > 4 && d !== p.today) continue;
-    const w = weekOf(d);
-    const g = out.find((x) => x.week === w);
-    if (g) g.days.push(d); else out.push({ week: w, days: [d] });
-  }
-  return out;
-}
-const weekLabel = (w: string, today: string, ar: boolean) => {
-  const cur = weekOf(today);
-  if (w === cur) return ar ? "هالأسبوع" : "This week";
-  if (w === addDays(cur, 7)) return ar ? "الأسبوع الجاي" : "Next week";
-  return ar ? `أسبوع ${dayNum(w)}–${dayNum(addDays(w, 6))}` : `Week of ${dayNum(w)}`;
-};
+const NOW_WORD: Record<Period, [string, string]> = { DAY: ["ارجع لليوم", "Back to today"], WEEK: ["ارجع لهذا الأسبوع", "Back to this week"], MONTH: ["ارجع لهذا الشهر", "Back to this month"] };
 const riyadhDay = (at: string) => new Date(Date.parse(at) + 3 * 3_600_000).toISOString().slice(0, 10);
 const timeText = (at: string, ar: boolean) => new Date(at).toLocaleTimeString(ar ? "ar-SA-u-nu-latn" : "en-GB", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Riyadh" });
 const fmt = (v: number) => v.toLocaleString("en-US", { maximumFractionDigits: 0 });
@@ -360,10 +327,21 @@ function useSuggestions(enabled: boolean, plan: Plan | null) {
  * The plan of a week (or a day, or a month): the summary line, one card per kind of work, the free items, the week day by day.
  * `rep` set: the supervisor reading a rep's plan — read-only, except adding and removing what the supervisor put there.
  */
-export function PlanView({ ar, rep, date, defaultPeriod = "WEEK", onChanged }: { ar: boolean; rep?: Who; date?: string; defaultPeriod?: Period; onChanged?: () => void }) {
+export function PlanView({ ar, rep, date, defaultPeriod = "WEEK", onChanged, side, openAdd, onAddOpened }: {
+  ar: boolean; rep?: Who; date?: string; defaultPeriod?: Period; onChanged?: () => void;
+  /** Under the week, in the side column (D8: the rep's «مهامي» card). */
+  side?: ReactNode;
+  /** Open «خطّط بند» once on arrival («أضف › بند في الخطة»); `onAddOpened` lets the page drop the request from the URL. */
+  openAdd?: boolean;
+  onAddOpened?: () => void;
+}) {
   const [period, setPeriod] = useState<Period>(defaultPeriod);
+  // The period on screen: `date` (a supervisor's link) or today; the arrows move it a week / month / day at a time.
+  const [cursor, setCursor] = useState<string | undefined>(date);
+  const [seenDate, setSeenDate] = useState(date);
+  if (date !== seenDate) { setSeenDate(date); setCursor(date); }
   const [reload, setReload] = useState(0);
-  const { plan, failed } = usePlan(period, reload, rep?.id, date);
+  const { plan, failed } = usePlan(period, reload, rep?.id, cursor);
   const bump = useCallback(() => { setReload((r) => r + 1); onChanged?.(); }, [onChanged]);
   const admin = !!rep;
   const readOnly = !!plan?.readOnly;
@@ -394,19 +372,34 @@ export function PlanView({ ar, rep, date, defaultPeriod = "WEEK", onChanged }: {
   const missing = groups.filter((g) => g.missing > 0 && (ACTIONS as string[]).includes(g.metric));
   const empty = plan && !groups.length && !customs.length && !checks.length;
   const canAdd = !!plan && (admin || !readOnly);
+  // «أضف › بند في الخطة» lands here with `?plan=new`: open «خطّط بند» once the plan is loaded, then hand the URL back.
+  const [addHandled, setAddHandled] = useState(false);
+  if (openAdd && canAdd && !addHandled) { setAddHandled(true); setAdding({ metric: null }); }
+  if (!openAdd && addHandled) setAddHandled(false);
+  useEffect(() => { if (openAdd && addHandled) onAddOpened?.(); }, [openAdd, addHandled, onAddOpened]);
+  const current = plan ? plan.start === periodStartOfDay(period, plan.today) : true;
+  const move = (dir: 1 | -1) => { if (plan) setCursor(stepPeriod(period, plan.start, dir)); };
   return (
     <div className={`pl-wrap${admin ? " adm" : ""}`} id="plan" data-testid="md-plan-section">
       <section className="md-card pl-main" aria-labelledby="pl-h">
         <div className="pl-head">
           <div className="pl-head-t">
-            <h2 id="pl-h"><Ico name="flag" small className="md-h-ico2" />{admin ? (ar ? `خطة ${rep!.name}` : `${rep!.name}'s plan`) : ar ? PERIOD_T[period][0] : PERIOD_T[period][1]}</h2>
+            <h2 id="pl-h" data-testid="plan-title"><Ico name="flag" small className="md-h-ico2" />{admin ? (ar ? `خطة ${rep!.name}` : `${rep!.name}'s plan`) : plan ? periodTitle(period, plan.start, plan.today, ar) : ar ? PERIOD_T[period][0] : PERIOD_T[period][1]}</h2>
             {plan ? <small>{range(plan.start, plan.end, ar)}{admin ? (ar ? " · للاطلاع، وتقدر تضيف له بنود" : " · read-only; you may add items") : ar ? " · خطتك خاصة فيك، والمشرف يشوفها بس" : " · yours; your supervisor only reads it"}</small> : null}
           </div>
           <div className="pl-head-a">
             {canAdd ? <button type="button" className="btn p sm" onClick={() => setAdding({ metric: null })} data-testid="plan-add"><Ico name="plus" small />{ar ? "خطّط بند" : "Plan an item"}</button> : null}
+            {!admin && plan ? (
+              <span className="pl-nav" role="group" aria-label={ar ? "تنقّل بين الفترات" : "Move between periods"}>
+                <button type="button" onClick={() => move(-1)} aria-label={ar ? "الفترة اللي قبل" : "Previous period"} data-testid="plan-prev"><Ico name="chev" small /></button>
+                <b>{range(plan.start, plan.end, ar)}</b>
+                <button type="button" onClick={() => move(1)} aria-label={ar ? "الفترة اللي بعد" : "Next period"} data-testid="plan-next"><Ico name="chev" small /></button>
+              </span>
+            ) : null}
             {!admin ? <span className="pl-seg" role="group" aria-label={ar ? "فترة الخطة" : "Plan period"}>
-              {(["DAY", "WEEK", "MONTH"] as Period[]).map((p) => <button key={p} type="button" aria-pressed={period === p} onClick={() => setPeriod(p)} data-testid={`plan-period-${p}`}>{ar ? PERIOD_SEG[p][0] : PERIOD_SEG[p][1]}</button>)}
+              {(["DAY", "WEEK", "MONTH"] as Period[]).map((p) => <button key={p} type="button" aria-pressed={period === p} onClick={() => { setPeriod(p); setCursor(undefined); }} data-testid={`plan-period-${p}`}>{ar ? PERIOD_SEG[p][0] : PERIOD_SEG[p][1]}</button>)}
             </span> : null}
+            {!admin && !current ? <button type="button" className="lk pl-now" onClick={() => setCursor(undefined)} data-testid="plan-now">{ar ? NOW_WORD[period][0] : NOW_WORD[period][1]}</button> : null}
           </div>
         </div>
         {err ? <p className="pl-err" role="alert">{err}</p> : null}
@@ -438,8 +431,11 @@ export function PlanView({ ar, rep, date, defaultPeriod = "WEEK", onChanged }: {
           </>
         )}
       </section>
-      {plan ? (period === "MONTH" ? <MonthSide plan={plan} ar={ar} a={a} /> : <Week plan={plan} ar={ar} a={a} />)
-        : <section className="md-card pl-agenda" aria-busy><p className="md-empty-line">{ar ? "جارٍ التحميل…" : "Loading…"}</p></section>}
+      <div className="pl-side">
+        {plan ? (period === "MONTH" ? <MonthSide plan={plan} ar={ar} a={a} /> : <Week plan={plan} ar={ar} a={a} />)
+          : <section className="md-card pl-agenda" aria-busy><p className="md-empty-line">{ar ? "جارٍ التحميل…" : "Loading…"}</p></section>}
+        {side}
+      </div>
       {adding && plan ? <AddSheet ar={ar} plan={plan} preset={adding.metric} rep={rep} onClose={() => setAdding(null)} onSaved={() => { setAdding(null); bump(); }} /> : null}
       {logging && plan ? <LogSheet ar={ar} plan={plan} it={logging} group={groups.find((g) => g.metric === logging.metric) ?? null} onClose={() => setLogging(null)} onSaved={() => { setLogging(null); bump(); }} /> : null}
       {detail && plan ? <DetailSheet ar={ar} x={detail} a={a} onClose={() => setDetail(null)} onMove={async (d) => { if (detail.it) { await act(send(`/api/sales/plan/items/${detail.it.id}`, "PATCH", { plannedDay: d })); } setDetail(null); }} plan={plan} /> : null}
@@ -477,7 +473,12 @@ function AddSheet({ ar, plan, preset, rep, onClose, onSaved }: { ar: boolean; pl
   // With no search: the suggested customers first, then the rest of the book — so a pick never needs typing.
   const list = q.trim() ? found.map((c) => ({ ...c, why: "", tone: "" }))
     : [...suggested, ...pool.filter((c) => !suggested.some((x) => x.id === c.id)).map((c) => ({ ...c, why: "", tone: "" }))].slice(0, 6);
-  const dayGroups = pickDays(plan);
+  // Which week the item goes to (D8 gate, «أبو فهد»: «أضف › بند في الخطة» opens on this week — the rep must reach the
+  // next weeks without closing the sheet): this week and the three after it; on «الشهر» the month's days already do.
+  const baseWeek = addWeek(plan) < weekOf(plan.today) ? weekOf(plan.today) : addWeek(plan);
+  const [wk, setWk] = useState(0);
+  const weekStart = addDays(baseWeek, 7 * wk);
+  const dayGroups = plan.period === "MONTH" ? pickDays(plan) : pickDays({ period: "WEEK", start: weekStart, end: addDays(weekStart, 7), today: plan.today });
   const tiles: { m: AMetric | "CHECK"; icon: D21IconName; t: [string, string] }[] = [
     { m: "VISITS", icon: "pin", t: ["زيارة", "Visit"] }, { m: "CALLS", icon: "phone", t: ["مكالمة", "Call"] }, { m: "QUOTES", icon: "quote", t: ["عرض سعر", "Quotation"] },
     { m: "COLLECTION", icon: "wallet", t: ["تحصيل", "Collection"] }, { m: "SAMPLES", icon: "cup", t: ["عيّنة", "Sample"] }, { m: "CHECK", icon: "note", t: ["بند آخر", "Other"] },
@@ -485,7 +486,8 @@ function AddSheet({ ar, plan, preset, rep, onClose, onSaved }: { ar: boolean; pl
   const ok = what === "CHECK" ? text.trim().length >= 2 : !!who;
   const save = async () => {
     setBusy(true); setErr("");
-    const body = what === "CHECK" ? { kind: "CHECK", label: text, plannedDay: day, date: addWeek(plan) } : { kind: "ACTION", metric: what, customerId: who!.id, plannedDay: day, date: addWeek(plan) };
+    const date = plan.period === "MONTH" ? baseWeek : weekStart;
+    const body = what === "CHECK" ? { kind: "CHECK", label: text, plannedDay: day, date } : { kind: "ACTION", metric: what, customerId: who!.id, plannedDay: day, date };
     const r = await send(rep ? "/api/sales/team-goals/items" : "/api/sales/plan/items", "POST", rep ? { ...body, employeeId: rep.id } : body);
     setBusy(false);
     if (!r.ok) { setErr(r.error ?? ""); return; }
@@ -522,6 +524,14 @@ function AddSheet({ ar, plan, preset, rep, onClose, onSaved }: { ar: boolean; pl
         )}
         <b className="pl-q">{ar ? "3 · أي يوم؟ (اختياري)" : "3 · Which day? (optional)"}</b>
         <div className="pl-daypick" data-testid="plan-days">
+          {plan.period !== "MONTH" ? (
+            <div className="pl-days pl-weeks" role="group" aria-label={ar ? "أي أسبوع؟" : "Which week?"}>
+              {[0, 1, 2, 3].map((k) => {
+                const w = addDays(baseWeek, 7 * k);
+                return <button key={k} type="button" aria-pressed={wk === k} onClick={() => { setWk(k); setDay(null); }} data-testid={`plan-week-${k}`}>{weekLabel(w, plan.today, ar)}</button>;
+              })}
+            </div>
+          ) : null}
           {dayGroups.map((g) => (
             <div key={g.week} className="pl-dayweek">
               {dayGroups.length > 1 ? <small>{weekLabel(g.week, plan.today, ar)}</small> : null}
@@ -530,7 +540,7 @@ function AddSheet({ ar, plan, preset, rep, onClose, onSaved }: { ar: boolean; pl
               </div>
             </div>
           ))}
-          <div className="pl-days"><button type="button" aria-pressed={day === null} onClick={() => setDay(null)}>{ar ? "بدون يوم (خلال هالأسبوع)" : "No day (this week)"}</button></div>
+          <div className="pl-days"><button type="button" aria-pressed={day === null} onClick={() => setDay(null)}>{ar ? (plan.period === "MONTH" || wk === 0 ? "بدون يوم (خلال هالأسبوع)" : `بدون يوم (خلال ${weekLabel(weekStart, plan.today, true)})`) : "No day (that week)"}</button></div>
         </div>
         {what !== "CHECK" ? <p className="pl-note"><Ico name="tick" small />{ar ? `بينحسب في «${KIND[what].title[0]}» أول ما تسجّل ${KIND[what].one[0] === "عرض سعر" ? "عرض السعر" : KIND[what].one[0] === "تحصيل" ? "التحصيل" : `ال${KIND[what].one[0]}`}.` : `Counts toward «${KIND[what].title[1]}» once recorded.`}</p> : null}
         {err ? <p className="pl-err" role="alert">{err}</p> : null}
@@ -725,6 +735,6 @@ export function PlanCard({ ar }: { ar: boolean }) {
 }
 
 /** The plan section at the top of «مهامي وخطتي». */
-export function PlanSection({ ar }: { ar: boolean }) {
-  return <PlanView ar={ar} />;
+export function PlanSection({ ar, side, openAdd, onAddOpened }: { ar: boolean; side?: ReactNode; openAdd?: boolean; onAddOpened?: () => void }) {
+  return <PlanView ar={ar} side={side} openAdd={openAdd} onAddOpened={onAddOpened} />;
 }

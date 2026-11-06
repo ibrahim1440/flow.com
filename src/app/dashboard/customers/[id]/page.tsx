@@ -102,6 +102,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   const [notice, setNotice] = useState<{ text: string; ok: boolean; href?: string; link?: string } | null>(null);
   // `?tab=files` (the contract notice links there, batch 24 WP-C) opens on the files tab.
   const search = useSearchParams();
+  const backToMyDay = search?.get("back") === "my-day";
   const [tab, setTab] = useState<Tab>(search?.get("tab") === "files" ? "files" : "overview");
   type QuickPick = { purpose: "quote" | "sample"; deals: { id: string; title: string; stageAr: string; stageEn: string; amount: string | null }[] };
   const [dialog, setDialog] = useState<null | { activity: ActivityKind } | { pick: QuickPick } | { sample: { dealId: string | null; sampled: string[]; manager: boolean } } | "details" | "ownerContact" | "file" | "hold" | "holdDirect" | "lift" | { contact: Contact | null }>(null);
@@ -971,7 +972,13 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   const dialogs = (
     <>
       {dialog && typeof dialog === "object" && "activity" in dialog && <ActivityDialog ar={ar} customerId={id} customerName={name} deals={openDeals} defaultDealId={null} initialKind={dialog.activity}
-        onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("سُجّل النشاط.", "Activity logged."), ok: true }); reload(); }} />}
+        onClose={() => { setDialog(null); if (backToMyDay) router.push("/dashboard/my-day"); }}
+        onDone={() => {
+          setDialog(null);
+          // D8.1: started on «يومي» («＋ جديد › نشاط»): back there, which says it was saved; the timeline here has it.
+          if (backToMyDay) { router.push("/dashboard/my-day?logged=1"); return; }
+          setNotice({ text: L("سُجّل النشاط.", "Activity logged."), ok: true }); reload();
+        }} />}
       {dialog && typeof dialog === "object" && "pick" in dialog && <DealPickDialog ar={ar} purpose={dialog.pick.purpose} deals={dialog.pick.deals}
         onClose={() => setDialog(null)} onPick={(dealId) => { const purpose = dialog.pick.purpose; setDialog(null); void goWithDeal(purpose, dealId); }} />}
       {dialog && typeof dialog === "object" && "sample" in dialog && <SampleDialog ar={ar} opportunityId={dialog.sample.dealId} customerId={id} sampledProductIds={dialog.sample.sampled} manager={dialog.sample.manager}

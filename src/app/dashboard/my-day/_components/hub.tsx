@@ -41,6 +41,7 @@ type QuickLink = { href: string; ar: string; en: string; id: string };
  * customer chosen first), an appointment, a task — then the sales documents the rep may start.
  */
 export function AddMenu({ ar, links, onDone }: { ar: boolean; links: QuickLink[]; onDone: (msg: string) => void }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [what, setWhat] = useState<null | "activity" | "appointment" | "task">(null);
   const box = useRef<HTMLDivElement | null>(null);
@@ -51,11 +52,16 @@ export function AddMenu({ ar, links, onDone }: { ar: boolean; links: QuickLink[]
     window.addEventListener("mousedown", off); window.addEventListener("keydown", esc);
     return () => { window.removeEventListener("mousedown", off); window.removeEventListener("keydown", esc); };
   }, [open]);
-  const pick = (w: "activity" | "appointment" | "task") => { setOpen(false); setWhat(w); };
-  const opts: { w: "activity" | "appointment" | "task"; icon: D21IconName; ar: string; en: string; subAr: string; subEn: string }[] = [
+  const pick = (w: "activity" | "plan" | "appointment" | "task") => {
+    setOpen(false);
+    if (w === "plan") { router.push("/dashboard/my-day?tab=tasks&plan=new"); return; }
+    setWhat(w);
+  };
+  const opts: { w: "activity" | "plan" | "appointment" | "task"; icon: D21IconName; ar: string; en: string; subAr: string; subEn: string }[] = [
     { w: "activity", icon: "phone", ar: "سجّل مكالمة أو زيارة", en: "Log a call or visit", subAr: "كلّمت عميل أو زرته؟ سجّل وش صار", subEn: "Record what happened" },
+    { w: "plan", icon: "flag", ar: "بند في الخطة", en: "Plan an item", subAr: "زيارة أو مكالمة أو عيّنة — لأي يوم قدام", subEn: "A visit, call or sample — any day ahead" },
     { w: "appointment", icon: "cal", ar: "موعد مع عميل", en: "Appointment", subAr: "حدّد اليوم والساعة", subEn: "Pick the day and time" },
-    { w: "task", icon: "check", ar: "مهمة", en: "Task", subAr: "شي لازم تسويه ومتى", subEn: "Something to do, and when" },
+    { w: "task", icon: "bell", ar: "تذكير", en: "Reminder", subAr: "تابع عميل أو شي لازم تسويه — ومتى", subEn: "Follow up a customer or do something — and when" },
   ];
   return (
     <div className="md-add" ref={box}>
@@ -76,7 +82,7 @@ export function AddMenu({ ar, links, onDone }: { ar: boolean; links: QuickLink[]
       ) : null}
       {what === "activity" ? <LogActivityPicker lang={ar ? "ar" : "en"} onClose={() => setWhat(null)} onDone={() => { setWhat(null); onDone(ar ? "تم التسجيل." : "Logged."); }} /> : null}
       {what === "appointment" ? <AppointmentDialog onClose={() => setWhat(null)} onSaved={(m) => { setWhat(null); onDone(m); }} /> : null}
-      {what === "task" ? <CreateTaskDialog onClose={() => setWhat(null)} onCreated={(_t, m) => { setWhat(null); onDone(m); }} /> : null}
+      {what === "task" ? <CreateTaskDialog reminder onClose={() => setWhat(null)} onCreated={(_t, m) => { setWhat(null); onDone(m); }} /> : null}
     </div>
   );
 }
@@ -91,7 +97,6 @@ type PlanToday = { today: string; items: { id: string; kind: string; metric: str
 const PLAN_VERB: Record<string, string> = { VISITS: "زيارة", CALLS: "مكالمة", QUOTES: "عرض سعر", COLLECTION: "تحصيل", SAMPLES: "عيّنة" };
 
 const timeText = (d: Date, ar: boolean) => d.toLocaleTimeString(ar ? "ar-SA-u-nu-latn" : "en-GB", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Riyadh" });
-const riyadhDay = (d: Date) => new Date(d.getTime() + 3 * 3_600_000).toISOString().slice(0, 10);
 
 /** «جدول اليوم»: today's appointments, tasks due today or late, and follow-ups — one list by the hour. */
 export function TodaySchedule({ ar, reloadKey }: { ar: boolean; reloadKey: number }) {
@@ -107,27 +112,14 @@ export function TodaySchedule({ ar, reloadKey }: { ar: boolean; reloadKey: numbe
   useEffect(() => { load(); }, [load, reloadKey]);
   if (failed) return null;
   const now = new Date();
-  const today = riyadhDay(now);
   const items: Item[] = [];
-  let lateFollow = 0;
   if (data) {
     for (const a of data.schedule) {
       const at = new Date(a.startAt);
       items.push({ key: `a:${a.id}`, at, time: timeText(at, ar), title: a.title, sub: a.customer?.name ?? null, kind: "appt", late: false, href: `/dashboard/my-day?tab=calendar&appointment=${a.id}`, done: a.status === "DONE" });
     }
-    for (const t of data.tasks) {
-      const at = new Date(t.dueAt);
-      if (!t.overdue && riyadhDay(at) !== today) continue;
-      items.push({ key: `t:${t.id}`, at, time: t.overdue ? (ar ? "متأخرة" : "Late") : timeText(at, ar), title: t.title, sub: t.customer?.name ?? null, kind: "task", late: !!t.overdue, href: `/dashboard/my-day?tab=tasks&task=${t.id}`, done: false });
-    }
-    for (const c of data.crm) {
-      const at = new Date(c.dueAt);
-      const late = at < now && riyadhDay(at) !== today;
-      // Late follow-ups are ONE line (below), not a wall of rows: the schedule is today's.
-      if (late) { lateFollow++; continue; }
-      if (riyadhDay(at) !== today) continue;
-      items.push({ key: `c:${c.id}`, at, time: timeText(at, ar), title: c.subject, sub: c.record, kind: "follow", late: false, href: c.openUrl, done: false });
-    }
+    // D8.1: tasks (late or due today) are «مهام اليوم»'s — one place per item; the schedule is appointments and the plan.
+    // D8.1: follow-ups («تذكير»), late or today, are «مهام اليوم»'s — one place, one tap that records what happened.
   }
   for (const p of plan?.items ?? []) {
     if ((p.kind !== "ACTION" && p.kind !== "CHECK") || p.plannedDay !== plan?.today) continue;
@@ -144,13 +136,8 @@ export function TodaySchedule({ ar, reloadKey }: { ar: boolean; reloadKey: numbe
         <h2 id="md-schedule-h"><Ico name="cal" small className="md-h-ico2" />{ar ? "جدول اليوم" : "Today's schedule"}</h2>
         <Link className="lk" href="/dashboard/my-day?tab=calendar">{ar ? "التقويم" : "Calendar"}</Link>
       </div>
-      {data && lateFollow > 0 ? (
-        <Link className="md-sched-late" href="/dashboard/my-day?tab=tasks#activities" data-testid="md-schedule-late">
-          <b className="num">{lateFollow}</b> {ar ? (lateFollow === 1 ? "متابعة متأخرة مع العملاء" : "متابعات متأخرة مع العملاء") : `late follow-up${lateFollow === 1 ? "" : "s"}`} <span aria-hidden>‹</span>
-        </Link>
-      ) : null}
       {!data ? <p className="md-empty-line" style={{ padding: "8px 0 4px" }}>{ar ? "جارٍ التحميل…" : "Loading…"}</p>
-        : items.length === 0 && lateFollow === 0 ? (
+        : items.length === 0 ? (
           <div className="md-empty" data-testid="md-schedule-empty">
             <span className="md-empty-ico" aria-hidden><Ico name="cal" small /></span>
             <span>{ar ? "ما عندك مواعيد ولا مهام اليوم." : "No appointments or tasks today."}</span>

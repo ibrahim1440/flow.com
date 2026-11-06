@@ -68,7 +68,7 @@ export function createActions(viewer: Viewer, moduleId: string | undefined): Cre
 
 // ── Batch 24 WP-A: «+ جديد» everywhere for a sales user ──────────────────────────────────────
 // The rep's menu (BATCH24-DESIGN §WP-A 2, mockup «زر + جديد»): نشاط N · عرض سعر Q · طلب عيّنة S · طلب O ·
-// عميل جديد C · عميل محتمل L — on EVERY page, not only inside Sales. Each item is offered only when the
+// عميل جديد C · عميل محتمل L · بند في الخطة P (D8) — on EVERY page, not only inside Sales. Each item is offered only when the
 // API it ends at would accept it (the same checks as the customer page's buttons and the pages' own
 // create buttons): nothing new is granted.
 const onCustomer = (v: Viewer) => hasModuleAccess(p(v), "customers");
@@ -84,11 +84,15 @@ export const SALES_MENU: CreateAction[] = [
     permitted: (v) => canEdit(p(v), "customers") },
   { id: "sales.lead.new", key: "L", labelAr: "عميل محتمل", labelEn: "Lead", href: "/dashboard/sales/leads?new=1",
     permitted: (v) => hasSubPrivilege(p(v), "sales", "lead_write") },
+  // D8 (owner, 6 Nov 2026): «بند في الخطة» — «خطّط بند» on «مهامي وخطتي», for any day ahead. The plan is the sales
+  // module's (POST /api/sales/plan/items: requireModule("sales")).
+  { id: "sales.plan.item", key: "P", labelAr: "بند في الخطة", labelEn: "Plan an item", href: "/dashboard/my-day?tab=tasks&plan=new",
+    permitted: (v) => hasModuleAccess(p(v), "sales") },
 ];
 
 /** «sales permissions»: the sales module with at least one way to create sales work. */
 export function hasSalesMenu(viewer: Viewer): boolean {
-  return hasModuleAccess(p(viewer), "sales") && SALES_MENU.some((a) => a.id !== ORDER.id && a.permitted(viewer));
+  return hasModuleAccess(p(viewer), "sales") && SALES_MENU.some((a) => a.id !== ORDER.id && a.id !== "sales.plan.item" && a.permitted(viewer));
 }
 
 /**
