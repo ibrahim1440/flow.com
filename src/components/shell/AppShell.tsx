@@ -613,6 +613,12 @@ export function AppShell({
           {!phoneHeader?.action || repBar ? (
             <button type="button" className="d21-ib" onClick={openPalette} aria-haspopup="dialog" aria-label={ar ? "بحث أو انتقال" : "Search or jump"} data-testid="ph-search"><Ico name="search" /></button>
           ) : null}
+          {/* The rep's bar has no «المزيد» sheet (where «تسجيل الخروج» lives), so the phone header carries it (owner,
+              6 Nov 2026). One confirm, so a stray tap never signs the rep out mid-visit. */}
+          {repTabs ? (
+            <button type="button" className="d21-ib" aria-label={ar ? "تسجيل الخروج" : "Sign out"} title={ar ? "تسجيل الخروج" : "Sign out"} data-testid="ph-logout"
+              onClick={() => { if (window.confirm(ar ? "تبي تسجّل خروج؟" : "Sign out?")) onLogout(); }}><LogOut aria-hidden size={20} /></button>
+          ) : null}
         </header>
 
         <div className="d21-main">
