@@ -98,6 +98,18 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     if (r) { setForm(null); doc.reload(); }
     return !!r;
   };
+  // «حوّلها إلى فاتورة ضريبية مبسطة» (UI · invoice-simplified): a buyer who is an individual or not VAT-registered gets a
+  // SIMPLIFIED tax invoice (B2C — VAT, the seller's VAT number and the QR, no buyer VAT number). Offered only where the
+  // block is exactly that: a STANDARD invoice draft with no buyer VAT number, that this person may correct. Same PATCH as
+  // «حفظ», with the type changed; the server re-checks every rule.
+  const blockedCodes = new Set([...(d.problems ?? []).map((p) => p.code), ...problems.map((p) => (p as { code?: string }).code ?? "")]);
+  // Only for the one who issues (invoices_issue), never the rep: the type is a compliance decision.
+  const offerSimplified = d.status === "DRAFT" && !isNote && canEditDraft && issuerHere && family === "STANDARD" && !(buyer?.vatNumber ?? "").trim()
+    && (blockedCodes.has("BUYER_VAT") || problems.some((p) => /الرقم الضريبي للمشتري/.test(p.ar)) || issueProblemsList.some((p) => p.code === "BUYER_VAT"));
+  const toSimplified = async () => {
+    const r = await w.run("simplified", `/api/sales/invoices/${id}`, "PATCH", { family: "SIMPLIFIED", buyer, supplyDate, paymentTermsDays: terms || undefined, notes, lines }, L("صارت فاتورة ضريبية مبسطة؛ راجعها وأصدرها.", "Now a simplified tax invoice; review and issue it."));
+    if (r) { setForm(null); setProblems([]); doc.reload(); }
+  };
   const sendRequest = async () => {
     if (canEditDraft && !(await save())) return;
     const r = await w.run<{ warnings: { ar: string; en: string }[] }>("request", `/api/sales/invoices/${id}/request`, "POST", {}, L("أُرسل الطلب للمحاسب.", "Sent to the accountant."));
@@ -167,6 +179,13 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       ) : null}
       {problems.length ? <ul className="inv-check" data-testid="issue-problems">{problems.map((p, i) => <li key={i}>{L(p.ar, p.en)}</li>)}</ul>
         : issueProblemsList.length ? <div data-testid="draft-problems"><p className="acct-hint">{L("ما يمنع الإصدار الآن:", "What stops the issue now:")}</p><ul className="inv-check">{issueProblemsList.map((p, i) => <li key={i}>{L(p.ar, p.en)}</li>)}</ul></div> : null}
+      {offerSimplified ? (
+        <div className="inv-fix" data-testid="offer-simplified">
+          <span><b>{L("العميل فرد أو غير مسجّل في الضريبة؟ حوّلها إلى فاتورة ضريبية مبسطة", "Is the customer an individual or not VAT-registered? Make it a simplified tax invoice")}</b>
+            <span className="inv-sub">{L("الفاتورة المبسطة فاتورة ضريبية أيضًا: فيها ضريبة 15% ورقمك الضريبي ورمز QR، ولا تحتاج رقمًا ضريبيًا للمشتري.", "A simplified invoice is still a tax invoice: 15% VAT, your VAT number and the QR — no buyer VAT number needed.")}</span></span>
+          <button type="button" className="hr-btn" disabled={!!w.busy} aria-busy={w.busy === "simplified" || undefined} onClick={() => void toSimplified()} data-testid="to-simplified">{L("حوّلها إلى فاتورة مبسطة", "Make it a simplified invoice")}</button>
+        </div>
+      ) : null}
 
       <div className="acct-cards">
         <div className="acct-card" data-testid="state-document">

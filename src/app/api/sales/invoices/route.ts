@@ -119,7 +119,7 @@ export async function POST(request: Request) {
     if (!(await inScope(user, customerId))) return NextResponse.json({ error: "غير موجود.", errorEn: "Not found.", code: "NOT_FOUND" }, { status: 404 });
     const requestKey = typeof body.requestKey === "string" && /^[A-Za-z0-9:_-]{8,80}$/.test(body.requestKey) ? `client:${user.id}:${body.requestKey}` : null;
     const input = {
-      customerId, family: body.family === "SIMPLIFIED" ? "SIMPLIFIED" as const : "STANDARD" as const, lines: body.lines, buyer: body.buyer, supplyDate: body.supplyDate,
+      customerId, family: body.family === "SIMPLIFIED" || body.family === "STANDARD" ? (body.family as "SIMPLIFIED" | "STANDARD") : undefined /* absent → by the buyer's VAT number (A2) */, lines: body.lines, buyer: body.buyer, supplyDate: body.supplyDate,
       supplyEndDate: body.supplyEndDate, paymentTermsDays: body.paymentTermsDays, notes: body.notes, requestKey,
       // A4: an invoice for an order of an external source (e.g. the Salla web shop, later): idempotent per order.
       channel: body.channel as string | null | undefined, externalOrderRef: body.externalOrderRef as string | null | undefined,

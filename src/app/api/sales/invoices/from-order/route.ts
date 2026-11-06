@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     if (!order || !(await inScope(user, order.customerId))) throw refuseInv("ORDER_NOT_FOUND");
     const deliveryIds = Array.isArray(body.deliveryIds) ? body.deliveryIds.filter((x): x is string => typeof x === "string").slice(0, 50) : undefined;
     const r = await draftFromOrder(orderId, {
-      basis: body.basis === "DELIVERED" ? "DELIVERED" : "REMAINING", deliveryIds, family: body.family === "SIMPLIFIED" ? "SIMPLIFIED" : "STANDARD",
+      basis: body.basis === "DELIVERED" ? "DELIVERED" : "REMAINING", deliveryIds, family: body.family === "SIMPLIFIED" || body.family === "STANDARD" ? (body.family as "SIMPLIFIED" | "STANDARD") : undefined /* absent → by the buyer's VAT number (A2) */,
       requestKey: typeof body.requestKey === "string" && /^[A-Za-z0-9:_-]{8,80}$/.test(body.requestKey) ? `client:${user.id}:${body.requestKey}` : null,
     }, auditFromRequest(request, user.id, "invoice from order"));
     return NextResponse.json(r, { status: r.replayed ? 200 : 201 });

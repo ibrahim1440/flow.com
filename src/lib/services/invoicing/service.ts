@@ -10,7 +10,7 @@ import { sodDecision, sodPolicy } from "@/lib/accounting/sod";
 import { emitAutomationEvent } from "@/lib/automation/emit";
 import { MoneyError, ZERO } from "@/lib/accounting/money";
 import {
-  Decimal, addDays, issueProblems, parseBuyer, parseLines, priceInvoice, riyadhStamp, seriesFor,
+  Decimal, addDays, defaultInvoiceFamily, issueProblems, parseBuyer, parseLines, priceInvoice, riyadhStamp, seriesFor,
   type BuyerParticulars, type CleanLine, type InvoiceFamily, type InvoiceKind, type NoteReason, NOTE_REASONS,
 } from "./pricing";
 import { readInvoiceSettings, sellerSnapshot } from "./settings";
@@ -316,11 +316,12 @@ async function insertDraft(tx: Tx, input: DraftInput, lines: CleanLine[], ext: {
   // the depreciation land on the asset's site; otherwise the given location, else the default.
   const assetBranch = await assetSaleBranch(tx, lines);
   const branchId = assetBranch ?? (given !== undefined ? given : await defaultInvoiceBranch(tx, { orderId: input.orderId ?? null, actorId: ctx.actorId }));
+  const buyer = parseBuyer(input.buyer, buyerFromCustomer(customer));
   const created = await tx.salesInvoice.create({
     data: {
-      kind: "INVOICE", family: input.family === "SIMPLIFIED" ? "SIMPLIFIED" : "STANDARD", status: "DRAFT",
+      kind: "INVOICE", family: defaultInvoiceFamily(input.family, buyer.vatNumber), status: "DRAFT",
       customerId: customer.id, orderId: input.orderId ?? null, quoteId: input.quoteId ?? null, branchId,
-      buyer: parseBuyer(input.buyer, buyerFromCustomer(customer)) as unknown as Prisma.InputJsonValue,
+      buyer: buyer as unknown as Prisma.InputJsonValue,
       supplyDate: dateOf(asDay(input.supplyDate)), supplyEndDate: dateOf(asDay(input.supplyEndDate)),
       paymentTermsDays: termsOf(input.paymentTermsDays, customer.paymentTermsDays ?? settings.defaultTermsDays),
       notes: notesOf(input.notes), source: input.source ?? (input.orderId ? "ORDER" : "MANUAL"), requestKey: input.requestKey ?? null,
@@ -401,7 +402,7 @@ export async function draftOnDelivery(deliveryId: string, actorId: string): Prom
     const { priced, rows } = lineRows(line);
     const created = await tx.salesInvoice.create({
       data: {
-        kind: "INVOICE", family: "STANDARD", status: "DRAFT", customerId: customer.id, orderId, buyer: buyerFromCustomer(customer) as unknown as Prisma.InputJsonValue,
+        kind: "INVOICE", family: defaultInvoiceFamily(undefined, buyerFromCustomer(customer).vatNumber), status: "DRAFT", customerId: customer.id, orderId, buyer: buyerFromCustomer(customer) as unknown as Prisma.InputJsonValue,
         supplyDate: dateOf(d.date), paymentTermsDays: customer.paymentTermsDays ?? settings.defaultTermsDays, source: "DELIVERY", requestKey: `delivery:${deliveryId}`,
         // Q-F4: the selling site (the order's location), never the site the delivery shipped from.
         branchId: await defaultInvoiceBranch(tx, { orderId, actorId }),

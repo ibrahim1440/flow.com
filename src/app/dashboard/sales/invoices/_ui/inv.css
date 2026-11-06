@@ -52,3 +52,8 @@
 .inv-req-top b { font-weight: 600; min-width: 0; overflow-wrap: anywhere }
 .inv-req-amt { flex: none; font-weight: 600 }
 .inv-req-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px }
+
+/* «حوّلها إلى فاتورة مبسطة»: the fix for a BUYER_VAT block, right under what blocks the issue. */
+.inv .inv-fix { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 12px 14px; border-radius: var(--hr-r-md); background: var(--hr-subtle); border: 1px solid var(--hr-border-strong); font-size: 14px; }
+.inv .inv-fix > span { flex: 1 1 320px; line-height: 1.7; }
+@media (max-width: 767px) { .inv .inv-fix .hr-btn { width: 100%; min-height: 44px; } }

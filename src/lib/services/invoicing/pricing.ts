@@ -161,6 +161,18 @@ export function isKsaVatNumber(v: unknown): v is string {
   return typeof v === "string" && /^3\d{13}3$/.test(v);
 }
 
+/**
+ * The type a NEW invoice draft takes when the caller names none (A2): a «فاتورة ضريبية (منشأة)» (STANDARD) only for a
+ * buyer with a valid KSA VAT number; otherwise a «فاتورة ضريبية مبسطة» (SIMPLIFIED, B2C — an individual or a buyer not
+ * VAT-registered). An explicit valid family always wins. Applied once, at creation: a draft's family changes after
+ * that only by an explicit edit, so a draft already requested is never re-defaulted. BUYER_VAT and the issue trigger
+ * are unchanged.
+ */
+export function defaultInvoiceFamily(explicit: unknown, buyerVatNumber: string | null | undefined): InvoiceFamily {
+  if (explicit === "STANDARD" || explicit === "SIMPLIFIED") return explicit;
+  return isKsaVatNumber(normDigits(buyerVatNumber ?? "")) ? "STANDARD" : "SIMPLIFIED";
+}
+
 const arabicDigits = (s: string) => s.replace(/[٠-٩]/g, (c) => String(c.charCodeAt(0) - 0x0660)).replace(/[۰-۹]/g, (c) => String(c.charCodeAt(0) - 0x06f0));
 export const normDigits = (v: unknown): string => (typeof v === "string" ? arabicDigits(v).replace(/\s+/g, "") : "");
 
