@@ -1,12 +1,13 @@
 // «يومي» — the page's reads. SIX SQL round-trips (the contract notice period, then WP-C's contracts query), whatever the size
 // of the book and whatever the commission plan (design §WP-B 9: ≤ 6 with 500 customers per rep; measured by
 // tests/sales/db/b24-myday-roundtrips.test.ts):
-//   1. meta         settings, the rep, the targets, the month's accrued commission, the plan in force and — only when the
-//                   commission card is visible — the month's STORED qualified base (CommissionPeriodResult, one PK row);
+//   1. meta         settings, the rep, the targets, the month's accrued commission, the plan in force and (D11) the
+//                   documents of the rep's deals the sales bar needs: the month's sales, the open invoices, the drafts;
 //   2. book         the rep's customers with their business orders of the last 400 days (kg per order), the last
 //                   contact and its type, the first order date and the viewer's snooze;
 //   3. deals        the rep's open deals (stage purpose, follow-up) and the samples sent without feedback;
-//   4. collections  recorded collections of the last 12 months on deals the rep owns or shares;
+//   4. collections  recorded collections of the last 12 months on deals the rep owns or shares (this month's with where
+//                   their receipt's money went, for the breakdown of collected);
 //   5. notice days  SystemConfig.contractRenewalNoticeDays (NULL = 45), then
 //   6. contracts    expiringContracts (WP-C) within that many days.
 //
@@ -14,13 +15,14 @@
 // Customer.accountOwnerId = ownerId — nothing else (design «Data scope rule»). A rep with no customers gets an empty book.
 import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 import { Decimal, ZERO, roundMoney } from "@/lib/services/commissions/engine";
-import { readComponents } from "@/lib/services/commissions/builder";
+import { readComponents, type Components } from "@/lib/services/commissions/builder";
 import { attributeCollections, targetProgress, type DealOwners } from "@/lib/services/sales/performance";
 import { factorsFrom } from "@/lib/services/customers/reorder";
 import { expiringContracts } from "@/lib/services/customers/contracts";
 import { kgBetween, riyadhMonthStartAt, settingsFrom, classifyTiers, customerFacts, buildCallList, weeklyStreak,
-  estimateAtTarget, daysLeftInMonth, DAY, TIER_WINDOW_DAYS,
-  type BookCustomer, type DealRow, type SampleRow, type PlanForEstimate, type Tier, type MyDaySettings } from "./rules";
+  daysLeftInMonth, DAY, TIER_WINDOW_DAYS,
+  type BookCustomer, type DealRow, type SampleRow, type Tier, type MyDaySettings } from "./rules";
+import { barState, breakdownOf, draftsOf, owedOf, salesOf, type DocRow } from "./sales-bar";
 import type { OrderRow } from "@/lib/services/customers/aggregates";
 import { dealNextStep } from "../next-step";
 import type { StagePurpose } from "../stages";
@@ -54,11 +56,15 @@ export async function loadMyDay(db: Db, opts: {
   const twelveBack = new Date(riyadhMonthStartAt(now, -12));
   const ordersSince = new Date(now.getTime() - 400 * DAY);
   const contactTypes = Prisma.join([...CONTACT_ACTIVITY_TYPES]);
+  // The Riyadh month as calendar dates (SalesInvoice.issueDate is a DATE).
+  const dayOf = (t: number) => new Date(t + 3 * 3_600_000).toISOString().slice(0, 10);
+  const monthDay = dayOf(monthStart.getTime());
+  const nextMonthDay = dayOf(monthEnd.getTime());
 
   const [metaRows, bookRows, dealRows, collectionRows, contracts] = await Promise.all([
     // 1 ── meta
     db.$queryRaw<{ config: Record<string, unknown> | null; rep: { id: string; name: string } | null; targets: { periodStart: string; amount: string }[] | null; accrued: unknown; plan: Record<string, unknown> | null;
-      period: { planVersionId: string; qualifiedBase: string } | null }[]>`
+      docs: DocRow[] | null }[]>`
       SELECT
         (SELECT row_to_json(x) FROM (SELECT "tierVipTopPct", "tierVipMinKgMonth", "tierSmallMaxKgMonth", "growthMinPct", "growthMinKgMonth",
                 "contactDaysVip", "contactDaysRegular", "contactDaysSmall", "contactDaysNew", "reorderLateFactor", "reorderInactiveFactor", "callAwaitDays",
@@ -75,8 +81,42 @@ export async function loadMyDay(db: Db, opts: {
            FROM "CommissionAssignment" a JOIN "CommissionPlanVersion" v ON v."id" = a."planVersionId"
           WHERE a."employeeId" = ${owner} AND a."effectiveFrom" < ${monthEnd} AND (a."effectiveTo" IS NULL OR a."effectiveTo" > ${monthStart})
           ORDER BY a."effectiveFrom" DESC LIMIT 1) AS plan,
-        (SELECT json_build_object('planVersionId', r."planVersionId", 'qualifiedBase', r."qualifiedBase") FROM "CommissionPeriodResult" r
-          WHERE ${opts.commissionVisible} AND r."employeeId" = ${owner} AND r."periodStart" = ${monthStart}) AS period`,
+        -- D11: the documents of the rep's deals (owned or shared) the sales bar needs, in this SAME round trip — the month's
+        -- issued invoices / debit / credit notes (sales), the issued invoices still open (owed) and the drafts of live orders
+        -- («بانتظار المحاسب»). A document belongs to the EARLIEST deal link of its order (a note: of its original's), else
+        -- to its quotation's deal; open = total − its credit notes' unapplied part − APPLIED ArApplications.
+        (WITH d AS (
+           SELECT o."id", o."ownerId",
+                  (SELECT json_agg(json_build_object('employeeId', w."employeeId", 'sharePercent', w."sharePercent")) FROM "OpportunityOwner" w WHERE w."opportunityId" = o."id") AS owners
+             FROM "Opportunity" o
+            WHERE o."ownerId" = ${owner} OR EXISTS (SELECT 1 FROM "OpportunityOwner" w WHERE w."opportunityId" = o."id" AND w."employeeId" = ${owner})),
+         ords AS (SELECT DISTINCT ol."orderId" FROM "OpportunityOrder" ol WHERE ol."opportunityId" IN (SELECT "id" FROM d)),
+         qts AS (SELECT q."id" FROM "Quote" q WHERE q."opportunityId" IN (SELECT "id" FROM d)),
+         inv AS (
+           SELECT i."id", i."kind", i."status", i."number", i."customerId", i."issueDate", i."taxableTotal", i."grandTotal",
+                  coalesce(i."orderId", oi."orderId") AS "orderId", coalesce(i."quoteId", oi."quoteId") AS "quoteId"
+             FROM "SalesInvoice" i LEFT JOIN "SalesInvoice" oi ON oi."id" = i."originalInvoiceId"
+            WHERE (coalesce(i."orderId", oi."orderId") IN (SELECT "orderId" FROM ords) OR coalesce(i."quoteId", oi."quoteId") IN (SELECT "id" FROM qts))
+              AND (i."status" = 'ISSUED' OR (i."status" = 'DRAFT' AND i."kind" = 'INVOICE'))),
+         res AS (
+           SELECT inv.*,
+                  coalesce((SELECT ol."opportunityId" FROM "OpportunityOrder" ol WHERE ol."orderId" = inv."orderId" ORDER BY ol."createdAt", ol."id" LIMIT 1),
+                           (SELECT q."opportunityId" FROM "Quote" q WHERE q."id" = inv."quoteId")) AS deal,
+                  (inv."issueDate" >= ${monthDay}::date AND inv."issueDate" < ${nextMonthDay}::date) AS "inMonth",
+                  coalesce((SELECT sum(a."amount") FROM "ArApplication" a WHERE a."invoiceId" = inv."id" AND a."status" = 'APPLIED'), 0) AS applied,
+                  coalesce((SELECT sum(cn."grandTotal" - coalesce((SELECT sum(a."amount") FROM "ArApplication" a WHERE a."creditNoteId" = cn."id" AND a."status" = 'APPLIED'), 0))
+                              FROM "SalesInvoice" cn WHERE cn."originalInvoiceId" = inv."id" AND cn."kind" = 'CREDIT_NOTE' AND cn."status" = 'ISSUED'), 0) AS "notesOpen",
+                  (inv."status" = 'DRAFT' AND EXISTS (SELECT 1 FROM "Order" od WHERE od."id" = inv."orderId"
+                      AND od."status" NOT IN ('Cancelled', 'Rejected') AND od."discountApprovalStatus" NOT IN ('PENDING', 'REJECTED'))) AS "draftLive"
+             FROM inv)
+         SELECT json_agg(json_build_object('id', res."id", 'kind', res."kind", 'status', res."status", 'number', res."number", 'customerId', res."customerId",
+                  'customerName', c."name", 'customerNameAr', c."nameAr", 'customerPhone', c."phone", 'issueDate', res."issueDate",
+                  'taxableTotal', res."taxableTotal", 'grandTotal', res."grandTotal", 'applied', res.applied, 'notesOpen', res."notesOpen",
+                  'inMonth', coalesce(res."inMonth", false), 'draftLive', res."draftLive", 'dealOwnerId', d."ownerId", 'owners', d.owners))
+           FROM res JOIN d ON d."id" = res.deal LEFT JOIN "Customer" c ON c."id" = res."customerId"
+          WHERE (res."status" = 'ISSUED' AND res."inMonth")
+             OR (res."status" = 'ISSUED' AND res."kind" IN ('INVOICE', 'DEBIT_NOTE') AND res."grandTotal" - res."notesOpen" - res.applied > 0)
+             OR res."draftLive") AS docs`,
     // 2 ── book
     db.$queryRaw<{ id: string; name: string; nameAr: string | null; phone: string | null; city: string | null; createdAt: Date;
       reorderIntervalDays: number | null; orders: [string, string, number, number][] | null; firstOrderAt: Date | null;
@@ -125,12 +165,27 @@ export async function loadMyDay(db: Db, opts: {
         FROM "SampleShipment" s JOIN "Opportunity" o ON o."id" = s."opportunityId" LEFT JOIN "Customer" c ON c."id" = o."customerId"
        WHERE o."ownerId" = ${owner} AND s."status"::text = 'SENT' AND s."feedbackAt" IS NULL AND s."sentAt" IS NOT NULL`,
     // 4 ── collections (12 months) on deals the rep owns or shares, attributed below exactly as the targets screen does
+    // D11 sheet F: for this month's events, where the receipt's money went (SalesCollection → APPLIED ArApplication →
+    // invoice.issueDate), VAT included. A Sales event's externalRef is its receipt's id; an accountant receipt's is
+    // `${collectionId}:${dealId}[:n]` and only its applications to THAT deal's invoices count (decision 6).
     db.$queryRaw<{ amountGross: unknown; amountTax: unknown; amountNonQualifying: unknown; collectedAt: Date; opportunityId: string;
-      ownerId: string; owners: { employeeId: string; sharePercent: string; effectiveFrom: string }[] | null }[]>`
+      ownerId: string; owners: { employeeId: string; sharePercent: string; effectiveFrom: string }[] | null;
+      accountant: boolean; fromMonth: unknown; fromBefore: unknown }[]>`
       SELECT e."amountGross", e."amountTax", e."amountNonQualifying", e."collectedAt", e."opportunityId", o."ownerId",
              (SELECT json_agg(json_build_object('employeeId', w."employeeId", 'sharePercent', w."sharePercent", 'effectiveFrom', w."effectiveFrom"))
-                FROM "OpportunityOwner" w WHERE w."opportunityId" = o."id") AS owners
+                FROM "OpportunityOwner" w WHERE w."opportunityId" = o."id") AS owners,
+             (position(':' in e."externalRef") > 0) AS accountant, p."fromMonth", p."fromBefore"
         FROM "CollectionEvent" e JOIN "Opportunity" o ON o."id" = e."opportunityId"
+        LEFT JOIN LATERAL (
+          SELECT coalesce(sum(a."amount") FILTER (WHERE i."issueDate" IS NULL OR i."issueDate" >= ${monthDay}::date), 0) AS "fromMonth",
+                 coalesce(sum(a."amount") FILTER (WHERE i."issueDate" < ${monthDay}::date), 0) AS "fromBefore"
+            FROM "SalesCollection" sc
+            JOIN "ArApplication" a ON a."collectionId" = sc."id" AND a."status" = 'APPLIED'
+            JOIN "SalesInvoice" i ON i."id" = a."invoiceId"
+           WHERE e."collectedAt" >= ${monthStart} AND sc."id" = split_part(e."externalRef", ':', 1)
+             AND (position(':' in e."externalRef") = 0 OR e."opportunityId" = coalesce(
+                   (SELECT ol."opportunityId" FROM "OpportunityOrder" ol WHERE ol."orderId" = i."orderId" ORDER BY ol."createdAt", ol."id" LIMIT 1),
+                   (SELECT q."opportunityId" FROM "Quote" q WHERE q."id" = i."quoteId")))) p ON true
        WHERE e."status"::text = 'RECORDED' AND e."collectedAt" >= ${twelveBack} AND e."collectedAt" < ${monthEnd}
          AND (o."ownerId" = ${owner} OR EXISTS (SELECT 1 FROM "OpportunityOwner" w WHERE w."opportunityId" = o."id" AND w."employeeId" = ${owner}))`,
     // 5 + 6 ── the company's contract notice period (sales settings, NULL = 45), then the contracts inside it (WP-C)
@@ -262,27 +317,26 @@ export async function loadMyDay(db: Db, opts: {
   const streakWeeks = weeklyStreak(perEvent, (m) => (targetsBy.has(m) ? Number(targetsBy.get(m)) : null), now);
 
   const accrued = roundMoney(dec(meta?.accrued));
-  let plan: PlanForEstimate = null;
+  // The plan's target-bonus brackets label the bar's stages (a COMPONENTS plan; a tiered plan has none).
   const p = meta?.plan;
-  if (p) {
-    if (p.components) plan = { kind: "COMPONENTS", components: readComponents(p.components) };
-    else plan = { kind: "TIERED", rules: {
-      basis: "NET_COLLECTION", tierMode: (p.tierMode as "INCREMENTAL") ?? "INCREMENTAL", baseRatePercent: dec(p.baseRatePercent), currency: String(p.currency ?? "SAR"),
-      tiers: ((p.tiers as { fromAmount: string; toAmount: string | null; ratePercent: string }[] | null) ?? []).map((t) => ({
-        fromAmount: dec(t.fromAmount), toAmount: t.toAmount === null ? null : dec(t.toAmount), ratePercent: dec(t.ratePercent) })),
-    } };
-  }
-  // A COMPONENTS plan (H2, fix round 2 — no engine run on the page): the month's QUALIFIED base exactly as the commission
-  // engine last wrote it (CommissionPeriodResult, rewritten by every accrual — the same run that wrote `accrued`), read in
-  // the meta query above. No stored row (or one of another plan version) means no accrual this month: the estimate then
-  // stays on the aggregated collections of read 4 (`collected` when everything counts, nothing new-client otherwise) —
-  // the conservative default. Only when the card is visible.
-  let qualifiedNow: Decimal | null = null;
-  const stored = meta?.period;
-  if (opts.commissionVisible && plan?.kind === "COMPONENTS" && stored && p?.id && stored.planVersionId === String(p.id)) {
-    qualifiedNow = dec(stored.qualifiedBase);
-  }
-  const estimate = opts.commissionVisible ? estimateAtTarget(plan, target, collected, accrued, qualifiedNow) : null;
+  const components: Components | null = p?.components ? readComponents(p.components) : null;
+
+  // ── D11: sales, owed, drafts and the breakdown of collected ──
+  const docs = meta?.docs ?? [];
+  const sales = salesOf(docs, owner);
+  const owed = owedOf(docs, dayOf(now.getTime()), owner);
+  const drafts = draftsOf(docs, owner);
+  const owners = [...dealOwners.values()];
+  const breakdown = breakdownOf(collectionRows
+    .filter((r) => r.collectedAt.getTime() >= monthStart.getTime() && r.collectedAt.getTime() < monthEnd.getTime())
+    .map((r) => {
+      const e = { amountGross: dec(r.amountGross), amountTax: dec(r.amountTax), amountNonQualifying: dec(r.amountNonQualifying), collectedAt: r.collectedAt, opportunityId: r.opportunityId };
+      return { mine: attributeCollections([e], owners).get(owner) ?? ZERO, gross: e.amountGross, fromMonth: dec(r.fromMonth), fromBefore: dec(r.fromBefore), accountant: !!r.accountant };
+    }));
+  const [yy, mm] = [new Date(monthStart.getTime() + 3 * 3_600_000).getUTCFullYear(), new Date(monthStart.getTime() + 3 * 3_600_000).getUTCMonth()];
+  const monthDays = new Date(Date.UTC(yy, mm + 1, 0)).getUTCDate();
+  const daysLeft = daysLeftInMonth(now);
+  const bar = target && target.greaterThan(0) ? barState({ target, collected, sales, daysLeft, monthDays, components }) : null;
 
   return {
     rep: meta?.rep ?? null,
@@ -291,15 +345,20 @@ export async function loadMyDay(db: Db, opts: {
     target: {
       month: `${new Date(monthStart.getTime() + 3 * 3_600_000).getUTCFullYear()}-${String(new Date(monthStart.getTime() + 3 * 3_600_000).getUTCMonth() + 1).padStart(2, "0")}`,
       ...progress,
-      daysLeft: daysLeftInMonth(now),
+      daysLeft,
       streakWeeks,
       personalBest: best ? { month: new Date(best.start + 3 * 3_600_000).toISOString().slice(0, 7), amount: best.amount.toFixed(2) } : null,
       newBest: !!best && collected.greaterThan(best.amount),
       commissionVisible: opts.commissionVisible,
       accrued: opts.commissionVisible ? accrued.toFixed(2) : null,
-      estimate: opts.commissionVisible && estimate ? estimate.amount.toFixed(2) : null,
-      estimateDiscretionary: opts.commissionVisible && !!estimate?.discretionary,
-      hasPlan: !!plan,
+      hasPlan: !!p,
+      // D11 — the sales bar (sales-bar.ts). Stages, «met» and the celebration follow COLLECTED only.
+      sales: sales.toFixed(2),
+      // Bonus amounts are commission figures: only to whoever may read them.
+      bar: bar ? { ...bar, reachedBonus: opts.commissionVisible ? bar.reachedBonus : null, next: bar.next ? { ...bar.next, bonus: opts.commissionVisible ? bar.next.bonus : null } : null } : null,
+      owed,
+      drafts,
+      breakdown,
     },
     callList: callList.map((c) => ({ ...c })),
     deals: negotiating.map((d) => ({ id: d.id, title: d.title, amount: d.amount, customerId: d.customerId, customerName: d.customerName, customerNameAr: d.customerNameAr, stageAr: d.stageAr, stageEn: d.stageEn, purpose: d.purpose,

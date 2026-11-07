@@ -149,29 +149,103 @@
 .d21 .md-dot.pri > i { background: var(--action-primary) }
 .d21 .md-acts-top { display: inline-flex; gap: 8px; flex-wrap: wrap }
 
-/* Target band */
-.d21 .md-band { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: center; padding: 22px 24px; border-radius: 14px;
+/* D11 sales bar (owner-approved Figma 1843:2 — A 1859:790, C1–C3, D, G; Desk-A 1852:528): one bar, two layers, on
+   brand/surface. Phone: one column, the two cards side by side. Desktop: the figures beside a 300px column of cards. */
+.d21 .md-sb { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 12px 24px; align-items: start; padding: 22px 24px; border-radius: 16px;
   background: var(--brand-surface); color: var(--brand-on-surface) }
-.d21 .md-band-main { display: grid; gap: 6px; min-width: 0 }
-.d21 .md-band-lbl { font-size: 13px; color: var(--brand-on-surface-soft) }
-.d21 .md-band-fig { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 16px; color: var(--brand-on-surface-soft) }
-.d21 .md-band-fig > b { font: 700 34px/1.15 var(--f-num); color: var(--brand-on-surface); font-variant-numeric: tabular-nums }
-.d21 .md-band-pct { margin-inline-start: auto; font-weight: 600; font-size: 18px; color: var(--brand-on-surface) }
-.d21 .md-band-bar { position: relative; height: 12px; border-radius: 999px; background: rgb(235 226 203 / 0.22); margin-top: 22px }
-.d21 .md-band-bar > i { display: block; height: 100%; border-radius: 999px; background: var(--brand-signature) }
-.d21 .md-pace { position: absolute; top: -6px; bottom: -6px; width: 2px; background: var(--brand-on-surface); transform: translateX(50%) }
-[dir="ltr"].d21 .md-pace, .d21 [dir="ltr"] .md-pace { transform: translateX(-50%) }
-.d21 .md-pace > em { position: absolute; bottom: calc(100% + 2px); inset-inline-start: 50%; transform: translateX(50%); white-space: nowrap; font-style: normal; font-size: 11px; color: var(--brand-on-surface-soft) }
-[dir="ltr"].d21 .md-pace > em, .d21 [dir="ltr"] .md-pace > em { transform: translateX(-50%) }
-.d21 .md-band-hints { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 4px 0 0; font-size: 13px; color: var(--brand-on-surface-soft) }
-.d21 .md-band-hints b, .d21 .md-band-hints .num { color: var(--brand-on-surface) !important }
-.d21 .md-band-kpis { display: grid; gap: 10px }
-.d21 .md-kpi { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 10px; padding: 10px 14px; border-radius: 10px;
-  background: rgb(255 253 247 / 0.08); box-shadow: inset 0 0 0 1px var(--brand-line) }
-.d21 .md-kpi small { font-size: 13px; color: var(--brand-on-surface-soft) }
-.d21 .md-kpi > span { font-size: 12px; color: var(--brand-on-surface-soft); white-space: nowrap }
-.d21 .md-kpi > span b { font: 700 20px/1.2 var(--f-num); color: var(--brand-on-surface) }
-.d21 .md-kpi .md-kpi-note { grid-column: 1 / -1; font-size: 11.5px }
+.d21 .md-sb-main { display: grid; gap: 10px; min-width: 0; justify-items: start }
+.d21 .md-sb-lbl { font: 500 13px/22px var(--f-ui); color: var(--brand-on-surface-soft) }
+.d21 .md-sb-figs { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px 24px; width: 100% }
+.d21 .md-sb-col { display: grid; gap: 0; justify-items: start; border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; text-align: start; border-radius: 8px }
+.d21 .md-sb-col:focus-visible, .d21 .md-sb-card.is-btn:focus-visible, .d21 .md-sb-drafts:focus-visible, .d21 .md-sb-link:focus-visible { outline: 2px solid var(--brand-on-surface); outline-offset: 3px }
+.d21 .md-sb-key, .d21 .md-sb-sales { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; line-height: 18px; color: var(--brand-on-surface-soft) }
+.d21 .md-sb .sw { width: 10px; height: 10px; border-radius: 3px; flex: none; display: inline-block }
+.d21 .md-sb .sw.solid { background: var(--brand-on-surface) }
+.d21 .md-sb .sw.soft { background: var(--brand-on-surface-soft) }
+.d21 .md-sb-head { display: inline-flex; align-items: baseline; gap: 6px; font-size: 14px; color: var(--brand-on-surface-soft) }
+.d21 .md-sb-head > b { font: 400 34px/1.1 var(--f-num); color: var(--brand-on-surface); font-variant-numeric: tabular-nums }
+.d21 .md-sb-head .num { font-family: var(--f-num) }
+.d21 .md-sb-chev { font-weight: 600 }
+.d21 .md-sb-sales b { font: 500 12.5px/18px var(--f-num); color: var(--brand-on-surface) }
+.d21 .md-sb-pill { display: inline-block; padding: 6px 12px; border-radius: 999px; background: var(--brand-on-surface); color: var(--brand-surface); font-size: 12.5px; font-weight: 600 }
+.d21 .md-sb-party { display: grid; gap: 6px; justify-items: start; animation: md-sb-pop .6s var(--ease, ease-out) }
+.d21 .md-sb-party small { font-size: 12px; color: var(--brand-on-surface-soft) }
+@keyframes md-sb-pop { from { transform: scale(.94); opacity: 0 } to { transform: none; opacity: 1 } }
+.d21 .md-sb-badge { display: inline-flex; padding: 3px 10px; border-radius: 999px; background: var(--brand-line); color: var(--brand-on-surface); font-size: 12px; font-weight: 600 }
+.d21 .md-sb-warn { display: grid; gap: 2px; width: 100%; padding: 10px 12px; border-radius: 10px; background: var(--status-warning-tint); color: var(--status-warning) }
+.d21 .md-sb-warn b { font-size: 13px }
+.d21 .md-sb-warn span { font-size: 12.5px }
+.d21 .md-sb-bar { width: 100%; padding-top: 24px }
+.d21 .md-sb-track { position: relative; height: 12px; border-radius: 6px; background: var(--brand-line) }
+.d21 .md-sb-track > i { position: absolute; inset-block: 0; inset-inline-start: 0; border-radius: 6px; transition: width .6s var(--ease, ease-out) }
+.d21 .md-sb-track > i.soft { background: var(--brand-on-surface-soft) }
+.d21 .md-sb-track > i.solid { background: var(--brand-on-surface) }
+.d21 .md-sb-pace { position: absolute; top: -6px; width: 3px; height: 24px; border-radius: 1.5px; background: var(--brand-on-surface); box-shadow: 0 0 0 1px var(--brand-surface); transform: translateX(50%) }
+[dir="ltr"].d21 .md-sb-pace, .d21 [dir="ltr"] .md-sb-pace { transform: translateX(-50%) }
+.d21 .md-sb-pace > em { position: absolute; bottom: calc(100% + 2px); inset-inline-start: 50%; transform: translateX(50%); white-space: nowrap; font-style: normal; font-size: 11.5px; color: var(--brand-on-surface-soft) }
+[dir="ltr"].d21 .md-sb-pace > em, .d21 [dir="ltr"] .md-sb-pace > em { transform: translateX(-50%) }
+.d21 .md-sb-ends { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; font: 500 11.5px/16px var(--f-ui); color: var(--brand-on-surface-soft) }
+.d21 .md-sb-ends > :last-child { color: var(--brand-on-surface) }
+.d21 .md-sb-next { margin: 0; font: 600 12.5px/18px var(--f-ui); color: var(--brand-on-surface) }
+.d21 .md-sb-sub, .d21 .md-sb-msg { margin: 0; font-size: 12.5px; line-height: 18px; color: var(--brand-on-surface-soft) }
+.d21 .md-sb-msg { font-size: 14px; font-weight: 600; line-height: 22px; color: var(--brand-on-surface) }
+.d21 .md-sb .num, .d21 .md-sb bdi.num { color: inherit }
+.d21 .md-sb-drafts, .d21 .md-sb-link { font: 500 11.5px/16px var(--f-ui); color: var(--brand-on-surface-soft); text-decoration: none; padding: 4px 0 }
+.d21 .md-sb-link { font-size: 12.5px; font-weight: 600; color: var(--brand-on-surface) }
+.d21 .md-sb-drafts:hover, .d21 .md-sb-link:hover { text-decoration: underline }
+.d21 .md-sb-note { margin: 0; font-size: 11.5px; line-height: 16px; color: var(--brand-on-surface-soft) }
+.d21 .md-sb-side { min-width: 0 }
+.d21 .md-sb-cards { display: grid; gap: 8px }
+.d21 .md-sb-card { display: grid; gap: 2px; justify-items: start; padding: 10px 12px; border-radius: 10px; border: 0; background: var(--brand-line); color: inherit; font: inherit; text-align: start; min-width: 0 }
+.d21 .md-sb-card.is-btn { cursor: pointer }
+.d21 .md-sb-card.is-btn:hover { background: rgb(235 226 203 / 0.22) }
+.d21 .md-sb-card small { font-size: 12.5px; line-height: 18px; color: var(--brand-on-surface-soft) }
+.d21 .md-sb-card small:last-of-type { font-size: 11.5px; line-height: 16px }
+.d21 .md-sb-val { font-size: 12.5px; color: var(--brand-on-surface-soft) }
+.d21 .md-sb-val b { font: 500 20px/22px var(--f-num); color: var(--brand-on-surface) }
+.d21 .md-sb-card em { font-style: normal; font: 500 11.5px/16px var(--f-ui); color: var(--brand-on-surface) }
+@media (prefers-reduced-motion: reduce) { .d21 .md-sb-party { animation: none } .d21 .md-sb-track > i { transition: none } }
+
+/* Sheets E / F: a phone bottom sheet (the shell's .d21-out) or a 440px desktop side panel (Desk-B 1852:1100). */
+.d21 .md-sheet { max-width: 520px; max-height: 88vh; overflow: auto; gap: 12px; color: var(--text-primary) }
+.md-sp-scrim { position: fixed; inset: 0; z-index: 90; background: var(--overlay-scrim-sheet, rgba(31, 27, 22, .42)) }
+.md-sp { position: absolute; inset-block: 0; inset-inline-end: 0; width: min(440px, 100%); background: var(--surface); box-shadow: 0 0 40px rgba(0, 0, 0, .14); padding: 24px; overflow: auto; display: grid; align-content: start; gap: 12px; color: var(--text-primary); animation: md-sp-in .2s var(--ease, ease-out) }
+@keyframes md-sp-in { from { transform: translateX(-16px); opacity: 0 } to { transform: none; opacity: 1 } }
+@media (prefers-reduced-motion: reduce) { .md-sp { animation: none } }
+.md-sp-x { position: absolute; top: 18px; inset-inline-end: 18px; width: 36px; height: 36px; border: 0; border-radius: 8px; background: none; color: var(--text-secondary); display: grid; place-items: center; cursor: pointer }
+.md-sp-x:hover { background: var(--surface-subtle) }
+.md-sheet-body { display: grid; gap: 10px }
+.md-sheet-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-inline-end: 0 }
+.md-sp .md-sheet-head { padding-inline-start: 0; padding-inline-end: 40px }
+.md-sheet-head h2 { margin: 0; font: 600 16px/1.3 var(--f-ui); color: var(--text-primary) }
+.md-sheet-amt { font-size: 12.5px; color: var(--text-muted); white-space: nowrap }
+.md-sheet-amt b { font: 500 22px/1.2 var(--f-num); color: var(--text-primary) }
+.md-sheet-sub { margin: 0; font-size: 12.5px; line-height: 18px; color: var(--text-muted) }
+.md-sp-total { display: flex; justify-content: space-between; align-items: baseline; padding: 12px 14px; border-radius: 10px; background: var(--surface-subtle); font-size: 13px; color: var(--text-secondary) }
+.md-sp-total b { font: 500 20px/1.2 var(--f-num); color: var(--text-primary) }
+.md-owed-list, .md-bd-list { list-style: none; margin: 0; padding: 0 }
+.md-owed-row { display: grid; gap: 6px; padding: 14px 0; border-bottom: 1px solid var(--border-subtle) }
+.md-owed-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px }
+.md-owed-top a { color: var(--text-primary); text-decoration: none; font-size: 14px }
+.md-owed-top .num { font: 500 14px/1.4 var(--f-num); white-space: nowrap }
+.md-owed-meta { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-muted) }
+.md-owed-acts { display: flex; gap: 6px; justify-content: flex-start }
+.md-owed-acts .btn { min-height: 36px; gap: 6px }
+.md-sheet-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 6px }
+.md-sheet-link { color: var(--action-primary); font-weight: 600; font-size: 14px; text-decoration: none }
+.md-sheet-link:hover { text-decoration: underline }
+.md-bd-bar { display: flex; gap: 3px; height: 10px; border-radius: 5px; overflow: hidden; background: var(--surface-subtle) }
+.md-bd-bar > i, .md-bd-list .sw { background: var(--brand-surface) }
+.md-bd-bar > i.b, .md-bd-list .sw.b { background: var(--status-warning, #8a5a2b) }
+.md-bd-bar > i.c, .md-bd-list .sw.c { background: var(--brand-on-surface-soft) }
+.md-bd-list .sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; margin-inline-end: 6px }
+.md-bd-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--border-subtle) }
+.md-bd-list li > div { display: grid; gap: 2px }
+.md-bd-list li b { font-size: 14px; color: var(--text-primary) }
+.md-bd-list li small { font-size: 12.5px; color: var(--text-muted) }
+.md-bd-list li > span { font-size: 12.5px; color: var(--text-muted); white-space: nowrap }
+.md-bd-list li > span b { font: 500 15px/1.3 var(--f-num) }
+.md-bd-list li.is-total { border-bottom: 0 }
 
 /* Cards: a quiet header line, the count beside the title */
 .d21 .md-card { padding: 0; gap: 0; overflow: hidden }
@@ -206,16 +280,16 @@
 .d21 .md-legend3 .md-dot { font-size: 12px; color: var(--text-muted) }
 .d21 .md-legend3 b { font: 700 20px/1.2 var(--f-num) }
 
-@media (max-width: 1279.98px) { .d21 .md-band { grid-template-columns: minmax(0, 1fr) 260px } }
+@media (max-width: 1279.98px) { .d21 .md-sb { grid-template-columns: minmax(0, 1fr) 260px } }
 @media (max-width: 767.98px) {
   .d21 .md-hello { align-items: stretch }
   .d21 .md-hello-side, .d21 .md-acts-top { width: 100% }
   .d21 .md-acts-top > .btn { flex: 1 1 0; justify-content: center; min-height: 44px }
   .d21 .md-hello h1 { font-size: 22px }
-  .d21 .md-band { grid-template-columns: minmax(0, 1fr); padding: 16px; gap: 14px }
-  .d21 .md-band-fig > b { font-size: 28px }
-  .d21 .md-band-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)) }
-  .d21 .md-kpi { grid-template-columns: 1fr }
+  .d21 .md-sb { grid-template-columns: minmax(0, 1fr); padding: 16px; gap: 12px }
+  .d21 .md-sb-figs { display: grid; gap: 12px }
+  .d21 .md-sb-side { border-top: 1px solid var(--brand-line); padding-top: 12px }
+  .d21 .md-sb-cards { grid-template-columns: repeat(2, minmax(0, 1fr)) }
   .d21 .md-row .md-av { display: none }
   .d21 .md-row .md-acts .md-log { flex: 1; min-height: 44px }
 }

@@ -25,9 +25,10 @@ import { AddMenu, HubTabs, TodaySchedule, hubTabOf } from "./_components/hub";
 import { PlanCard, PlanSection } from "./_components/plan";
 import WsCalendarPage from "../workspace/calendar/page";
 import { TasksCard } from "./_components/tasks-card";
+import { SalesBand, type BandTarget, type LogTarget } from "./_components/sales-band";
 import { filterCallList, callFilterOf, type CallFilter } from "@/lib/services/sales/my-day/filters";
 import {
-  TIER_LABEL, days, greeting, streakText, monthName, n, reasonPill, telHref, todayLine, waNumber, whyLine,
+  TIER_LABEL, days, greeting, streakText, n, reasonPill, telHref, todayLine, waNumber, whyLine,
   type Lang, type Reason, type Tier,
 } from "./_components/text";
 
@@ -37,10 +38,8 @@ type CallItem = {
 };
 type Day = {
   rep: { id: string; name: string }; generatedAt: string; readOnly: boolean; teamView: boolean; viewerId: string;
-  target: {
-    month: string; target: string | null; achieved: string; percent: string | null; remaining: string | null; met: boolean | null;
-    daysLeft: number; streakWeeks: number; personalBest: { month: string; amount: string } | null; newBest: boolean;
-    commissionVisible: boolean; accrued: string | null; estimate: string | null; estimateDiscretionary: boolean; hasPlan: boolean;
+  target: BandTarget & {
+    remaining: string | null; streakWeeks: number; personalBest: { month: string; amount: string } | null; newBest: boolean; hasPlan: boolean;
   };
   callList: CallItem[];
   deals: { id: string; title: string; amount: string; customerId: string | null; customerName: string | null; customerNameAr: string | null; stageAr: string; stageEn: string;
@@ -78,6 +77,11 @@ function MyDay() {
   const [filter, setFilter] = useState<CallFilter>("ALL");
   const [logFor, setLogFor] = useState<{ item: CallItem; kind: "CALL" | "WHATSAPP" } | null>(null);
   const openLog = useCallback((item: CallItem, kind: "CALL" | "WHATSAPP" = "CALL") => setLogFor({ item, kind }), []);
+  // «عند العملاء» (D11 sheet E): a call / WhatsApp opens the same log dialog as «كلّمهم اليوم».
+  const openLogFor = useCallback((c: LogTarget, kind: "CALL" | "WHATSAPP") => setLogFor({
+    item: { key: `owed:${c.customerId}`, customerId: c.customerId, name: c.name, nameAr: c.nameAr, phone: c.phone, tier: null, kgPerMonth: 0,
+      reason: { code: "NO_CONTACT", days: null, thresholdDays: 0 }, others: [], intervalDays: null, lastContactDays: null }, kind,
+  }), []);
   const [flash, setFlash] = useState<{ text: string; undo?: () => void } | null>(null);
   const [reps, setReps] = useState<{ id: string; name: string }[]>([]);
   // D8.1: back from logging on a customer page («＋ جديد › نشاط» started here): say it was saved, then drop the flag.
@@ -224,7 +228,7 @@ function MyDay() {
           {tabsBar}
           {empty ? <NoBookNotice lang={lang} /> : null}
           {/* Owner (6 Nov 2026): on a phone the target first — it is what gets the rep going — then «كلّمهم اليوم». */}
-          <TargetCard d={data} lang={lang} who={who} compact />
+          <SalesBand t={data.target} lang={lang} who={who} phone ro={ro} viewerId={data.viewerId} onLog={openLogFor} />
           <CallCard d={data} lang={lang} items={shown} total={listed} all={full} onAll={() => setAll((v) => !v)} ro={ro} empty={empty}
             filter={filter} onFilter={setFilter} onDone={openLog} onSnooze={snooze} phone />
           <AttentionStrip d={data} lang={lang} ro={ro} />
@@ -251,7 +255,7 @@ function MyDay() {
         {hello}
         {tabsBar}
         {empty ? <NoBookNotice lang={lang} /> : null}
-        <TargetCard d={data} lang={lang} who={who} />
+        <SalesBand t={data.target} lang={lang} who={who} phone={false} ro={ro} viewerId={data.viewerId} onLog={openLogFor} />
         <AttentionStrip d={data} lang={lang} ro={ro} />
         {/* Figma 06 (160:107): «جدول اليوم» wide, the plan and «مهام اليوم» stacked beside it; «كلّمهم اليوم» on its own row. */}
         {!ro ? <div className="md-grid2 md-today-row"><TodaySchedule ar={ar} reloadKey={tick} /><div className="md-today-side"><PlanCard ar={ar} /><TasksCard ar={ar} mode="today" onChanged={(m) => { setFlash({ text: m }); reload(); }} /></div></div> : null}
@@ -374,73 +378,6 @@ function Streak({ d, lang, third }: { d: Day; lang: Lang; third?: boolean }) {
   }
   if (d.target.newBest) return <span className="md-pill ok" data-testid="md-best"><Ico name="check" small />{third ? (ar ? "هذا أفضل شهر له" : "Their best month yet") : ar ? "هذا أفضل شهر لك" : "Your best month yet"}</span>;
   return null;
-}
-
-/** `who`: the rep's first name when a manager reads the day (third person, council fix round 2 item 8); null = «لك». */
-function TargetCard({ d, lang, compact, who }: { d: Day; lang: Lang; compact?: boolean; who: string | null }) {
-  const ar = lang === "ar";
-  const third = who !== null;
-  const t = d.target;
-  const month = monthName(t.month, lang);
-  const title = ar ? `هدف ${month} (التحصيل)` : `${month} target (collections)`;
-  if (t.target === null) {
-    return (
-      <Card title={title} testId="md-target" link={<Link className="lk" href="/dashboard/sales/my-commissions">{ar ? "هدفي وعمولتي" : "My target"}</Link>}>
-        <Empty>{third ? (ar ? <>ما فيه هدف مسجّل لـ<bdi>{who}</bdi> هذا الشهر.</> : <>No target is set for <bdi>{who}</bdi> this month.</>)
-          : ar ? "ما فيه هدف مسجّل لك هذا الشهر — اطلب من مديرك يحدد هدفك." : "No target is set for you this month — ask your manager to set one."}</Empty>
-      </Card>
-    );
-  }
-  const pct = Number(t.percent ?? 0);
-  const width = Math.max(0, Math.min(100, pct));
-  const remain = Number(t.remaining ?? 0);
-  const left = days(t.daysLeft, lang);
-  const sub = t.met
-    ? (third ? (ar ? <>وصل <bdi>{who}</bdi> الهدف</> : <><bdi>{who}</bdi> reached the target</>) : ar ? "وصلت الهدف — كل ريال تحصّله الحين زيادة لك" : "Target reached — every riyal now is extra")
-    : third ? (ar ? <>باقي لـ<bdi>{who}</bdi> <b className="num" style={{ color: "var(--text-primary)" }}>{n(remain)}</b> ريال يوصل الهدف · باقي {left}</>
-      : <>SAR <b className="num">{n(remain)}</b> for <bdi>{who}</bdi> to go · {left} left</>)
-    : ar ? <>باقي لك <b className="num" style={{ color: "var(--text-primary)" }}>{n(remain)}</b> ريال توصل الهدف · باقي {left}</>
-      : <>SAR <b className="num">{n(remain)}</b> to go · {left} left</>;
-  // Where the month says you should be today (elapsed share of the month, Riyadh) — the white tick on the bar.
-  const [yy, mm] = t.month.split("-").map(Number);
-  const monthDays = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
-  const pace = Math.max(0, Math.min(100, ((monthDays - t.daysLeft) / monthDays) * 100));
-  const perDay = !t.met && t.daysLeft > 0 ? remain / t.daysLeft : null;
-  return (
-    <section className="md-band" data-testid="md-target" aria-label={title}>
-      <div className="md-band-main">
-        <span className="md-band-lbl">{ar ? `هدف ${month} · التحصيل قبل الضريبة` : `${month} target · collections before VAT`}</span>
-        <div className="md-band-fig">
-          <b className="num" data-testid="md-target-achieved">{n(t.achieved)}</b>
-          <span>{ar ? <>من <bdi className="num">{n(t.target)}</bdi> ر.س</> : <>of SAR <bdi className="num">{n(t.target)}</bdi></>}</span>
-          <span className="md-band-pct num" data-testid="md-target-pct">{n(pct, 0)}%</span>
-        </div>
-        <div className="md-band-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(width)} aria-label={title}>
-          <i style={{ width: `${width}%` }} />
-          {!t.met ? <span className="md-pace" style={{ insetInlineStart: `${pace}%` }} title={ar ? "المفروض توصل له اليوم" : "Where the month says you should be"}><em>{ar ? "المفروض اليوم" : "Pace today"}</em></span> : null}
-        </div>
-        <p className="md-band-hints">
-          <span>{sub}</span>
-          {perDay !== null ? <span>{ar ? <>تحتاج <bdi className="num">{n(Math.ceil(perDay))}</bdi> ر.س يوميًا</> : <>SAR <bdi className="num">{n(Math.ceil(perDay))}</bdi> a day</>}</span> : null}
-        </p>
-      </div>
-      {t.commissionVisible ? (
-        <div className="md-band-kpis" data-testid={compact ? "md-commission-phone" : undefined}>
-          <div className="md-kpi" data-testid="md-accrued">
-            <small>{ar ? "عمولة مستحقة" : "Accrued commission"}</small>
-            <span><b className="num">{n(t.accrued ?? 0)}</b> {ar ? "ر.س" : "SAR"}</span>
-          </div>
-          <div className="md-kpi" data-testid="md-estimate">
-            <small>{ar ? (third ? "متوقعة لو وصل الهدف" : "المتوقع لو حققت الهدف") : third ? "If the target is reached" : "If you reach the target"}</small>
-            <span><b className="num">{t.estimate === null ? "—" : n(t.estimate)}</b> {t.estimate === null ? null : (ar ? "ر.س" : "SAR")}</span>
-            <small className="md-kpi-note">{t.estimate === null
-              ? (ar ? (t.hasPlan ? "تقدير غير متاح" : "ما عندك خطة عمولة") : (t.hasPlan ? "Estimate unavailable" : "No commission plan"))
-              : ar ? `تقدير${t.estimateDiscretionary ? " · مكافأة الهدف بقرار الإدارة" : ""}` : `estimate${t.estimateDiscretionary ? " · target bonus at management's discretion" : ""}`}</small>
-          </div>
-        </div>
-      ) : null}
-    </section>
-  );
 }
 
 function CallActions({ item, lang, ro, onDone, onSnooze }: { item: CallItem; lang: Lang; ro: boolean; onDone: (i: CallItem, kind?: "CALL" | "WHATSAPP") => void; onSnooze: (i: CallItem) => void; phone?: boolean }) {
