@@ -1,6 +1,7 @@
 import { NextResponse } from "@/lib/api-response";
 import { cronAuthorized } from "@/lib/cron/auth";
 import { runWorkspaceJobs } from "@/lib/workspace/server/reminders";
+import { notifyStaleBuckets } from "@/lib/services/station/roast-v2";
 
 /**
  * «مساحة عملي» scheduler entry: sends the task and appointment reminders and escalations that are due.
@@ -17,7 +18,9 @@ export async function GET(request: Request) {
   if (!auth.ok) return NextResponse.json({ error: "غير مصرّح", errorEn: "Unauthorized" }, { status: 401 });
   try {
     const summary = await runWorkspaceJobs("cron");
-    return NextResponse.json({ ok: true, ...summary });
+    // «محطة التحميص v2»: buckets left in staging over 72 h (once per bucket); never fails the workspace run.
+    const staging = await notifyStaleBuckets().catch((e) => { console.error("[workspace] stale buckets failed:", (e as Error)?.name ?? "error"); return null; });
+    return NextResponse.json({ ok: true, ...summary, ...(staging ? { stagingStale: staging } : {}) });
   } catch (e) {
     console.error("[workspace] cron run failed:", (e as Error)?.name ?? "error");
     return NextResponse.json({ ok: false, error: "تعذّر تشغيل مهام مساحة العمل", errorEn: "Workspace jobs could not run" }, { status: 500 });

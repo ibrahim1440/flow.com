@@ -363,7 +363,7 @@ export async function submitCollection(tx: Tx, input: SubmitInput): Promise<Subm
     orderBy: { createdAt: "asc" },
     select: { orderId: true },
   });
-  if (input.orderId && !order) throw { _appCode: 409, message: "The order is not one of this deal's." };
+  if (input.orderId && !order) throw { _appCode: 409, message: "الطلب ليس من طلبات هذه الصفقة.", errorEn: "The order is not one of this deal's.", code: "ORDER_NOT_IN_DEAL" };
 
   const given = await parseBranchId(tx, input.branchId);
   const branchId = given !== undefined ? given : await defaultCollectionBranch(tx, { orderId: order?.orderId ?? null, recorderId: input.submittedById });

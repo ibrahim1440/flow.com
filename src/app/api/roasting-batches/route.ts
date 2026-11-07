@@ -330,6 +330,14 @@ export async function POST(request: Request) {
   // D5: a chosen roaster is checked before anything else is decided (operator, nominal, min–max).
   // No roaster chosen → nothing here runs, exactly as before.
   let roasterCheck: RoasterCheckResult | null = null;
+  // Roasting station v2 (risk 4): a V2 roaster's green waits in staging buckets and its lots are weighed by basket — it
+  // records through /api/station/roasting/v2, never here (this path draws at the roaster's site, one lot per roast).
+  if (roasterId) {
+    const mode = await prisma.roaster.findUnique({ where: { id: roasterId }, select: { name: true, stationMode: true } });
+    if (mode?.stationMode === "V2") {
+      return NextResponse.json({ error: `${mode.name} تعمل بمحطة التحميص v2: سجّل الوزن من شاشتها.`, errorEn: `${mode.name} runs roasting station v2: record the weight from its screen.`, code: "ROASTER_V2_USE_STATION" }, { status: 409 });
+    }
+  }
   if (roasterId) {
     try {
       roasterCheck = await checkRoasterForRoast(prisma, { roasterId, greenKg: qty, ack: data.ack === true, user });

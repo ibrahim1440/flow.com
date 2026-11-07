@@ -87,11 +87,17 @@ export async function DELETE(request: Request, { params }: Params) {
 
   const batch = await prisma.roastingBatch.findUnique({
     where: { id },
-    select: { orderItemId: true, greenBeanId: true, greenBeanQuantity: true, roastedBeanQuantity: true, productionOrderId: true, batchNumber: true, productId: true },
+    select: { orderItemId: true, greenBeanId: true, greenBeanQuantity: true, roastedBeanQuantity: true, productionOrderId: true, batchNumber: true, productId: true, basketId: true, lotKind: true },
   });
 
   if (!batch) {
     return NextResponse.json({ error: "Batch not found" }, { status: 404 });
+  }
+  // Roasting station v2: a lot weighed from a basket drew its green per bucket at staging, possibly from several lots —
+  // this delete restocks ONE lot at the roast's site. Such a lot is corrected by the station's cancel-and-re-record
+  // (correctsBatchId; the per-component reversal is onRoastCancelled's `components`), never deleted here.
+  if (batch.basketId || batch.lotKind) {
+    return NextResponse.json({ error: "هذه دفعة من محطة التحميص v2 (سلة موزونة): تُصحَّح بإلغائها وإعادة تسجيلها من المحطة، لا بالحذف.", errorEn: "This lot was weighed at roasting station v2 (a basket): it is corrected by cancelling and re-recording it at the station, not deleted here.", code: "V2_LOT_USE_CORRECTION" }, { status: 409 });
   }
 
 

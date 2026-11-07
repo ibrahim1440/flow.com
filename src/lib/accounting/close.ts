@@ -15,6 +15,7 @@
 //   ar / ap       AR sub-ledger = GL (AR − customer advances); AP open items = GL                  WARN / FAIL
 //   vat           the month's VAT documents = the VAT accounts' movement from documents             FAIL
 //   zatca         the e-invoicing queue holds nothing pending / failed for the month (A4)          FAIL (NA while off)
+//   roastStation  roasting station v2: no unreviewed discard (FAIL), no roast unweighed / problem open (WARN)  NA while unused
 //   trialBalance  the trial balance to the month end balances                                      FAIL
 // softClose / close run it, record it (PeriodCloseReview, append-only) and then use A1's own period actions; a FAIL
 // blocks the final close, a WARN needs a note (recorded). closeYear posts the CLOSING entry through the engine —
@@ -169,6 +170,20 @@ export async function closeChecklist(periodId: string) {
 
   // 7. ZATCA queue (A4): nothing pending / failed for documents signed up to the month end
   out.push(await zatcaCheck(to));
+
+  // «محطة التحميص v2»: no roast left unweighed (WARN — its green is still valued in staging) and no discard left without a
+  // supervisor's review (FAIL — the owner's control on a cost already expensed). NA while the station has no roast.
+  const [stOpen, stUnreviewed, stAny, stProblems] = await Promise.all([
+    prisma.roastRun.count({ where: { status: { in: ["CHARGED", "DROPPED"] }, chargedAt: { lte: to } } }),
+    prisma.roastRun.count({ where: { status: "DISCARDED", reviewedAt: null, discardedAt: { lte: to } } }),
+    prisma.roastRun.count({ where: { chargedAt: { lte: to } } }),
+    prisma.roastStationEvent.count({ where: { status: "OPEN", reportedAt: { lte: to } } }),
+  ]);
+  const st = { openRuns: stOpen, unreviewed: stUnreviewed, problems: stProblems, any: stAny + stProblems > 0 };
+  out.push(check("roastStation", !st.any ? "NA" : st.unreviewed ? "FAIL" : st.openRuns || st.problems ? "WARN" : "PASS",
+    st.unreviewed ? `${st.unreviewed} تحميصة تالفة لم يراجعها مشرف` : st.openRuns ? `${st.openRuns} تحميصة في الدرام أو التبريد لم تُوزن` : st.problems ? `${st.problems} بلاغ مشكلة مفتوح على الحمّاصات` : "لا تحميصات مفتوحة ولا تالف بلا مراجعة ولا بلاغات مفتوحة",
+    st.unreviewed ? `${st.unreviewed} discarded roast(s) not reviewed by a supervisor` : st.openRuns ? `${st.openRuns} roast(s) charged or dropped and not weighed` : st.problems ? `${st.problems} problem report(s) open on the roasters` : "No open roasts, no unreviewed discards, no open problem reports",
+    "/dashboard/production", st.unreviewed || st.openRuns || st.problems || null));
 
   // 8. trial balance
   const tb = await trialBalance(new Date(Date.UTC(p.year, 0, 1)), to);

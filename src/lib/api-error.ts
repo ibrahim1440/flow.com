@@ -28,7 +28,23 @@ export function handleDomainError(err: unknown): NextResponse {
   return handlePrismaError(err);
 }
 
+/**
+ * A deadlock (40P01) or a serialization failure (40001): nothing was written (the transaction rolled back) and the same
+ * request can simply be sent again — a coded, retryable 409, never an uncoded 500. Prisma reports it as P2034, or as a
+ * raw database error carrying the SQLSTATE.
+ */
+export function isRetryableConflict(err: unknown): boolean {
+  const e = err as { code?: unknown; meta?: { code?: unknown }; message?: unknown } | null;
+  if (!e || typeof e !== "object") return false;
+  if (e.code === "P2034" || e.code === "40P01" || e.code === "40001" || e.meta?.code === "40P01" || e.meta?.code === "40001") return true;
+  const msg = typeof e.message === "string" ? e.message : "";
+  return /\b40P01\b|\b40001\b|deadlock detected|could not serialize access/i.test(msg);
+}
+
 export function handlePrismaError(err: unknown): NextResponse {
+  if (isRetryableConflict(err)) {
+    return NextResponse.json({ error: "تعارض مع عملية أخرى في اللحظة نفسها؛ لم يُحفظ شيء. أعد المحاولة.", errorEn: "This collided with another operation at the same moment; nothing was saved. Try again.", code: "RETRY_CONFLICT", retryable: true }, { status: 409 });
+  }
   // Phase 1 payroll lock (independent review F7): a refusal by the database's payroll guards is a
   // refusal, never a crash — 409 with its code, whatever route the write came through.
   const msg = err instanceof Error ? err.message : "";

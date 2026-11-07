@@ -59,6 +59,8 @@ export async function GET(request: Request) {
         ...(dateFilter ? { createdAt: dateFilter } : {}),
         roastedBeanQuantity: { gt: 0 },
         isBlend: false,
+        // «محطة التحميص v2»: a corrected lot was replaced by its re-recorded lot — counted once.
+        status: { not: "Corrected" },
       },
       _sum: {
         roastedBeanQuantity: true,

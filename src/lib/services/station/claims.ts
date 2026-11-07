@@ -147,8 +147,11 @@ export async function startRoast(args: { user: Actor; item: { type: StationItemT
     let plannedGreenKg: number | null = null;
     let bypass = false;
     if (roasterId) {
-      const r = await tx.roaster.findUnique({ where: { id: roasterId }, select: { id: true, name: true, status: true, defaultTargetKg: true } });
+      const r = await tx.roaster.findUnique({ where: { id: roasterId }, select: { id: true, name: true, status: true, defaultTargetKg: true, stationMode: true } });
       if (!r || r.status === "RETIRED") throw AR("الحمّاصة غير موجودة أو خرجت من الخدمة.", "Roaster not found or retired.", 404, "ROASTER_NOT_FOUND");
+      // Roasting station v2 (risk 5): a V2 roaster runs buckets, charge / drop and baskets — never a claim, so the
+      // per-operator ONE_ACTIVE_ROAST rule below stays a V1 rule and one operator may run two V2 roasters.
+      if (r.stationMode === "V2") throw AR(`${r.name} تعمل بمحطة التحميص v2: اشحن دلوًا من شاشتها.`, `${r.name} runs roasting station v2: charge a bucket from its screen.`, 409, "ROASTER_V2_USE_STATION");
       if (r.status !== "AVAILABLE") throw AR(`المحمصة ${r.name} غير متاحة الآن.`, `${r.name} is not available now.`, 409, "ROASTER_UNAVAILABLE");
       const op = operatorVerdict(user.role, await isAssignedOperator(tx, r.id, user.id));
       if (op.kind === "refused") throw operatorRefusal(r.name);

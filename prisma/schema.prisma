@@ -128,10 +128,10 @@ model Employee {
   workAppointments       WorkAppointment[]            @relation("WorkAppointmentOrganizer")
   workAppointmentInvites WorkAppointmentParticipant[] @relation("WorkAppointmentParticipant")
   workReminders          WorkReminder[]               @relation("WorkReminderRecipient")
+  salesPlanItems         SalesPlanItem[]              @relation("SalesPlanItemEmployee")
+  salesPlanItemsCreated  SalesPlanItem[]              @relation("SalesPlanItemCreatedBy")
 
   @@index([accessRoleId])
-  salesPlanItems        SalesPlanItem[] @relation("SalesPlanItemEmployee")
-  salesPlanItemsCreated SalesPlanItem[] @relation("SalesPlanItemCreatedBy")
 }
 
 /// A custom access role (Figma UR-05 / UR-06): a named permission template. The system templates
@@ -265,16 +265,16 @@ model Customer {
 
   /// WhatsApp automation (additive, defaulted): the customer asked not to receive WhatsApp
   /// messages. Every automated message to this customer is recorded as SKIPPED instead.
-  whatsappOptOut Boolean @default(false)
+  whatsappOptOut     Boolean   @default(false)
   /// «يستقبل إيميلات» (20261207090000_email_channel): no automated e-mail when true. Set by staff, by the
   /// customer's own signed unsubscribe link, or after a complaint / hard bounce (emailOptOutSource, CHECK).
-  emailOptOut       Boolean   @default(false)
-  emailOptOutAt     DateTime?
-  emailOptOutSource String?
+  emailOptOut        Boolean   @default(false)
+  emailOptOutAt      DateTime?
+  emailOptOutSource  String?
   /// The opt-out history, one dated line per change — appended, never overwritten (fix round 1).
-  emailOptOutNote   String?
+  emailOptOutNote    String?
   /// The opaque id the signed unsubscribe link carries (never the customer id). Made on the first e-mail.
-  emailLinkId       String?   @unique
+  emailLinkId        String?   @unique
   /// Batch 25b (20261208090000_email_followups): a legal hold on this customer's archived messages — while on, neither the
   /// 5-year retention nor an erasure destroys them. Set by the administrator (audited).
   messageLegalHold   Boolean   @default(false)
@@ -286,43 +286,43 @@ model Customer {
   // every existing row reads "not set" and no figure is invented. Nothing reads them in a
   // calculation: the credit limit is shown, not enforced (no enforcement rule is decided).
   /// Commercial registration number (السجل التجاري), digits only; shown as «CR-…».
-  commercialRegNo  String?
+  commercialRegNo      String?
   /// VAT registration number (الرقم الضريبي): 15 digits, starting and ending with 3.
-  vatNumber        String?
+  vatNumber            String?
   // ─── Buyer identity and national address (additive, 20261220090000_soon_batch) ─────────────
   // The «مسلّمات» of a customer registered by a rep (owner decision, Nov 2026): every later change needs a reason
   // (services/customers/customer-identity.ts), logged on the customer's activity log and in the audit log. They feed
   // the buyer snapshot of a NEW invoice (ZATCA standard invoice buyer address, BR-KSA-63); an issued invoice keeps its
   // frozen snapshot. Nullable, no default: existing customers read "not set". CHECKs in the migration.
   /// «الرقم الموحد» (unified national number, 700…): 10 digits starting with 7.
-  unifiedNumber          String?
+  unifiedNumber        String?
   /// «العنوان الوطني» — رقم المبنى: 4 digits.
-  nationalBuildingNo     String?
-  nationalStreet         String?
-  nationalDistrict       String?
-  nationalCity           String?
+  nationalBuildingNo   String?
+  nationalStreet       String?
+  nationalDistrict     String?
+  nationalCity         String?
   /// الرمز البريدي: 5 digits.
-  nationalPostalCode     String?
+  nationalPostalCode   String?
   /// الرقم الإضافي: 4 digits.
-  nationalAdditionalNo   String?
+  nationalAdditionalNo String?
   /// العنوان المختصر (e.g. RRRD2929), optional.
-  nationalShortAddress   String?
+  nationalShortAddress String?
   /// Account category code: WHOLESALE | RETAIL | CAFE | DISTRIBUTOR | OTHER (validated by the API).
-  segment          String?
-  city             String?
+  segment              String?
+  city                 String?
   /// The price list / tier the customer is on, as text («جملة · فئة أ»). There is no
   /// price-list model; this records the agreement, it prices nothing.
-  priceList        String?
+  priceList            String?
   /// Agreed payment terms in days (0–365).
-  paymentTermsDays Int?
+  paymentTermsDays     Int?
   /// Agreed credit limit in SAR. Displayed only.
-  creditLimit      Decimal?          @db.Decimal(18, 2)
+  creditLimit          Decimal?          @db.Decimal(18, 2)
   /// The employee responsible for the account («المسؤول»).
-  accountOwnerId   String?
-  accountOwner     Employee?         @relation("CustomerAccountOwner", fields: [accountOwnerId], references: [id], onDelete: SetNull)
-  contacts         CustomerContact[]
+  accountOwnerId       String?
+  accountOwner         Employee?         @relation("CustomerAccountOwner", fields: [accountOwnerId], references: [id], onDelete: SetNull)
+  contacts             CustomerContact[]
   /// The customer file's documents (additive, migration 20261027120000_customer_file).
-  files            CustomerFile[]
+  files                CustomerFile[]
 
   // ─── Credit warnings and the sales hold (additive, migration 20261028100000_credit_hold) ──
   /// «مدة الإيقاف الافتراضية»: the duration (days, 1–365) the «إيقاف البيع» dialog proposes.
@@ -355,11 +355,12 @@ model Customer {
   // ─── «متابعة إعادة الشراء» (additive, 20261204120000_reorder_rhythm) ───────────────────────
   /// The agreed reorder interval in days (1–365), when the order history does not show it. NULL =
   /// learned from the business orders (customers/aggregates.ts orderRhythm).
-  reorderIntervalDays         Int?
+  reorderIntervalDays Int?
 
   salesCallSnoozes SalesCallSnooze[]
   /// «خطة الأسبوع v2» (20261216090000_sales_plan_actions): the plan items planned for this customer.
   salesPlanItems   SalesPlanItem[]   @relation("SalesPlanItemCustomer")
+
   @@index([accountOwnerId])
 }
 
@@ -542,6 +543,8 @@ model GreenBean {
   coffeeProducts   CoffeeProduct[]
   roastProfiles    RoastProfile[]
   productionOrders ProductionOrder[]
+  greenBuckets     GreenBucket[]
+  bucketComponents GreenBucketComponent[]
 
   @@index([isActive])
   @@index([isActive, quantityKg])
@@ -587,12 +590,12 @@ model Order {
   salesCollections SalesCollection[]
 
   /// «الموقع» (20261125090000_location_dimension): the location (FinBranch) — NULL «غير محدد».
-  branchId String?
-  branch   FinBranch? @relation("OrderBranch", fields: [branchId], references: [id], onDelete: Restrict)
+  branchId                 String?
+  branch                   FinBranch? @relation("OrderBranch", fields: [branchId], references: [id], onDelete: Restrict)
   /// «بيع مباشر» discount above the threshold (20261222090000_direct_sale_discount_approval): NONE | PENDING | APPROVED |
   /// REJECTED. PENDING: the sale waits for sales › quote_approve_discount — no deal won, no invoice request, no collection.
-  discountApprovalStatus   String    @default("NONE")
-  requestedDiscountPercent Decimal?  @db.Decimal(9, 6)
+  discountApprovalStatus   String     @default("NONE")
+  requestedDiscountPercent Decimal?   @db.Decimal(9, 6)
   discountApprovedById     String?
   discountApprovedAt       DateTime?
   discountRejectedById     String?
@@ -639,7 +642,8 @@ model OrderItem {
   availableQuantity          Float?
   productionRequiredQuantity Float?
 
-  allocations StockAllocation[]
+  allocations         StockAllocation[]
+  roastLotAllocations RoastLotAllocation[]
 
   // Workstations W4 (additive, relation fields only).
   preparationPicks     PreparationPick[]
@@ -769,6 +773,21 @@ model RoastingBatch {
   /// Converted from another product by an approved disposition (the product it was roasted as).
   convertedFromProductId String?
 
+  // ─── Roasting station v2 (additive, migration 20261223090000_roast_station_v2) ───
+  /// SINGLE | PAIR: a lot weighed from one roast or two mixed in the cooler. NULL = every V1 batch. A v2 lot
+  /// with a basket has a kind (CHECK); a corrected (status «Corrected») v2 lot keeps its kind and frees its basket.
+  lotKind         String?
+  /// More than one green lot went into this lot (its greenBeanId is then the largest share; the cost is the weighted one).
+  isMixedGreen    Boolean              @default(false)
+  /// The weighed basket this lot was recorded from (one lot per basket).
+  basketId        String?              @unique
+  basket          RoastBasket?         @relation(fields: [basketId], references: [id], onDelete: Restrict)
+  /// A lot re-recorded after a cancel: the lot it corrects (posted entries are never edited).
+  correctsBatchId String?
+  correctsBatch   RoastingBatch?       @relation("LotCorrection", fields: [correctsBatchId], references: [id], onDelete: SetNull)
+  corrections     RoastingBatch[]      @relation("LotCorrection")
+  lotAllocations  RoastLotAllocation[]
+
   createdAt             DateTime              @default(now())
   updatedAt             DateTime              @updatedAt
   qcRecords             QcRecord[]
@@ -794,6 +813,7 @@ model RoastingBatch {
   @@index([status, createdAt])
   @@index([roasterId, createdAt])
   @@index([profileVersionId])
+  @@index([correctsBatchId])
 }
 
 model BlendIngredient {
@@ -1076,8 +1096,8 @@ model CuppingScore {
 }
 
 model SystemConfig {
-  id         String  @id @default("singleton")
-  logoBase64 String? @db.Text
+  id              String    @id @default("singleton")
+  logoBase64      String?   @db.Text
   /// «وضع التجربة مع قيود» (20261211090000_qoyod_pilot_invoices): a sales document issued before this day is an internal
   /// copy — the customer's tax invoice is Qoyod's PDF (SalesInvoiceQoyod). NULL = no pilot.
   qoyodPilotUntil DateTime? @db.Date
@@ -1185,23 +1205,23 @@ model SystemConfig {
   /// Tiers are DERIVED per rep from the rep's own book by kg ordered in the last 90 days (never stored):
   /// VIP = the top `tierVipTopPct` % of the rep's customers AND ≥ `tierVipMinKgMonth` kg/month; «صغير» <
   /// `tierSmallMaxKgMonth` kg/month; a book under 8 customers uses the two floors only. Admin-edited, audited.
-  tierVipTopPct       Decimal @default(20) @db.Decimal(5, 2)
-  tierVipMinKgMonth   Decimal @default(40) @db.Decimal(10, 2)
-  tierSmallMaxKgMonth Decimal @default(10) @db.Decimal(10, 2)
+  tierVipTopPct             Decimal @default(20) @db.Decimal(5, 2)
+  tierVipMinKgMonth         Decimal @default(40) @db.Decimal(10, 2)
+  tierSmallMaxKgMonth       Decimal @default(10) @db.Decimal(10, 2)
   /// «ينمو»: the last 3 full months up ≥ `growthMinPct` % and ≥ `growthMinKgMonth` kg/month on the 3 before.
-  growthMinPct        Decimal @default(20) @db.Decimal(5, 2)
-  growthMinKgMonth    Decimal @default(10) @db.Decimal(10, 2)
+  growthMinPct              Decimal @default(20) @db.Decimal(5, 2)
+  growthMinKgMonth          Decimal @default(10) @db.Decimal(10, 2)
   /// «ما تواصلت»: days without a contact after which a customer of that tier is on the call list.
-  contactDaysVip      Int     @default(14)
-  contactDaysRegular  Int     @default(30)
-  contactDaysSmall    Int     @default(60)
-  contactDaysNew      Int     @default(7)
+  contactDaysVip            Int     @default(14)
+  contactDaysRegular        Int     @default(30)
+  contactDaysSmall          Int     @default(60)
+  contactDaysNew            Int     @default(7)
   // ─── «صلاحية العقد» (additive, 20261206100000_customer_contract_validity) ──────────────────
   /// Days before a contract's end date that its account owner is told (1–365); NULL = 45.
   contractRenewalNoticeDays Int?
   // ─── «كلّمته — بانتظار الطلب» (additive, 20261206110000_sales_call_await_home) ────────────────
   /// Days a LATE customer the rep just contacted stays on the call list as «awaiting the order» (1–30); NULL = 3.
-  callAwaitDays Int?
+  callAwaitDays             Int?
 }
 
 /// «أجّل لبكرة» (20261206090000_sales_myday): a rep set a customer of the call list aside until `until`.
@@ -1254,10 +1274,16 @@ model Roaster {
   /// Where this roaster draws green coffee (20261117090000_locations_enhancements); NULL = the production site.
   locationId        String?
   location          StockLocation?       @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  /// Roasting station v2 (20261223090000_roast_station_v2): V1 (the claim → record station, unchanged) | V2 (buckets,
+  /// charge / drop, baskets weighed together). Per roaster, default V1.
+  stationMode       String               @default("V1")
   maintenance       RoasterMaintenance[]
   scheduledSlots    ScheduledSlot[]
   roastPlans        RoastPlan[]
   operators         RoasterOperator[]
+  roastBaskets      RoastBasket[]
+  roastRuns         RoastRun[]
+  stationEvents     RoastStationEvent[]
 
   @@index([type, status])
   @@index([locationId])
@@ -1413,6 +1439,9 @@ model CoffeeProduct {
   scheduledSlots     ScheduledSlot[]
   roastPlans         RoastPlan[]
   roastProfiles      RoastProfile[]
+  greenBuckets       GreenBucket[]
+  roastBaskets       RoastBasket[]
+  roastRuns          RoastRun[]
 
   // Smart Marketing (additive, relation fields only, 20261107090000_marketing_foundation).
   mktCampaigns MktCampaign[]
@@ -1550,6 +1579,7 @@ enum SourceDocType {
   RECEIVING // a packaging-material delivery received under inventory › receive (IN, audited)
   STOCK_TRANSFER // phase 3: a transfer between two locations (an OUT and an IN, same transfer id)
   SAMPLE // 20261204090000_sample_inventory: finished units issued as a sales sample (OUT; sourceDocId = SampleShipment.id)
+  ROAST_RUN // 20261223090000_roast_station_v2: a discarded (burnt) roast's green out of staging (OUT; sourceDocId = RoastRun.id)
 }
 
 model InventoryMovement {
@@ -2040,6 +2070,9 @@ model StockLocation {
   reorderPoints    StockReorderPoint[]
   roasters         Roaster[]
   stations         Station[]
+  prepSources      GreenPrepSession[]      @relation("PrepSource")
+  prepStagings     GreenPrepSession[]      @relation("PrepStaging")
+  greenBuckets     GreenBucket[]
 
   /// «الموقع» (20261125090000_location_dimension): the branch (profit centre) this site belongs to; NULL for TRANSIT (CHECK).
   finBranchId String?
@@ -2101,8 +2134,10 @@ model StockTransfer {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @default(now()) @updatedAt
 
-  lines     StockTransferLine[]
-  movements InventoryMovement[]
+  lines         StockTransferLine[]
+  movements     InventoryMovement[]
+  prepBuckets   GreenBucket[]       @relation("BucketPrep")
+  returnBuckets GreenBucket[]       @relation("BucketReturn")
 
   @@index([transferDate])
   @@index([fromLocationId])
@@ -2287,6 +2322,7 @@ model ProductionOrder {
   createdAt           DateTime              @default(now())
   updatedAt           DateTime              @updatedAt
   roastingBatches     RoastingBatch[]
+  roastLotAllocations RoastLotAllocation[]
 }
 
 // ─── QC Correction History ────────────────────────────────────────────────────
@@ -3388,12 +3424,12 @@ model Opportunity {
   stageId String
   stage   PipelineStage @relation(fields: [stageId], references: [id])
 
-  outcome    OpportunityOutcome @default(OPEN)
+  outcome        OpportunityOutcome @default(OPEN)
   /// Required by the service whenever outcome becomes LOST.
-  lostReason String?
+  lostReason     String?
   /// The coded reason beside the text (additive, 20261204100000_pipeline_qualification). Optional.
   lostReasonCode LostReasonCode?
-  closedAt   DateTime?
+  closedAt       DateTime?
 
   /// «تحليل الاحتياج» — a detail of the Qualified Opportunity stage, not a stage of its own
   /// (additive, 20261204100000_pipeline_qualification; all nullable). Copied from the lead on
@@ -3417,15 +3453,15 @@ model Opportunity {
   ownerId String
   owner   Employee @relation("OpportunityOwner", fields: [ownerId], references: [id])
 
-  conversion  LeadConversion?
-  owners      OpportunityOwner[]
-  stageEvents OpportunityStageEvent[]
+  conversion        LeadConversion?
+  owners            OpportunityOwner[]
+  stageEvents       OpportunityStageEvent[]
   /// Pipeline v2: a rep's manual stage move waiting for a supervisor (StageMoveRequest, one PENDING per deal).
   stageMoveRequests StageMoveRequest[]
-  quotes      Quote[]
-  samples     SampleShipment[]
-  activities  Activity[]
-  orderLinks  OpportunityOrder[]
+  quotes            Quote[]
+  samples           SampleShipment[]
+  activities        Activity[]
+  orderLinks        OpportunityOrder[]
 
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
@@ -3648,7 +3684,7 @@ model Activity {
   /// feedback reminder), `deal-follow-up:<dealId>` (the deal's «جدولة متابعة»). At most one OPEN row per key: a
   /// partial unique index ("Activity_open_sourceKey_key", WHERE "sourceKey" IS NOT NULL AND "completedAt" IS NULL)
   /// that lives in the migration's raw SQL (Prisma cannot model a partial index). Null on every person's activity.
-  sourceKey   String?
+  sourceKey String?
 
   ownerId String
   owner   Employee @relation("ActivityOwner", fields: [ownerId], references: [id])
@@ -3685,19 +3721,19 @@ model Quote {
   supersededBy Quote?  @relation("QuoteRevision")
 
   /// NULL on an ACCOUNTING quotation («مسار المحاسب», 20261213090000_quote_without_deal): no deal, the customer is its own.
-  opportunityId String?
-  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
-  customerId    String?
-  customer      Customer?   @relation(fields: [customerId], references: [id])
+  opportunityId         String?
+  opportunity           Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
+  customerId            String?
+  customer              Customer?    @relation(fields: [customerId], references: [id])
   /// SALES (on a deal; reps, commissions) | ACCOUNTING (no deal, a customer; never in the pipeline or commissions) — CHECK.
-  channel       String      @default("SALES")
+  channel               String       @default("SALES")
   /// «عمولة عرض المحاسب» (20261214090000_accounting_quote_commission): NULL (no rep) | PENDING | ASSIGNED | NONE (CHECK).
   /// ASSIGNED moves the quotation onto the rep's deal (channel SALES); NONE keeps it the accounting section's.
   commissionDecision    String?
   commissionRepId       String?
-  commissionRep         Employee? @relation("QuoteCommissionRep", fields: [commissionRepId], references: [id], onDelete: SetNull)
+  commissionRep         Employee?    @relation("QuoteCommissionRep", fields: [commissionRepId], references: [id], onDelete: SetNull)
   commissionDecidedById String?
-  commissionDecidedBy   Employee? @relation("QuoteCommissionDecider", fields: [commissionDecidedById], references: [id], onDelete: SetNull)
+  commissionDecidedBy   Employee?    @relation("QuoteCommissionDecider", fields: [commissionDecidedById], references: [id], onDelete: SetNull)
   commissionDecidedAt   DateTime?
   commissionReason      String?
 
@@ -4324,11 +4360,11 @@ model SalesCollection {
   opportunityId String?
   opportunity   Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
   quoteId       String?
-  quote         Quote?      @relation(fields: [quoteId], references: [id])
+  quote         Quote?       @relation(fields: [quoteId], references: [id])
   orderId       String?
-  order         Order?      @relation(fields: [orderId], references: [id])
+  order         Order?       @relation(fields: [orderId], references: [id])
   customerId    String?
-  customer      Customer?   @relation(fields: [customerId], references: [id])
+  customer      Customer?    @relation(fields: [customerId], references: [id])
 
   /// Client-generated, unique per submitter: a double-clicked form, a retried request and
   /// a replayed queue message all carry the same key and land once.
@@ -4381,22 +4417,22 @@ model SalesCollection {
   /// «سند قبض» (20261127090000_customer_receipts, BATCH22 WP-D). SALES = recorded by Sales against a deal (commission);
   /// ACCOUNTANT = recorded by the accountant against an issued invoice whose customer has no open deal (no commission,
   /// a second person confirms unless the SoD setting allows self-approval — then sodBypass).
-  source               String          @default("SALES")
+  source               String           @default("SALES")
   invoiceId            String?
-  invoice              SalesInvoice?   @relation("CollectionInvoice", fields: [invoiceId], references: [id], onDelete: Restrict)
+  invoice              SalesInvoice?    @relation("CollectionInvoice", fields: [invoiceId], references: [id], onDelete: Restrict)
   /// RCT-YYYY-NNNNNN — given by the database at confirmation (sales_collection_receipt_guard), gapless, never changed.
-  receiptNumber        String?         @unique
+  receiptNumber        String?          @unique
   /// The cash / bank / card-clearing account the money went to (chosen at confirmation; frozen once decided).
   depositAccountId     String?
-  depositAccount       Account?        @relation("CollectionDepositAccount", fields: [depositAccountId], references: [id], onDelete: Restrict)
+  depositAccount       Account?         @relation("CollectionDepositAccount", fields: [depositAccountId], references: [id], onDelete: Restrict)
   receiptMemo          String?
   /// RETURN_FOR_CORRECTION on a REJECTED row = «إعادة للمندوب للتصحيح».
   decisionReasonCode   String?
   /// «نسخ وتصحيح»: the returned collection this one corrects (one correction per row).
-  replacesCollectionId String?         @unique
+  replacesCollectionId String?          @unique
   replacesCollection   SalesCollection? @relation("CollectionCorrection", fields: [replacesCollectionId], references: [id], onDelete: NoAction)
   correctedBy          SalesCollection? @relation("CollectionCorrection")
-  sodBypass            Boolean         @default(false)
+  sodBypass            Boolean          @default(false)
   // WP-B hook (qf-loc, 20261125090000_location_dimension): branchId «الموقع» is added there, not here.
 
   createdAt DateTime @default(now())
@@ -7322,11 +7358,14 @@ model ScheduledSlot {
   cancelledAt    DateTime?
   cancelledById  String?
   cancelReason   String?
+  /// Roasting station v2: ROASTED | DISCARDED — what became of the slot's roast (NULL: every V1 slot).
+  outcome        String?
   createdById    String?
   updatedById    String?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   batch          RoastingBatch?
+  roastRun       RoastRun?
 
   @@index([roasterId, startsAt])
   @@index([operatorId, startsAt])
@@ -7731,13 +7770,13 @@ model SalesInvoice {
   updatedAt          DateTime       @updatedAt
 
   lines              SalesInvoiceLine[]
-  applications       ArApplication[]    @relation("ArTarget")
-  creditApplications ArApplication[]    @relation("ArCreditSource")
+  applications       ArApplication[]            @relation("ArTarget")
+  creditApplications ArApplication[]            @relation("ArCreditSource")
   requestEvents      SalesInvoiceRequestEvent[]
 
   /// «الموقع» (20261125090000_location_dimension): the location (FinBranch) — NULL «غير محدد».
-  branchId String?
-  branch   FinBranch? @relation("SalesInvoiceBranch", fields: [branchId], references: [id], onDelete: Restrict)
+  branchId           String?
+  branch             FinBranch?         @relation("SalesInvoiceBranch", fields: [branchId], references: [id], onDelete: Restrict)
   /// «سند قبض» of an invoice with no deal (20261127090000_customer_receipts, source ACCOUNTANT).
   accountantReceipts SalesCollection[]  @relation("CollectionInvoice")
   /// «فاتورة قيود» (20261211090000_qoyod_pilot_invoices): Qoyod's tax-invoice PDF of this issued document.
@@ -7773,50 +7812,50 @@ model SalesInvoiceRequestEvent {
 }
 
 model SalesInvoiceLine {
-  id                  String             @id @default(cuid())
-  tenantId            String             @default("hiqbah")
-  invoiceId           String
-  invoice             SalesInvoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  position            Int                @default(0)
+  id                    String               @id @default(cuid())
+  tenantId              String               @default("hiqbah")
+  invoiceId             String
+  invoice               SalesInvoice         @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  position              Int                  @default(0)
   /// The order line it invoices (over-invoicing is refused by the database), the delivery it came from.
-  orderItemId         String?
-  deliveryId          String?
-  productSkuId        String?
+  orderItemId           String?
+  deliveryId            String?
+  productSkuId          String?
   /// A note's line: the original invoice line it credits / debits (a credit is capped by it).
-  originalLineId      String?
-  originalLine        SalesInvoiceLine?  @relation("NoteLines", fields: [originalLineId], references: [id], onDelete: Restrict)
-  noteLines           SalesInvoiceLine[] @relation("NoteLines")
-  description         String
-  descriptionEn       String?
-  skuCode             String?
-  quantity            Decimal            @db.Decimal(12, 3)
+  originalLineId        String?
+  originalLine          SalesInvoiceLine?    @relation("NoteLines", fields: [originalLineId], references: [id], onDelete: Restrict)
+  noteLines             SalesInvoiceLine[]   @relation("NoteLines")
+  description           String
+  descriptionEn         String?
+  skuCode               String?
+  quantity              Decimal              @db.Decimal(12, 3)
   /// UNIT | KG
-  unit                String             @default("UNIT")
-  unitPrice           Decimal            @db.Decimal(18, 2)
-  discountPercent     Decimal            @default(0) @db.Decimal(5, 2)
-  discountAmount      Decimal            @default(0) @db.Decimal(18, 2)
+  unit                  String               @default("UNIT")
+  unitPrice             Decimal              @db.Decimal(18, 2)
+  discountPercent       Decimal              @default(0) @db.Decimal(5, 2)
+  discountAmount        Decimal              @default(0) @db.Decimal(18, 2)
   /// S | Z | E | O (UNCL5305), with the exemption reason (code + text) for Z / E / O.
-  taxCategory         String             @default("S")
-  taxRatePercent      Decimal            @default(15) @db.Decimal(5, 2)
-  exemptionReasonCode String?
-  exemptionReason     String?
+  taxCategory           String               @default("S")
+  taxRatePercent        Decimal              @default(15) @db.Decimal(5, 2)
+  exemptionReasonCode   String?
+  exemptionReason       String?
   /// round(qty × price) − discount; the line VAT is informational (KSA-11), the document's is E-10.
-  lineNet             Decimal            @db.Decimal(18, 2)
-  lineTax             Decimal            @db.Decimal(18, 2)
-  lineTotal           Decimal            @db.Decimal(18, 2)
+  lineNet               Decimal              @db.Decimal(18, 2)
+  lineTax               Decimal              @db.Decimal(18, 2)
+  lineTotal             Decimal              @db.Decimal(18, 2)
   /// «شامل؟» (20261202090000_inclusive_entry): typed VAT-inclusive; unitPrice is the net the server derived from
   /// enteredGrossUnitPrice (round half-up, 2 dp — SalesInvoiceLine_inclusive_check). Kept for audit.
-  priceIncludesVat    Boolean            @default(false)
-  enteredGrossUnitPrice Decimal?         @db.Decimal(18, 2)
+  priceIncludesVat      Boolean              @default(false)
+  enteredGrossUnitPrice Decimal?             @db.Decimal(18, 2)
   /// «بيع أصل ثابت» (20261128090000_fa_sale_invoice): ITEM | FIXED_ASSET_SALE (CHECK). A sale line names the asset it sells
   /// and the disposal it will make (SALE | SCRAP); its net posts to FA_DISPOSAL_CLEARING, which the disposal clears.
-  kind                String             @default("ITEM")
-  fixedAssetId        String?
-  fixedAsset          FixedAsset?        @relation(fields: [fixedAssetId], references: [id], onDelete: Restrict)
-  disposalKind        String?
-  disposals           FixedAssetDisposal[]
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
+  kind                  String               @default("ITEM")
+  fixedAssetId          String?
+  fixedAsset            FixedAsset?          @relation(fields: [fixedAssetId], references: [id], onDelete: Restrict)
+  disposalKind          String?
+  disposals             FixedAssetDisposal[]
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
 
   @@index([invoiceId, position])
   @@index([orderItemId])
@@ -8233,30 +8272,30 @@ model SupplierCreditNote {
 
 /// A payment to a supplier, applied in full to its posted invoices. POSTED → VOIDED (reversed).
 model SupplierPayment {
-  id             String    @id @default(cuid())
-  tenantId       String    @default("hiqbah")
-  number         String    @unique
-  supplierId     String
-  supplier       Supplier  @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  paymentDate    DateTime  @db.Date
-  amount         Decimal   @db.Decimal(18, 2)
+  id                String    @id @default(cuid())
+  tenantId          String    @default("hiqbah")
+  number            String    @unique
+  supplierId        String
+  supplier          Supplier  @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  paymentDate       DateTime  @db.Date
+  amount            Decimal   @db.Decimal(18, 2)
   /// BANK_TRANSFER | CASH | CHEQUE
-  method         String
-  reference      String?
+  method            String
+  reference         String?
   /// POSTED | VOIDED
-  status         String    @default("POSTED")
-  journalEntryId String?
+  status            String    @default("POSTED")
+  journalEntryId    String?
   /// «الحساب» (paid from; 20261127090000_customer_receipts): a postable cash / bank account; posting credits it
   /// instead of the method's role account. Set at record time, never changed (supplier_payment_account_guard).
   paidFromAccountId String?
-  paidFromAccount   Account? @relation("SupplierPaymentPaidFrom", fields: [paidFromAccountId], references: [id], onDelete: Restrict)
+  paidFromAccount   Account?  @relation("SupplierPaymentPaidFrom", fields: [paidFromAccountId], references: [id], onDelete: Restrict)
   // WP-B hook (qf-loc): branchId «الموقع» is added by 20261125090000_location_dimension.
-  createdBy      String
-  voidedBy       String?
-  voidedAt       DateTime?
-  voidReason     String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  createdBy         String
+  voidedBy          String?
+  voidedAt          DateTime?
+  voidReason        String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   allocations SupplierPaymentAllocation[]
 
@@ -9618,34 +9657,34 @@ model RecurringSchedule {
 
 /// One run per (schedule, due date) — the run key.
 model RecurringRun {
-  id                String            @id @default(cuid())
-  tenantId          String            @default("hiqbah")
-  scheduleId        String
-  schedule          RecurringSchedule @relation(fields: [scheduleId], references: [id], onDelete: Restrict)
-  occurrenceIndex   Int
-  dueDate           DateTime          @db.Date
+  id                      String                 @id @default(cuid())
+  tenantId                String                 @default("hiqbah")
+  scheduleId              String
+  schedule                RecurringSchedule      @relation(fields: [scheduleId], references: [id], onDelete: Restrict)
+  occurrenceIndex         Int
+  dueDate                 DateTime               @db.Date
   /// CREATED | POSTED | SKIPPED | FAILED
-  status            String
+  status                  String
   /// The snapshot at the first attempt: what the run makes, and its auto-post authorisation (a retry makes exactly this).
-  payload           Json
-  autoPost          Boolean           @default(false)
-  autoPostBy        String?
-  autoPostSodBypass Boolean           @default(false)
+  payload                 Json
+  autoPost                Boolean                @default(false)
+  autoPostBy              String?
+  autoPostSodBypass       Boolean                @default(false)
   /// The StandingAuthorisation the snapshot's auto-post is made under (frozen with the snapshot; NULL = no auto-post).
   standingAuthorisationId String?
-  standingAuthorisation StandingAuthorisation? @relation(fields: [standingAuthorisationId], references: [id], onDelete: Restrict)
-  journalEntryId    String?
-  salesInvoiceId    String?
+  standingAuthorisation   StandingAuthorisation? @relation(fields: [standingAuthorisationId], references: [id], onDelete: Restrict)
+  journalEntryId          String?
+  salesInvoiceId          String?
   /// NOT_ACTIVE | BEFORE_GO_LIVE
-  skipReason        String?
-  errorCode         String?
-  errorMessage      String?
-  attempts          Int               @default(1)
+  skipReason              String?
+  errorCode               String?
+  errorMessage            String?
+  attempts                Int                    @default(1)
   /// CRON | MANUAL | RETRY
-  trigger           String
-  actorId           String
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @default(now()) @updatedAt
+  trigger                 String
+  actorId                 String
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @default(now()) @updatedAt
 
   @@unique([scheduleId, dueDate])
   @@index([status])
@@ -9842,30 +9881,30 @@ model FixedAssetEvent {
 
 /// A monthly depreciation run: one balanced entry; reversed only as a whole.
 model FixedAssetDepreciationRun {
-  id              String                       @id @default(cuid())
-  tenantId        String                       @default("hiqbah")
-  number          String                       @unique
-  year            Int
-  month           Int
-  periodEnd       DateTime                     @db.Date
+  id                      String                       @id @default(cuid())
+  tenantId                String                       @default("hiqbah")
+  number                  String                       @unique
+  year                    Int
+  month                   Int
+  periodEnd               DateTime                     @db.Date
   /// POSTED | REVERSED
-  status          String                       @default("POSTED")
-  totalAmount     Decimal                      @db.Decimal(18, 2)
-  assetCount      Int
+  status                  String                       @default("POSTED")
+  totalAmount             Decimal                      @db.Decimal(18, 2)
+  assetCount              Int
   /// POSTED | SKIPPED
-  glState         String
-  journalEntryId  String?
-  reversalEntryId String?
-  reversedAt      DateTime?
-  reversedBy      String?
-  reverseReason   String?
-  createdBy       String
-  createdAt       DateTime                     @default(now())
-  updatedAt       DateTime                     @default(now()) @updatedAt
-  lines           FixedAssetDepreciationLine[]
+  glState                 String
+  journalEntryId          String?
+  reversalEntryId         String?
+  reversedAt              DateTime?
+  reversedBy              String?
+  reverseReason           String?
+  createdBy               String
+  createdAt               DateTime                     @default(now())
+  updatedAt               DateTime                     @default(now()) @updatedAt
+  lines                   FixedAssetDepreciationLine[]
   /// The StandingAuthorisation (DEPRECIATION) the scheduler made it under; NULL = a person ran it.
   standingAuthorisationId String?
-  standingAuthorisation StandingAuthorisation? @relation(fields: [standingAuthorisationId], references: [id], onDelete: Restrict)
+  standingAuthorisation   StandingAuthorisation?       @relation(fields: [standingAuthorisationId], references: [id], onDelete: Restrict)
 
   @@index([year, month])
   @@index([standingAuthorisationId])
@@ -9936,28 +9975,28 @@ model FixedAssetAddition {
 /// A disposal (sale or scrap): depreciation to the disposal day, cost and accumulated derecognised, proceeds (and
 /// output VAT on a sale), gain / loss = proceeds net − net book value (CHECK).
 model FixedAssetDisposal {
-  id                  String     @id @default(cuid())
-  tenantId            String     @default("hiqbah")
-  number              String     @unique
+  id                  String            @id @default(cuid())
+  tenantId            String            @default("hiqbah")
+  number              String            @unique
   assetId             String
-  asset               FixedAsset @relation(fields: [assetId], references: [id], onDelete: Restrict)
-  disposalDate        DateTime   @db.Date
+  asset               FixedAsset        @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  disposalDate        DateTime          @db.Date
   /// SALE | SCRAP
   kind                String
-  proceedsNet         Decimal    @default(0) @db.Decimal(18, 2)
-  vatRate             Decimal    @default(0) @db.Decimal(5, 2)
-  vat                 Decimal    @default(0) @db.Decimal(18, 2)
+  proceedsNet         Decimal           @default(0) @db.Decimal(18, 2)
+  vatRate             Decimal           @default(0) @db.Decimal(5, 2)
+  vat                 Decimal           @default(0) @db.Decimal(18, 2)
   proceedsAccountId   String?
-  proceedsAccount     Account?   @relation("FaDisposalProceeds", fields: [proceedsAccountId], references: [id], onDelete: Restrict)
+  proceedsAccount     Account?          @relation("FaDisposalProceeds", fields: [proceedsAccountId], references: [id], onDelete: Restrict)
   buyerName           String?
   taxInvoiceRef       String?
-  catchUpDepreciation Decimal    @default(0) @db.Decimal(18, 2)
-  costRemoved         Decimal    @db.Decimal(18, 2)
-  accumRemoved        Decimal    @db.Decimal(18, 2)
-  gainLoss            Decimal    @db.Decimal(18, 2)
+  catchUpDepreciation Decimal           @default(0) @db.Decimal(18, 2)
+  costRemoved         Decimal           @db.Decimal(18, 2)
+  accumRemoved        Decimal           @db.Decimal(18, 2)
+  gainLoss            Decimal           @db.Decimal(18, 2)
   reason              String?
   before              Json
-  status              String     @default("POSTED")
+  status              String            @default("POSTED")
   glState             String
   journalEntryId      String?
   cancelEntryId       String?
@@ -9968,8 +10007,8 @@ model FixedAssetDisposal {
   salesInvoiceLineId  String?
   salesInvoiceLine    SalesInvoiceLine? @relation(fields: [salesInvoiceLineId], references: [id], onDelete: Restrict)
   createdBy           String
-  createdAt           DateTime   @default(now())
-  updatedAt           DateTime   @default(now()) @updatedAt
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @default(now()) @updatedAt
 
   @@index([disposalDate])
 }
@@ -10141,28 +10180,28 @@ model DeferralScheduleLine {
 /// accounting, type DEFERRAL_RUN). SKIPPED = accounting not active / before go-live (the lines are recorded, no entry —
 /// the existing pattern). REVERSED: its entry reversed and its lines PENDING again.
 model DeferralRun {
-  id              String                 @id @default(cuid())
-  tenantId        String                 @default("hiqbah")
-  periodStart     DateTime               @db.Date
-  entryDate       DateTime               @db.Date
+  id                      String                 @id @default(cuid())
+  tenantId                String                 @default("hiqbah")
+  periodStart             DateTime               @db.Date
+  entryDate               DateTime               @db.Date
   /// POSTED | SKIPPED | REVERSED (CHECK)
-  status          String
+  status                  String
   /// NOT_ACTIVE | BEFORE_GO_LIVE when SKIPPED.
-  skipReason      String?
-  journalEntryId  String?
-  total           Decimal                @db.Decimal(18, 2)
-  lineCount       Int
-  createdBy       String
-  createdAt       DateTime               @default(now())
-  updatedAt       DateTime               @default(now()) @updatedAt
-  reversedBy      String?
-  reversedAt      DateTime?
-  reverseReason   String?
-  reversalEntryId String?
-  lines           DeferralScheduleLine[]
+  skipReason              String?
+  journalEntryId          String?
+  total                   Decimal                @db.Decimal(18, 2)
+  lineCount               Int
+  createdBy               String
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @default(now()) @updatedAt
+  reversedBy              String?
+  reversedAt              DateTime?
+  reverseReason           String?
+  reversalEntryId         String?
+  lines                   DeferralScheduleLine[]
   /// The StandingAuthorisation (DEFERRAL_RECOGNITION) the scheduler made it under; NULL = a person ran it.
   standingAuthorisationId String?
-  standingAuthorisation StandingAuthorisation? @relation(fields: [standingAuthorisationId], references: [id], onDelete: Restrict)
+  standingAuthorisation   StandingAuthorisation? @relation(fields: [standingAuthorisationId], references: [id], onDelete: Restrict)
 
   @@index([periodStart])
   @@index([standingAuthorisationId])
@@ -10351,4 +10390,216 @@ model SalesPlanItem {
 
   @@index([employeeId, period, periodStart], map: "SalesPlanItem_employee_period_idx")
   @@index([customerId], map: "SalesPlanItem_customer_idx")
+}
+
+// ─── Roasting station v2 (P0, migration 20261223090000_roast_station_v2) ─────────────────────────────────────
+// Green weighed in advance into numbered buckets and moved to «منطقة التحميص» (a real immediate StockTransfer); each roast
+// charges one bucket; two consecutive roasts of the same coffee are weighed together as one lot (RoastingBatch).
+
+/// A weighing session: one operator moving green from one site to staging on one business day.
+model GreenPrepSession {
+  id                String        @id @default(cuid())
+  businessDay       DateTime      @db.Date
+  operatorId        String
+  operatorName      String?
+  sourceLocationId  String
+  sourceLocation    StockLocation @relation("PrepSource", fields: [sourceLocationId], references: [id], onDelete: Restrict)
+  stagingLocationId String
+  stagingLocation   StockLocation @relation("PrepStaging", fields: [stagingLocationId], references: [id], onDelete: Restrict)
+  /// OPEN | CLOSED
+  status            String        @default("OPEN")
+  note              String?
+  closedAt          DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @default(now()) @updatedAt
+  buckets           GreenBucket[]
+
+  @@index([businessDay, status], map: "GreenPrepSession_day_idx")
+}
+
+/// A numbered bucket of green coffee waiting in staging. One green lot per bucket (P0); its components say so.
+model GreenBucket {
+  id               String                 @id @default(cuid())
+  /// The label's barcode: GB-000123, from a sequence, never reused.
+  barcode          String                 @unique @default(dbgenerated("('GB-'::text || lpad((nextval('\"GreenBucket_barcode_seq\"'::regclass))::text, 6, '0'::text))"))
+  sessionId        String
+  session          GreenPrepSession       @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  /// The bucket's number within its session (the label's big number).
+  seqNo            Int
+  greenBeanId      String
+  greenBean        GreenBean              @relation(fields: [greenBeanId], references: [id], onDelete: Restrict)
+  /// The coffee it is weighed for (optional) and its colour key on the label.
+  productId        String?
+  product          CoffeeProduct?         @relation(fields: [productId], references: [id], onDelete: SetNull)
+  colorKey         String?
+  plannedKg        Decimal?               @db.Decimal(10, 3)
+  actualKg         Decimal                @db.Decimal(10, 3)
+  /// PREPARED | CHARGED | RETURNED | WRITTEN_OFF
+  status           String                 @default("PREPARED")
+  /// Where it waits (staging).
+  locationId       String
+  location         StockLocation          @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  transferId       String?
+  transfer         StockTransfer?         @relation("BucketPrep", fields: [transferId], references: [id], onDelete: Restrict)
+  returnTransferId String?
+  returnTransfer   StockTransfer?         @relation("BucketReturn", fields: [returnTransferId], references: [id], onDelete: Restrict)
+  labelPrintedAt   DateTime?
+  requestKey       String?                @unique
+  createdById      String
+  createdByName    String?
+  returnedAt       DateTime?
+  writtenOffAt     DateTime?
+  statusReason     String?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @default(now()) @updatedAt
+  components       GreenBucketComponent[]
+  runs             RoastRun[]
+
+  @@unique([sessionId, seqNo], map: "GreenBucket_session_seq_key")
+  @@index([status, createdAt], map: "GreenBucket_status_idx")
+  @@index([greenBeanId])
+}
+
+/// The green lot(s) in a bucket (one in P0; a table from day one so a green blend needs no rewrite).
+model GreenBucketComponent {
+  id          String      @id @default(cuid())
+  bucketId    String
+  bucket      GreenBucket @relation(fields: [bucketId], references: [id], onDelete: Cascade)
+  greenBeanId String
+  greenBean   GreenBean   @relation(fields: [greenBeanId], references: [id], onDelete: Restrict)
+  kg          Decimal     @db.Decimal(10, 3)
+  createdAt   DateTime    @default(now())
+
+  @@unique([bucketId, greenBeanId], map: "GreenBucketComponent_bucket_bean_key")
+  @@index([greenBeanId])
+}
+
+/// The cooler: the roasts weighed together. At most one OPEN per roaster (partial unique index "RoastBasket_one_open").
+model RoastBasket {
+  id         String         @id @default(cuid())
+  roasterId  String
+  roaster    Roaster        @relation(fields: [roasterId], references: [id], onDelete: Restrict)
+  /// What "the same coffee" means for pairing: the product.
+  coffeeKey  String
+  productId  String?
+  product    CoffeeProduct? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  /// OPEN (takes the next roast of the same coffee) | SEALED (awaits the weight) | RECORDED | CANCELLED
+  status     String         @default("OPEN")
+  /// «سجّلها لحالها»: sealed with one roast on purpose.
+  single     Boolean        @default(false)
+  sealedAt   DateTime?
+  recordedAt DateTime?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @default(now()) @updatedAt
+  runs       RoastRun[]
+  batch      RoastingBatch?
+
+  @@index([roasterId, status], map: "RoastBasket_roaster_status_idx")
+}
+
+/// The serial's daily counter: R-YYYYMMDD-NN.
+model RoastRunCounter {
+  day  DateTime @id @db.Date
+  last Int      @default(0)
+}
+
+/// One roast: a bucket charged into a roaster, dropped, then recorded with its basket — or discarded, or undone.
+/// Partial unique indexes: one CHARGED per roaster ("RoastRun_one_in_drum"); a bucket once unless UNDONE ("RoastRun_bucket_once").
+model RoastRun {
+  id              String         @id @default(cuid())
+  serial          String         @unique
+  bucketId        String
+  bucket          GreenBucket    @relation(fields: [bucketId], references: [id], onDelete: Restrict)
+  roasterId       String
+  roaster         Roaster        @relation(fields: [roasterId], references: [id], onDelete: Restrict)
+  productId       String
+  product         CoffeeProduct  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  /// Employee id (no FK, audit convention).
+  operatorId      String
+  operatorName    String?
+  greenKg         Decimal        @db.Decimal(10, 3)
+  /// CHARGED | DROPPED | RECORDED | DISCARDED | UNDONE
+  status          String         @default("CHARGED")
+  chargedAt       DateTime       @default(now())
+  droppedAt       DateTime?
+  coolerPosition  Int?
+  basketId        String?
+  basket          RoastBasket?   @relation(fields: [basketId], references: [id], onDelete: SetNull)
+  scheduledSlotId String?        @unique
+  scheduledSlot   ScheduledSlot? @relation(fields: [scheduledSlotId], references: [id], onDelete: SetNull)
+  profile         String?
+  /// The roaster's min–max acknowledged at charge (BELOW_MIN | ABOVE_MAX), and an admin who is not an assigned operator.
+  capacityAck     String?
+  adminBypass     Boolean        @default(false)
+  /// Idempotency keys of the charge, the drop and the discard.
+  chargeKey       String?        @unique
+  dropKey         String?        @unique
+  discardKey      String?        @unique
+  /// The Idempotency-Key of the last undo (a replay answers with the run as it is; the expected step guards the rest).
+  undoKey         String?        @unique
+  undoneAt        DateTime?
+  undoneById      String?
+  discardedAt     DateTime?
+  discardedById   String?
+  discardReason   String?
+  /// The discard's green cost (expensed to ROAST_DISCARD).
+  discardValue    Decimal?       @db.Decimal(18, 2)
+  /// A supervisor's review of a discard (never the discarding operator — CHECK).
+  reviewedAt      DateTime?
+  reviewedById    String?
+  reviewNote      String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @default(now()) @updatedAt
+
+  stationEvents RoastStationEvent[]
+
+  @@index([roasterId, status], map: "RoastRun_roaster_status_idx")
+  @@index([basketId])
+  @@index([status, reviewedAt], map: "RoastRun_discard_review_idx")
+}
+
+/// P2 (behind a flag): a lot split across order lines by green share. Created by P0, unused.
+model RoastLotAllocation {
+  id                String           @id @default(cuid())
+  batchId           String
+  batch             RoastingBatch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  orderItemId       String?
+  orderItem         OrderItem?       @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+  productionOrderId String?
+  productionOrder   ProductionOrder? @relation(fields: [productionOrderId], references: [id], onDelete: SetNull)
+  greenKg           Decimal          @db.Decimal(10, 3)
+  roastedKg         Decimal          @db.Decimal(10, 3)
+  createdAt         DateTime         @default(now())
+
+  @@index([batchId])
+  @@index([orderItemId])
+}
+
+/// «إبلاغ عن مشكلة» on a V2 roaster: PAUSE | MALFUNCTION, OPEN until resumed (one OPEN per roaster, "RoastStationEvent_one_open").
+/// No stock moves; the roaster's status is not changed (D13). A charge is refused while a problem is OPEN.
+model RoastStationEvent {
+  id             String    @id @default(cuid())
+  roasterId      String
+  roaster        Roaster   @relation(fields: [roasterId], references: [id], onDelete: Restrict)
+  /// PAUSE | MALFUNCTION
+  kind           String
+  /// BURNER_STOPPED | IRREGULAR_HEAT | COOLING_PROBLEM | OTHER
+  reason         String
+  note           String?
+  runId          String?
+  run            RoastRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+  /// The roaster at the report: the roast in the drum, the unweighed roasts.
+  roasterState   Json?
+  /// OPEN | RESOLVED
+  status         String    @default("OPEN")
+  reportedById   String
+  reportedByName String?
+  reportedAt     DateTime  @default(now())
+  reportKey      String    @unique
+  resolvedAt     DateTime?
+  resolvedById   String?
+  resolveKey     String?   @unique
+  resolveNote    String?
+
+  @@index([roasterId, reportedAt], map: "RoastStationEvent_roaster_idx")
 }

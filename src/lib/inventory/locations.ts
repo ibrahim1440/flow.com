@@ -31,6 +31,16 @@ export const TRANSIT_TYPE = "TRANSIT";
 export const TRANSIT_LABEL: [string, string] = ["في الطريق", "In transit"];
 export const isTransitLocation = (l: { id?: string; type?: string } | null | undefined) => !!l && (l.type === TRANSIT_TYPE || l.id === TRANSIT_LOCATION_ID);
 
+/**
+ * «منطقة التحميص» (20261223090000_roast_station_v2): the system location where green weighed into numbered buckets waits
+ * for the roaster (STAGING). A real location — its stock counts in the totals and valuation — reached by an immediate
+ * transfer from a site; a V2 roast draws its green there. Never default / production (database CHECK).
+ */
+export const STAGING_LOCATION_ID = "loc_roast_staging";
+export const STAGING_TYPE = "STAGING";
+export const STAGING_LABEL: [string, string] = ["منطقة التحميص", "Roasting staging"];
+export const isStagingLocation = (l: { id?: string; type?: string } | null | undefined) => !!l && (l.type === STAGING_TYPE || l.id === STAGING_LOCATION_ID);
+
 /** The seeded sites (ids only: their names, types, order and the default are the owner's to change). */
 export const SEEDED_LOCATIONS = { roastery: "loc_roastery", warehouse: "loc_warehouse", cafe: "loc_cafe" } as const;
 
@@ -52,7 +62,7 @@ export function locationName(l: Pick<LocationRow, "nameAr" | "nameEn">, lang: "a
 
 /** A location's type label («في الطريق» for the transit location). */
 export function locationTypeLabel(type: string, lang: "ar" | "en" | string): string {
-  const pair = type === TRANSIT_TYPE ? TRANSIT_LABEL : isLocationType(type) ? LOCATION_TYPE_LABEL[type] : null;
+  const pair = type === TRANSIT_TYPE ? TRANSIT_LABEL : type === STAGING_TYPE ? STAGING_LABEL : isLocationType(type) ? LOCATION_TYPE_LABEL[type] : null;
   return pair ? (lang === "en" ? pair[1] : pair[0]) : type;
 }
 

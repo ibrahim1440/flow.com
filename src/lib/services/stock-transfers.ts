@@ -48,7 +48,7 @@ import { SHORTFALL_ROLLING_DAYS, judgeShortfall, judgementWords, shortfallLimits
 import { dayText, parseBusinessDay, riyadhDay } from "@/lib/accounting/dates";
 import {
   TRANSIT_LOCATION_ID, covers, isTransitLocation, locationName, parseReceiveLines, parseTransferLines, shortRefusal, inactiveRefusal,
-  type StockItemKind, type TransferItemKind, type TransferMode,
+  type StockItemKind, type TransferItemKind, type TransferMode, type TransferLineInput,
 } from "@/lib/inventory/locations";
 import { applyInventoryAdjustment, type AdjustmentUser } from "./inventory-adjustment";
 import { locationQty, withBalanceWriter } from "./stock-locations";
@@ -333,10 +333,29 @@ export async function createTransfer(body: Record<string, unknown>, actor: Actor
 
   return prisma.$transaction(async (tx) => {
     await setAuditContext(tx, ctx);
+    const r = await createTransferTx(tx, { fromId, toId, mode, day, notes, requestKey, lines }, actor, ctx);
+    await flushPostings(tx);
+    return r;
+  }, { ...TX_OPTS, timeout: 60_000 });
+}
+
+/**
+ * The transfer itself, inside the caller's transaction (the caller set the audit context and flushes the postings — a
+ * transfer posts nothing, but the caller's other events may). Used by createTransfer and by the roasting station v2
+ * (a bucket of green to «منطقة التحميص», and back), so a bucket and its transfer are one commit.
+ */
+export async function createTransferTx(
+  tx: Tx,
+  input: { fromId: string; toId: string; mode: TransferMode; day: Date; notes: string | null; requestKey: string | null; lines: TransferLineInput[] },
+  actor: Actor,
+  ctx: AuditContext,
+): Promise<{ id: string; number: number; replayed: boolean }> {
+  const { fromId, toId, mode, day, notes, requestKey, lines } = input;
+  {
     if (requestKey) {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`stock-transfer:${requestKey}`}, 0))`;
-      const twin = await tx.stockTransfer.findUnique({ where: { requestKey }, select: { id: true } });
-      if (twin) return { id: twin.id, replayed: true };
+      const twin = await tx.stockTransfer.findUnique({ where: { requestKey }, select: { id: true, number: true } });
+      if (twin) return { id: twin.id, number: twin.number, replayed: true };
     }
     const [from, to] = await Promise.all([tx.stockLocation.findUnique({ where: { id: fromId } }), tx.stockLocation.findUnique({ where: { id: toId } })]);
     if (!from || !to) throw fail(404, "STOCK_LOCATION_NOT_FOUND", "الموقع غير موجود.", "Location not found.");
@@ -387,9 +406,8 @@ export async function createTransfer(body: Record<string, unknown>, actor: Actor
       moved.push({ lineNo: i + 1, itemKind: l.itemKind, entityId: l.entityId, code: it.code, name: it.nameAr ?? it.name, qty: l.qty, unit: it.unit, fromBefore: m.fromQty, fromAfter: m.fromAfter, toBefore: m.toQty, toAfter: m.toAfter, value: m.value });
     }
     await logTransfer(tx, ctx, twoStep ? "STOCK_TRANSFER_SENT" : "STOCK_TRANSFER_CREATED", t, { mode, from: { id: fromId, name: from.nameAr }, to: { id: toId, name: to.nameAr }, transferDate: dayText(day), lines: moved, notes });
-    await flushPostings(tx);
-    return { id: t.id, replayed: false };
-  }, { ...TX_OPTS, timeout: 60_000 });
+    return { id: t.id, number: t.number, replayed: false };
+  }
 }
 
 /**

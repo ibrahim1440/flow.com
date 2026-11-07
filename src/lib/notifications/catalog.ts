@@ -678,6 +678,36 @@ export const EVENTS: NotificationEventDef[] = [
     }),
   },
   {
+    // «محطة التحميص v2»: every discard (burnt roast) is reviewed by a supervisor within 24 h — never the discarding
+    // operator. Danger above 500 SAR or with more than 2 discards on the roaster's shift (the owner's alert).
+    key: "production.roast_discard", category: "production", severity: "warning",
+    label: { ar: "سُجّلت تحميصة تالفة (محروقة)", en: "A roast was discarded (burnt)" },
+    recipients: [{ perm: [{ module: "production", sub: "manage_schedule" }] }], requires: [MOD("production")],
+    trigger: "discardRun (lib/services/station/roast-v2.ts): a V2 roast discarded — once per roast",
+    render: (f) => ({
+      titleAr: `${f.alert ? "تنبيه · " : ""}تحميصة تالفة ${s(f.serial)}: ${s(f.kg)} كغ أخضر بقيمة ${s(f.value)} ر.س`,
+      titleEn: `${f.alert ? "Alert · " : ""}Roast ${s(f.serial)} discarded: ${s(f.kg)} kg of green worth ${s(f.value)} SAR`,
+      bodyAr: [`سجّلها ${s(f.byName)}`, `السبب: ${s(f.reason)}`, `تالف الوردية: ${s(f.shiftCount)}`, "راجعها خلال 24 ساعة (مشرف غير من سجّلها)."].join(" · "),
+      bodyEn: [`Recorded by \u2068${sEn(f, "byName")}\u2069`, `reason: \u2068${sEn(f, "reason")}\u2069`, `discards this shift: ${s(f.shiftCount)}`, "Review it within 24 hours (a supervisor other than the one who recorded it)."].join(" · "),
+      ...(f.alert ? { severity: "danger" as const } : {}),
+      link: "/dashboard/production",
+    }),
+  },
+  {
+    // «محطة التحميص v2»: a prepared bucket left in «منطقة التحميص» longer than 72 h — return it (a reverse transfer) or roast it.
+    key: "production.staging_stale", category: "production", severity: "warning",
+    label: { ar: "دلو بن أخضر ينتظر في منطقة التحميص أكثر من 72 ساعة", en: "A green bucket has waited in staging over 72 hours" },
+    recipients: [{ perm: [{ module: "production", sub: "manage_schedule" }] }], requires: [MOD("production")],
+    trigger: "notifyStaleBuckets (lib/services/station/roast-v2.ts) from the daily workspace cron — once per bucket",
+    render: (f) => ({
+      titleAr: `الدلو ${s(f.barcode)} في منطقة التحميص منذ ${s(f.hours)} ساعة`,
+      titleEn: `Bucket ${s(f.barcode)} has been in staging for ${s(f.hours)} hours`,
+      bodyAr: `${s(f.kg)} كغ من اللوت ${s(f.lot)}. حمّصه أو أرجعه لموقعه.`,
+      bodyEn: `${s(f.kg)} kg of lot ${s(f.lot)}. Roast it or return it to its site.`,
+      link: "/dashboard/production",
+    }),
+  },
+  {
     key: "production.roaster_status", category: "production", severity: "warning",
     label: { ar: "محمصة دخلت الصيانة أو توقفت", en: "A roaster under maintenance or stopped" },
     recipients: [{ perm: [{ module: "production", sub: "manage_schedule" }, { module: "production", sub: "manage_roasters" }] }, { person: "operators" }],

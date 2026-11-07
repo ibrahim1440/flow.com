@@ -47,6 +47,9 @@ export const ACCOUNT_ROLES: RoleDef[] = [
   { key: "COGS", ar: "تكلفة المبيعات (الجملة)", en: "COGS (wholesale)", group: "cost", phase: "A3", types: ["EXPENSE"], seedCode: "5200" },
   { key: "COGS_CAFE", ar: "تكلفة مبيعات المقهى", en: "COGS (café)", group: "cost", phase: "A3", types: ["EXPENSE"], seedCode: "5100" },
   { key: "ROAST_LOSS", ar: "فاقد التحميص غير الطبيعي", en: "Abnormal roast loss", group: "cost", phase: "A3", types: ["EXPENSE"], seedCode: "5410" },
+  // «محطة التحميص v2» (20261223090000_roast_station_v2): a burnt roast's full green cost, expensed at once; a supervisor reviews
+  // it (never the discarding operator). Kept apart from ROAST_LOSS (an abnormal loss on a roast that was weighed and kept).
+  { key: "ROAST_DISCARD", ar: "تالف التحميص (محروق)", en: "Roast discard (burnt)", group: "cost", phase: "A3", types: ["EXPENSE"], seedCode: "5415" },
   { key: "WASTAGE", ar: "الهالك والتالف", en: "Wastage & spoilage", group: "cost", phase: "A3", types: ["EXPENSE"], seedCode: "5400" },
   { key: "INVENTORY_VARIANCE", ar: "فروقات الجرد", en: "Inventory count variance", group: "cost", phase: "A3", types: ["EXPENSE"], seedCode: "5500" },
   { key: "PURCHASE_SHORTAGE", ar: "خسائر نقص المشتريات", en: "Purchase shortage losses", group: "cost", phase: "A3", types: ["EXPENSE"], seedCode: "5420" },

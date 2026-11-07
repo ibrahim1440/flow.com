@@ -41,17 +41,17 @@ export async function GET() {
     openQcBatches,
   ] = await Promise.all([
     prisma.roastingBatch.aggregate({
-      where: { createdAt: { gte: currentMonthStart }, roastedBeanQuantity: { gt: 0 }, isBlend: false },
+      where: { createdAt: { gte: currentMonthStart }, roastedBeanQuantity: { gt: 0 }, isBlend: false, status: { not: "Corrected" } },
       _sum: { roastedBeanQuantity: true, greenBeanQuantity: true },
       _count: { id: true },
     }),
     prisma.roastingBatch.aggregate({
-      where: { createdAt: { gte: prevMonthStart, lte: prevMonthEnd }, roastedBeanQuantity: { gt: 0 }, isBlend: false },
+      where: { createdAt: { gte: prevMonthStart, lte: prevMonthEnd }, roastedBeanQuantity: { gt: 0 }, isBlend: false, status: { not: "Corrected" } },
       _sum: { roastedBeanQuantity: true },
     }),
     // Fetch raw batch rows for loss calculation — only 2 float fields, very small payload
     prisma.roastingBatch.findMany({
-      where: { createdAt: { gte: thirtyDaysAgo }, roastedBeanQuantity: { gt: 0 }, greenBeanQuantity: { gt: 0 }, isBlend: false },
+      where: { createdAt: { gte: thirtyDaysAgo }, roastedBeanQuantity: { gt: 0 }, greenBeanQuantity: { gt: 0 }, isBlend: false, status: { not: "Corrected" } },
       select: { roastedBeanQuantity: true, greenBeanQuantity: true },
     }),
     prisma.qcRecord.groupBy({
@@ -69,7 +69,7 @@ export async function GET() {
     }),
     // Only 3 fields per batch for chart — minimal payload
     prisma.roastingBatch.findMany({
-      where: { createdAt: { gte: eightWeeksAgo }, roastedBeanQuantity: { gt: 0 }, isBlend: false },
+      where: { createdAt: { gte: eightWeeksAgo }, roastedBeanQuantity: { gt: 0 }, isBlend: false, status: { not: "Corrected" } },
       select: { createdAt: true, roastedBeanQuantity: true, greenBeanQuantity: true },
       orderBy: { createdAt: "asc" },
     }),

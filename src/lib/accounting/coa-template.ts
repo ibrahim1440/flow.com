@@ -9,6 +9,7 @@
 //   ★ 7300 gain / loss on disposal of fixed assets (IAS 16.68: a gain is not revenue — other income / expense);
 //   ★ the fixed-asset accounts (1210 … 1290) refuse manual journals: the fixed-asset register posts them;
 //   ★ 5410 abnormal roast loss (normal loss is absorbed into roasted cost; only loss above standard is expensed);
+//   ★ 5415 roast discard — a burnt roast at the roasting station v2, its full green cost (the ROAST_DISCARD role);
 //   ★ 2195 fixed-asset sale clearing (the FA_DISPOSAL_CLEARING role: a sale line «بيع أصل ثابت» credits it, the disposal clears it);
 //   ★ 2152 deferred revenue – subscriptions & prepaid orders (the DEFERRED_REVENUE role of «قوالب التأجيل»);
 //   ★ 6410 free promotional samples (the SAMPLES_EXPENSE role: a sample issued from stock, at its cost). In the 6400
@@ -107,6 +108,7 @@ const ROWS: T[] = [
   ["5300", "تكلفة مبيعات المتجر الإلكتروني", "COGS – online", X, D, "5000", true],
   ["5400", "الهالك والتالف", "Wastage & spoilage", X, D, "5000", true],
   ["5410", "فاقد التحميص غير الطبيعي", "Abnormal roast loss", X, D, "5000", true],
+  ["5415", "تالف التحميص (محروق)", "Roast discard (burnt)", X, D, "5000", true],
   ["5420", "خسائر نقص المشتريات", "Purchase shortage losses", X, D, "5000", true],
   ["5500", "فروقات الجرد", "Inventory count variance", X, D, "5000", true],
   ["5600", "تكاليف التحميص غير المباشرة المحملة", "Applied roasting overhead", X, C, "5000", true],

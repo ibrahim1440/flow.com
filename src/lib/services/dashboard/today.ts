@@ -101,11 +101,11 @@ export async function loadToday(now = new Date(), opts: { customerDetail: boolea
       where: { date: { gte: start, lt: end }, ...(Object.keys(mine).length ? { orderItem: { order: mine } } : {}) },
       select: { quantityKg: true, orderItem: { select: { orderId: true, order: { select: { id: true, orderNumber: true, status: true, createdAt: true, customer: { select: { name: true, nameAr: true } } } } } } },
     }),
-    prisma.roastingBatch.findMany({ where: { isBlend: false, date: { gte: start, lt: end } }, select: { greenBeanQuantity: true, roastedBeanQuantity: true } }),
+    prisma.roastingBatch.findMany({ where: { isBlend: false, status: { not: "Corrected" }, date: { gte: start, lt: end } }, select: { greenBeanQuantity: true, roastedBeanQuantity: true } }),
     prisma.greenBean.findMany({ where: { isActive: true }, select: { id: true, beanType: true, beanTypeAr: true, quantityKg: true } }),
     prisma.roastingBatch.groupBy({
       by: ["greenBeanId"],
-      where: { isBlend: false, date: { gte: windowStart, lte: now }, greenBeanId: { not: null } },
+      where: { isBlend: false, status: { not: "Corrected" }, date: { gte: windowStart, lte: now }, greenBeanId: { not: null } },
       _sum: { greenBeanQuantity: true },
     }),
   ]);

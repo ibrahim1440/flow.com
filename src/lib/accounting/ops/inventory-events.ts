@@ -147,24 +147,70 @@ export async function onAdjustment(tx: Tx, a: { kind: "GREEN_BEAN" | "MATERIAL";
  * WIP_ROASTING). A roast is recorded with its measured output in one step, so both events post in its transaction.
  */
 export async function onRoast(tx: Tx, a: { batchId: string; batchNumber: string; greenBeanId: string; greenKg: number; roastedKg: number; productId: string | null; actor: string; movementId?: string | null }) {
-  const holders = await lockHolders(tx, [{ kind: "GREEN_BEAN", entityId: a.greenBeanId }, { kind: "ROASTED_BATCH", entityId: a.batchId }]);
-  const green = holders.get(`GREEN_BEAN:${a.greenBeanId}`) as HolderRow;
+  return onRoastLot(tx, { batchId: a.batchId, batchNumber: a.batchNumber, components: [{ greenBeanId: a.greenBeanId, kg: a.greenKg, movementId: a.movementId }], roastedKg: a.roastedKg, productId: a.productId, actor: a.actor });
+}
+
+/** One green component a lot consumed: a bucket's lot (lineKey `bucket:<id>`), or the one lot of a V1 roast (no lineKey). */
+export type RoastComponent = { greenBeanId: string; kg: number; lineKey?: string; movementId?: string | null };
+
+/**
+ * A lot recorded from one or more green components (roasting station v2: the buckets of the roasts weighed together;
+ * a V1 roast is the one-component case, its movements identical to before). Each component leaves its own lot at that
+ * lot's moving average (one cost-out per component, lineKey `bucket:<id>`); the lot's cost is their sum — the weighted
+ * cost across the green lots. ONE GREEN_ISSUED entry (Dr WIP_ROASTING / Cr INVENTORY_GREEN per lot) and ONE COMPLETED
+ * entry on the lot totals (roasted cost, abnormal loss to ROAST_LOSS).
+ */
+export async function onRoastLot(tx: Tx, a: { batchId: string; batchNumber: string; components: RoastComponent[]; roastedKg: number; productId: string | null; actor: string }) {
+  if (!a.components.length) throw new Error("onRoastLot: no green component");
+  const holders = await lockHolders(tx, [...a.components.map((c) => ({ kind: "GREEN_BEAN" as CostKind, entityId: c.greenBeanId })), { kind: "ROASTED_BATCH", entityId: a.batchId }]);
   const roasted = holders.get(`ROASTED_BATCH:${a.batchId}`) as HolderRow;
   const issueSrc: Src = { module: "production", type: "ROAST_BATCH", id: a.batchId, event: "GREEN_ISSUED" };
   const doneSrc: Src = { module: "production", type: "ROAST_BATCH", id: a.batchId, event: "COMPLETED" };
-  const out = await costOut(tx, { holder: green, src: issueSrc, kind: "ISSUE", qty: kg(a.greenKg), actor: a.actor, inventoryMovementId: a.movementId });
-  const c = roastCost(kg(a.greenKg), kg(a.roastedKg), out.value, await abnormalThreshold(tx, a.productId));
+  const outs: { id: string; value: Decimal; greenBeanId: string; role: string }[] = [];
+  let greenKg = ZERO, greenValue = ZERO;
+  for (const c of a.components) {
+    const green = holders.get(`GREEN_BEAN:${c.greenBeanId}`) as HolderRow;
+    const out = await costOut(tx, { holder: green, src: issueSrc, lineKey: c.lineKey, kind: "ISSUE", qty: kg(c.kg), actor: a.actor, inventoryMovementId: c.movementId });
+    outs.push({ id: out.id, value: out.value, greenBeanId: c.greenBeanId, role: green.role });
+    greenKg = greenKg.plus(kg(c.kg)); // the weighed green (as before: the roast's loss is measured on what was charged)
+    greenValue = greenValue.plus(out.value);
+  }
+  const c = roastCost(greenKg, kg(a.roastedKg), greenValue, await abnormalThreshold(tx, a.productId));
   const inn = await costIn(tx, { holder: roasted, src: doneSrc, kind: "RECEIPT", qty: c.roastedKg, value: c.roastedCost, actor: a.actor, reason: c.abnormalCost.gt(0) ? `فاقد غير طبيعي ${c.abnormalLossKg.toFixed(3)} كغ` : null });
   const pDim = productDim(a.productId);
-  await postAndResolve(tx, [out.id], {
+  await postAndResolve(tx, outs.map((o) => o.id), {
     source: issueSrc, memo: `صرف بن أخضر للتحميص · دفعة ${a.batchNumber}`, createdBy: a.actor,
-    lines: [side("WIP_ROASTING", out.value, pDim), side(green.role, out.value.negated(), greenDim(a.greenBeanId))],
+    lines: [side("WIP_ROASTING", greenValue, pDim), ...outs.map((o) => side(o.role, o.value.negated(), greenDim(o.greenBeanId)))],
   });
   await postAndResolve(tx, [inn.id], {
     source: doneSrc, memo: `اكتمال التحميص · دفعة ${a.batchNumber} · فاقد ${c.lossPct.toFixed(2)}%`, createdBy: a.actor,
-    lines: [side(roasted.role, c.roastedCost, pDim), side("ROAST_LOSS", c.abnormalCost, pDim), side("WIP_ROASTING", out.value.negated(), pDim)],
+    lines: [side(roasted.role, c.roastedCost, pDim), side("ROAST_LOSS", c.abnormalCost, pDim), side("WIP_ROASTING", greenValue.negated(), pDim)],
   });
-  return c;
+  return { ...c, greenValue, components: outs.map((o) => ({ greenBeanId: o.greenBeanId, value: o.value })) };
+}
+
+/**
+ * A discarded (burnt) roast at the roasting station v2: its bucket's green leaves staging at the moving average and the
+ * full cost is expensed at once — Dr ROAST_DISCARD / Cr INVENTORY_GREEN per lot. No roasted stock, no RoastingBatch.
+ * `production · ROAST_RUN · DISCARDED`; one cost-out per component (lineKey `bucket:<id>`).
+ */
+export async function onRoastDiscard(tx: Tx, a: { runId: string; serial: string; components: RoastComponent[]; productId: string | null; reason: string; actor: string }) {
+  const holders = await lockHolders(tx, a.components.map((c) => ({ kind: "GREEN_BEAN" as CostKind, entityId: c.greenBeanId })));
+  const src: Src = { module: "production", type: "ROAST_RUN", id: a.runId, event: "DISCARDED" };
+  const outs: { id: string; value: Decimal; greenBeanId: string; role: string }[] = [];
+  let value = ZERO;
+  for (const c of a.components) {
+    const green = holders.get(`GREEN_BEAN:${c.greenBeanId}`) as HolderRow;
+    const out = await costOut(tx, { holder: green, src, lineKey: c.lineKey, kind: "WRITE_OFF", qty: kg(c.kg), actor: a.actor, inventoryMovementId: c.movementId, reason: a.reason });
+    outs.push({ id: out.id, value: out.value, greenBeanId: c.greenBeanId, role: green.role });
+    value = value.plus(out.value);
+  }
+  const pDim = productDim(a.productId);
+  await postAndResolve(tx, outs.map((o) => o.id), {
+    source: src, memo: `تالف تحميص (محروق) · ${a.serial} · ${a.reason}`.slice(0, 480), createdBy: a.actor,
+    lines: [side("ROAST_DISCARD", value, pDim), ...outs.map((o) => side(o.role, o.value.negated(), greenDim(o.greenBeanId)))],
+  });
+  return { value };
 }
 
 /**
@@ -173,7 +219,7 @@ export async function onRoast(tx: Tx, a: { batchId: string; batchNumber: string;
  * WASTAGE — or INVENTORY_VARIANCE when the roast itself was never posted). Not restocked: the roasted stock left is
  * written off (Dr WASTAGE / Cr INVENTORY_ROASTED). `production · ROAST_BATCH · CANCELLED`.
  */
-export async function onRoastCancelled(tx: Tx, a: { batchId: string; batchNumber: string; greenBeanId: string | null; greenKg: number; restock: boolean; productId: string | null; reason: string | null; actor: string; movementId?: string | null }) {
+export async function onRoastCancelled(tx: Tx, a: { batchId: string; batchNumber: string; greenBeanId: string | null; greenKg: number; restock: boolean; productId: string | null; reason: string | null; actor: string; movementId?: string | null; components?: RoastComponent[] }) {
   const src: Src = { module: "production", type: "ROAST_BATCH", id: a.batchId, event: "CANCELLED" };
   const roasted = await lockHolder(tx, "ROASTED_BATCH", a.batchId);
   const pDim = productDim(a.productId);
@@ -184,6 +230,8 @@ export async function onRoastCancelled(tx: Tx, a: { batchId: string; batchNumber
       lines: [side("WASTAGE", out.value, pDim), side(roasted.role, out.value.negated(), pDim)],
     });
   }
+  // A lot of several green components (roasting station v2): each comes back to ITS lot at the value it left with.
+  if (a.components?.length) return roastCancelledPerComponent(tx, { ...a, components: a.components }, src, roasted, pDim);
   const moves = await tx.costMove.findMany({ where: { sourceType: "ROAST_BATCH", sourceId: a.batchId, sourceEvent: { in: ["GREEN_ISSUED", "COMPLETED"] } }, select: { sourceEvent: true, value: true, glState: true } });
   const issued = moves.find((m) => m.sourceEvent === "GREEN_ISSUED");
   const completed = moves.find((m) => m.sourceEvent === "COMPLETED");
@@ -204,6 +252,41 @@ export async function onRoastCancelled(tx: Tx, a: { batchId: string; batchNumber
       side(roasted.role, out.value.negated(), pDim),
       side(wasPosted ? "ROAST_LOSS" : "INVENTORY_VARIANCE", abnormal.negated(), pDim),
       side(wasPosted ? "WASTAGE" : "INVENTORY_VARIANCE", writtenOff.negated(), pDim),
+    ],
+  });
+}
+
+/** onRoastCancelled for a lot of several components: each green component back to its own lot at its issue value. */
+async function roastCancelledPerComponent(tx: Tx, a: { batchId: string; batchNumber: string; components: RoastComponent[]; reason: string | null; actor: string }, src: Src, roasted: HolderRow, pDim: PostingDims | undefined) {
+  const moves = await tx.costMove.findMany({
+    where: { sourceType: "ROAST_BATCH", sourceId: a.batchId, sourceEvent: { in: ["GREEN_ISSUED", "COMPLETED"] } },
+    select: { sourceEvent: true, value: true, glState: true, lineKey: true, costItem: { select: { entityId: true } } },
+  });
+  const issued = moves.filter((m) => m.sourceEvent === "GREEN_ISSUED");
+  const completed = moves.find((m) => m.sourceEvent === "COMPLETED");
+  const holders = await lockHolders(tx, a.components.map((c) => ({ kind: "GREEN_BEAN" as CostKind, entityId: c.greenBeanId })));
+  const out = await costOut(tx, { holder: roasted, src, kind: "RETURN", qty: roasted.qty, closeOut: true, actor: a.actor, reason: a.reason });
+  const ids = [out.id];
+  const lines: ReturnType<typeof side>[] = [];
+  let g = ZERO;
+  for (const c of a.components) {
+    const green = holders.get(`GREEN_BEAN:${c.greenBeanId}`) as HolderRow;
+    const m = issued.find((x) => x.costItem.entityId === c.greenBeanId && x.lineKey === (c.lineKey ?? ""));
+    if (!m) throw new Error(`onRoastCancelled: no GREEN_ISSUED movement for ${c.greenBeanId} ${c.lineKey ?? ""}`);
+    const back = await costIn(tx, { holder: green, src, lineKey: c.lineKey, kind: "RETURN", qty: kg(c.kg), value: new Decimal(m.value).abs(), actor: a.actor, inventoryMovementId: c.movementId, reason: a.reason });
+    ids.push(back.id);
+    g = g.plus(back.value);
+    lines.push(side(green.role, back.value, greenDim(c.greenBeanId)));
+  }
+  const r = completed ? new Decimal(completed.value) : out.value;
+  const wasPosted = issued.some((m) => m.glState === "POSTED");
+  return postAndResolve(tx, ids, {
+    source: src, memo: `إلغاء دفعة ${a.batchNumber} وإرجاع البن الأخضر`, createdBy: a.actor,
+    lines: [
+      ...lines,
+      side(roasted.role, out.value.negated(), pDim),
+      side(wasPosted ? "ROAST_LOSS" : "INVENTORY_VARIANCE", g.minus(r).negated(), pDim),
+      side(wasPosted ? "WASTAGE" : "INVENTORY_VARIANCE", r.minus(out.value).negated(), pDim),
     ],
   });
 }
