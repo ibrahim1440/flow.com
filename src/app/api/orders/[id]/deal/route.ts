@@ -1,5 +1,6 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
+import { awaitingDiscountRefusal, isAwaitingDiscount } from "@/lib/services/orders/discount-hold";
 import { forbidden, requireAuth } from "@/lib/auth-server";
 import { hasModuleAccess } from "@/lib/auth-shared";
 import { handleDomainError } from "@/lib/api-error";
@@ -54,6 +55,8 @@ export async function POST(request: Request, { params }: Params) {
   if (error) return error;
   if (!hasModuleAccess(user.permissions, "orders") || !hasModuleAccess(user.permissions, "sales")) return forbidden();
   const { id } = await params;
+  // D10 gate H1: a direct sale waiting for its discount approval does not move (cancel aside).
+  { const h = await prisma.order.findUnique({ where: { id: id }, select: { discountApprovalStatus: true } }); if (isAwaitingDiscount(h?.discountApprovalStatus)) { const r = awaitingDiscountRefusal(); return NextResponse.json({ error: r.error, errorEn: r.errorEn, code: r.code }, { status: 409 }); } }
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 }); }
   const raw = (body ?? {}) as { opportunityId?: unknown };

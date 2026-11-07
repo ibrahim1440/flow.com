@@ -163,7 +163,7 @@ export function RepBook({
                   </div>
                   <div className="spg-acts">
                     {tel ? <a className="spg-ib" href={tel} aria-label={L(`اتصل بـ ${name(c)}`, `Call ${name(c)}`)} title={L("اتصال", "Call")}><Ico name="phone" small /></a> : null}
-                    <Link className="spg-ib" href={`/dashboard/orders?new=order&customerId=${encodeURIComponent(c.id)}`} aria-label={L(`طلب لـ ${name(c)}`, `Order for ${name(c)}`)} title={L("طلب", "Order")}><Ico name="orders" small /></Link>
+                    <Link className="spg-ib" href={`?new=order&customerId=${encodeURIComponent(c.id)}`} aria-label={L(`طلب لـ ${name(c)}`, `Order for ${name(c)}`)} title={L("طلب", "Order")}><Ico name="orders" small /></Link>
                     <Link className="spg-ib" href={`/dashboard/customers/${c.id}?new=quote`} aria-label={L(`عرض سعر لـ ${name(c)}`, `Quotation for ${name(c)}`)} title={L("عرض سعر", "Quotation")}><Ico name="quote" small /></Link>
                     <Link className="spg-ib" href={`/dashboard/customers/${c.id}?new=sample`} aria-label={L(`عيّنة لـ ${name(c)}`, `Sample for ${name(c)}`)} title={L("عيّنة", "Sample")}><Ico name="flask" small /></Link>
                     {!phone ? <button type="button" className="spg-ib" onClick={() => onPreview(c.id)} aria-label={L(`معاينة ${name(c)}`, `Preview ${name(c)}`)} title={L("معاينة", "Preview")} data-testid={`open-customer-${c.id}`}><Ico name="more" small /></button> : null}

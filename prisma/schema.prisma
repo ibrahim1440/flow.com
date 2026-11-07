@@ -589,6 +589,15 @@ model Order {
   /// «الموقع» (20261125090000_location_dimension): the location (FinBranch) — NULL «غير محدد».
   branchId String?
   branch   FinBranch? @relation("OrderBranch", fields: [branchId], references: [id], onDelete: Restrict)
+  /// «بيع مباشر» discount above the threshold (20261222090000_direct_sale_discount_approval): NONE | PENDING | APPROVED |
+  /// REJECTED. PENDING: the sale waits for sales › quote_approve_discount — no deal won, no invoice request, no collection.
+  discountApprovalStatus   String    @default("NONE")
+  requestedDiscountPercent Decimal?  @db.Decimal(9, 6)
+  discountApprovedById     String?
+  discountApprovedAt       DateTime?
+  discountRejectedById     String?
+  discountRejectedAt       DateTime?
+  discountRejectionNote    String?
 
   @@index([createdAt])
   @@index([customerId, createdAt])

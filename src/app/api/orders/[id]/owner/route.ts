@@ -1,5 +1,6 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
+import { awaitingDiscountRefusal, isAwaitingDiscount } from "@/lib/services/orders/discount-hold";
 import { assertAdminRoleGate, forbidden, requireAuth } from "@/lib/auth-server";
 import { hasModuleAccess } from "@/lib/auth-shared";
 import { handleDomainError } from "@/lib/api-error";
@@ -37,6 +38,8 @@ export async function PUT(request: Request, { params }: Params) {
     return NextResponse.json({ error: "ownerId must be an employee id or null." }, { status: 400 });
   }
   const nextOwnerId = ownerId === null ? null : (ownerId as string).trim();
+  // D10 gate H2 (low): the rep of a direct sale waiting for its discount stays its owner (the approval completes it as theirs).
+  { const h = await prisma.order.findUnique({ where: { id }, select: { discountApprovalStatus: true } }); if (isAwaitingDiscount(h?.discountApprovalStatus)) { const r = awaitingDiscountRefusal(); return NextResponse.json({ error: r.error, errorEn: r.errorEn, code: r.code }, { status: 409 }); } }
 
   try {
     const result = await prisma.$transaction(async (tx) => {

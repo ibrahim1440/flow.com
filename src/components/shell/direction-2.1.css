@@ -372,3 +372,26 @@
 .d21-out-go:hover { background: var(--action-danger-hover, var(--action-danger)) }
 .d21-out-no { background: var(--surface-subtle); color: var(--text-primary); border: 0 }
 .d21-out-go:focus-visible, .d21-out-no:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }
+
+/* D10 «طلب جديد» (Figma 1827:8 phone sheet / 1829:45 desktop dialog): two big options, «خيارات أخرى», «إلغاء». */
+.d21-no { gap: 12px }
+.d21-no-opts { display: grid; gap: 12px }
+.d21-no-opt { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 80px; padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text-primary); font: inherit; text-align: start; cursor: pointer }
+.d21-no-opt:hover { background: var(--surface-subtle) }
+.d21-no-opt:focus-visible, .d21-no-other:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }
+.d21-no-ico { flex: none; width: 48px; height: 48px; border-radius: 12px; background: var(--surface-subtle); display: grid; place-items: center; color: var(--text-primary) }
+.d21-no-ico svg { width: 24px; height: 24px }
+.d21-no-txt { flex: 1; display: grid; gap: 2px; min-width: 0 }
+.d21-no-txt b { font-size: 17px; font-weight: 600 }
+.d21-no-txt small { font-size: 13px; color: var(--text-secondary) }
+.d21-no-chev { flex: none; color: var(--text-secondary) }
+[dir="rtl"] .d21-no-chev svg { transform: scaleX(-1) }
+.d21-no-other { justify-self: center; min-height: 44px; padding: 4px 12px; border: 0; background: none; color: var(--action-primary); font: inherit; font-size: 14px; font-weight: 500; cursor: pointer }
+@media (min-width: 768px) {
+  .d21-out-scrim:has(.d21-no) { align-items: center }
+  .d21-no { max-width: 560px; border-radius: 12px; padding: 24px }
+  .d21-no .d21-out-grab { display: none }
+  .d21-no-opts { grid-template-columns: 1fr 1fr }
+  .d21-no-opt { flex-direction: column; align-items: flex-start; min-height: 0; padding: 20px 16px }
+  .d21-no-chev { display: none }
+}

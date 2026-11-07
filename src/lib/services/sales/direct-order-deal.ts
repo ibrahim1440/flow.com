@@ -31,6 +31,7 @@ import { hasModuleAccess, type Permissions } from "@/lib/auth-shared";
 import { audit } from "@/lib/hr/core";
 import { appendOrderActivity } from "@/lib/services/order-operations";
 import { DEFAULT_VAT_RATE } from "@/lib/services/invoicing/pricing";
+import { voidDirectSaleDrafts } from "@/lib/services/invoicing/service";
 import { seesAllSales } from "./scope";
 import { requireStageFor } from "./stages";
 import { syncDealAmount } from "./deal-amount";
@@ -212,6 +213,11 @@ async function isAutoDeal(tx: Tx, opportunityId: string): Promise<boolean> {
  * الطلب» (closed, a stage event, no automation event).
  */
 export async function refreshDirectOrderDeal(tx: Tx, input: { orderId: string; actorId: string; change: "edit" | "end"; remove?: boolean }) {
+  // D10 gate M2: a direct sale's invoice draft leaves the accountant's queue with its order (never issued for nothing).
+  if (input.change === "end") {
+    const voided = await voidDirectSaleDrafts(tx, { orderId: input.orderId, actorId: input.actorId, reason: "تلقائي: انلغى الطلب" });
+    if (voided.length) await audit(tx, { action: "DIRECT_SALE_INVOICE_VOIDED", entityType: "Order", entityId: input.orderId, actorId: input.actorId, after: { invoiceIds: voided } });
+  }
   const links = await tx.opportunityOrder.findMany({ where: { orderId: input.orderId, quoteId: null, directGross: { not: null } }, select: { id: true, opportunityId: true } });
   for (const link of links) {
     await tx.$queryRaw`SELECT "id" FROM "Opportunity" WHERE "id" = ${link.opportunityId} FOR UPDATE`;
@@ -243,7 +249,12 @@ export async function refreshDirectOrderDeal(tx: Tx, input: { orderId: string; a
         `لا يمكن ${input.remove ? "حذف" : "إلغاء"} الطلب وعلى صفقته تحصيل مسجّل (${claims.total.toFixed(2)} ر.س) أكبر مما يبقى بدونه (${documentGross.toFixed(2)} ر.س) — ارفض التحصيل المعلّق أو اعكس المعتمد أولًا، أو أصدر إشعارًا دائنًا.`,
         `The order cannot be ${input.remove ? "deleted" : "cancelled"}: its deal carries ${claims.total.toFixed(2)} SAR of collections, more than the ${documentGross.toFixed(2)} SAR left without it. Reject the pending collection or reverse the approved one first, or issue a credit note.`);
     }
-    if (!(await isAutoDeal(tx, link.opportunityId))) { await syncDealAmount(tx, link.opportunityId); continue; }
+    if (!(await isAutoDeal(tx, link.opportunityId))) {
+      await syncDealAmount(tx, link.opportunityId);
+      // «بيع مباشر» D1: the order that WON this (until then OPEN) deal ended, and nothing else keeps it won → OPEN again.
+      if (input.change === "end" && live.length === 0 && !quote) await reopenAfterDirectSale(tx, { opportunityId: link.opportunityId, orderId: input.orderId, actorId: input.actorId });
+      continue;
+    }
     const deal = await tx.opportunity.findUnique({ where: { id: link.opportunityId }, select: { outcome: true, stageId: true } });
     if (!deal) continue;
     // Past the rule above, claims ≤ the remaining document: the auto deal's amount is the remaining value; with no live
@@ -262,6 +273,31 @@ export async function refreshDirectOrderDeal(tx: Tx, input: { orderId: string; a
     }
     await audit(tx, { action: "DIRECT_ORDER_DEAL_REFRESHED", entityType: "Order", entityId: input.orderId, actorId: input.actorId, after: { opportunityId: link.opportunityId, change: input.change, removed: !!input.remove, liveGross: liveGross.toFixed(2), claimed: claims.total.toFixed(2) } });
   }
+}
+
+export const DIRECT_SALE_REOPEN_REASON = "تلقائي: رجعت الصفقة مفتوحة — انلغى الطلب";
+
+/**
+ * D1 (orchestrator default within the owner's «يرجع تلقائي», 6 Nov 2026): a direct sale that WON a deal which was OPEN
+ * before it puts the deal back — OPEN, its stage before the sale — once that order is cancelled, rejected or deleted, and
+ * only when no other live order or accepted quotation keeps it won (the caller checked). The state before the sale is
+ * read from the sale's own audit row (DIRECT_SALE_COMPLETED.after.priorDeal). A deal closed by hand since is left alone.
+ */
+async function reopenAfterDirectSale(tx: Tx, input: { opportunityId: string; orderId: string; actorId: string }) {
+  const sale = await tx.hrAuditLog.findFirst({ where: { action: "DIRECT_SALE_COMPLETED", entityType: "Order", entityId: input.orderId }, orderBy: { createdAt: "desc" }, select: { after: true } });
+  const prior = (sale?.after as { priorDeal?: { id?: string; outcome?: string; stageId?: string; amount?: string | null } | null } | null)?.priorDeal;
+  if (!prior || prior.id !== input.opportunityId || prior.outcome !== "OPEN" || !prior.stageId) return;
+  const deal = await tx.opportunity.findUnique({ where: { id: input.opportunityId }, select: { outcome: true, stageId: true } });
+  if (!deal || deal.outcome !== "WON") return;
+  const won = await tx.opportunityStageEvent.findFirst({ where: { opportunityId: input.opportunityId, toOutcome: "WON" }, orderBy: { createdAt: "desc" }, select: { reason: true } });
+  if (won?.reason !== "تلقائي: بيع مباشر") return;
+  const stage = await tx.pipelineStage.findUnique({ where: { id: prior.stageId }, select: { id: true, isActive: true } });
+  const toStageId = stage?.isActive ? stage.id : deal.stageId;
+  // Gate L2: the deal's amount before the sale comes back too (not the cancelled sale's).
+  await tx.opportunity.update({ where: { id: input.opportunityId }, data: { outcome: "OPEN", closedAt: null, stageId: toStageId, ...(prior.amount != null ? { amount: prior.amount } : {}) } });
+  await tx.opportunityStageEvent.create({ data: { opportunityId: input.opportunityId, fromStageId: deal.stageId, toStageId, fromOutcome: "WON", toOutcome: "OPEN", reason: DIRECT_SALE_REOPEN_REASON, actorId: input.actorId } });
+  await appendOrderActivity(tx, { orderId: input.orderId, type: "DEAL_REOPENED", authorId: input.actorId, authorName: "النظام", message: DIRECT_SALE_REOPEN_REASON, metadata: { opportunityId: input.opportunityId, toStageId } });
+  await audit(tx, { action: "DIRECT_SALE_DEAL_REOPENED", entityType: "Order", entityId: input.orderId, actorId: input.actorId, after: { opportunityId: input.opportunityId, toStageId } });
 }
 
 /** The accountant's receipts already on this order's invoices (APPROVED / PENDING), for the «اربط بصفقة» warning. */

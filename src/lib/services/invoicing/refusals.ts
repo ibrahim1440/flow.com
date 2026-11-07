@@ -14,6 +14,8 @@ export const INV_REFUSALS = {
   ORDER_NOT_FOUND: { status: 404, en: "Order not found.", ar: "الطلب غير موجود." },
   DRAFT_ONLY: { status: 409, en: "Only a draft can be edited or cancelled.", ar: "تُعدَّل المسودة أو تُلغى فقط؛ المستند الصادر لا يتغير." },
   ALREADY_CANCELLED: { status: 409, en: "This draft is cancelled.", ar: "هذه المسودة ملغاة." },
+  ORDER_AWAITING_DISCOUNT: { status: 409, en: "This direct sale is waiting for a supervisor's discount approval — no invoice before it.", ar: "الطلب بيع مباشر ينتظر موافقة المشرف على الخصم — ما تنسوّى فاتورة قبلها." },
+  ORDER_ENDED: { status: 409, en: "The order of this invoice was cancelled or rejected — it cannot be issued.", ar: "طلب هذه الفاتورة انلغى أو انرفض — ما تنصدر." },
   LINES_INVALID: { status: 400, en: "Some lines are not valid.", ar: "بعض البنود غير صحيحة." },
   NOT_READY: { status: 409, en: "The document cannot be issued yet.", ar: "لا يمكن إصدار المستند بعد." },
   OVER_INVOICED: { status: 409, en: "This would invoice more than the order line holds.", ar: "الكمية تتجاوز المتبقي دون فوترة على بند الطلب." },

@@ -21,6 +21,7 @@ import { defaultInvoiceBranch, orderBranchId, parseBranchId, sharedBranch } from
 import { notifyIssued, notifyRequested, writeRequestEvent } from "./request-events";
 import { commercialChanges, correctionDiff } from "./request-math";
 import { recomputeFlagsForInvoice } from "@/lib/services/orders/order-flags";
+import { isAwaitingDiscount } from "@/lib/services/orders/discount-hold";
 
 type Tx = Prisma.TransactionClient;
 const D = (v: { toString(): string } | null | undefined) => new Decimal(v == null ? 0 : v.toString());
@@ -302,8 +303,10 @@ async function insertDraft(tx: Tx, input: DraftInput, lines: CleanLine[], ext: {
   const customer = await tx.customer.findUnique({ where: { id: input.customerId }, select: { id: true, name: true, nameAr: true, vatNumber: true, commercialRegNo: true, city: true, address: true, phone: true, paymentTermsDays: true, unifiedNumber: true, nationalBuildingNo: true, nationalStreet: true, nationalDistrict: true, nationalCity: true, nationalPostalCode: true, nationalAdditionalNo: true } });
   if (!customer) throw refuseInv("CUSTOMER_NOT_FOUND");
   if (input.orderId) {
-    const o = await tx.order.findUnique({ where: { id: input.orderId }, select: { customerId: true } });
+    const o = await tx.order.findUnique({ where: { id: input.orderId }, select: { customerId: true, discountApprovalStatus: true } });
     if (!o) throw refuseInv("ORDER_NOT_FOUND");
+    // D10 gate H1: no draft of any kind for a direct sale still waiting for its discount approval.
+    if (isAwaitingDiscount(o.discountApprovalStatus)) throw refuseInv("ORDER_AWAITING_DISCOUNT");
     if (o.customerId !== customer.id) throw refuseInv("BAD_INPUT", "The order belongs to another customer.", "الطلب لعميل آخر.");
   } else if (lines.some((l) => l.orderItemId)) {
     throw refuseInv("BAD_INPUT", "Lines name order lines: give the order.", "البنود مرتبطة بطلب؛ حدّد الطلب.");
@@ -337,6 +340,7 @@ async function insertDraft(tx: Tx, input: DraftInput, lines: CleanLine[], ext: {
 
 /** «إنشاء فاتورة من الطلب»: a draft of what is left to invoice (or only what was delivered and not invoiced). */
 export async function draftFromOrder(orderId: string, opts: { basis?: "REMAINING" | "DELIVERED"; family?: InvoiceFamily; deliveryIds?: string[]; requestKey?: string | null }, ctx: AuditContext) {
+  if (isAwaitingDiscount((await prisma.order.findUnique({ where: { id: orderId }, select: { discountApprovalStatus: true } }))?.discountApprovalStatus)) throw refuseInv("ORDER_AWAITING_DISCOUNT");
   const facts = await orderInvoicing(prisma, orderId);
   if (!facts) throw refuseInv("ORDER_NOT_FOUND");
   const basis = opts.basis ?? "REMAINING";
@@ -368,6 +372,28 @@ export async function draftFromOrder(orderId: string, opts: { basis?: "REMAINING
 }
 
 /**
+ * «بيع مباشر»: the draft of a just-created order, inside the CALLER'S transaction (the caller sets the audit context), under
+ * its request key — the same key twice returns the first draft. Every ordered quantity at the SKU's catalogue price, so the
+ * draft equals what the order and its deal were priced at (priceDirectOrder). STANDARD family; the accountant may change it.
+ */
+export async function draftFromOrderIn(tx: Tx, orderId: string, requestKey: string, ctx: AuditContext, discountPercent = "0.00") {
+  const hit = await tx.salesInvoice.findUnique({ where: { requestKey }, select: { id: true } });
+  if (hit) return { id: hit.id, replayed: true };
+  const facts = await orderInvoicing(tx, orderId);
+  if (!facts) throw refuseInv("ORDER_NOT_FOUND");
+  const raw = facts.lines.filter((l) => new Decimal(l.remaining).greaterThan(0)).map((l) => ({
+    description: l.description, descriptionEn: l.descriptionEn, skuCode: l.skuCode, productSkuId: l.productSkuId, orderItemId: l.orderItemId, deliveryId: null,
+    quantity: l.remaining, unit: l.unit, unitPrice: l.price.unitPrice, discountPercent: l.price.source === "SKU" ? discountPercent : l.price.discountPercent,
+    taxCategory: "S", taxRatePercent: l.price.taxRatePercent ?? undefined,
+  }));
+  if (!raw.length) throw refuseInv("NOTHING_TO_INVOICE");
+  const { lines, problems } = parseLines(raw);
+  if (problems.length) throw refuseWith("LINES_INVALID", { problems });
+  const today = riyadhStamp(new Date()).day;
+  return insertDraft(tx, { customerId: facts.order.customerId, orderId, lines: raw, supplyDate: today, source: "ORDER", requestKey }, lines, null, ctx);
+}
+
+/**
  * ON_DELIVERY invoicing point: a recorded delivery opens (or extends) a DRAFT for what it shipped — one open
  * delivery draft per order. Called after the delivery committed; a failure never undoes the delivery (the
  * delivered quantity stays on «إنشاء فاتورة من الطلب»). Idempotent per delivery.
@@ -378,6 +404,7 @@ export async function draftOnDelivery(deliveryId: string, actorId: string): Prom
   const dl = await prisma.delivery.findUnique({ where: { id: deliveryId }, select: { id: true, orderItem: { select: { orderId: true } } } });
   if (!dl) return null;
   const orderId = dl.orderItem.orderId;
+  if (isAwaitingDiscount((await prisma.order.findUnique({ where: { id: orderId }, select: { discountApprovalStatus: true } }))?.discountApprovalStatus)) return null;
   return prisma.$transaction(async (tx) => {
     await setAuditContext(tx, { actorId, reason: "invoicing point: on delivery" });
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"sinv:order:" + orderId}, 0))`;
@@ -537,6 +564,25 @@ export async function cancelDraft(id: string, reason: string, ctx: AuditContext)
   }, TX_OPTS);
 }
 
+/**
+ * «بيع مباشر» (D10 gate M2): the order of a direct sale was cancelled, rejected or deleted — its invoice DRAFT (still in
+ * the accountant's queue) is cancelled with it, in the caller's transaction: the request leaves the queue (a CANCELLED
+ * history row) and the audit trail names the reason. An issued invoice is untouched (a credit note is the accountant's).
+ */
+export async function voidDirectSaleDrafts(tx: Tx, input: { orderId: string; actorId: string; reason: string }): Promise<string[]> {
+  const drafts = await tx.salesInvoice.findMany({ where: { orderId: input.orderId, kind: "INVOICE", status: "DRAFT", requestKey: { startsWith: "direct-sale:" } }, select: { id: true } });
+  if (!drafts.length) return [];
+  await setAuditContext(tx, { actorId: input.actorId, reason: input.reason });
+  for (const d of drafts) {
+    await lockDocument(tx, d.id);
+    const was = await tx.salesInvoice.findUniqueOrThrow({ where: { id: d.id }, select: { requestedAt: true, status: true } });
+    if (was.status !== "DRAFT") continue;
+    await tx.salesInvoice.update({ where: { id: d.id }, data: { status: "CANCELLED", cancelledAt: new Date(), cancelledById: input.actorId, cancelReason: input.reason.slice(0, 500), requestedAt: null } });
+    if (was.requestedAt) await writeRequestEvent(tx, { invoiceId: d.id, kind: "CANCELLED", actorId: input.actorId, reason: input.reason.slice(0, 1000) });
+  }
+  return drafts.map((d) => d.id);
+}
+
 // ── credit / debit notes ────────────────────────────────────────────────────────────────────────────
 
 export type NoteInput = { kind: "CREDIT_NOTE" | "DEBIT_NOTE"; reasonCode: unknown; reason: unknown; lines?: unknown; full?: boolean };
@@ -626,6 +672,13 @@ export async function issueDocument(id: string, ctx: AuditContext, now: Date = n
     if (row.status === "CANCELLED") throw refuseInv("ALREADY_CANCELLED");
     const doc = (await loadDocument(tx, id))!;
     if (row.status === "ISSUED") return { id, number: doc.number!, replayed: true, posting: { status: "replayed" } };
+    // Defence in depth (D10 gate M2): an invoice is never issued for an order that no longer exists as a sale.
+    // Only a direct sale's own draft (M4): an ordinary invoice of a cancelled order stays issuable — goods may have been
+    // delivered before the cancel.
+    if (doc.kind === "INVOICE" && doc.orderId && (await tx.salesInvoice.findUnique({ where: { id }, select: { requestKey: true } }))?.requestKey?.startsWith("direct-sale:")) {
+      const o = await tx.order.findUnique({ where: { id: doc.orderId }, select: { status: true } });
+      if (o && (o.status === "Cancelled" || o.status === "Rejected")) throw refuseInv("ORDER_ENDED");
+    }
     let sodBypass = false;
     if (doc.kind !== "INVOICE" && doc.createdById === ctx.actorId) {
       // The SoD setting (A5, src/lib/accounting/sod.ts; SIMPLE MODE always allows): the preparer issues their own

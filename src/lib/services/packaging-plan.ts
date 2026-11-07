@@ -65,7 +65,8 @@ export async function packagingPlan(db: Db, batch: IdentifiableBatch, availableG
           productSkuId: { in: skus.map((s) => s.id) },
           quantityUnits: { not: null },
           OR: [{ preparationDecision: null }, { preparationDecision: { not: "Blocked" } }],
-          order: { status: { in: [...OPEN_DEMAND_STATUSES] } },
+          // D10: a direct sale waiting for (or refused) its discount approval is not demand until it completes.
+          order: { status: { in: [...OPEN_DEMAND_STATUSES] }, discountApprovalStatus: { notIn: ["PENDING", "REJECTED"] } },
         },
         select: { id: true, productSkuId: true, quantityUnits: true, deliveredUnits: true, order: { select: { orderNumber: true, createdAt: true } } },
         orderBy: [{ order: { createdAt: "asc" } }],

@@ -10,6 +10,7 @@
 //   queue     GET  /api/sales/invoices/requests        invoices_issue: oldest first, aged in Riyadh business days
 //   «حفظ وإصدار»  POST /api/sales/invoices {issue: true, requestKey}  invoices_issue: create under the key, then issue
 import { prisma, TX_OPTS } from "@/lib/db";
+import type { Prisma } from "@/generated/prisma/client";
 import { setAuditContext, type AuditContext } from "@/lib/accounting/audit";
 import { assertSalesAllowed } from "@/lib/services/customers/credit-db";
 import { notify } from "@/lib/notifications/notify";
@@ -29,19 +30,25 @@ const clean = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/[
 export async function requestInvoice(id: string, note: unknown, ctx: AuditContext, now: Date = new Date()) {
   return prisma.$transaction(async (tx) => {
     await setAuditContext(tx, ctx);
-    const row = await lockDocument(tx, id);
-    if (row.status !== "DRAFT") throw refuseInv("DRAFT_ONLY");
-    const doc = (await loadDocument(tx, id))!;
-    if (doc.requestedAt) throw refuseInv("ALREADY_REQUESTED");
-    if (!doc.lines.length) throw refuseInv("LINES_INVALID", "(no lines)", "(لا بنود)");
-    if (doc.kind === "INVOICE" && !doc.orderId) await assertSalesAllowed(tx, doc.customerId, now);
-    const warnings = await draftProblems(tx, doc, now);
-    const requestNote = clean(note, 1000) || null;
-    await tx.salesInvoice.update({ where: { id }, data: { requestedAt: now, requestedById: ctx.actorId, requestNote } });
-    await writeRequestEvent(tx, { invoiceId: id, kind: "REQUESTED", actorId: ctx.actorId, reason: requestNote });
-    await notifyRequested(tx, doc, ctx.actorId, now);
-    return { id, requestedAt: now.toISOString(), warnings };
+    return requestInvoiceIn(tx, id, note, ctx, now);
   }, TX_OPTS);
+}
+
+/** requestInvoice inside the CALLER'S transaction (the caller sets the audit context) — «بيع مباشر» requests its draft
+ *  in the same transaction that creates the order. Same checks, same history row, same notification. */
+export async function requestInvoiceIn(tx: Prisma.TransactionClient, id: string, note: unknown, ctx: AuditContext, now: Date = new Date()) {
+  const row = await lockDocument(tx, id);
+  if (row.status !== "DRAFT") throw refuseInv("DRAFT_ONLY");
+  const doc = (await loadDocument(tx, id))!;
+  if (doc.requestedAt) throw refuseInv("ALREADY_REQUESTED");
+  if (!doc.lines.length) throw refuseInv("LINES_INVALID", "(no lines)", "(لا بنود)");
+  if (doc.kind === "INVOICE" && !doc.orderId) await assertSalesAllowed(tx, doc.customerId, now);
+  const warnings = await draftProblems(tx, doc, now);
+  const requestNote = clean(note, 1000) || null;
+  await tx.salesInvoice.update({ where: { id }, data: { requestedAt: now, requestedById: ctx.actorId, requestNote } });
+  await writeRequestEvent(tx, { invoiceId: id, kind: "REQUESTED", actorId: ctx.actorId, reason: requestNote });
+  await notifyRequested(tx, doc, ctx.actorId, now);
+  return { id, requestedAt: now.toISOString(), warnings };
 }
 
 /** «سحب الطلب»: the requester takes the draft back to edit it (it leaves the queue; nothing else changes). */

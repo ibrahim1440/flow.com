@@ -180,7 +180,7 @@ function MyDay() {
   const kinds = summaryOf(data.callList);
   const perms = user?.permissions;
   const acts = !ro && perms ? [
-    hasSubPrivilege(perms, "orders", "create") ? { href: "/dashboard/orders?new=order", ar: "+ طلب جديد", en: "+ New order", p: true, id: "md-new-order" } : null,
+    hasSubPrivilege(perms, "orders", "create") ? { href: "/dashboard/my-day?new=order", ar: "+ طلب جديد", en: "+ New order", p: true, id: "md-new-order" } : null,
     hasSubPrivilege(perms, "sales", "quote_write") ? { href: "/dashboard/sales/quotes/new", ar: "عرض سعر", en: "Quotation", p: false, id: "md-new-quote" } : null,
     hasSubPrivilege(perms, "sales", "collection_submit") ? { href: "/dashboard/sales/collections", ar: "تسجيل تحصيل", en: "Record a collection", p: false, id: "md-new-collection" } : null,
   ].filter((x): x is NonNullable<typeof x> => x !== null) : [];

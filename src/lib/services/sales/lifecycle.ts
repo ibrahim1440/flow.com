@@ -143,6 +143,8 @@ export async function winOnAcceptedQuote(
   tx: Tx,
   opportunityId: string,
   actorId: string,
+  /** The stage-event reason; «بيع مباشر» passes its own (the deal is won by the order, not by a quotation). */
+  reason = "Automatic: the customer accepted the quotation",
 ): Promise<boolean> {
   const locked = await tx.$queryRaw<{ id: string; stageId: string; outcome: string; customerId: string | null }[]>`
     SELECT "id", "stageId", "outcome"::text AS outcome, "customerId"
@@ -177,7 +179,7 @@ export async function winOnAcceptedQuote(
       toStageId: deal.stageId,
       fromOutcome: "OPEN",
       toOutcome: "WON",
-      reason: "Automatic: the customer accepted the quotation",
+      reason,
       actorId,
     },
   });

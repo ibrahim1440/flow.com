@@ -1,0 +1,99 @@
+/* «بيع مباشر» (D10, Figma 1827:2 frames B–E / DC). Quiet Ledger 2.1 tokens from the shell. */
+.ds { max-width: 880px; margin: 0 auto; padding: 8px 16px 24px; display: grid; gap: 14px; color: var(--text-primary) }
+.ds-head { display: flex; align-items: center; justify-content: space-between; gap: 8px }
+.ds-title { display: grid; text-align: center; gap: 0 }
+.ds-title h1 { margin: 0; font-size: 17px; font-weight: 600 }
+.ds-title span { font-size: 12.5px; color: var(--text-secondary) }
+.ds-ib, .ds-ib-ph { width: 44px; height: 44px; flex: none; border: 0; border-radius: 10px; background: none; color: var(--text-primary); display: grid; place-items: center; cursor: pointer }
+.ds-ib:hover { background: var(--surface-subtle) }
+.ds-ib.sm { width: 36px; height: 36px; color: var(--text-secondary) }
+[dir="ltr"] .ds-head .ds-ib:first-child svg { transform: scaleX(-1) }
+.ds-steps { display: flex; gap: 6px }
+.ds-steps i { flex: 1; height: 4px; border-radius: 2px; background: var(--surface-subtle) }
+.ds-steps i.on { background: var(--action-primary) }
+.ds-body { display: grid; gap: 14px; align-content: start }
+.ds-search { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 14px; border: 1px solid var(--border-control, var(--border-strong)); border-radius: 12px; background: var(--surface); color: var(--text-secondary) }
+.ds-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font: inherit; font-size: 16px; color: var(--text-primary) }
+.ds-search:focus-within { outline: 2px solid var(--focus-ring); outline-offset: 1px }
+.ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 16px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface); color: var(--text-primary); font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; text-decoration: none }
+.ds-btn:hover { background: var(--surface-hover, var(--surface-subtle)) }
+.ds-btn.p { background: var(--action-primary); border-color: var(--action-primary); color: var(--text-inverse, #fff) }
+.ds-btn.p:hover { background: var(--action-primary-hover, var(--action-primary)) }
+.ds-btn.g { border-color: transparent; background: none }
+.ds-btn.big { min-height: 52px; font-size: 16px; font-weight: 600; width: 100% }
+.ds-btn:disabled { opacity: .5; cursor: not-allowed }
+.ds-btn:focus-visible, .ds-row:focus-visible, .ds-link:focus-visible, .ds-qty button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }
+.ds-lbl { margin: 0; font-size: 13px; font-weight: 500; color: var(--text-secondary) }
+.ds-lbl.strong { font-size: 14px; font-weight: 600; color: var(--text-primary) }
+.ds-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px }
+.ds-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 12px; border: 1px solid var(--border-subtle, var(--border)); border-radius: 12px; background: var(--surface); color: inherit; font: inherit; text-align: start; cursor: pointer }
+.ds-row:hover { background: var(--surface-hover, var(--surface-subtle)) }
+.ds-row-txt { flex: 1; min-width: 0; display: grid; gap: 2px }
+.ds-row-txt b { font-size: 15px; font-weight: 600 }
+.ds-row-txt small { font-size: 12.5px; color: var(--text-secondary) }
+.ds-chev { color: var(--text-secondary); flex: none }
+[dir="rtl"] .ds-chev svg { transform: scaleX(-1) }
+.ds-empty { padding: 12px 0; font-size: 14px; color: var(--text-secondary) }
+.ds-card { border: 1px solid var(--border-subtle, var(--border)); border-radius: 14px; background: var(--surface); padding: 14px; display: grid; gap: 10px }
+.ds-chip { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 12px; background: var(--surface-subtle) }
+.ds-chip span { font-size: 13px; color: var(--text-secondary) }
+.ds-chip b { flex: 1; font-size: 14px }
+.ds-link { border: 0; background: none; padding: 6px 4px; min-height: 36px; color: var(--action-primary); font: inherit; font-size: 13.5px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 4px }
+.ds-item-top { display: flex; align-items: flex-start; gap: 8px }
+.ds-item-bot { display: flex; align-items: center; justify-content: space-between; gap: 8px }
+.ds-amt { font-size: 15px; font-weight: 600 }
+.ds-qty { display: inline-flex; align-items: center; border: 1px solid var(--border-strong); border-radius: 10px; overflow: hidden }
+.ds-qty button { width: 44px; height: 44px; border: 0; background: none; color: var(--text-primary); font: inherit; font-size: 18px; cursor: pointer }
+.ds-qty button:hover { background: var(--surface-subtle) }
+.ds-qty input { width: 52px; height: 44px; border: 0; text-align: center; font: inherit; font-size: 16px; font-weight: 600; background: none; color: var(--text-primary) }
+.ds-add { gap: 8px }
+.ds-disc { display: grid; grid-template-columns: auto 96px 1fr; align-items: center; gap: 8px }
+.ds-disc label { font-size: 14px; font-weight: 500 }
+.ds-disc input { height: 44px; padding: 0 10px; border: 1px solid var(--border-control, var(--border-strong)); border-radius: 10px; font: inherit; font-size: 16px; background: var(--surface); color: var(--text-primary) }
+.ds-disc .ds-link { justify-self: start }
+.ds-disc .ds-hint { grid-column: 1 / -1 }
+.ds-disc-on { justify-self: start }
+.ds-hint { margin: 0; font-size: 13px; color: var(--text-secondary) }
+.ds-hint.warn { color: var(--status-warning); font-weight: 500 }
+.ds-tot { display: grid; gap: 8px; padding: 14px; border-radius: 12px; background: var(--surface-subtle) }
+.ds-tot.flat { padding: 0; background: none }
+.ds-kvrow { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 14px }
+.ds-kvrow span { color: var(--text-secondary) }
+.ds-kvrow b { font-weight: 500 }
+.ds-kvrow.warn b { color: var(--status-warning) }
+.ds-kvrow.total { padding-top: 8px; border-top: 1px solid var(--border-subtle, var(--border)) }
+.ds-kvrow.total span { color: var(--text-primary); font-weight: 600; font-size: 15px }
+.ds-kvrow.total b { font-size: 17px; font-weight: 700 }
+.ds-side { display: grid; gap: 12px; align-content: start }
+.ds-choice { margin: 0; padding: 0; border: 0; display: flex; flex-wrap: wrap; gap: 8px }
+.ds-choice legend { width: 100%; margin-bottom: 8px; font-size: 14px; font-weight: 600 }
+.ds-choice label { position: relative; flex: 1 1 96px; min-height: 48px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface); font-size: 15px; font-weight: 500; cursor: pointer }
+.ds-choice label.on { border-color: var(--action-primary); background: var(--action-primary-tint, var(--surface-selected)); box-shadow: inset 0 0 0 1px var(--action-primary) }
+.ds-choice input { position: absolute; opacity: 0; pointer-events: none }
+.ds-choice label:focus-within { outline: 2px solid var(--focus-ring); outline-offset: 2px }
+.ds-what { list-style: none; margin: 0; background: var(--surface-subtle); border: 0 }
+.ds-what li { display: flex; align-items: center; gap: 10px; font-size: 14px }
+.ds-what svg { color: var(--action-primary); flex: none }
+.ds-foot { display: grid; gap: 8px; position: sticky; bottom: 0; padding: 12px 0 calc(8px + env(safe-area-inset-bottom)); background: var(--surface) }
+.ds-done { display: grid; gap: 12px; justify-items: center; text-align: center; padding-top: 48px; max-width: 480px; margin: 0 auto; width: 100% }
+.ds-done h1 { margin: 0; font-size: 22px; font-weight: 600 }
+.ds-done .ds-btn { width: 100% }
+.ds-ok { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; background: var(--status-success-tint); color: var(--status-success) }
+.ds-ok svg { width: 30px; height: 30px }
+.ds-mut { margin: 0; font-size: 14px; color: var(--text-secondary) }
+.ds-note { margin: 0; font-size: 13px; color: var(--text-secondary) }
+.ds-kv { width: 100%; margin: 0; text-align: start }
+.ds-kv div { display: flex; justify-content: space-between; gap: 12px; font-size: 14px }
+.ds-kv dt { color: var(--text-secondary) }
+.ds-kv dd { margin: 0; font-weight: 500 }
+.ds-good { color: var(--status-success) }
+.ds-warn { color: var(--status-warning) }
+@media (min-width: 900px) {
+  .ds-two { grid-template-columns: 1fr 300px; align-items: start }
+  .ds-side { position: sticky; top: 16px }
+  .ds-foot { position: static; max-width: 360px }
+}
+.ds-ok.wait { background: var(--status-warning-tint); color: var(--status-warning) }
+.ds-pending { background: var(--status-warning-tint); border: 0; gap: 4px; text-align: start }
+.ds-pending b { color: var(--status-warning); font-size: 14px }
+.ds-pending span { font-size: 13px; color: var(--text-primary) }

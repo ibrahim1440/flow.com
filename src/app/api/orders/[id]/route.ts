@@ -2,6 +2,7 @@ import { withdrawProvisionalPlansInTx } from "@/lib/services/production-schedule
 import { autoPrepareOrder } from "@/lib/services/orders/preparation";
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
+import { awaitingDiscountRefusal, isAwaitingDiscount } from "@/lib/services/orders/discount-hold";
 import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
@@ -42,6 +43,12 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   if (!(await orderInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   let body: Record<string, unknown>;
   try { body = (await request.json()) as Record<string, unknown>; } catch { body = {}; }
+  // D10 gate H1 / H2: a direct sale waiting for (or refused) its discount approval keeps its customer, lines, dates and
+  // branch exactly as the supervisor will see them — only `notes` may change until it completes.
+  if (Object.keys(body).some((k) => k !== "notes")) {
+    const h = await prisma.order.findUnique({ where: { id }, select: { discountApprovalStatus: true } });
+    if (isAwaitingDiscount(h?.discountApprovalStatus)) { const r = awaitingDiscountRefusal(); return NextResponse.json({ error: r.error, errorEn: r.errorEn, code: r.code }, { status: 409 }); }
+  }
 
   // ── Writable order fields, by allowlist ────────────────────────────────────
   // approvalStatus, approvalDate, paymentStatus and vatInvoiceStatus are deliberately absent:

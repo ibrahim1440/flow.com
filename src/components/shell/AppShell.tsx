@@ -18,6 +18,7 @@ import { BrandMark } from "@/components/brand/BrandMark";
 import { Ico, type D21IconName } from "./icons";
 import { customerActionHref, customerOfPath, shellCreates, type CreateAction } from "./creates";
 import { QuickJump, ShortcutsSheet, useTrap, type PalPage } from "./QuickJump";
+import { NewOrderSheet } from "./NewOrderSheet";
 import { CrumbsContext, PhoneContext, SectionPagesContext, TitleContext, type Crumb, type PhoneHeader, type SectionPages } from "./page-context";
 import "./direction-2.1.css";
 import { accountantEligible, accountantModeFor, accountantTree, activeAccountantItem, quickCreates, workspaceKey } from "@/lib/nav/accountant";
@@ -88,6 +89,29 @@ function SearchSync({ onChange }: { onChange: (s: string) => void }) {
   const params = useSearchParams();
   const s = params.toString();
   useEffect(() => { onChange(s); }, [s, onChange]);
+  return null;
+}
+
+/**
+ * D10: `?new=order` on any page (يومي's «طلب جديد», a customer row's order icon, shared links) opens «طلب جديد» —
+ * the same sheet as «＋ جديد › طلب». The request is taken off the address once (in its own Suspense boundary).
+ */
+function OrderRequestSync({ onAsk }: { onAsk: (customerId: string | null) => void }) {
+  const params = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const s = params.toString();
+  const handled = useRef<string | null>(null);
+  useEffect(() => {
+    const q = new URLSearchParams(s);
+    if (q.get("new") !== "order") { handled.current = null; return; }
+    if (handled.current === s) return;
+    handled.current = s;
+    onAsk(q.get("customerId"));
+    q.delete("new"); q.delete("customerId");
+    const rest = q.toString();
+    router.replace(rest ? `${pathname}?${rest}` : pathname, { scroll: false });
+  }, [s, onAsk, router, pathname]);
   return null;
 }
 
@@ -313,6 +337,8 @@ export function AppShell({
   const [palette, setPalette] = useState(false);
   // Batch 24 WP-A: «لأي عميل؟» for a «+ جديد» item done on a customer, and the «?» shortcuts sheet.
   const [pickFor, setPickFor] = useState<CreateAction | null>(null);
+  // D10 «طلب جديد»: open (with the customer when known) or closed.
+  const [orderSheet, setOrderSheet] = useState<{ customerId: string | null } | null>(null);
   const [keysOpen, setKeysOpen] = useState(false);
   const [more, setMore] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -325,11 +351,13 @@ export function AppShell({
   const returnTo = useRef<HTMLElement | null>(null);
   const openPalette = () => { returnTo.current = document.activeElement as HTMLElement | null; setPalette(true); };
   const openMore = () => { returnTo.current = moreRef.current; setMore(true); };
+  const askOrder = useCallback((customerId: string | null) => { returnTo.current = document.activeElement as HTMLElement | null; setOrderSheet({ customerId }); }, []);
+  const closeOrder = useCallback(() => setOrderSheet(null), []);
   useEffect(() => {
-    if (palette || more || pickFor || keysOpen || !returnTo.current) return;
+    if (palette || more || pickFor || keysOpen || orderSheet || !returnTo.current) return;
     returnTo.current.focus();
     returnTo.current = null;
-  }, [palette, more, pickFor, keysOpen]);
+  }, [palette, more, pickFor, keysOpen, orderSheet]);
 
   // «جديد» offers the create actions of the module you are in (owner decision A-3): several →
   // a menu, exactly one → the control opens it directly, none → no control.
@@ -352,10 +380,11 @@ export function AppShell({
   const pageCustomer = customerOfPath(pathname);
   const runCreate = useCallback((a: CreateAction) => {
     setCreate(null);
-    if (pageCustomer && (a.onCustomer || a.id === "orders.order.new")) { router.push(customerActionHref(a, pageCustomer)); return; }
+    if (a.id === "orders.order.new") { askOrder(pageCustomer); return; }
+    if (pageCustomer && a.onCustomer) { router.push(customerActionHref(a, pageCustomer)); return; }
     if (a.onCustomer) { returnTo.current = document.activeElement as HTMLElement | null; setPickFor(a); return; }
     router.push(a.href);
-  }, [pageCustomer, router]);
+  }, [pageCustomer, router, askOrder]);
   // A page button that starts one of these menu actions (e.g. «اطلب عيّنة» on «العيّنات», Figma page 10) asks the
   // shell through `requestShellCreate(id)`, so it gets the same «لأي عميل؟» picker and the same permission check.
   useEffect(() => {
@@ -500,7 +529,7 @@ export function AppShell({
         <span key={c.id} style={{ display: "contents" }}>
           {/* The sales menu's people («عميل جديد», «عميل محتمل») sit apart from the work (mockup «+ جديد»). */}
           {i > 0 && c.id === "customers.customer.new" ? <div className="d21-menu-sep" role="separator" /> : null}
-          {c.onCustomer || (pageCustomer && c.id === "orders.order.new") ? (
+          {c.onCustomer || c.id === "orders.order.new" ? (
             <button type="button" role="menuitem" className="d21-menu-item" data-testid={`d21-new-${c.id}`} onClick={() => runCreate(c)}>
               <span>{ar ? c.labelAr : c.labelEn}</span>{c.key ? <span className="d21-kbd" aria-hidden>{c.key}</span> : null}
             </button>
@@ -522,12 +551,14 @@ export function AppShell({
     <SectionPagesContext value={sectionPages}>
     <WorkspaceModeContext value={workspaceMode}>
     <div className="d21" lang={lang} dir={ar ? "rtl" : "ltr"} data-shell="d21" data-repbar={repTabs ? "true" : undefined}>
+      <Suspense fallback={null}><OrderRequestSync onAsk={askOrder} /></Suspense>
+      {orderSheet ? <NewOrderSheet ar={ar} viewer={viewer} customerId={orderSheet.customerId} onClose={closeOrder} /> : null}
       {askOut ? <LogoutSheet ar={ar} onCancel={() => setAskOut(false)} onConfirm={() => { setAskOut(false); onLogout(); }} /> : null}
       {/* IBM Plex, self-hosted (public/fonts): the same faces, files and unicode-range subsets
           Google Fonts served, so nothing is fetched from a third party. */}
       <link rel="stylesheet" precedence="default" href="/fonts/ibm-plex.css" />
       <a className="d21-skip" href="#d21-content">{ar ? "تجاوز إلى المحتوى" : "Skip to content"}</a>
-      <div className="d21-app" inert={palette || more || !!pickFor || keysOpen}>
+      <div className="d21-app" inert={palette || more || !!pickFor || keysOpen || !!orderSheet}>
         <aside className="d21-side" aria-label={ar ? "القائمة الجانبية" : "Sidebar"}>
           <div className="d21-brandbar">
             <span className="d21-mark"><BrandMark /></span>

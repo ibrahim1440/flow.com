@@ -1,5 +1,6 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
+import { awaitingDiscountRefusal, isAwaitingDiscount } from "@/lib/services/orders/discount-hold";
 import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import {
@@ -31,6 +32,8 @@ export async function POST(request: Request, { params }: Params) {
   if (error) return error;
 
   const { id } = await params;
+  // D10 gate H1: a direct sale waiting for its discount approval does not move (cancel aside).
+  { const h = await prisma.order.findUnique({ where: { id: id }, select: { discountApprovalStatus: true } }); if (isAwaitingDiscount(h?.discountApprovalStatus)) { const r = awaitingDiscountRefusal(); return NextResponse.json({ error: r.error, errorEn: r.errorEn, code: r.code }, { status: 409 }); } }
 
   let body: unknown;
   try {

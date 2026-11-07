@@ -166,6 +166,34 @@ export const EVENTS: NotificationEventDef[] = [
       link: `/dashboard/sales/quotes/${enc(s(f.quoteId))}`,
     }),
   },
+  // «بيع مباشر» (20261222090000_direct_sale_discount_approval): a direct sale with a discount above the threshold waits
+  // for the same approvers as a quotation's discount, in the same inbox.
+  {
+    key: "sales.direct_discount_pending", category: "sales", severity: "warning",
+    label: { ar: "بيع مباشر ينتظر اعتمادك للخصم", en: "A direct sale's discount awaits your approval" },
+    recipients: [{ perm: [sales("quote_approve_discount")] }], requires: [MOD("sales")], scope: "customer",
+    trigger: "createDirectSale / resubmitDirectSale — a direct sale with a discount above the threshold (POST /api/sales/direct-sale)",
+    render: (f) => ({
+      titleAr: `اعتمادك مطلوب: خصم ${s(f.percent)}٪ على الطلب ${s(f.orderNumber)} (بيع مباشر)`,
+      titleEn: `Your approval is needed: ${s(f.percent)}% discount on order ${s(f.orderNumber)} (direct sale)`,
+      bodyAr: s(f.customerName), bodyEn: s(f.customerName),
+      link: "/dashboard/workspace/approvals",
+    }),
+  },
+  {
+    key: "sales.direct_discount_decided", category: "sales", severity: "info",
+    label: { ar: "اعتُمد الخصم على بيعك المباشر أو رُفض", en: "The discount on your direct sale approved / refused" },
+    recipients: [{ person: "orderOwner" }], requires: [MOD("sales")],
+    trigger: "POST /api/sales/direct-sale/[orderId]/discount-approval (decideDirectSaleDiscount)",
+    render: (f) => ({
+      severity: f.decision === "APPROVE" ? "success" : "warning",
+      titleAr: f.decision === "APPROVE" ? `اعتُمد الخصم — الطلب ${s(f.orderNumber)} راح للمحاسب` : `الخصم انرفض على الطلب ${s(f.orderNumber)}`,
+      titleEn: f.decision === "APPROVE" ? `Discount approved — order ${s(f.orderNumber)} went to the accountant` : `The discount on order ${s(f.orderNumber)} was refused`,
+      bodyAr: f.decision === "APPROVE" ? s(f.note) : `${s(f.note)} — أرسله بخصم ${s(f.threshold)}٪ أو أقل، أو ألغِ الطلب.`.replace(/^ — /, ""),
+      bodyEn: f.decision === "APPROVE" ? s(f.note) : `${s(f.note)} — resubmit at ${s(f.threshold)}% or less, or cancel the order.`.replace(/^ — /, ""),
+      link: `/dashboard/sales/direct-sale?order=${enc(s(f.orderId))}`,
+    }),
+  },
   // Readiness review P1-6: samples and stage-move requests were pull-only (the approvals inbox, the dispatch tab).
   {
     key: "sales.sample_requested", category: "sales", severity: "info",

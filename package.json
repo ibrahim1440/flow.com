@@ -65,7 +65,7 @@
     "test:workspace:db": "tsx --import ./tests/support/simple-mode-off.mjs --import ./tests/support/server-only-stub.mjs --test --test-concurrency=1 --test-force-exit tests/workspace/db/*.test.ts",
     "test:workspace:visual": "node --test --test-concurrency=1 tests/workspace/visual/*.test.mjs",
     "test:accounting:unit": "tsx --import ./tests/support/simple-mode-off.mjs --test tests/accounting/unit/*.test.ts",
-    "test:accounting:db": "tsx --import ./tests/support/simple-mode-off.mjs --test --test-concurrency=1 --test-force-exit tests/accounting/db/*.test.ts",
+    "test:accounting:db": "tsx --import ./tests/support/server-only-stub.mjs --import ./tests/support/simple-mode-off.mjs --test --test-concurrency=1 --test-force-exit tests/accounting/db/*.test.ts",
     "test:accounting:http": "tsx --test --test-concurrency=1 tests/accounting/http/*.test.ts",
     "test:zatca:unit": "tsx --import ./tests/support/simple-mode-off.mjs --test tests/zatca/unit/*.test.ts",
     "test:zatca:db": "tsx --import ./tests/support/simple-mode-off.mjs --test --test-concurrency=1 --test-force-exit tests/zatca/db/*.test.ts",

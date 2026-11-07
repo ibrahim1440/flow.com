@@ -17,7 +17,9 @@ import { listRequests, assessLeave } from "@/lib/hr/services/leave";
 import { listAdvances } from "@/lib/hr/services/advances";
 import { discountThreshold } from "@/lib/services/sales/quote-settings";
 import { discountApprovalState, priceQuote } from "@/lib/services/sales/quotes";
-import { seesAllSales } from "@/lib/services/sales/scope";
+import { ownedCustomerWhere, seesAllSales } from "@/lib/services/sales/scope";
+import { Prisma } from "@/generated/prisma/client";
+import { priceDirectSale } from "@/lib/services/sales/direct-sale";
 import { approvesSamples } from "@/lib/services/sales/sample-rules";
 import { approvalQueue } from "@/lib/finance/server/approvals";
 import { leaveTypeName } from "@/lib/i18n/hr";
@@ -161,6 +163,47 @@ async function discountItems(actor: WsActor): Promise<ApprovalItem[]> {
   return out;
 }
 
+/** «بيع مباشر» waiting for its discount (20261222090000_direct_sale_discount_approval) — the same approvers and the same
+ *  rules as a quotation's discount, decided at POST /api/sales/direct-sale/[orderId]/discount-approval. */
+async function directSaleDiscountItems(actor: WsActor): Promise<ApprovalItem[]> {
+  if (!hasSubPrivilege(actor.permissions, "sales", "quote_approve_discount")) return [];
+  const threshold = await discountThreshold(prisma);
+  const scopeAll = seesAllSales(actor.permissions);
+  const orders = await prisma.order.findMany({
+    where: { discountApprovalStatus: "PENDING", status: { notIn: ["Cancelled", "Rejected"] }, ...(scopeAll ? {} : { customer: ownedCustomerWhere(actor.id) }) },
+    orderBy: { createdAt: "asc" }, take: 200,
+    select: { id: true, orderNumber: true, ownerId: true, createdAt: true, requestedDiscountPercent: true, customer: { select: { name: true, nameAr: true } }, owner: { select: { name: true } },
+      items: { select: { productSkuId: true, quantityUnits: true } } },
+  });
+  const out: ApprovalItem[] = [];
+  for (const o of orders) {
+    if (!isSimpleMode() && o.ownerId === actor.id) continue;
+    const pct = new Prisma.Decimal((o.requestedDiscountPercent ?? 0).toString());
+    // Gate L4: a sale whose price cannot be computed now (a SKU deactivated or unpriced since) stays in the inbox with a
+    // warning — never silently dropped; approving it is refused by the service until the price is fixed.
+    let priced: Awaited<ReturnType<typeof priceDirectSale>> | null = null;
+    let priceProblem: string | null = null;
+    try { priced = await priceDirectSale(prisma, o.items.filter((i) => i.productSkuId && i.quantityUnits).map((i) => ({ productSkuId: i.productSkuId!, quantityUnits: i.quantityUnits! })), pct); }
+    catch (e) { priceProblem = (e as { errorAr?: string })?.errorAr ?? "تعذّر حساب السعر."; }
+    const p = pct.toDecimalPlaces(2).toString();
+    out.push({
+      key: `DISCOUNT:order:${o.id}`, type: "DISCOUNT", id: o.id,
+      title: `خصم ${p}% · بيع مباشر · طلب ${o.orderNumber}`, titleEn: `Discount ${p}% · direct sale · order ${o.orderNumber}`,
+      requester: o.owner?.name ?? null, subject: o.customer.nameAr || o.customer.name, subjectEn: o.customer.name,
+      createdAt: iso(o.createdAt),
+      facts: {
+        orderNumber: o.orderNumber, customer: o.customer.nameAr || o.customer.name, dealOwner: o.owner?.name ?? null,
+        discountPercent: p, thresholdPercent: threshold.toString(), subtotal: priced?.subtotal ?? null, discountTotal: priced?.discount ?? null, grandTotal: priced?.gross ?? null, currency: "SAR",
+      },
+      warnings: priceProblem ? [{ ar: `ما ينحسب سعر الطلب الحين: ${priceProblem} — صحّح الصنف أو ارفض الخصم.`, en: "The order cannot be priced now (a product is unavailable or unpriced) — fix the product or refuse the discount." }] : [],
+      decide: { url: `/api/sales/direct-sale/${encodeURIComponent(o.id)}/discount-approval`, rejectNeedsReason: true, expected: { discountPercent: p, ...(priced ? { grandTotal: priced.gross } : {}) }, stepUp: true },
+      openUrl: `/dashboard/orders?order=${o.orderNumber}`,
+      notice: { ar: "اعتماد الخصم يكمّل البيع: تنقفل الصفقة رابحة وتروح الفاتورة للمحاسب يصدرها.", en: "Approving completes the sale: the deal is won and the invoice goes to the accountant to issue." },
+    });
+  }
+  return out;
+}
+
 // «للعميل من كل محصول عيّنة واحدة» (20261205090000_sample_approval): a customer's second sample of a coffee product
 // waits for the sales manager or the administrator (approvesSamples). Decided at POST /api/sales/samples/[id]/approval
 // (APPROVE, or REJECT = decline with the reason), which re-checks the duty and the state under the sample's lock.
@@ -271,7 +314,7 @@ async function marketingItems(actor: WsActor): Promise<ApprovalItem[]> {
 }
 
 const SOURCES: [ApprovalType, (a: WsActor) => Promise<ApprovalItem[]>][] = [
-  ["LEAVE", leaveItems], ["ADVANCE", advanceItems], ["DISCOUNT", discountItems], ["SAMPLE", sampleItems], ["STAGE_MOVE", stageMoveItems], ["FINANCE", financeItems], ["MARKETING", marketingItems],
+  ["LEAVE", leaveItems], ["ADVANCE", advanceItems], ["DISCOUNT", async (a: WsActor) => [...(await discountItems(a)), ...(await directSaleDiscountItems(a))]], ["SAMPLE", sampleItems], ["STAGE_MOVE", stageMoveItems], ["FINANCE", financeItems], ["MARKETING", marketingItems],
 ];
 
 export async function myApprovals(actor: WsActor, only?: ApprovalType | null) {

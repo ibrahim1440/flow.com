@@ -1,7 +1,8 @@
 "use client";
 import { CustomerCreditNotice } from "@/components/credit/credit-ui";
 import { localizeApiError } from "@/lib/i18n/api-errors";
-import { useCreateRequest } from "@/components/shell/page-context";
+import { requestShellCreate, useCreateRequest } from "@/components/shell/page-context";
+import { customersScopedToOwner } from "@/lib/services/sales/scope";
 
 import { useState, useEffect, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -113,6 +114,17 @@ type GreenBean = { id: string; serialNumber: string; beanType: string; quantityK
 type ProductSku = { id: string; skuCode: string; weightGrams: number; isBulk: boolean; price: number };
 type ProductSummary = { id: string; productNameEn: string; productNameAr: string | null; productSkus: ProductSku[] };
 
+/** «بيع مباشر» whose discount waits for a supervisor, or was refused (20261222090000_direct_sale_discount_approval). */
+function DiscountWait({ order, ar }: { order: { discountApprovalStatus?: string | null; orderNumber: number }; ar: boolean }) {
+  const s = order.discountApprovalStatus;
+  if (s !== "PENDING" && s !== "REJECTED") return null;
+  return (
+    <span className="hr-badge" style={{ marginInlineStart: 6, background: "var(--status-warning-tint)", color: "var(--status-warning)" }} data-testid={`order-discount-${order.orderNumber}`}>
+      {s === "PENDING" ? (ar ? "بانتظار موافقة الخصم" : "Waiting for discount approval") : (ar ? "الخصم انرفض" : "Discount refused")}
+    </span>
+  );
+}
+
 function StatusBadge({ status }: { status: string }) {
   const { t } = useI18n();
   const cls =
@@ -174,7 +186,10 @@ export default function OrdersPage() {
   // «جديد» from the shell (A-3): `?new=1` opens the same form as «طلب جديد».
   // Batch 24 WP-A: «+ جديد › طلب» from a customer page carries `customerId`, so the form opens on that customer.
   const askedCustomer = params.get("customerId");
-  useCreateRequest("order", () => { setShowForm(true); if (askedCustomer) setForm((f) => ({ ...f, customerId: askedCustomer })); }, canCreate);
+  // D10: `?new=order` is the shell's «طلب جديد» question now (NewOrderSheet); this form is «خيارات أخرى · طلب داخلي بدون
+  // فاتورة» — `?new=internal`, for operations and administration only (never a scoped sales rep, owner-approved plan).
+  const internalOrders = canCreate && !!user && !customersScopedToOwner({ role: user.role, permissions: user.permissions });
+  useCreateRequest("internal", () => { setShowForm(true); if (askedCustomer) setForm((f) => ({ ...f, customerId: askedCustomer })); }, internalOrders);
   // In-flight guard for the create-order write, so the button cannot be pressed twice.
   //
   // Two flags on purpose. The state drives the disabled attribute; the ref is what
@@ -485,7 +500,7 @@ export default function OrdersPage() {
                   <Link href="/station/packaging" className="hr-btn" data-testid="open-preparation-station"><PackageCheck size={15} aria-hidden="true" /> {t("opsOpenPackagingStation")}</Link>
                 ) : null}
                 {canCreate ? (
-                  <Btn variant="primary" onClick={() => setShowForm(true)}>
+                  <Btn variant="primary" onClick={() => requestShellCreate("orders.order.new")} data-testid="orders-new">
                     <Plus size={16} aria-hidden="true" /> {t("newOrder")}
                   </Btn>
                 ) : null}
@@ -758,7 +773,7 @@ export default function OrdersPage() {
                         <td className="num hr-hide-preview">{order.items.length}</td>
                         <td className="num">{kg(totalKg(order))}</td>
                         <td className="hr-hide-preview">{opsDate(order.createdAt, lang)}</td>
-                        <td className="m-end"><OrderStatusBadge status={order.status} /></td>
+                        <td className="m-end"><OrderStatusBadge status={order.status} /><DiscountWait order={order} ar={lang === "ar"} /></td>
                         <td className="hr-hide-preview">{(() => { const d = orderProgress(order); return d ? <ProgressChip d={d} testId={`order-stage-${order.orderNumber}`} /> : <span className="hr-muted">—</span>; })()}</td>
                       </tr>
                     ))}
@@ -785,6 +800,7 @@ export default function OrdersPage() {
                   <h2 className="hr-section" style={{ fontSize: 22, lineHeight: "28.6px", margin: 0 }}>{order.customer.name}</h2>
                   <div className="hr-meta" style={{ marginTop: 6 }}>
                     <OrderStatusBadge status={order.status} />
+                    <DiscountWait order={order} ar={lang === "ar"} />
                     {orderNeedsAttention(order) ? <NeedsAttentionBadge /> : null}
                     <StatusBadge status={productionStatusOf(order)} />
                   </div>
