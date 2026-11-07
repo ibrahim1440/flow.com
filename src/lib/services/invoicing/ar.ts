@@ -8,6 +8,8 @@ import { setAuditContext, type AuditContext } from "@/lib/accounting/audit";
 import { riyadhDay, dayText } from "@/lib/accounting/dates";
 import { Decimal, ZERO } from "@/lib/accounting/money";
 import { reverseEntry } from "@/lib/accounting/posting-engine";
+import { getSettings } from "@/lib/accounting/setup";
+import { syncAccountantReceiptEvents } from "@/lib/services/sales/accountant-receipt-events";
 import { agingOf, allocateFifo, applicationRefusal, daysOverdue, statementOf, openOf, openingArItems, openingShare, unappliedOf, type CreditItem, type DebitItem, type StatementMove } from "./ar-math";
 import { postApplication, postReceiptReceived, postedEntry, reverseReceiptEntries } from "./postings";
 import { refuseInv, refuseWith } from "./refusals";
@@ -221,6 +223,8 @@ export async function applyToInvoice(input: ApplyInput, ctx: AuditContext) {
       const r = await postApplication(tx, { applicationId: app.id, collectionId: receipt.id, customerId, amount, date: today, invoiceNumber: inv.number!, branchId: receipt.branchId }, ctx.actorId, "APPLIED");
       posting = r.status;
     }
+    // Decision 6: an accountant receipt now paying a rep's deal earns the rep the collection (no-op for a Sales receipt).
+    if (receipt) await syncAccountantReceiptEvents(tx, receipt.id, ctx.actorId);
     return { id: app.id, posting };
   }, TX_OPTS);
 }
@@ -245,6 +249,8 @@ export async function unapply(applicationId: string, reason: string, ctx: AuditC
         const e = await postedEntry(tx, "COLLECTION", a.collectionId, `APPLIED.${a.id}`);
         if (e && e.status === "POSTED") await reverseEntry(tx, { entryId: e.id, reason: `إلغاء تخصيص: ${why}`, actorId: ctx.actorId });
       }
+      // Decision 6: what the accountant receipt still pays per deal — the un-applied part's event is reversed.
+      await syncAccountantReceiptEvents(tx, a.collectionId, ctx.actorId);
     }
     return { id: a.id, status: "REVERSED" };
   }, TX_OPTS);
@@ -301,7 +307,24 @@ export async function onCollectionApproved(tx: Tx, collectionId: string, actorId
   const amount = D(c.amountGross);
   let parts: { id: string; amount: Decimal }[] = [];
   if (opts.allocation === undefined) {
-    if (c.orderId) parts = allocateFifo(amount, await openDebits(tx, customerId, { orderId: c.orderId })).parts;
+    // P0 G1: a Sales receipt pays its DEAL — the invoice it names, then every open invoice of the deal's orders /
+    // quotations, oldest due first — not only the deal's first order any more. It never spills to the customer's other
+    // deals (gate H1: a direct sale's cash confirmed while its invoice is a draft must wait, as an advance, for that
+    // invoice — G2 applies it at the issue). The rest goes to the opening balance, then the advance (below). A receipt
+    // without a deal keeps the A2 rule: its order's open invoices.
+    if (c.opportunityId) {
+      const dealDocs = await dealInvoiceIds(tx, c.opportunityId);
+      const debits = dealDocs.length ? await openDebits(tx, customerId, { id: { in: dealDocs } }) : [];
+      const own = debits.filter((d) => d.id === c.invoiceId);
+      const ofDeal = debits.filter((d) => d.id !== c.invoiceId);
+      let left = amount;
+      for (const group of [own, ofDeal]) {
+        if (left.lessThanOrEqualTo(0)) break;
+        const r = allocateFifo(left, group);
+        parts.push(...r.parts);
+        left = r.left;
+      }
+    } else if (c.orderId) parts = allocateFifo(amount, await openDebits(tx, customerId, { orderId: c.orderId })).parts;
   } else if (opts.allocation === "AUTO") {
     parts = proposeAllocation(amount, await openDebits(tx, customerId), { invoiceId: c.invoiceId, orderId: c.orderId });
   } else {
@@ -337,6 +360,71 @@ export async function onCollectionApproved(tx: Tx, collectionId: string, actorId
   const ref = c.receiptNumber ?? c.referenceNumber ?? c.id.slice(-8);
   const posting = await postReceiptReceived(tx, { collectionId: c.id, amount, appliedAtReceipt: applied, toOpening, method: c.paymentMethod, depositAccountId: c.depositAccountId, customerId, date: dayText(riyadhDay(c.collectedAt)), ref, memo: c.receiptMemo, sodBypass: c.sodBypass, branchId: c.branchId }, actorId);
   return { applied: applied.toFixed(2), toOpening: toOpening.toFixed(2), posting: posting.status, parts: parts.map((p) => ({ invoiceId: p.id, amount: p.amount.toFixed(2) })) };
+}
+
+/** The invoices / debit notes of a deal: of its orders (OpportunityOrder) and of its quotations. */
+export async function dealInvoiceIds(db: Db, opportunityId: string): Promise<string[]> {
+  const [orders, quotes] = await Promise.all([
+    db.opportunityOrder.findMany({ where: { opportunityId }, select: { orderId: true } }),
+    db.quote.findMany({ where: { opportunityId }, select: { id: true } }),
+  ]);
+  if (!orders.length && !quotes.length) return [];
+  const rows = await db.salesInvoice.findMany({
+    where: { kind: { in: ["INVOICE", "DEBIT_NOTE"] }, OR: [...(orders.length ? [{ orderId: { in: orders.map((o) => o.orderId) } }] : []), ...(quotes.length ? [{ quoteId: { in: quotes.map((q) => q.id) } }] : [])] },
+    select: { id: true },
+  });
+  return rows.map((r) => r.id);
+}
+
+/**
+ * P0 G2 (council) — an invoice was just issued (inside issueDocument's transaction, after its own posting): the APPROVED
+ * receipts of the SAME order (or of the same direct sale: the receipt's key is the draft's request key) that are still
+ * unapplied pay it — e.g. a cash direct sale whose receipt was confirmed while the invoice was a draft. Oldest first; never
+ * more than the invoice owes (the rest stays the customer's advance). Each part is an ordinary application (not at
+ * receipt), posted exactly like a manual one (applyToInvoice: Dr customer advances / Cr AR, only when the receipt's RECEIVED
+ * entry was posted). Idempotent: a re-issue returns before this (already ISSUED); the invoice row is locked by the caller.
+ */
+export async function applyAdvancesOnIssue(tx: Tx, input: { invoiceId: string; invoiceNumber: string; customerId: string; orderId: string | null; requestKey: string | null; total: Decimal; date: string; actorId: string }) {
+  const owedNow = D((await tx.arApplication.aggregate({ where: { invoiceId: input.invoiceId, status: "APPLIED" }, _sum: { amount: true } }))._sum.amount);
+  let left = input.total.minus(owedNow);
+  if (left.lessThanOrEqualTo(0)) return [];
+  const same = [...(input.orderId ? [{ orderId: input.orderId }] : []), ...(input.requestKey?.startsWith("direct-sale:") ? [{ idempotencyKey: input.requestKey }] : [])];
+  if (!same.length) return [];
+  const receipts = await tx.salesCollection.findMany({
+    where: { status: "APPROVED", AND: [{ OR: [{ customerId: input.customerId }, { customerId: null, opportunity: { customerId: input.customerId } }] }, { OR: same }] },
+    select: { id: true, amountGross: true, opportunityId: true, orderId: true, collectedAt: true, branchId: true },
+  });
+  if (!receipts.length) return [];
+  await tx.$queryRaw`SELECT "id" FROM "SalesCollection" WHERE "id" = ANY(${receipts.map((r) => r.id)}) ORDER BY "id" FOR UPDATE`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`ar:opening:${input.customerId}`}, 0))`;
+  const used = await tx.arApplication.groupBy({ by: ["collectionId"], where: { collectionId: { in: receipts.map((r) => r.id) }, status: "APPLIED" }, _sum: { amount: true } });
+  const opening = await openingAr(tx, [input.customerId]);
+  // Once accounting is live, only a receipt whose RECEIVED entry was posted is an advance in the books (Cr customer
+  // advances): one from before the go-live date sits in the opening balances and is never auto-applied (it would part
+  // the AR sub-ledger from the ledger). Before go-live nothing posts, so every receipt counts.
+  const live = (await getSettings(tx)).accountingActive;
+  const posted = live ? new Set((await tx.journalEntry.findMany({ where: { sourceModule: "sales", sourceType: "COLLECTION", sourceEvent: "RECEIVED", sourceId: { in: receipts.map((r) => r.id) }, status: "POSTED", idempotencyKey: { not: null } }, select: { sourceId: true } })).map((e) => e.sourceId)) : null;
+  const ranked = receipts
+    .filter((r) => !posted || posted.has(r.id))
+    .map((r) => ({ ...r, free: D(r.amountGross).minus(D(used.find((u) => u.collectionId === r.id)?._sum.amount)).minus(opening.share.get(r.id) ?? ZERO) }))
+    .filter((r) => r.free.greaterThan(0))
+    .sort((a, b) => a.collectedAt.getTime() - b.collectedAt.getTime() || a.id.localeCompare(b.id));
+  const out: { collectionId: string; amount: string; posting: string }[] = [];
+  const appliedDate = new Date(`${input.date}T00:00:00Z`);
+  for (const r of ranked) {
+    if (left.lessThanOrEqualTo(0)) break;
+    const take = Decimal.min(left, r.free);
+    const app = await tx.arApplication.create({ data: { customerId: input.customerId, invoiceId: input.invoiceId, collectionId: r.id, amount: take.toFixed(2), appliedDate, createdById: input.actorId }, select: { id: true } });
+    let posting = "none";
+    if (await postedEntry(tx, "COLLECTION", r.id, "RECEIVED")) {
+      posting = (await postApplication(tx, { applicationId: app.id, collectionId: r.id, customerId: input.customerId, amount: take, date: input.date, invoiceNumber: input.invoiceNumber, branchId: r.branchId }, input.actorId, "APPLIED")).status;
+    }
+    out.push({ collectionId: r.id, amount: take.toFixed(2), posting });
+    left = left.minus(take);
+    // Decision 6: an accountant receipt that sat as an advance reaches the rep once it pays the deal's invoice.
+    await syncAccountantReceiptEvents(tx, r.id, input.actorId);
+  }
+  return out;
 }
 
 /** A receipt was reversed: its applications are reversed and every posting of it is reversed. */

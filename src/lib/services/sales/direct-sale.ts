@@ -258,6 +258,8 @@ async function completeSale(tx: Tx, input: { orderId: string; orderNumber: numbe
       opportunityId, amountGross: new Prisma.Decimal(priced.gross), currency: "SAR", collectedAt: input.now,
       paymentMethod: method === "CASH" ? "CASH" : "POS_CARD", referenceNumber: null, note: `بيع مباشر — طلب #${input.orderNumber}`,
       idempotencyKey: key, submittedById: rep.id,
+      // P0 G1: the sale's own order (not the deal's first) — its invoice is the one this money pays.
+      orderId,
     });
     collectionId = c.collectionId;
   }

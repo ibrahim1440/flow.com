@@ -80,15 +80,6 @@ function MyDay() {
   const openLog = useCallback((item: CallItem, kind: "CALL" | "WHATSAPP" = "CALL") => setLogFor({ item, kind }), []);
   const [flash, setFlash] = useState<{ text: string; undo?: () => void } | null>(null);
   const [reps, setReps] = useState<{ id: string; name: string }[]>([]);
-  // One-time notice (council fix round 1, P0-15): «يومي» became the home page; the old one is a setting away.
-  // A per-person convenience on this device (localStorage), never a business record.
-  const introKey = user ? `hq.mydayIntro.v1.${user.id}` : null;
-  const [intro, setIntro] = useState(() => {
-    if (!introKey || typeof window === "undefined") return false;
-    try { return window.localStorage.getItem(introKey) !== "seen"; } catch { return false; }
-  });
-  const closeIntro = useCallback(() => { setIntro(false); try { if (introKey) window.localStorage.setItem(introKey, "seen"); } catch { /* private window */ } }, [introKey]);
-
   // D8.1: back from logging on a customer page («＋ جديد › نشاط» started here): say it was saved, then drop the flag.
   const logged = sp.get("logged") === "1";
   const [seenLogged, setSeenLogged] = useState(false);
@@ -161,13 +152,6 @@ function MyDay() {
     </div>
   ) : null;
 
-  const introBar = intro && !ro ? (
-    <div className="notice ok" role="status" data-testid="md-intro">
-      <span style={{ flex: 1 }}>{ar ? <>صفحتك الرئيسية صارت «يومي» — تقدر ترجع للقديمة من <Link href="/dashboard/profile" onClick={closeIntro}>الملف الشخصي</Link>.</> : <>Your home page is now «My day» — you can switch back in <Link href="/dashboard/profile" onClick={closeIntro}>your profile</Link>.</>}</span>
-      <button type="button" className="btn g sm" onClick={closeIntro} aria-label={ar ? "فهمت" : "Got it"} data-testid="md-intro-close">{ar ? "فهمت" : "Got it"}</button>
-    </div>
-  ) : null;
-
   const flashBar = flash ? (
     <div className="notice ok" role="status" data-testid="md-flash">
       <span style={{ flex: 1 }}>{flash.text}</span>
@@ -235,7 +219,6 @@ function MyDay() {
       <div className="pg">
         <div className="md" data-testid="md-page" data-phone="1">
           {banner}
-          {introBar}
           {flashBar}
           {hello}
           {tabsBar}
@@ -264,7 +247,6 @@ function MyDay() {
     <div className="pg">
       <div className="md" data-testid="md-page">
         {banner}
-        {introBar}
         {flashBar}
         {hello}
         {tabsBar}

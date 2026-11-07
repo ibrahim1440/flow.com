@@ -22,6 +22,7 @@ import { notifyIssued, notifyRequested, writeRequestEvent } from "./request-even
 import { commercialChanges, correctionDiff } from "./request-math";
 import { recomputeFlagsForInvoice } from "@/lib/services/orders/order-flags";
 import { isAwaitingDiscount } from "@/lib/services/orders/discount-hold";
+import { applyAdvancesOnIssue } from "./ar";
 
 type Tx = Prisma.TransactionClient;
 const D = (v: { toString(): string } | null | undefined) => new Decimal(v == null ? 0 : v.toString());
@@ -739,6 +740,12 @@ export async function issueDocument(id: string, ctx: AuditContext, now: Date = n
       if (amount.greaterThan(0)) {
         await tx.arApplication.create({ data: { customerId: issued.customerId, invoiceId: doc.originalInvoiceId, creditNoteId: id, amount: amount.toFixed(2), appliedDate: dateOf(stamp.day)!, createdById: ctx.actorId } });
       }
+    }
+    // P0 G2: the unapplied receipts of this invoice's order / direct sale (e.g. the sale's cash, confirmed while the
+    // invoice was a draft) pay it now — oldest first, never more than it owes.
+    if (doc.kind === "INVOICE") {
+      const key = (await tx.salesInvoice.findUnique({ where: { id }, select: { requestKey: true } }))?.requestKey ?? null;
+      await applyAdvancesOnIssue(tx, { invoiceId: id, invoiceNumber: issued.number!, customerId: issued.customerId, orderId: doc.orderId ?? null, requestKey: key, total: D(issued.grandTotal), date: dayOf(issued.issueDate)!, actorId: ctx.actorId });
     }
     await emitAutomationEvent(tx, { eventType: "sales.invoice_status_changed", subjectType: "SalesInvoice", subjectId: id, payload: { from: "DRAFT", to: "ISSUED", kind: doc.kind }, actorId: ctx.actorId });
     // P1-5: the order's «الفاتورة» / «الدفع» flags follow the issue (order-flags.ts).

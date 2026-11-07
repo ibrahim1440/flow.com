@@ -4,6 +4,7 @@ import { accrueForCollection } from "../commissions/accrual";
 import { emitAutomationEvent } from "@/lib/automation/emit";
 // Sales invoicing A2: the AR sub-ledger and the ledger postings of a receipt (approved → RECEIVED, reversed → reversal).
 import { onCollectionApproved, onCollectionReversed, type ReceiptAllocation } from "@/lib/services/invoicing/ar";
+import { resyncDealAccountantReceipts, syncAccountantReceiptEvents } from "./accountant-receipt-events";
 import { defaultCollectionBranch, parseBranchId } from "@/lib/accounting/locations";
 import { receiptSelfConfirmAllowed } from "./receipt-four-eyes";
 import { recomputeFlagsForCollection } from "@/lib/services/orders/order-flags";
@@ -266,6 +267,9 @@ export type SubmitInput = {
   branchId?: unknown;
   /** «نسخ وتصحيح» (BATCH22 WP-D): the returned collection this one corrects. */
   replacesCollectionId?: string | null;
+  /** The order this money pays (P0 G1: «بيع مباشر» passes its own order); must be one of the deal's. Absent = the deal's
+   *  first order, as before. The allocation itself covers the whole deal either way (invoicing/ar.ts). */
+  orderId?: string | null;
 };
 
 export type SubmitResult = {
@@ -355,10 +359,11 @@ export async function submitCollection(tx: Tx, input: SubmitInput): Promise<Subm
   );
 
   const order = await tx.opportunityOrder.findFirst({
-    where: { opportunityId: input.opportunityId },
+    where: { opportunityId: input.opportunityId, ...(input.orderId ? { orderId: input.orderId } : {}) },
     orderBy: { createdAt: "asc" },
     select: { orderId: true },
   });
+  if (input.orderId && !order) throw { _appCode: 409, message: "The order is not one of this deal's." };
 
   const given = await parseBranchId(tx, input.branchId);
   const branchId = given !== undefined ? given : await defaultCollectionBranch(tx, { orderId: order?.orderId ?? null, recorderId: input.submittedById });
@@ -585,6 +590,10 @@ export async function approveCollection(
   const outcomes = event ? await accrueForCollection(tx, event.id, input.actorId) : [];
   // A2: apply the receipt to its open invoices and post it (a no-op before accounting's go-live).
   const application = await onCollectionApproved(tx, row.id, input.actorId, c.allocation !== undefined ? { allocation: c.allocation } : accountant ? { allocation: "AUTO" } : {});
+  // Decision 6: an accountant receipt paying a rep's deal counts as the rep's collection — its own commission events;
+  // a Sales receipt changes the room left on its deal, so the accountant receipts there are re-synced (gate M1).
+  if (accountant) await syncAccountantReceiptEvents(tx, row.id, input.actorId);
+  else await resyncDealAccountantReceipts(tx, row.opportunityId, input.actorId);
   await emitCollectionStatus(tx, row.id, "PENDING_VERIFICATION", "APPROVED", input.actorId);
   // P1-5: the orders this money touches update their «الدفع» flag (order-flags.ts).
   await recomputeFlagsForCollection(tx, row.id);
@@ -713,6 +722,10 @@ export async function reverseCollection(
   const outcomes = row.collectionEventId ? await accrueForCollection(tx, row.collectionEventId, input.actorId) : [];
   // A2: the receipt's AR applications and every ledger posting of it are reversed with it.
   await onCollectionReversed(tx, row.id, reason, input.actorId);
+  // Decision 6: its commission events (if any) are reversed with it — the engine posts the negative difference; a Sales
+  // receipt's reversal frees room on its deal, so a capped accountant event there grows back (gate M1).
+  if (accountant) await syncAccountantReceiptEvents(tx, row.id, input.actorId);
+  else await resyncDealAccountantReceipts(tx, row.opportunityId, input.actorId);
   await emitCollectionStatus(tx, row.id, "APPROVED", "REVERSED", input.actorId);
   await recomputeFlagsForCollection(tx, row.id);
 
