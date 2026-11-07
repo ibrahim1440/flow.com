@@ -47,6 +47,7 @@ import { assertAdminRoleGate } from "@/lib/auth-server";
 import { STAGING_LOCATION_ID } from "@/lib/inventory/locations";
 import { lossVerdict } from "@/lib/station/shared";
 import { notify } from "@/lib/notifications/notify";
+import { isAssignedOperator } from "@/lib/services/roaster-operators";
 import { emitAutomationEvent } from "@/lib/automation/emit";
 import { nextRoastBatchNumber } from "@/lib/services/batch-number";
 import { batchProductId, resolveApprovedVersionId } from "@/lib/services/qc/profiles";
@@ -75,6 +76,8 @@ export const DISCARD_ALERT_SAR = 500;
 export const DISCARD_ALERT_PER_SHIFT = 2;
 export const DISCARD_REVIEW_HOURS = 24;
 export const STALE_BUCKET_HOURS = 72;
+/** A charge back-dated to the first refused tap (R6) at most this far. */
+export const CHARGE_BACKDATE_MAX_MS = 15 * 60_000;
 export const COST_SPREAD_WARN = 0.15;
 /** The label colours, one per coffee (stable: the same product always gets the same colour). */
 export const BUCKET_COLORS = ["RED", "BLUE", "GREEN", "ORANGE", "PURPLE", "YELLOW", "PINK", "BROWN"] as const;
@@ -363,9 +366,17 @@ export async function chargeRun(actor: V2Actor, body: Record<string, unknown>, k
     // An admin who is not an assigned operator is never blocked — the admin role exercised, through its gate (as V1).
     if (check.bypass) await assertAdminRoleGate(actor, "production.roaster_operator_bypass");
     const serial = await nextRunSerial(tx);
+    // D12 R6: a charge refused by the gate is retried once the basket is weighed; the drum was really charged at the first
+    // refused tap, so the client sends that tap's time and the run keeps it — never in the future, never > 15 min back, and
+    // never before the previous roast on this roaster left the drum (two roasts never overlap in the drum).
+    const now = Date.now();
+    const tapped = typeof body.tappedAt === "string" || typeof body.tappedAt === "number" ? new Date(body.tappedAt as string).getTime() : NaN;
+    const prev = await tx.roastRun.findFirst({ where: { roasterId, status: { not: "UNDONE" }, droppedAt: { not: null } }, orderBy: { droppedAt: "desc" }, select: { droppedAt: true } });
+    const floorMs = Math.max(now - CHARGE_BACKDATE_MAX_MS, prev?.droppedAt ? +prev.droppedAt : -Infinity);
+    const chargedAt = new Date(Number.isFinite(tapped) ? Math.min(now, Math.max(floorMs, tapped)) : now);
     const run = await tx.roastRun.create({
       data: {
-        serial, bucketId: b.id, roasterId, productId, operatorId: actor.id, operatorName: actor.name, greenKg: b.actualKg, status: "CHARGED",
+        serial, bucketId: b.id, roasterId, productId, operatorId: actor.id, operatorName: actor.name, greenKg: b.actualKg, status: "CHARGED", chargedAt,
         scheduledSlotId: slotId, profile, capacityAck: check.ack?.direction ?? null, adminBypass: check.bypass, chargeKey: key,
       },
       include: RUN_VIEW,
@@ -646,7 +657,7 @@ export async function recordBasket(actor: V2Actor, basketId: string, body: Recor
  * (packed, blended, QC hold / exception / disposition, a QC record, any roasted kg drawn). A reason is required.
  * Idempotent on the key (the new lot's requestKey).
  */
-export async function correctLot(actor: V2Actor, batchId: string, body: Record<string, unknown>, keyRaw: unknown) {
+export async function correctLot(actor: V2Actor, batchId: string, body: Record<string, unknown>, keyRaw: unknown, via: "desk" | "station" = "desk") {
   const key = requireKey(keyRaw);
   const roastedKg = kgOf(body.roastedKg, "الوزن المحمص");
   const reason = textOf(body.reason, 3, 300);
@@ -690,13 +701,27 @@ export async function correctLot(actor: V2Actor, batchId: string, body: Record<s
     const runs = basket.runs.filter((r) => r.status === "RECORDED");
     if (!runs.length) throw fail(409, "BASKET_EMPTY", "لا تحميصات في سلّة هذه الدفعة.", "The lot's basket holds no roast.");
     scoped(actor, basket.roasterId);
-    // L4 (the gate's decision): a supervisor does not correct a lot they roasted or recorded; an admin may, logged.
     const recorder = await tx.inventoryMovement.findFirst({ where: { sourceDocType: "ROASTING_BATCH", sourceDocId: old.id, type: "OUT" }, select: { userId: true } });
     const own = runs.some((r) => r.operatorId === actor.id) || recorder?.userId === actor.id;
-    if (own && actor.role !== "admin") {
+    if (via === "station") {
+      // The owner's decision: the roaster corrects his own weighing at the station — the one who recorded it or any
+      // operator of that roaster (or the roaster's paired device) — the same Riyadh business day only; afterwards it is
+      // the supervisor's desk correction. A reason is required and the supervisors are told (below).
+      if (+riyadhDay(old.date) !== +riyadhDay()) {
+        throw fail(403, "CORRECTION_DAY_PASSED", "انتهى يوم العمل الذي وُزنت فيه الدفعة؛ يصحّحها المشرف.", "The business day the lot was weighed in has ended; a supervisor corrects it.");
+      }
+      const operator = own || actor.stationRoasterId === basket.roasterId || await isAssignedOperator(tx, basket.roasterId, actor.id);
+      if (!operator && actor.role !== "admin") throw fail(403, "NOT_ROASTER_OPERATOR", "يصحّح الوزن من سجّله أو مشغّل هذه الحمّاصة.", "The weight is corrected by the one who recorded it or an operator of this roaster.");
+      if (!operator) {
+        // An admin who is not an operator of the roaster: the admin role exercised — its gate, then logged (as the desk path).
+        await assertAdminRoleGate(actor, "production.lot_station_correction");
+        await tx.authAuditLog.create({ data: { userId: actor.id, action: "ROAST_LOT_ADMIN_STATION_CORRECTION", result: "SUCCESS", sourceInterface: "STATION", ipHash: await ipHashOf(null), metadata: { batchId: old.id, batchNumber: old.batchNumber, reason, adminOverride: true } } });
+      }
+    } else if (own && actor.role !== "admin") {
+      // L4 (the gate's decision): at the desk a supervisor does not correct a lot they roasted or recorded; an admin may, logged.
       throw fail(403, "SELF_CORRECTION", "لا يصحّح الدفعة من حمّصها أو وزنها. يصحّحها مشرف آخر.", "A lot is not corrected by the person who roasted or weighed it. Another supervisor corrects it.");
     }
-    if (own) {
+    if (own && via === "desk") {
       // The admin role exercised: the admin-role gate (a verified individual; SIMPLE MODE waives that), then logged.
       await assertAdminRoleGate(actor, "production.lot_self_correction");
       await tx.authAuditLog.create({ data: { userId: actor.id, action: "ROAST_LOT_SELF_CORRECTION", result: "SUCCESS", sourceInterface: "STATION", ipHash: await ipHashOf(null), metadata: { batchId: old.id, batchNumber: old.batchNumber, reason, adminOverride: true } } });
@@ -734,6 +759,13 @@ export async function correctLot(actor: V2Actor, batchId: string, body: Record<s
 
     // 2. The same basket re-recorded as a new lot.
     const lot = await writeLot(tx, actor, { basket, runs, roastedKg, lossReason, key, intentHash, correctsBatchId: old.id });
+    // Every correction is told to the production supervisors: the old and new weight and the loss.
+    const greenKg = r3(runs.reduce((sum, r) => sum + r.bucket.components.reduce((x, c) => x + num(c.kg), 0), 0));
+    const lossPct = greenKg > 0 ? ((greenKg - roastedKg) / greenKg) * 100 : 0;
+    await notify(tx, {
+      event: "production.lot_corrected", actorId: actor.id, dedupeKey: lot.batch.id, entity: { type: "RoastingBatch", id: lot.batch.id },
+      facts: { batchNumber: old.batchNumber, newBatchNumber: lot.batch.batchNumber, oldKg: num(old.roastedBeanQuantity).toFixed(2), newKg: roastedKg.toFixed(2), lossPct: lossPct.toFixed(1), reason, byName: actor.name, via },
+    });
     return { ...lot, corrected: old.id, reason };
   }, { ...TX_OPTS, timeout: 60_000 });
   if (!out) {
@@ -887,17 +919,19 @@ export async function undoRun(actor: V2Actor, runId: string, body: Record<string
     const expired = () => fail(409, "UNDO_EXPIRED", "انتهت مهلة التراجع (3 دقائق).", "The undo window (3 minutes) has passed.");
     // «حتى الخطوة التالية»: the step must still be the roaster's last one — every other step of the roaster (its other
     // runs' charge / drop / discard, its baskets' «لحالها» / unpair / weighing) is at or before it.
-    const at = step === "CHARGE" ? run.chargedAt : run.droppedAt!;
+    // A charge's step time is when the server recorded it (createdAt): its chargedAt may be back-dated to the first
+    // refused tap (R6), which must not make the weighing that unblocked it look like a later step.
+    const at = step === "CHARGE" ? run.createdAt : run.droppedAt!;
     const [{ last }] = await tx.$queryRaw<{ last: Date | null }[]>`
       SELECT GREATEST(
-        (SELECT max(GREATEST("chargedAt", coalesce("droppedAt", '-infinity'::timestamp), coalesce("discardedAt", '-infinity'::timestamp)))
+        (SELECT max(GREATEST("createdAt", coalesce("droppedAt", '-infinity'::timestamp), coalesce("discardedAt", '-infinity'::timestamp)))
            FROM "RoastRun" WHERE "roasterId" = ${run.roasterId} AND "status" <> 'UNDONE' AND "id" <> ${run.id}),
         (SELECT max(GREATEST(coalesce("sealedAt", '-infinity'::timestamp), coalesce("recordedAt", '-infinity'::timestamp)))
            FROM "RoastBasket" WHERE "roasterId" = ${run.roasterId})
       ) AS last`;
     if (last && +last > +at) throw fail(409, "STEP_CHANGED", "جاءت خطوة بعدها على الحمّاصة؛ لا تراجع عنها الآن.", "A later step happened on this roaster, so this one can no longer be undone.", { step, laterStepAt: last });
     if (step === "CHARGE") {
-      if (+now - +run.chargedAt > UNDO_WINDOW_MS) throw expired();
+      if (+now - +run.createdAt > UNDO_WINDOW_MS) throw expired();
       await tx.greenBucket.update({ where: { id: run.bucketId }, data: { status: "PREPARED" } });
       if (run.scheduledSlotId) await tx.scheduledSlot.updateMany({ where: { id: run.scheduledSlotId, status: "IN_PROGRESS" }, data: { status: "PLANNED", startedAt: null, startedById: null, updatedById: actor.id } });
       const out = await tx.roastRun.update({ where: { id: runId }, data: { status: "UNDONE", undoneAt: now, undoneById: actor.id, scheduledSlotId: null, undoKey: key } });
@@ -1003,6 +1037,128 @@ export async function resumeProblemV2(actor: V2Actor, roasterId: string, problem
     const out = await tx.roastStationEvent.update({ where: { id: p.id }, data: { status: "RESOLVED", resolvedAt: new Date(), resolvedById: actor.id, resolveKey: key, resolveNote: note } });
     return { problem: out, replayed: false };
   }, TX_OPTS);
+}
+
+// ─── The station screens (D12): one read for the floor, the prep plan and a session's buckets ──────────
+
+const productLite = { id: true, productNameEn: true, productNameAr: true } as const;
+const FLOOR_RUN = { bucket: { select: { id: true, barcode: true, seqNo: true, actualKg: true, colorKey: true, greenBeanId: true } }, product: { select: productLite } } as const;
+
+/**
+ * Everything the V2 floor screen shows (R1–R13) in one read: the drum, the roasts in cooling / in the basket (grouped by
+ * basket), the open problem, the prepared buckets (the next one pre-selected: the same coffee as the drum or the last
+ * roast, lowest number first), the plan pill, and the last step if it can still be undone.
+ */
+export async function floorView(roasterId: string, now = new Date()) {
+  const roaster = await prisma.roaster.findUnique({ where: { id: roasterId }, select: { id: true, name: true, manufacturerModel: true, status: true, stationMode: true, defaultTargetKg: true } });
+  if (!roaster) throw fail(404, "ROASTER_NOT_FOUND", "الحمّاصة غير موجودة.", "Roaster not found.");
+  const [open, baskets, problem, prepared, lastRuns] = await Promise.all([
+    prisma.roastRun.findMany({ where: { roasterId, status: { in: ["CHARGED", "DROPPED"] } }, orderBy: { chargedAt: "asc" }, include: FLOOR_RUN }),
+    prisma.roastBasket.findMany({ where: { roasterId, status: { in: ["OPEN", "SEALED"] } }, orderBy: { createdAt: "asc" }, select: { id: true, status: true, single: true, productId: true } }),
+    prisma.roastStationEvent.findFirst({ where: { roasterId, status: "OPEN" } }),
+    prisma.greenBucket.findMany({ where: { status: "PREPARED" }, orderBy: [{ createdAt: "asc" }], take: 300, select: { id: true, barcode: true, seqNo: true, actualKg: true, colorKey: true, productId: true, createdAt: true, product: { select: productLite } } }),
+    prisma.roastRun.findMany({ where: { roasterId, status: { not: "UNDONE" } }, orderBy: { chargedAt: "desc" }, take: 1, select: { productId: true } }),
+  ]);
+  const drum = open.find((r) => r.status === "CHARGED") ?? null;
+  const dropped = open.filter((r) => r.status === "DROPPED").sort((a, b) => +a.droppedAt! - +b.droppedAt!);
+  const coffee = drum?.productId ?? lastRuns[0]?.productId ?? prepared[0]?.productId ?? null;
+  const sameCoffee = prepared.filter((b) => b.productId === coffee).sort((a, b) => a.seqNo - b.seqNo);
+  const next = sameCoffee[0] ?? prepared[0] ?? null;
+  // The last step of the roaster, if it is still undoable (owner decision: until the next action, at most 3 min).
+  const steps: { kind: "CHARGE" | "DROP"; runId: string; at: Date }[] = [];
+  for (const r of open) {
+    steps.push({ kind: "CHARGE", runId: r.id, at: r.createdAt });
+    if (r.droppedAt) steps.push({ kind: "DROP", runId: r.id, at: r.droppedAt });
+  }
+  const [lastOther] = await prisma.$queryRaw<{ last: Date | null }[]>`
+    SELECT GREATEST(
+      (SELECT max(coalesce("discardedAt", '-infinity'::timestamp)) FROM "RoastRun" WHERE "roasterId" = ${roasterId}),
+      (SELECT max(GREATEST(coalesce("sealedAt", '-infinity'::timestamp), coalesce("recordedAt", '-infinity'::timestamp))) FROM "RoastBasket" WHERE "roasterId" = ${roasterId})
+    ) AS last`;
+  const last = steps.sort((a, b) => +b.at - +a.at)[0] ?? null;
+  const undoable = last && +now - +last.at <= UNDO_WINDOW_MS && !(lastOther?.last && +lastOther.last > +last.at) ? { kind: last.kind, runId: last.runId, at: last.at } : null;
+  const todayStart = new Date(+riyadhDay(now) - 3 * 3_600_000);
+  const planBuckets = coffee ? await prisma.greenBucket.aggregate({ where: { productId: coffee, createdAt: { gte: todayStart } }, _sum: { actualKg: true } }) : null;
+  // «آخر الدفعات»: today's lots on this roaster — the roaster corrects his own weighing the same business day.
+  const lots = await prisma.roastingBatch.findMany({
+    where: { roasterId, lotKind: { not: null }, status: { not: "Corrected" }, date: { gte: todayStart } },
+    orderBy: { date: "desc" }, take: 8,
+    select: { id: true, batchNumber: true, date: true, roastedBeanQuantity: true, greenBeanQuantity: true, roastedAvailableKg: true, qcHoldAt: true, correctsBatchId: true, product: { select: productLite } },
+  });
+  return {
+    lotsToday: lots.map((l) => ({
+      id: l.id, batchNumber: l.batchNumber, at: l.date, roastedKg: l.roastedBeanQuantity, greenKg: l.greenBeanQuantity, product: l.product, corrected: !!l.correctsBatchId,
+      inUse: !!l.qcHoldAt || Math.abs(l.roastedAvailableKg - l.roastedBeanQuantity) > 0.0005,
+    })),
+    roaster: { ...roaster, defaultTargetKg: num(roaster.defaultTargetKg) },
+    drum,
+    dropped: dropped.map((r) => ({ ...r, basket: baskets.find((b) => b.id === r.basketId) ?? null })),
+    baskets: baskets.map((b) => ({ ...b, runIds: dropped.filter((r) => r.basketId === b.id).map((r) => r.id) })).filter((b) => b.runIds.length),
+    unweighed: dropped.length,
+    openProblem: problem ? { ...problem, ageMinutes: Math.floor((+now - +problem.reportedAt) / 60_000) } : null,
+    prepared, next,
+    plan: coffee ? { productId: coffee, product: sameCoffee[0]?.product ?? drum?.product ?? (await prisma.coffeeProduct.findUnique({ where: { id: coffee }, select: productLite })), remaining: sameCoffee.length, totalKg: num(planBuckets?._sum.actualKg ?? 0) } : null,
+    undoable,
+    canCharge: !drum && !problem && dropped.length <= UNWEIGHED_LIMIT && roaster.stationMode === "V2",
+    serverTime: now.toISOString(),
+  };
+}
+
+/**
+ * The prep plan (P1): today's roast queue per coffee — the roasted kilograms still to make, turned into green with the
+ * coffee's expected loss — and the buckets suggested (N × the roaster's default charge, the last one the remainder).
+ */
+export async function prepPlan(bucketKg?: number) {
+  const queue = await roastQueue(prisma, {});
+  const v2 = await prisma.roaster.findFirst({ where: { stationMode: "V2", status: { not: "RETIRED" } }, orderBy: { isDefault: "desc" }, select: { defaultTargetKg: true } });
+  const per = bucketKg && bucketKg > 0 ? bucketKg : v2 ? num(v2.defaultTargetKg) : 5;
+  const todayStart = new Date(+riyadhDay() - 3 * 3_600_000);
+  const done = await prisma.greenBucket.groupBy({ by: ["productId"], where: { createdAt: { gte: todayStart }, status: { not: "RETURNED" } }, _count: { _all: true }, _sum: { actualKg: true } });
+  // Roast-to-stock production orders (P1 «مخزون»): their expected green, per coffee, for the coffees the queue does not carry.
+  const stock = await prisma.productionOrder.findMany({
+    where: { status: { in: ["PENDING", "IN_PRODUCTION"] }, sourceOrderItemId: null },
+    select: { expectedGreenBeanKg: true, productSku: { select: { product: { select: { id: true, productNameEn: true, productNameAr: true, expectedRoastLoss: true, defaultGreenBean: { select: { id: true, serialNumber: true, quantityKg: true } } } } } } },
+  });
+  const stockLines = new Map<string, { greenKg: number; p: NonNullable<(typeof stock)[number]["productSku"]>["product"] }>();
+  for (const o of stock) {
+    const pr = o.productSku?.product;
+    if (!pr || queue.some((c) => c.productId === pr.id && c.demandKg > 0)) continue;
+    const cur = stockLines.get(pr.id) ?? { greenKg: 0, p: pr };
+    cur.greenKg += Number(o.expectedGreenBeanKg ?? 0);
+    stockLines.set(pr.id, cur);
+  }
+  const fromStock = [...stockLines.values()].filter((x) => x.greenKg > 0).map((x) => {
+    const count = Math.max(1, Math.ceil(x.greenKg / per - 1e-9));
+    const d = done.find((y) => y.productId === x.p.id);
+    return {
+      productId: x.p.id, nameAr: x.p.productNameAr ?? x.p.productNameEn, nameEn: x.p.productNameEn, demandKg: 0, greenKg: r3(x.greenKg), orders: [] as number[],
+      green: x.p.defaultGreenBean, bucketKg: per, buckets: count, lastKg: r3(x.greenKg - per * (count - 1)),
+      preparedToday: d?._count._all ?? 0, preparedKgToday: num(d?._sum.actualKg ?? 0), colorKey: colorFor(x.p.id),
+    };
+  });
+  return [...queue.filter((c) => c.demandKg > 0 || done.some((d) => d.productId === c.productId)).map((c) => {
+    const loss = Math.min(40, Math.max(0, c.expectedRoastLoss || 15)) / 100;
+    const greenKg = r3(c.demandKg / (1 - loss));
+    const count = Math.max(1, Math.ceil(greenKg / per - 1e-9));
+    const d = done.find((x) => x.productId === c.productId);
+    return {
+      productId: c.productId, nameAr: c.productNameAr ?? c.productNameEn, nameEn: c.productNameEn, demandKg: c.demandKg, greenKg,
+      orders: c.orders.map((o) => o.orderNumber), green: c.green, bucketKg: per, buckets: count,
+      lastKg: r3(greenKg - per * (count - 1)), preparedToday: d?._count._all ?? 0, preparedKgToday: num(d?._sum.actualKg ?? 0), colorKey: colorFor(c.productId),
+    };
+  }), ...fromStock];
+}
+
+/** A prep session's buckets (P3): every bucket with its state, and the leftovers of earlier days still in staging. */
+export async function sessionBuckets(sessionId: string, now = new Date()) {
+  const session = await prisma.greenPrepSession.findUnique({ where: { id: sessionId } });
+  if (!session) throw fail(404, "PREP_SESSION_NOT_FOUND", "جلسة التحضير غير موجودة.", "Prep session not found.");
+  const buckets = await prisma.greenBucket.findMany({
+    where: { sessionId }, orderBy: { seqNo: "asc" },
+    select: { id: true, barcode: true, seqNo: true, plannedKg: true, actualKg: true, status: true, colorKey: true, createdAt: true, labelPrintedAt: true, product: { select: productLite }, greenBean: { select: { serialNumber: true } }, runs: { where: { status: { not: "UNDONE" } }, select: { status: true, serial: true } } },
+  });
+  const leftovers = (await stagingBuckets(now)).filter((b) => b.sessionId !== sessionId);
+  return { session, buckets, leftovers };
 }
 
 // ─── Reads and the roaster flag ──────────────────────────────────────────────────────────────────

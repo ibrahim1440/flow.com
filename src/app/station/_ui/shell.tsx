@@ -8,6 +8,7 @@
 //  · ANY OTHER BROWSER (W1, unchanged): the person's own ERP session. An unsigned visitor goes to
 //    the sign-in screen and comes back; «تبديل الموظف» and «قفل» sign out; 5 minutes without input
 //    sign out. /station itself shows S1 so a tablet can be activated, with the personal sign-in.
+import { idleDecision } from "@/lib/station/idle-hold";
 import "@/components/shell/direction-2.1.css";
 import "@/components/d21/reference.css";
 import "../station.css";
@@ -16,7 +17,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type Re
 import { StationCtx, clearStationDrafts, loginUrl, type StationInfo, type StationUser } from "./context";
 import { LanguageProvider } from "@/lib/i18n/context";
 import { useLanguageSwitcher } from "@/lib/i18n/use-language-switcher";
-import { applyDocumentLang } from "@/lib/i18n/language-switch";
+import { applyDocumentLang, persistLanguage } from "@/lib/i18n/language-switch";
 import type { Lang } from "@/lib/i18n/translations";
 import { STATION_IDLE_MS } from "@/lib/station/shared";
 import { st } from "@/lib/i18n/station";
@@ -63,8 +64,18 @@ export function StationShell({ children }: { children: ReactNode }) {
   // The quick language switch, for a PERSONAL session only (W1: the person's own ERP session at
   // a browser — their profile language, saved as in the ERP). A shared device (W2) follows each
   // signed-in employee's saved language and never offers it: the PIN flows are untouched.
-  const setPersonalLang = useCallback((l: Lang) => setPhase((p) => (p.p === "personal" ? { ...p, user: { ...p.user, preferredLanguage: l } } : p)), []);
-  const switcher = useLanguageSwitcher(lang, setPersonalLang);
+  // The owner's decision (roast v2): the switch is on EVERY station screen — a shared device too, where it is saved to the
+  // signed-in employee's own preference (POST /api/station/language) and so follows each employee.
+  const setSessionLang = useCallback((l: Lang) => setPhase((p) => (p.p === "personal" ? { ...p, user: { ...p.user, preferredLanguage: l } } : p.p === "in" ? { ...p, emp: { ...p.emp, preferredLanguage: l } } : p)), []);
+  const onDevice = phase.p === "in";
+  const persistLang = useCallback(async (l: Lang) => {
+    if (!onDevice) return persistLanguage(l);
+    try {
+      const r = await fetch("/api/station/language", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preferredLanguage: l }) });
+      return r.ok;
+    } catch { return false; }
+  }, [onDevice]);
+  const switcher = useLanguageSwitcher(lang, setSessionLang, persistLang);
   // <html lang/dir> follow the session's language (a client navigation from the sign-in screen
   // keeps the root layout's <html> as that screen left it). Only once a session is known.
   const known = phase.p === "personal" || phase.p === "in";
@@ -187,11 +198,18 @@ export function StationShell({ children }: { children: ReactNode }) {
   // the station session ends after the policy's minutes and the tiles come back (S2); a PIN screen
   // left half-typed returns to the tiles after the same time.
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // D12: the v2 floor holds the idle lock while a roast is in the drum or waits for the scale — re-armed, but at most
+  // 3 × the idle policy since the last touch (idleDecision); then the lock proceeds as usual.
+  const idleHold = useRef(false);
+  const lastTouch = useRef(0);
+  const holdIdle = useCallback((on: boolean) => { idleHold.current = on; }, []);
   const idleMs = phase.p === "personal" ? STATION_IDLE_MS : phase.p === "in" || phase.p === "gate" ? phase.idleMinutes * 60_000 : 0;
   const idleKey = phase.p === "in" ? `in:${phase.emp.id}` : phase.p === "gate" ? `gate:${phase.gate.v}` : phase.p;
   useEffect(() => {
     if (!idleMs || (phase.p === "gate" && phase.gate.v === "tiles")) return;
     const fire = async () => {
+      const d = idleDecision(idleHold.current, Date.now() - lastTouch.current, idleMs);
+      if (!d.lock) { schedule(d.inMs); return; }
       if (phase.p === "personal") { void signOut("station_idle"); return; }
       if (phase.p === "in") {
         clearStationDrafts();
@@ -201,7 +219,8 @@ export function StationShell({ children }: { children: ReactNode }) {
       }
       void refresh({ v: "tiles" });
     };
-    const arm = () => { if (timer.current) clearTimeout(timer.current); timer.current = setTimeout(() => { void fire(); }, idleMs); };
+    const schedule = (ms: number) => { if (timer.current) clearTimeout(timer.current); timer.current = setTimeout(() => { void fire(); }, ms); };
+    const arm = () => { lastTouch.current = Date.now(); schedule(idleMs); };
     const events = ["pointerdown", "keydown", "touchstart", "wheel"] as const;
     events.forEach((e) => window.addEventListener(e, arm, { passive: true }));
     arm();
@@ -255,8 +274,8 @@ export function StationShell({ children }: { children: ReactNode }) {
       body = phase.station.home ? <div className="ws-plain" role="status">{t("loading")}</div> : <NoScreen lang={lang} station={phase.station} bar={<DeviceBar lang={lang} station={phase.station} />} />;
     } else {
       body = (
-        <StationCtx value={{ user, mode: phase.p === "in" ? "device" : "personal", station, signOut, lock, switchEmployee, stations: phase.p === "in" ? phase.stations : undefined }}>
-          <LanguageProvider lang={lang} switcher={phase.p === "personal" ? switcher : undefined}>{children}</LanguageProvider>
+        <StationCtx value={{ user, mode: phase.p === "in" ? "device" : "personal", station, signOut, lock, switchEmployee, stations: phase.p === "in" ? phase.stations : undefined, holdIdle }}>
+          <LanguageProvider lang={lang} switcher={switcher}>{children}</LanguageProvider>
         </StationCtx>
       );
     }

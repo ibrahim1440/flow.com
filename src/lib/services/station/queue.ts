@@ -40,6 +40,8 @@ export type StationRoaster = {
   nominalKg: number; defaultTargetKg: number; minKg: number; maxKg: number; cycleMinutes: number;
   /** The caller is an assigned RoasterOperator of it. */
   assigned: boolean;
+  /** V1 (this screen) | V2 (roasting station v2: /station/roasting serves the v2 floor for it). */
+  stationMode: string;
 };
 
 export type QueueItem = {
@@ -111,14 +113,14 @@ export async function stationRoasters(user: { id: string }): Promise<StationRoas
     orderBy: [{ isDefault: "desc" }, { name: "asc" }],
     select: {
       id: true, name: true, status: true, statusReason: true, isDefault: true, nominalCapacityKg: true, defaultTargetKg: true,
-      minBatchKg: true, maxBatchKg: true, cycleMinutes: true,
+      minBatchKg: true, maxBatchKg: true, cycleMinutes: true, stationMode: true,
     },
   });
   const mine = await assignedRoasterIds(prisma, user.id);
   return roasterRows.map((r) => ({
     id: r.id, name: r.name, status: r.status, statusReason: r.statusReason, isDefault: r.isDefault,
     nominalKg: Number(r.nominalCapacityKg), defaultTargetKg: Number(r.defaultTargetKg), minKg: Number(r.minBatchKg), maxKg: Number(r.maxBatchKg),
-    cycleMinutes: r.cycleMinutes, assigned: mine.has(r.id),
+    cycleMinutes: r.cycleMinutes, assigned: mine.has(r.id), stationMode: r.stationMode,
   }));
 }
 

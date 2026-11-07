@@ -19,6 +19,8 @@ type Ctx = {
   switchEmployee: () => void;
   /** W3: every station this device serves (one for most devices). More than one → «تبديل المحطة». */
   stations?: StationInfo[];
+  /** Roasting station v2 (D12): no idle lock while a roast is in the drum or unweighed — the screen holds it. */
+  holdIdle?: (on: boolean) => void;
 };
 export const StationCtx = createContext<Ctx | null>(null);
 export const useStation = () => useContext(StationCtx)!;

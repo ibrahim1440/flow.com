@@ -17,7 +17,8 @@ import { applyDocumentLang, otherLang, persistLanguage, writeLangCookie } from "
  * and the scroll position are untouched: nothing navigates. A refused or failed save puts the
  * previous language back and reports `failed`.
  */
-export function useLanguageSwitcher(lang: Lang, setLang: (l: Lang) => void): LanguageSwitcher {
+/** `persist`: where the choice is saved (default: PATCH /api/profile; a station device saves to its employee). */
+export function useLanguageSwitcher(lang: Lang, setLang: (l: Lang) => void, persist: (l: Lang) => Promise<boolean> = persistLanguage): LanguageSwitcher {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -39,7 +40,7 @@ export function useLanguageSwitcher(lang: Lang, setLang: (l: Lang) => void): Lan
     const next = otherLang(prev);
     applyDocumentLang(next);
     setLang(next);
-    const ok = await persistLanguage(next);
+    const ok = await persist(next);
     if (ok) {
       writeLangCookie(next);
       router.refresh();
@@ -51,7 +52,7 @@ export function useLanguageSwitcher(lang: Lang, setLang: (l: Lang) => void): Lan
     busy.current = false;
     setPending(false);
     return ok;
-  }, [lang, router, setLang]);
+  }, [lang, router, setLang, persist]);
 
   return useMemo(() => ({ toggle, apply, pending, failed }), [toggle, apply, pending, failed]);
 }

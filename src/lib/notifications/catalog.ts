@@ -694,6 +694,21 @@ export const EVENTS: NotificationEventDef[] = [
     }),
   },
   {
+    // «محطة التحميص v2»: a weighed lot corrected — by the roaster at the station (same business day) or by a supervisor
+    // at the desk. The supervisors see the old and new weight and the loss.
+    key: "production.lot_corrected", category: "production", severity: "info",
+    label: { ar: "صُحّح وزن دفعة محمّصة", en: "A roasted lot's weight was corrected" },
+    recipients: [{ perm: [{ module: "production", sub: "manage_schedule" }] }], requires: [MOD("production")],
+    trigger: "correctLot (lib/services/station/roast-v2.ts): a V2 lot corrected — once per new lot",
+    render: (f) => ({
+      titleAr: `صُحّح وزن الدفعة ${s(f.batchNumber)}: ${s(f.oldKg)} ← ${s(f.newKg)} كغ (فاقد ${s(f.lossPct)}٪)`,
+      titleEn: `Lot ${s(f.batchNumber)} weight corrected: ${s(f.oldKg)} → ${s(f.newKg)} kg (loss ${s(f.lossPct)}%)`,
+      bodyAr: [`صحّحها ${s(f.byName)}${f.via === "station" ? " من المحطة" : ""}`, `السبب: ${s(f.reason)}`, `الدفعة الجديدة ${s(f.newBatchNumber)}`].join(" · "),
+      bodyEn: [`Corrected by \u2068${sEn(f, "byName")}\u2069${f.via === "station" ? " at the station" : ""}`, `reason: \u2068${sEn(f, "reason")}\u2069`, `new lot ${s(f.newBatchNumber)}`].join(" · "),
+      link: "/dashboard/production/roast-v2",
+    }),
+  },
+  {
     // «محطة التحميص v2»: a prepared bucket left in «منطقة التحميص» longer than 72 h — return it (a reverse transfer) or roast it.
     key: "production.staging_stale", category: "production", severity: "warning",
     label: { ar: "دلو بن أخضر ينتظر في منطقة التحميص أكثر من 72 ساعة", en: "A green bucket has waited in staging over 72 hours" },

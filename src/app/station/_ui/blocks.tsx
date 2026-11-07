@@ -43,7 +43,7 @@ export function StationBar(props: {
       {props.site ? <span className="ws-site" data-testid="station-site" title={props.siteTitle ?? undefined}><span className="ws-k">{en ? "Location: " : "الموقع: "}</span><bdi>{props.site}</bdi>{props.siteTitle ? <span className="ws-k" aria-hidden="true"> *</span> : null}{props.siteTitle ? <span className="sr-only">{` — ${props.siteTitle}`}</span> : null}</span> : null}
       {props.extra}
       <span className="ws-sp" />
-      {/* The quick language switch: a personal session only (the context has no switcher on a shared device). */}
+      {/* The quick language switch: every station screen (a shared device saves it to the signed-in employee). */}
       <LanguageToggle testId="station-lang" />
       <span className={`st ${props.conn.tone}`} data-testid="station-conn" role="status">{props.conn.label}</span>
       <span className="ws-upd"><span className="ws-upd-w">{props.updatedWord} </span><span className="n">{props.updated}</span></span>
