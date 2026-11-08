@@ -95,12 +95,6 @@ export function SalesBand({ t, lang, who, phone, ro, viewerId, onLog }: {
     </div>
   );
 
-  const drafts = t.drafts.count > 0 ? (
-    <Link className="md-sb-drafts" href="/dashboard/orders" data-testid="md-drafts">
-      {ar ? <>بانتظار المحاسب <bdi className="num">{n(t.drafts.amount)}</bdi> ر.س · <bdi className="num">{n(t.drafts.count)}</bdi> مسودة ←</>
-        : <>Waiting for the accountant SAR <bdi className="num">{n(t.drafts.amount)}</bdi> · <bdi className="num">{n(t.drafts.count)}</bdi> drafts →</>}
-    </Link>
-  ) : null;
 
   const sheets = (
     <>
@@ -122,7 +116,6 @@ export function SalesBand({ t, lang, who, phone, ro, viewerId, onLog }: {
           {quiet ? <p className="md-sb-sub">{ar ? "ولا فيه مبيعات أو تحصيل بعد. أول فاتورة تصدر لك وأول تحصيل ينعتمد يطلعون هنا." : "No sales or collections yet. Your first issued invoice and first approved collection will show here."}</p>
             : <p className="md-sb-sub">{ar ? <>المحصّل <bdi className="num">{n(t.achieved)}</bdi> ر.س · مبيعات {month} <bdi className="num">{n(t.sales)}</bdi> ر.س</> : <>Collected SAR <bdi className="num">{n(t.achieved)}</bdi> · {month} sales SAR <bdi className="num">{n(t.sales)}</bdi></>}</p>}
           <Link className="md-sb-link" href="/dashboard/sales/my-commissions">{ar ? "هدفي وعمولتي ←" : "My target and commission →"}</Link>
-          {drafts}
         </div>
         <div className="md-sb-side">{cards}</div>
       </section>
@@ -138,8 +131,8 @@ export function SalesBand({ t, lang, who, phone, ro, viewerId, onLog }: {
   // The pace tick: where the month says you should be today — only inside the current stage (in practice stage 1).
   const paceAmount = bar.pace !== null && stage.to !== null ? Math.round(((stage.from + bar.pace * (stage.to - stage.from)) / 100) * target) : null;
   const startLabel = stage.index === 0 ? "0" : `✓ ${pc(stage.from)}`;
-  const endLabel = top ? (ar ? `فوق ${pc(150)} · كل المكافآت` : "Above 150% · every bonus")
-    : `${pc(stage.to!)}${nextBonus ? ` · ${nextBonus}` : ""}`;
+  // The owner (8 Nov): the end label is the stage's percent only — no bonus text (the line below says the bonus).
+  const endLabel = top ? (ar ? "+150%" : "150%+") : `${stage.to}%`;
   const aria = ar
     ? `المحصّل ${pc(n(bar.collectedPct, 0))} من الهدف، المرحلة ${stage.index + 1} من 4، المبيعات ${pc(n(bar.salesPct, 0))}`
     : `Collected ${n(bar.collectedPct, 0)}% of the target, stage ${stage.index + 1} of 4, sales ${n(bar.salesPct, 0)}%`;
@@ -197,7 +190,7 @@ export function SalesBand({ t, lang, who, phone, ro, viewerId, onLog }: {
               </span>
             ) : null}
           </div>
-          <div className="md-sb-ends"><bdi className="num" dir={ar ? "rtl" : "ltr"}>{startLabel}</bdi><bdi dir={ar ? "rtl" : "ltr"} data-testid="md-bar-end">{endLabel}</bdi></div>
+          <div className="md-sb-ends"><bdi className="num" dir={ar ? "rtl" : "ltr"}>{startLabel}</bdi><bdi className="num" dir="ltr" data-testid="md-bar-end">{endLabel}</bdi></div>
         </div>
 
         {bar.next ? (
@@ -212,8 +205,7 @@ export function SalesBand({ t, lang, who, phone, ro, viewerId, onLog }: {
         ) : (
           <p className="md-sb-next">{ar ? `كل ريال تحصّله الحين يزيد عمولتك — ما فيه مرحلة بعد ${pc(150)}` : "Every riyal collected now adds to your commission — no stage after 150%"}</p>
         )}
-        {drafts}
-        <p className="md-sb-note">ⓘ {ar ? "قبل الضريبة: لو العميل حوّل 1,150 ر.س ينحسب لك 1,000 ر.س" : "Before VAT: a customer's SAR 1,150 transfer counts as SAR 1,000"}</p>
+        {/* The owner (8 Nov): «بانتظار المحاسب … مسودة» and the before-VAT note are not shown on the band. */}
       </div>
       <div className="md-sb-side">{cards}</div>
     </section>
