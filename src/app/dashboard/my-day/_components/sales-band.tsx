@@ -33,6 +33,8 @@ export type BandTarget = {
 export type LogTarget = { customerId: string; name: string; nameAr: string | null; phone: string | null };
 
 const sar = (ar: boolean) => (ar ? "ر.س" : "SAR");
+/** D13's «متأخر X / ماشي صح» line under the bar — hidden for now by the owner (8 Nov 2026); flip to show it again. */
+const SHOW_PACE: boolean = false;
 /** «120%» inside an Arabic sentence: an LRM keeps the sign after the number (as the Figma text does). */
 const pc = (v: number | string) => `\u200E${v}%`;
 
@@ -131,7 +133,8 @@ export function SalesBand({ t, lang, who, phone, ro, viewerId, onLog }: {
   const target = Number(t.target);
   // The pace tick: where the month says you should be today — only inside the current stage (in practice stage 1).
   const paceAmount = bar.pace !== null && stage.to !== null ? Math.round(((stage.from + bar.pace * (stage.to - stage.from)) / 100) * target) : null;
-  const startLabel = stage.index === 0 ? "0" : `✓ ${pc(stage.from)}`;
+  // The owner (8 Nov, later): no «0» at the start of the first stage; a later stage still shows the one it opened from.
+  const startLabel = stage.index === 0 ? "" : `✓ ${pc(stage.from)}`;
   // How far the collected is from today's pace (positive = behind), rounded to the riyal; none outside the stage's pace.
   const gap = paceAmount !== null ? Math.round(paceAmount - Number(t.achieved)) : null;
   // The owner (8 Nov): the end label is the stage's percent only — no bonus text (the line below says the bonus).
@@ -186,7 +189,8 @@ export function SalesBand({ t, lang, who, phone, ro, viewerId, onLog }: {
           <div className="md-sb-ends"><bdi className="num" dir={ar ? "rtl" : "ltr"}>{startLabel}</bdi><bdi className="num" dir="ltr" data-testid="md-bar-end">{endLabel}</bdi></div>
         </div>
         {/* D13: where the month says the rep should be today, as a sentence (the bar's tick replaced). */}
-        {gap !== null ? (gap > 0
+        {/* The owner (8 Nov, later): the pace sentence is hidden for now (SHOW_PACE). */}
+        {SHOW_PACE && gap !== null ? (gap > 0
           ? <p className="md-sb-paceline is-late" data-testid="md-pace">⚠️ {ar ? <>متأخر <bdi className="num">{n(gap)}</bdi> ر.س عن المفروض لليوم</> : <>SAR <bdi className="num">{n(gap)}</bdi> behind today&apos;s pace</>}</p>
           : <p className="md-sb-paceline is-ok" data-testid="md-pace">✓ {ar ? <>ماشي صح{gap < 0 ? <> · متقدم <bdi className="num">{n(-gap)}</bdi> ر.س</> : null}</> : <>On pace{gap < 0 ? <> · SAR <bdi className="num">{n(-gap)}</bdi> ahead</> : null}</>}</p>) : null}
 
