@@ -7,6 +7,7 @@ const F: Record<string, [string, string]> = {
   cycleMinutes: ["الدورة", "Cycle"], defaultOperatorId: ["المشغّل الافتراضي:", "Default operator:"], status: ["الحالة:", "Status:"],
   statusReason: ["السبب:", "Reason:"], statusUntil: ["حتى", "Until"], isDefault: ["الافتراضية:", "Default:"],
   locationId: ["موقع الحمّاصة:", "Location:"],
+  stationMode: ["طريقة المحطة:", "Station:"],
 };
 
 /** One history row: «أُنشئت الحمّاصة · سعة الحمّاصة 6.00 · كمية التحميص الافتراضية 5.00 كغ», «أقل كمية مسموحة للتحميص 3.00 · أعلى كمية مسموحة للتحميص 6.00 · الدورة 30 دقيقة». */
@@ -21,6 +22,7 @@ export function historyText(h: HistoryRow, ar: boolean): string {
     if (k === "type") return ar ? TYPE[v as Roaster["type"]]?.[0] ?? String(v) : TYPE[v as Roaster["type"]]?.[1] ?? String(v);
     if (k === "isDefault") return v ? (ar ? "نعم" : "yes") : (ar ? "لا" : "no");
     if (k === "statusUntil") return dayLabel(String(v), ar, false);
+    if (k === "stationMode") return v === "V2" ? (ar ? "الجديدة (v2)" : "new (v2)") : (ar ? "القديمة" : "previous");
     return String(v);
   };
   const part = (k: string) => `${ar ? F[k]?.[0] ?? k : F[k]?.[1] ?? k} ${val(k, a[k])}`;

@@ -26,6 +26,8 @@ export type Roaster = {
    * effectively draws green at, with where that comes from. */
   locationId?: string | null;
   effectiveSite?: { id: string; nameAr: string; nameEn: string | null; source: "roaster" | "station" | "production" } | null;
+  /** The roaster's station screen: V1 (the previous one) or V2 (roast station v2). */
+  stationMode?: "V1" | "V2";
 };
 export type Maintenance = {
   id: string; roasterId: string; title: string; kind: "ROUTINE" | "ONE_OFF"; recurrenceWeeks: number | null;

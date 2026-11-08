@@ -15,6 +15,7 @@ import {
 import { draftOf, RoasterForm } from "../../_parts/form";
 import { StatusDialog } from "../../_parts/status-dialog";
 import { historyText } from "../../_parts/history";
+import { StationModeControl } from "../../_parts/station-mode";
 
 export default function RoasterPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -31,14 +32,15 @@ export default function RoasterPage({ params }: { params: Promise<{ id: string }
   const [statusOpen, setStatusOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [formKey, setFormKey] = useState(0);
+  const [canMode, setCanMode] = useState(false);
 
   const [token, setToken] = useState(0);
   const load = useCallback(() => setToken((t) => t + 1), []);
   useEffect(() => {
     let off = false;
-    call<{ roaster: Roaster; history: HistoryRow[] }>(`/api/settings/production/roasters/${id}`).then((r) => {
+    call<{ roaster: Roaster; history: HistoryRow[]; can?: { stationMode?: boolean } }>(`/api/settings/production/roasters/${id}`).then((r) => {
       if (off) return;
-      if (r.ok) { setRoaster(r.data.roaster); setHistory(r.data.history); setError(null); }
+      if (r.ok) { setRoaster(r.data.roaster); setHistory(r.data.history); setCanMode(!!r.data.can?.stationMode); setError(null); }
       else if (r.status === 404) setNotFound(true);
       else setError(r.data);
     });
@@ -66,6 +68,7 @@ export default function RoasterPage({ params }: { params: Promise<{ id: string }
     if (notFound) return <div className="hr-state" role="status"><h3>{L("الحمّاصة غير موجودة.", "Roaster not found.")}</h3><Link href={BASE} className="hr-btn">{L("رجوع إلى الحمّاصات", "Back to roasters")}</Link></div>;
     if (error || oErr) return <Retry error={(error ?? oErr)!} onRetry={() => { load(); reloadOverview(); }} />;
     if (!roaster || !overview) return <OpsLoading rows={8} />;
+    const modeControl = <StationModeControl roasterId={roaster.id} mode={roaster.stationMode === "V2" ? "V2" : "V1"} canChange={canMode} onChanged={(m) => { setRoaster({ ...roaster, stationMode: m }); load(); }} />;
 
     if (phone && !editing) {
       // 382:89 — the detail: status, the limits, the next maintenance; «تغيير الحالة» · «تعديل».
@@ -89,6 +92,7 @@ export default function RoasterPage({ params }: { params: Promise<{ id: string }
               </div>
             ) : <p className="ss-muted">{L("لا صيانة مخططة", "No maintenance planned")}</p>}
           </section>
+          {modeControl}
           {canEdit ? (
             <div className="ss-formacts is-sticky is-two">
               <Btn onClick={() => setStatusOpen(true)} data-testid="roaster-status">{L("تغيير الحالة", "Change status")}</Btn>
@@ -99,7 +103,7 @@ export default function RoasterPage({ params }: { params: Promise<{ id: string }
       );
     }
 
-    if (!canEdit) return <p className="tl-foot" data-testid="rm-readonly">{L("للعرض فقط · يغيّر الإعداد المدير", "Read only · the administrator changes the configuration")}</p>;
+    if (!canEdit) return <>{modeControl}<p className="tl-foot" data-testid="rm-readonly">{L("للعرض فقط · يغيّر الإعداد المدير", "Read only · the administrator changes the configuration")}</p></>;
     return (
       <>
         {saved ? <div className="hr-notice tone-success" role="status" data-testid="roaster-saved">{L("حُفظت التغييرات.", "Changes saved.")}</div> : null}
@@ -112,6 +116,7 @@ export default function RoasterPage({ params }: { params: Promise<{ id: string }
           othersOfType={others}
           onSaved={(r) => { setRoaster(r); setSaved(true); load(); reloadOverview(); if (phone) router.push(`${BASE}/roasters/${id}`); }}
         />
+        {phone ? null : modeControl}
         {phone ? null : (
           <div className="ss-after" data-testid="roaster-after">
             <section>

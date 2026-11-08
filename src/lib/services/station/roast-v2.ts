@@ -38,6 +38,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { setAuditContext, type AuditContext } from "@/lib/accounting/audit";
 import { ipHashOf } from "@/lib/accounting/ops/purchase-activity";
+import { writeSettingsAudit } from "@/lib/services/settings/audit";
 import { flushPostings, lockHolders } from "@/lib/accounting/ops/cost-ledger";
 import { onRoastCancelled, onRoastDiscard, onRoastLot, type RoastComponent } from "@/lib/accounting/ops/inventory-events";
 import { Decimal } from "@/lib/accounting/money";
@@ -1178,7 +1179,12 @@ export async function roasterState(roasterId: string) {
 }
 
 /** Switch a roaster between the V1 and V2 stations. Back to V1 only with nothing open on it. */
-export async function setStationMode(actor: V2Actor, roasterId: string, modeRaw: unknown) {
+/**
+ * The roaster's station: V1 (the previous screen) or V2. From the station (a supervisor at a device: bound to its
+ * roaster) or from the roaster's settings page (`via: "desk"`, no station scope) — the same guards either way. Logged in
+ * AuthAuditLog (ROASTER_STATION_MODE, with where it came from) and, from the desk, in the roaster's change history.
+ */
+export async function setStationMode(actor: V2Actor, roasterId: string, modeRaw: unknown, via: "station" | "desk" = "station") {
   const mode = modeRaw === "V2" ? "V2" : modeRaw === "V1" ? "V1" : null;
   if (!mode) throw fail(400, "MODE_INVALID", "اختر v1 أو v2.", "Choose V1 or V2.");
   return prisma.$transaction(async (tx) => {
@@ -1200,7 +1206,10 @@ export async function setStationMode(actor: V2Actor, roasterId: string, modeRaw:
       if (claim) throw fail(409, "ROASTER_HAS_ACTIVE_SLOT", "على الحمّاصة خانة قيد التحميص في المحطة الحالية. أنهِها أولًا.", "A slot is being roasted on the current station. Finish it first.");
     }
     const out = await tx.roaster.update({ where: { id: roasterId }, data: { stationMode: mode, updatedById: actor.id } });
-    await tx.authAuditLog.create({ data: { userId: actor.id, action: "ROASTER_STATION_MODE", result: "SUCCESS", sourceInterface: "WEB", ipHash: await ipHashOf(null), metadata: { roasterId, from: r.stationMode, to: mode } } });
+    await tx.authAuditLog.create({ data: { userId: actor.id, action: "ROASTER_STATION_MODE", result: "SUCCESS", sourceInterface: via === "desk" ? "WEB" : "STATION", ipHash: await ipHashOf(null), metadata: { roasterId, from: r.stationMode, to: mode, via } } });
+    if (via === "desk") {
+      await writeSettingsAudit(tx, { section: "production", action: "ROASTER_UPDATED", entityType: "Roaster", entityId: roasterId, changed: ["stationMode"], before: { stationMode: r.stationMode }, after: { stationMode: mode }, actor: { id: actor.id, name: actor.name } });
+    }
     return { id: out.id, stationMode: out.stationMode };
   }, TX_OPTS);
 }

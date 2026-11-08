@@ -228,6 +228,8 @@ export function roasterOut(r: RoasterRow, names: Map<string, string> = new Map()
     workingHours: parseWorkingHours(r.workingHours ?? null),
     /** Where it draws green (20261117090000); null = the production site. */
     locationId: ("locationId" in r ? (r as { locationId?: string | null }).locationId : null) ?? null,
+    /** The roaster's station screen: V1 (the previous one) or V2 (roast station v2). */
+    stationMode: ("stationMode" in r ? (r as { stationMode?: string }).stationMode : null) ?? "V1",
   };
 }
 

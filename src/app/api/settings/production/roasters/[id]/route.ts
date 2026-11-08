@@ -1,7 +1,7 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { forbidden, requireAdminAction, requireAuth } from "@/lib/auth-server";
-import { hasModuleAccess } from "@/lib/auth-shared";
+import { hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
 import { handleDomainError } from "@/lib/api-error";
 import { roasterAudit, roasterOut, validateRoaster, type FieldError } from "@/lib/services/settings/roasters";
 import { employeeNames, isAuthorizedOperator, roasterHistory } from "@/lib/services/settings/roasters-db";
@@ -36,7 +36,7 @@ export async function GET(_request: Request, { params }: Params) {
     const r = await prisma.roaster.findUnique({ where: { id } });
     if (!r) return notFound("roaster");
     const names = await employeeNames(prisma, [r.defaultOperatorId]);
-    return NextResponse.json({ roaster: { ...roasterOut(r, names), effectiveSite: await roasterEffectiveSite(prisma, id) }, history: await roasterHistory(prisma, id), can: { edit: user.role === "admin" } });
+    return NextResponse.json({ roaster: { ...roasterOut(r, names), effectiveSite: await roasterEffectiveSite(prisma, id) }, history: await roasterHistory(prisma, id), can: { edit: user.role === "admin", stationMode: user.role === "admin" || hasSubPrivilege(user.permissions, "production", "manage_roasters") } });
   } catch (err) {
     return handleDomainError(err);
   }
