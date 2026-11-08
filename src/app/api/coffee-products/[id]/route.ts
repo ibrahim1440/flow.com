@@ -116,5 +116,9 @@ export async function PATCH(request: Request, { params }: Params) {
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
+  // D14 (gate): the default green lot is set through its own audited endpoint (an active lot with stock), never here.
+  if (body && typeof body === "object" && "defaultGreenBeanId" in body) {
+    return NextResponse.json({ error: "تُحدَّد الدفعة الخضراء الافتراضية من «الدفعة الخضراء الافتراضية» في صفحة المنتج.", errorEn: "The default green lot is set from «Default green lot» on the product page.", code: "DEFAULT_GREEN_ENDPOINT", field: "defaultGreenBeanId" }, { status: 400 });
+  }
   return updateCatalogProduct(id, (body ?? {}) as Record<string, unknown>);
 }

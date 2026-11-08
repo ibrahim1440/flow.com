@@ -151,8 +151,7 @@ export function PackagingStation() {
         right={<span className={`st ws-st ${b.kind === "MATERIAL_SHORT" ? "wa" : "er"}`}>{b.kind === "MATERIAL_SHORT" ? L("مواد ناقصة", "Materials short") : b.kind === "QC_HOLD" ? L("محجوزة", "Held") : L("محجورة", "Quarantined")}</span>} />);
     }
     for (const o of prepQ?.blocked ?? []) {
-      const cust = lang === "ar" ? o.customer.nameAr || o.customer.name : o.customer.name;
-      rows.push(<Row key={`o-${o.id}`} testId={`blocked-order-${o.orderNumber}`} title={<><bdi>{cust}</bdi> · <Bid>#{o.orderNumber}</Bid></>}
+      rows.push(<Row key={`o-${o.id}`} testId={`blocked-order-${o.orderNumber}`} title={<>{L("الطلب", "Order")} <Bid>#{o.orderNumber}</Bid></>}
         sub={L("معلّق مؤقتاً · لا يُجهَّز حتى يُستأنف من النظام", "On hold · not prepared until it is resumed in the ERP")}
         right={<span className="st ws-st wa">{L("طلب موقوف", "Order on hold")}</span>} />);
     }
@@ -412,7 +411,8 @@ function PrepTab(p: Shared & { q: PrepQueue | null }) {
   const [parcels, setParcels] = useState(1);
   const [choose, setChoose] = useState(false);
   const [chosen, setChosen] = useState<string[]>([]);
-  const cust = (o: { customer: { name: string; nameAr: string | null } }) => (lang === "ar" ? o.customer.nameAr || o.customer.name : o.customer.name);
+  // No customer name on any station screen (owner decision, 8 Nov 2026): an order reads by its number.
+  const orderTitle = (o: { orderNumber: number }) => <>{L("الطلب", "Order")} <Bid>#{o.orderNumber}</Bid></>;
   const lineName = (l: { nameEn: string; nameAr: string | null } | null | undefined) => (l ? (lang === "ar" ? l.nameAr || l.nameEn : l.nameEn) : "");
 
   const refreshOrder = useCallback(async (id: string) => {
@@ -528,7 +528,7 @@ function PrepTab(p: Shared & { q: PrepQueue | null }) {
   const first = startable[0] ?? null;
   const steps = [L("التحقق من الحجز", "Check the reservation"), L("الالتقاط والتحقق", "Pick and verify"), L("تأكيد الكمية", "Confirm the count"), L("التسليم للشحن", "Hand to dispatch")];
   const errBox = err ? <Info tone="err" title={err} testId="station-error" /> : null;
-  const orderSub = (o: PrepOrder) => <>{L("الطلب", "Order")} <Bid>#{o.orderNumber}</Bid> · {L("من المخزون الجاهز · محجوز", "From finished stock · reserved")}{o.legacyLines ? <> · {L(`${o.legacyLines} بند بالكيلو يُسلَّم من النظام`, `${o.legacyLines} kg line(s) handled in the ERP`)}</> : null}</>;
+  const orderSub = (o: PrepOrder) => <>{L("من المخزون الجاهز · محجوز", "From finished stock · reserved")}{o.legacyLines ? <> · {L(`${o.legacyLines} بند بالكيلو يُسلَّم من النظام`, `${o.legacyLines} kg line(s) handled in the ERP`)}</> : null}</>;
   const claimSince = (o: PrepOrder) => (o.claim ? <>{L("بدأ", "Started")} <Num>{clock(o.claim.at, false)}</Num> · {o.claim.byName}</> : null);
 
   // ── P1 ──────────────────────────────────────────────────────────────────────────────────
@@ -546,7 +546,7 @@ function PrepTab(p: Shared & { q: PrepQueue | null }) {
         ? <>{L(`${o.totals.readyToPick + o.totals.prepared} من ${o.totals.outstanding} جاهزة · الباقي بانتظار الإنتاج`, `${o.totals.readyToPick + o.totals.prepared} of ${o.totals.outstanding} ready · the rest is waiting for production`)}</>
         : <><Num>{o.totals.outstanding}</Num> {L("وحدة", "units")}{o.lines.length > 1 ? <> · {L(`${o.lines.length} بنود`, `${o.lines.length} lines`)}</> : null} · {L("من المخزون الجاهز", "from finished stock")}{o.totals.prepared ? <> · {L(`جُهّز ${o.totals.prepared}`, `${o.totals.prepared} prepared`)}</> : null}{o.status === "Preparing" && o.lastHandoff ? <> · {L("سُلّم جزء للشحن", "part handed to dispatch")}</> : null}</>;
       return <Row key={o.id} on={isFirst} dim={dim} testId={`prep-row-${o.orderNumber}`} onClick={() => { if (!dim) void start(o); }}
-        title={<><bdi>{cust(o)}</bdi> · <Bid>#{o.orderNumber}</Bid></>} sub={sub} right={<span className={`st ws-st ${tone}`}>{label}</span>} />;
+        title={orderTitle(o)} sub={sub} right={<span className={`st ws-st ${tone}`}>{label}</span>} />;
     });
     const readyN = orders.filter((o) => o.state === "ready" || o.state === "prepared").length;
     return (<>{bar}
@@ -602,7 +602,7 @@ function PrepTab(p: Shared & { q: PrepQueue | null }) {
     const partial = o.totals.outstanding - o.totals.handedOff - units > 0;
     return (<>{bar}
       <Sheet testId="station-prep-prepared"
-        head={<Head title={<bdi>{cust(o)}</bdi>} sub={orderSub(o)} steps={{ items: steps, cur: 3 }} status={{ tone: "ok", label: partial ? L("جُهّز جزئيًا · بانتظار التسليم", "Partly prepared · awaiting handoff") : L("جُهّز · بانتظار التسليم", "Prepared · awaiting handoff") }} since={claimSince(o)} />}
+        head={<Head title={orderTitle(o)} sub={orderSub(o)} steps={{ items: steps, cur: 3 }} status={{ tone: "ok", label: partial ? L("جُهّز جزئيًا · بانتظار التسليم", "Partly prepared · awaiting handoff") : L("جُهّز · بانتظار التسليم", "Prepared · awaiting handoff") }} since={claimSince(o)} />}
         foot={<>
           <Primary disabled={units <= 0 || !online} wait={sending} onClick={() => void handOff()} testId="handoff-confirm">{choose ? L(`تسليم البنود المختارة · ${units} وحدة`, `Hand off the chosen lines · ${units} units`) : L(`تسليم للشحن · ${units} وحدة`, `Hand to dispatch · ${units} units`)}</Primary>
           {ready.length > 1 ? <Secondary onClick={() => { setChoose(!choose); setChosen([]); }} testId="handoff-partial">{choose ? L("تسليم الكل", "Hand off everything") : L("تسليم جزئي", "Partial handoff")}</Secondary>
@@ -680,7 +680,7 @@ function PrepTab(p: Shared & { q: PrepQueue | null }) {
     const until = clock(now + 2 * 3600_000, false);
     return (<>{bar}
       <Sheet testId="station-prep-partial"
-        head={<Head title={<bdi>{cust(o)}</bdi>} sub={orderSub(o)} steps={{ items: steps, cur: 2 }} status={{ tone: "wa", label: L("جزئي", "Partial") }} since={claimSince(o)} />}
+        head={<Head title={orderTitle(o)} sub={orderSub(o)} steps={{ items: steps, cur: 2 }} status={{ tone: "wa", label: L("جزئي", "Partial") }} since={claimSince(o)} />}
         foot={<>
           <Primary onClick={() => void saveDecision()} wait={sending} disabled={!online} testId="partial-save">{L("حفظ الجزء المنجز", "Save the work done")}</Primary>
           <Secondary onClick={() => setView({ v: "order", id: o.id })} testId="partial-continue">{L("متابعة التجهيز", "Continue preparing")}</Secondary>
@@ -708,7 +708,7 @@ function PrepTab(p: Shared & { q: PrepQueue | null }) {
   const onKey = (k: string) => typeEntry(k === "del" ? entry.slice(0, -1) : lotChars(entry + k));
   return (<>{bar}
     <Sheet testId={ambiguous ? "station-prep-ambiguous" : wrong ? "station-prep-wrong" : "station-prep-pick"}
-      head={<Head title={<bdi>{cust(o)}</bdi>} sub={orderSub(o)} steps={{ items: steps, cur: 1 }} status={{ tone: "in", label: L("قيد التجهيز", "Being prepared") }} since={claimSince(o)} />}
+      head={<Head title={orderTitle(o)} sub={orderSub(o)} steps={{ items: steps, cur: 1 }} status={{ tone: "in", label: L("قيد التجهيز", "Being prepared") }} since={claimSince(o)} />}
       foot={<>
         {ambiguous && entry.length < fullLen
           ? <Primary disabled testId="pick-confirm">{L("تحقق من الرقم الكامل", "Check the full number")}</Primary>

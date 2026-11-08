@@ -12,7 +12,7 @@ import { UsersError } from "@/lib/users/errors";
 import { auditContext } from "@/lib/users/account-update";
 import { recordUsersAudit } from "@/lib/users/server";
 import {
-  STATION_TYPES, activationCodeHash, effectivePolicy, newActivationCode, normalizeDeviceCode, policyValue,
+  STATION_TYPES, SESSIONLESS_STATION_TYPES, activationCodeHash, effectivePolicy, newActivationCode, normalizeDeviceCode, policyValue,
   type StationType,
 } from "@/lib/station/device";
 import { accessNow, holdsStationPrivilege, isAdminRole, type AccessNow } from "@/lib/station/access";
@@ -24,6 +24,7 @@ const reasonOf = (v: unknown) => text(v, 300);
 
 export const STATION_TYPE_AR: Record<StationType, { ar: string; en: string }> = {
   ROASTING: { ar: "التحميص", en: "Roasting" }, QUALITY: { ar: "الجودة", en: "Quality" }, PACKAGING: { ar: "التعبئة والتجهيز", en: "Packaging & fulfilment" },
+  ORDERS_BOARD: { ar: "لوحة الطلبات", en: "Orders board" },
 };
 
 // ── Reads ──────────────────────────────────────────────────────────────────────────────────────
@@ -256,7 +257,8 @@ export async function userStations(id: string) {
     select: { id: true, name: true, role: true, active: true, permissions: true, stationAssignments: { select: { stationId: true, supervisor: true } }, stationPin: { select: { setAt: true, attempts: { where: { lockedAt: { not: null } }, select: { stationDeviceId: true, lockedAt: true, device: { select: { displayName: true } } } } } } },
   });
   if (!e) return null;
-  const stations = await prisma.station.findMany({ where: { status: "ACTIVE" }, orderBy: { createdAt: "asc" }, select: { id: true, name: true, type: true, place: true } });
+  // A board (ORDERS_BOARD) has no sign-in, so it is nobody's station to be allowed on.
+  const stations = await prisma.station.findMany({ where: { status: "ACTIVE", type: { notIn: [...SESSIONLESS_STATION_TYPES] } }, orderBy: { createdAt: "asc" }, select: { id: true, name: true, type: true, place: true } });
   let perms = parsePermissions(e.permissions);
   if (!perms || Object.keys(perms).length === 0) perms = buildDefaultPermissions(e.role);
   perms = simpleModePermissions(perms, e.role);
@@ -292,7 +294,7 @@ export async function setUserStations(request: Request, user: SessionUser, id: s
   }
   // D12: the administrator account never signs in at a station device.
   if (isAdminRole(e.role) && [...want.values()].some((w) => w.allowed)) throw new UsersError(409, "ADMIN_NOT_AT_STATION", "حساب مدير المنشأة لا يدخل من أجهزة المحطات؛ يستخدم المحطة من متصفحه بحسابه.", "The administrator account does not sign in at station devices.");
-  const stations = await prisma.station.findMany({ where: { id: { in: [...want.keys()] }, status: "ACTIVE" }, select: { id: true, name: true } });
+  const stations = await prisma.station.findMany({ where: { id: { in: [...want.keys()] }, status: "ACTIVE", type: { notIn: [...SESSIONLESS_STATION_TYPES] } }, select: { id: true, name: true } });
   const known = new Map(stations.map((s) => [s.id, s.name]));
   const ctx = auditContext(request, user.id);
   return prisma.$transaction(async (tx) => {

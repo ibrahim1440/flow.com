@@ -19,7 +19,7 @@ import {
   type CategoryList, type CategoryRef, type Material,
 } from "../_catalog/shared";
 
-type Bean = { id: string; serialNumber: string; beanType: string; beanTypeAr?: string | null; quantityKg: number };
+type Bean = { id: string; serialNumber: string; beanType: string; beanTypeAr?: string | null; quantityKg: number; isActive?: boolean };
 type Sku = { key: number; skuCode: string; weightGrams: string; price: string; barcode: string; isActive: boolean };
 type BomLine = { key: number; type: "ROASTED_COFFEE" | "MATERIAL"; materialItemId: string; quantityPerUnit: string };
 
@@ -190,7 +190,7 @@ export default function AddProductPage() {
               <Field label={lbl("البن الأخضر الافتراضي", "Default green coffee")} help={L("يُقترح عند بدء التحميص.", "Suggested when a roast starts.")}>
                 <Select className="hr-select" value={f.defaultGreenBeanId} onChange={(e) => set("defaultGreenBeanId", e.target.value)}>
                   <option value="">{L("لم يُحدَّد", "Not set")}</option>
-                  {beans.map((b) => <option key={b.id} value={b.id}>{(lang === "ar" && b.beanTypeAr) || b.beanType} · {b.serialNumber}</option>)}
+                  {beans.filter((b) => b.isActive !== false && b.quantityKg > 0).map((b) => <option key={b.id} value={b.id}>{(lang === "ar" && b.beanTypeAr) || b.beanType} · {b.serialNumber}</option>)}
                 </Select>
               </Field>
             </div>

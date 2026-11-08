@@ -13,6 +13,7 @@ import { useI18n } from "@/lib/i18n/context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useUser } from "../../../user-context";
 import { call, dayLabel, errText, Seg, timeOf, useLang, type ApiError } from "../../../settings/production/_parts/shared";
+import { StockOrderDialog } from "../../_components/stock-order";
 import "./schedule.css";
 
 export { call, dayLabel, errText, timeOf, useLang, type ApiError };
@@ -68,6 +69,7 @@ export function ScheduleFrame({ view, when, children, testId }: { view: View; wh
   const user = useUser();
   const can = (k: string) => hasSubPrivilege(user?.permissions ?? {}, "production", k);
   const views: [View, string][] = [["queue", t("schedViewQueue")], ["day", t("schedViewDay")], ["roasters", t("schedViewRoasters")], ["plan", t("schedViewPlan")]];
+  const [stockOpen, setStockOpen] = useState(false);
   const go = (v: View) => router.push(v === "queue" ? "/dashboard/production?tab=pending" : v === "day" ? BASE : `${BASE}?view=${v}`);
   return (
     <div className="hr-page" data-testid={testId}>
@@ -75,7 +77,8 @@ export function ScheduleFrame({ view, when, children, testId }: { view: View; wh
         title={t("opsProductionTitle")}
         actions={can("start_batch") ? (
           <>
-            {can("roast_to_stock") ? <Link href="/dashboard/production?tab=pending" className="hr-btn"><Boxes size={15} aria-hidden="true" /> {t("roastToStock")}</Link> : null}
+            {/* D14 (owner, 8 Nov): «تحميص للمخزون» opens the stock roast order (the V2 station's prep lists it under «مخزون»). */}
+            {can("roast_to_stock") || user?.role === "admin" ? <button type="button" className="hr-btn" onClick={() => setStockOpen(true)} data-testid="roast-to-stock"><Boxes size={15} aria-hidden="true" /> {t("roastToStock")}</button> : null}
             <Link href="/dashboard/production?tab=pending" className="hr-btn is-primary" data-testid="record-batch-link"><Flame size={15} aria-hidden="true" /> {L("تسجيل دفعة", "Record batch")}</Link>
           </>
         ) : null}
@@ -102,6 +105,7 @@ export function ScheduleFrame({ view, when, children, testId }: { view: View; wh
         {when ? <span className="rs-when">{when}</span> : null}
       </div>
       {children}
+      {stockOpen ? <StockOrderDialog onClose={() => setStockOpen(false)} /> : null}
     </div>
   );
 }

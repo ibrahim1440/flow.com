@@ -6,7 +6,7 @@ import { prepQueue } from "@/lib/services/station/prep";
 /**
  * GET /api/station/prep/queue — P1 «طلبات للتجهيز» (order lines whose units are reserved on
  * finished-goods lots, oldest order first), P5 (orders on hold: the status wins) and the caller's
- * own claimed order (S5). Customers by name and order number only (F4). 304 when unchanged (H5).
+ * own claimed order (S5). By order number only — no customer (owner, 8 Nov 2026). 304 when unchanged (H5).
  */
 export async function GET(request: Request) {
   const { user, error } = await requirePackagingStation("preparation");

@@ -1,3 +1,4 @@
+import type { OrderChannel } from "@/lib/station/board";
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 import { kgForUnits } from "@/lib/services/finished-products";
 import { CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
@@ -105,6 +106,8 @@ export type NewOrderHeader = {
   ownerId?: string | null;
   /** «الموقع» (WP-B): the selling location (an active FinBranch id, validated by the caller); absent = the owner's default. */
   branchId?: string | null;
+  /** «القناة» (20261224090000): where the order came from, set by the flow that creates it; absent = not recorded (derived). */
+  channel?: OrderChannel | null;
 };
 
 /**
@@ -198,6 +201,7 @@ export async function createOrderWithNumber(
           // cancels it (the manager and the administrator may as well).
           ownerId: header.ownerId ?? null,
           branchId: header.branchId !== undefined ? header.branchId : await defaultBranchForActor(db, header.ownerId ?? null),
+          ...(header.channel ? { channel: header.channel } : {}),
           items: { create: lines },
         },
         include: {

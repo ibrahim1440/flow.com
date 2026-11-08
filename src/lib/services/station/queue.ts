@@ -51,8 +51,8 @@ export type QueueItem = {
   productId: string;
   nameAr: string | null;
   nameEn: string;
-  /** Order numbers the roast is attributed to, oldest first (empty for a stock roast). */
-  orders: { orderNumber: number; customerName: string }[];
+  /** Order numbers the roast is attributed to, oldest first (empty for a stock roast). No customer (owner, 8 Nov 2026). */
+  orders: { orderNumber: number }[];
   productionNumber: string | null;
   forStock: boolean;
   /** Roasted kilograms still needed. */
@@ -181,7 +181,7 @@ export async function stationQueue(user: Actor, opts: { roasterId?: string | nul
     items.push({
       key: ref, itemType: "RoastCoffee", itemId: c.productId, productId: c.productId,
       nameAr: c.productNameAr, nameEn: c.productNameEn,
-      orders: c.orders.map((o) => ({ orderNumber: o.orderNumber, customerName: o.customerName })),
+      orders: c.orders.map((o) => ({ orderNumber: o.orderNumber })),
       productionNumber: null, forStock: false, needKg: c.demandKg, plannedGreenKg, expectedLossPct: c.expectedRoastLoss,
       green: g.green, greenAvailableKg: r3(g.availableKg), greenWait: g.wait, blocked, claim,
     });

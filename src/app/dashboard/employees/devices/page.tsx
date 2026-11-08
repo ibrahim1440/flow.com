@@ -20,7 +20,7 @@ type Policy = { idleMinutes: number; pinMaxAttempts: number; activationMinutes: 
 type Overview = { stations: Station[]; devices: Device[]; policy: Policy; roasters: { id: string; name: string; status: string }[]; locations?: SiteRow[] };
 type Code = { device: { id: string; name: string; stationName: string; deviceCode: string }; activationCode: string; expiresAt: string };
 
-const TYPE: Record<string, { ar: string; en: string }> = { ROASTING: { ar: "التحميص", en: "Roasting" }, QUALITY: { ar: "الجودة", en: "Quality" }, PACKAGING: { ar: "التعبئة والتجهيز", en: "Packaging & fulfilment" } };
+const TYPE: Record<string, { ar: string; en: string }> = { ROASTING: { ar: "التحميص", en: "Roasting" }, QUALITY: { ar: "الجودة", en: "Quality" }, PACKAGING: { ar: "التعبئة والتجهيز", en: "Packaging & fulfilment" }, ORDERS_BOARD: { ar: "لوحة الطلبات (عرض فقط)", en: "Orders board (display only)" } };
 const typeWord = (t: string, lang: Lang) => (TYPE[t] ? TYPE[t][lang] : t);
 
 export default function StationDevicesPage() {
@@ -185,7 +185,7 @@ function AddStationDialog({ roasters, onClose, onDone }: { roasters: Overview["r
         <Select value={type} onChange={(e) => setType(e.target.value)} data-testid="ur-station-type">
           {Object.keys(TYPE).map((k) => <option key={k} value={k}>{typeWord(k, lang)}</option>)}
         </Select>
-        {type === "QUALITY" ? <span className="hr-help">{L("محطة الجودة: الفحص بالقياس وطلب الاستثناء، لمن يملك «تسجيل نتائج الجودة». جهاز التحميص نفسه يمكن أن يخدمها (زر «المحطات» في الجهاز).", "The QC station: measured inspection and the exception request, for holders of “Submit QC records”. The roasting device itself can serve it (the device's «Stations» button).")}</span> : type === "PACKAGING" ? <span className="hr-help">{L("تبويبا «التعبئة» و«تجهيز الطلبات»: يعمل فيهما من يملك صلاحية التعبئة أو التسليم والشحن.", "«Packaging» and «Order preparation»: for whoever holds the packaging or the dispatch privilege.")}</span> : null}
+        {type === "QUALITY" ? <span className="hr-help">{L("محطة الجودة: الفحص بالقياس وطلب الاستثناء، لمن يملك «تسجيل نتائج الجودة». جهاز التحميص نفسه يمكن أن يخدمها (زر «المحطات» في الجهاز).", "The QC station: measured inspection and the exception request, for holders of “Submit QC records”. The roasting device itself can serve it (the device's «Stations» button).")}</span> : type === "PACKAGING" ? <span className="hr-help">{L("تبويبا «التعبئة» و«تجهيز الطلبات»: يعمل فيهما من يملك صلاحية التعبئة أو التسليم والشحن.", "«Packaging» and «Order preparation»: for whoever holds the packaging or the dispatch privilege.")}</span> : type === "ORDERS_BOARD" ? <span className="hr-help" data-testid="ur-station-board-help">{L("شاشة للعرض فقط: الطلبات ومرحلة كل طلب، تتحدث وحدها. لا يدخل عليها أحد ولا تُعرض فيها أسعار ولا أسماء عملاء. سجّل الجهاز وفعّله كأي محطة.", "Display only: the orders and each one's stage, updating by itself. Nobody signs in on it; no prices or customer names are shown. Register and activate the device like any station.")}</span> : null}
       </label>
       <label className="hr-field"><span className="hr-label">{L("الموقع", "Place")}</span><input className="hr-input" value={place} onChange={(e) => setPlace(e.target.value)} maxLength={80} placeholder={L("صالة التحميص", "Roasting hall")} data-testid="ur-station-place" /></label>
       {type === "ROASTING" ? (

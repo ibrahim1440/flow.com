@@ -284,12 +284,12 @@ export function RoastingStation() {
     />
   );
   const steps = [t("stepConfirm"), t("stepRoast"), t("stepWeights"), t("stepQc")];
-  const itemSub = (i: QueueItem | null, long = false): ReactNode => {
+  const itemSub = (i: QueueItem | null): ReactNode => {
     if (!i) return null;
     const refs: ReactNode[] = [];
     if (i.productionNumber) refs.push(<Bid key="po">{i.productionNumber}</Bid>);
     if (i.forStock) refs.push(<span key="stock">{t("forStock")}</span>);
-    if (i.orders.length) refs.push(<span key="o">{t("forOrders", { orders: "" })}{i.orders.map((o, n) => <span key={n}>{n ? " · " : ""}<Bid>#{o.orderNumber}</Bid></span>)}{long && i.orders[0] ? ` · ${i.orders[0].customerName}` : ""}</span>);
+    if (i.orders.length) refs.push(<span key="o">{t("forOrders", { orders: "" })}{i.orders.map((o, n) => <span key={n}>{n ? " · " : ""}<Bid>#{o.orderNumber}</Bid></span>)}</span>);
     if (i.needKg > 0) refs.push(<span key="n">{t("neededRoasted", { kg: k2(i.needKg) })}</span>);
     return refs.map((r, n) => <span key={n}>{n ? " · " : ""}{r}</span>);
   };
@@ -438,7 +438,7 @@ export function RoastingStation() {
     const expected = i.expectedLossPct;
     return (<>{bar}
       <Sheet testId="station-start"
-        head={<Head title={<bdi>{name(i)}</bdi>} sub={itemSub(i, true)} steps={{ items: steps, cur: 0 }} status={blocked ? { tone: "er", label: t("rowBlocked") } : { tone: "", label: i.slot?.status === "IN_PROGRESS" ? t("slotInProgress") : t("planned") }} since={i.slot ? t("slotPlannedAt", { time: hhmm(i.slot.startsAt) }) : t("inQueueSince")} />}
+        head={<Head title={<bdi>{name(i)}</bdi>} sub={itemSub(i)} steps={{ items: steps, cur: 0 }} status={blocked ? { tone: "er", label: t("rowBlocked") } : { tone: "", label: i.slot?.status === "IN_PROGRESS" ? t("slotInProgress") : t("planned") }} since={i.slot ? t("slotPlannedAt", { time: hhmm(i.slot.startsAt) }) : t("inQueueSince")} />}
         foot={<>
           {blocked
             ? <Primary disabled testId="start-blocked">{why === "AWAITING_TRANSFER" ? L("بانتظار تحويل", "Waiting for a transfer") : why === "GREEN_SHORT" || why === "NO_GREEN_SOURCE" ? L("تواصل مع المشرف", "Contact the supervisor") : t("cannotStart")}</Primary>
@@ -497,7 +497,7 @@ export function RoastingStation() {
     const mm = Math.floor(elapsedMs / 60000), ss = Math.floor((elapsedMs % 60000) / 1000);
     return (<>{bar}
       <Sheet testId="station-active"
-        head={<Head title={<bdi>{name(item)}</bdi>} sub={itemSub(item, true)} steps={{ items: steps, cur: 1 }} status={{ tone: stopped ? "wa" : "in", label: stateLabel(mine.state) }} since={t("startedAt", { time: startedAt, name: user.name })} />}
+        head={<Head title={<bdi>{name(item)}</bdi>} sub={itemSub(item)} steps={{ items: steps, cur: 1 }} status={{ tone: stopped ? "wa" : "in", label: stateLabel(mine.state) }} since={t("startedAt", { time: startedAt, name: user.name })} />}
         foot={stopped ? <>
           <Primary onClick={() => void claimAction("resume")} wait={busy} disabled={!online} testId="active-resume">{t("resume")}</Primary>
           <Secondary onClick={() => void claimAction("release")} testId="active-release" disabled={busy || !online}>{t("releaseTask")}</Secondary>
@@ -558,7 +558,7 @@ export function RoastingStation() {
       </div>
     );
     const lossOptions = LOSS_REASONS.map((r) => ({ value: r as string, label: t(`loss${r}` as StationKey) }));
-    const head = <Head title={<bdi>{name(item)}</bdi>} sub={itemSub(item, true)} steps={{ items: steps, cur: 2 }} status={{ tone: "in", label: t("awaitingWeights") }}
+    const head = <Head title={<bdi>{name(item)}</bdi>} sub={itemSub(item)} steps={{ items: steps, cur: 2 }} status={{ tone: "in", label: t("awaitingWeights") }}
       since={t("roastStartedAgo", { time: startedAt, min: Math.floor(elapsedMs / 60000) })} />;
 
     if (stage === "loss") {
@@ -639,7 +639,7 @@ export function RoastingStation() {
     const lossPct = b.greenBeanQuantity > 0 ? (lossKg / b.greenBeanQuantity) * 100 : 0;
     return (<>{bar}
       <Sheet testId="station-done"
-        head={<Head title={<bdi>{name(doneItem)}</bdi>} sub={itemSub(doneItem, true)} steps={{ items: steps, cur: 4 }} status={{ tone: "in", label: t("awaitingQc") }} since={t("recordedAt", { time: view.at })} />}
+        head={<Head title={<bdi>{name(doneItem)}</bdi>} sub={itemSub(doneItem)} steps={{ items: steps, cur: 4 }} status={{ tone: "in", label: t("awaitingQc") }} since={t("recordedAt", { time: view.at })} />}
         foot={<>
           {nextItem ? <Primary onClick={() => setView({ v: "start", key: nextItem.key })} testId="done-next">{t("startNext", { name: name(nextItem) })}</Primary>
             : <Primary onClick={() => setView({ v: "queue" })} testId="done-next">{t("viewQueue")}</Primary>}

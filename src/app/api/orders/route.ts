@@ -10,6 +10,7 @@ import { canSeeCustomerContact, CUSTOMER_OPERATIONS_SELECT } from "@/lib/auth/cu
 import { deliveryLotsFor } from "@/lib/services/delivery-lots";
 import { autoPrepareOrder } from "@/lib/services/orders/preparation";
 import { orderPipelines } from "@/lib/services/orders/pipeline";
+import { isFormChannel } from "@/lib/station/board";
 import { parseBranchId } from "@/lib/accounting/locations";
 import { orderVisibilityWhere, seesAllSales } from "@/lib/services/sales/scope";
 import { linkDirectOrderDeal } from "@/lib/services/sales/direct-order-deal";
@@ -159,6 +160,8 @@ export async function POST(request: Request) {
             // The creating user owns the order (owner decision, fix/order-owner).
             ownerId: user.id,
             ...(branchId !== undefined ? { branchId } : {}),
+            // «القناة»: the web store or the café when the form says so; otherwise not recorded (derived).
+            ...(isFormChannel(body.channel) ? { channel: body.channel } : {}),
           },
           resolvedItems,
           canSeeCustomerContact(user.permissions),

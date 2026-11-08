@@ -1,4 +1,5 @@
-import { DEVICE_REQUIRED, DEVICE_REVOKED, StationError, currentDevice, deviceStation, stationPolicy } from "@/lib/services/station/guard";
+import { DEVICE_REQUIRED, DEVICE_REVOKED, StationError, WRONG_STATION, currentDevice, deviceStation, stationPolicy } from "@/lib/services/station/guard";
+import { isSessionlessStation } from "@/lib/station/device";
 import { stationSignIn } from "@/lib/services/station/session";
 
 /**
@@ -15,6 +16,8 @@ export async function POST(request: Request) {
   const raw = ((await request.json().catch(() => ({}))) ?? {}) as Record<string, unknown>;
   const station = await deviceStation(dev.device, typeof raw.stationId === "string" ? raw.stationId : null, dev.station);
   if (!station) return DEVICE_REQUIRED().response();
+  // The orders board (D15) shows only: nobody signs in on it.
+  if (isSessionlessStation(station.type)) return WRONG_STATION().response();
   try {
     return await stationSignIn(request, dev.device, station, raw, await stationPolicy());
   } catch (err) {

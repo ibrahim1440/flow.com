@@ -5,6 +5,9 @@
 // with the stock they draw on, and the product data. GET /api/coffee-products/:id; edits go to
 // PATCH /api/coffee-products/:id (product, category, status), POST /api/products (a new SKU),
 // PATCH /api/products/:skuId (price, barcode, status) and PUT /api/products/:skuId/bom.
+import { DefaultGreenDialog } from "../../production/_components/stock-order";
+import { useUser } from "../../user-context";
+import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -42,6 +45,9 @@ export default function ProductPage() {
   const { lang } = useI18n();
   const L = useL();
   const canEdit = useCanEditCatalog();
+  const me = useUser();
+  const canStock = !!me && (me.role === "admin" || hasSubPrivilege(me.permissions ?? {}, "production", "roast_to_stock"));
+  const [editGreen, setEditGreen] = useState(false);
   const [p, setP] = useState<Product | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [key, setKey] = useState(0);
@@ -235,7 +241,8 @@ export default function ProductPage() {
               <div><dt>{L("ملاحظات التذوق", "Tasting notes")}</dt><dd>{pick(p.cupNotesAr, p.cupNotesEn)}</dd></div>
               <div><dt>{L("مسار التحميص", "Roast path")}</dt><dd>{pick(p.roastPathAr, p.roastPathEn)}</dd></div>
               <div><dt>{L("فقد التحميص المتوقع", "Expected roast loss")}</dt><dd className="hr-num">{p.expectedRoastLoss.toFixed(1)}%</dd></div>
-              <div><dt>{L("البن الأخضر الافتراضي", "Default green coffee")}</dt><dd><span className="hr-id" dir="ltr">{p.defaultGreenBean?.serialNumber ?? "—"}</span></dd></div>
+              {/* D14 (owner, 8 Nov): «الدفعة الخضراء الافتراضية» — changed by roast_to_stock or the admin role, audited. */}
+              <div data-testid="product-default-green"><dt>{L("الدفعة الخضراء الافتراضية", "Default green lot")}</dt><dd><span className="hr-id" dir="ltr">{p.defaultGreenBean?.serialNumber ?? "—"}</span>{p.defaultGreenBean ? <> · {(lang === "ar" ? p.defaultGreenBean.beanTypeAr || p.defaultGreenBean.beanType : p.defaultGreenBean.beanType)}</> : null}{canStock ? <> <Btn size="sm" variant="ghost" onClick={() => setEditGreen(true)} data-testid="product-default-green-edit">{L("تغيير", "Change")}</Btn></> : null}</dd></div>
             </dl>
           </section>
         </div>
@@ -247,6 +254,7 @@ export default function ProductPage() {
       ) : null}
       {editSku ? <SkuDialog sku={editSku} productId={p.id} onClose={() => setEditSku(null)} onSaved={() => { setEditSku(null); reload(); setToast({ tone: "success", msg: L("حُفظ الصنف.", "SKU saved.") }); }} /> : null}
       {addSku ? <SkuDialog productId={p.id} onClose={() => setAddSku(false)} onSaved={(sid) => { setAddSku(false); setBomSku(sid); reload(); setToast({ tone: "success", msg: L("أُضيف صنف البيع. أضف مكوناته.", "SKU added. Add its components.") }); }} /> : null}
+      {editGreen ? <DefaultGreenDialog productId={p.id} current={p.defaultGreenBeanId} onClose={() => setEditGreen(false)} onSaved={() => { setEditGreen(false); reload(); setToast({ tone: "success", msg: L("حُفظت الدفعة الخضراء الافتراضية.", "Default green lot saved.") }); }} /> : null}
       {editProduct ? <ProductDialog product={p} onClose={() => setEditProduct(false)} onSaved={() => { setEditProduct(false); reload(); setToast({ tone: "success", msg: L("حُفظ المنتج.", "Product saved.") }); }} /> : null}
     </OpsRoot>
   );

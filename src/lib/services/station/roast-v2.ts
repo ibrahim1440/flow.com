@@ -506,11 +506,22 @@ type LockedBasket = Awaited<ReturnType<typeof lockBasket>>;
 type LockedRun = LockedBasket["runs"][number];
 
 /**
+ * A «أمر تحميص للمخزون» is done once the green of its (non-rejected) lots reaches the green it asked for — then COMPLETED
+ * (terminal; the V1 queue, green readiness and V2 prep stop counting it).
+ */
+async function completeStockOrderIfDone(tx: Tx, productionOrderId: string) {
+  const po = await tx.productionOrder.findUnique({ where: { id: productionOrderId }, select: { status: true, sourceOrderItemId: true, expectedGreenBeanKg: true } });
+  if (!po || po.sourceOrderItemId || po.status === "COMPLETED" || po.status === "CANCELLED") return;
+  const agg = await tx.roastingBatch.aggregate({ where: { productionOrderId, isBlend: false, status: { notIn: ["Rejected", "Corrected"] } }, _sum: { greenBeanQuantity: true } });
+  if ((agg._sum.greenBeanQuantity ?? 0) + 0.0005 >= po.expectedGreenBeanKg) await tx.productionOrder.update({ where: { id: productionOrderId }, data: { status: "COMPLETED" } });
+}
+
+/**
  * The lot itself, inside the caller's transaction: its order line (or the shelf), the batch, the green out of STAGING per
  * component, the entries, the runs / basket / slots marked. Shared by «وزن» and by the supervisor's correction (which
  * re-records a reversed lot with `correctsBatchId`).
  */
-async function writeLot(tx: Tx, actor: V2Actor, a: { basket: LockedBasket; runs: LockedRun[]; roastedKg: number; lossReason: string | null; key: string; intentHash: string; correctsBatchId: string | null }) {
+async function writeLot(tx: Tx, actor: V2Actor, a: { basket: LockedBasket; runs: LockedRun[]; roastedKg: number; lossReason: string | null; key: string; intentHash: string; correctsBatchId: string | null; stockOrderId?: string | null }) {
   const { basket, runs, roastedKg, lossReason, key, intentHash } = a;
   const productId = runs[0].productId;
   const components: { greenBeanId: string; kg: number; bucketId: string; barcode: string }[] = runs.flatMap((r) => r.bucket.components.map((c) => ({ greenBeanId: c.greenBeanId, kg: num(c.kg), bucketId: r.bucketId, barcode: r.bucket.barcode })));
@@ -533,6 +544,17 @@ async function writeLot(tx: Tx, actor: V2Actor, a: { basket: LockedBasket; runs:
   if (orderItemId) {
     const pos = await tx.productionOrder.findMany({ where: { sourceOrderItemId: orderItemId, status: { in: ["PENDING", "IN_PRODUCTION"] } }, select: { id: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 1 });
     productionOrderId = pos[0]?.id ?? null;
+  } else {
+    // D14 (gate F2): a lot for no order item goes to the coffee's oldest open «أمر تحميص للمخزون» (a correction keeps the
+    // order its original lot was for), so the stock order is used up instead of being re-suggested every day.
+    if (a.stockOrderId) productionOrderId = a.stockOrderId;
+    else {
+      const stock = await tx.productionOrder.findMany({
+        where: { sourceOrderItemId: null, status: { in: ["PENDING", "IN_PRODUCTION"] }, productSku: { productId } },
+        select: { id: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 1,
+      });
+      productionOrderId = stock[0]?.id ?? null;
+    }
   }
 
   // The green lots: the largest share names the lot; the cost spread warns.
@@ -585,7 +607,10 @@ async function writeLot(tx: Tx, actor: V2Actor, a: { basket: LockedBasket; runs:
   if (slotIds.length) await tx.scheduledSlot.updateMany({ where: { id: { in: slotIds } }, data: { status: "RECORDED", recordedAt: now, outcome: "ROASTED", updatedById: actor.id } });
 
   if (orderItemId) await recalcOrderItemStatus(orderItemId, tx);
-  if (productionOrderId) await recalcProductionOrderStatus(productionOrderId, tx);
+  if (productionOrderId) {
+    await recalcProductionOrderStatus(productionOrderId, tx);
+    if (!orderItemId) await completeStockOrderIfDone(tx, productionOrderId);
+  }
   if (orderItemId) await assertOrderStillAcceptsProduction(tx, orderItemId, "start");
   for (const r of runs) {
     if (!r.capacityAck && !r.adminBypass) continue;
@@ -759,7 +784,8 @@ export async function correctLot(actor: V2Actor, batchId: string, body: Record<s
     if (old.productionOrderId) await recalcProductionOrderStatus(old.productionOrderId, tx);
 
     // 2. The same basket re-recorded as a new lot.
-    const lot = await writeLot(tx, actor, { basket, runs, roastedKg, lossReason, key, intentHash, correctsBatchId: old.id });
+    const oldStock = old.productionOrderId && !old.orderItemId ? old.productionOrderId : null;
+    const lot = await writeLot(tx, actor, { basket, runs, roastedKg, lossReason, key, intentHash, correctsBatchId: old.id, stockOrderId: oldStock });
     // Every correction is told to the production supervisors: the old and new weight and the loss.
     const greenKg = r3(runs.reduce((sum, r) => sum + r.bucket.components.reduce((x, c) => x + num(c.kg), 0), 0));
     const lossPct = greenKg > 0 ? ((greenKg - roastedKg) / greenKg) * 100 : 0;
@@ -1115,39 +1141,62 @@ export async function prepPlan(bucketKg?: number) {
   const per = bucketKg && bucketKg > 0 ? bucketKg : v2 ? num(v2.defaultTargetKg) : 5;
   const todayStart = new Date(+riyadhDay() - 3 * 3_600_000);
   const done = await prisma.greenBucket.groupBy({ by: ["productId"], where: { createdAt: { gte: todayStart }, status: { not: "RETURNED" } }, _count: { _all: true }, _sum: { actualKg: true } });
-  // Roast-to-stock production orders (P1 «مخزون»): their expected green, per coffee, for the coffees the queue does not carry.
+  // «أمر تحميص للمخزون» (D14, gate F1/F2): per coffee, the green its open stock orders still ask for — their expected
+  // green less the green already roasted against them (writeLot links those lots), less the green already in buckets
+  // or in the drum beyond what the coffee's orders take. It joins the coffee's line (orders + stock), or makes its own.
   const stock = await prisma.productionOrder.findMany({
     where: { status: { in: ["PENDING", "IN_PRODUCTION"] }, sourceOrderItemId: null },
-    select: { expectedGreenBeanKg: true, productSku: { select: { product: { select: { id: true, productNameEn: true, productNameAr: true, expectedRoastLoss: true, defaultGreenBean: { select: { id: true, serialNumber: true, quantityKg: true } } } } } } },
+    select: { id: true, expectedGreenBeanKg: true, productSku: { select: { product: { select: { id: true, productNameEn: true, productNameAr: true, expectedRoastLoss: true, defaultGreenBean: { select: { id: true, serialNumber: true, quantityKg: true } } } } } } },
   });
-  const stockLines = new Map<string, { greenKg: number; p: NonNullable<(typeof stock)[number]["productSku"]>["product"] }>();
+  const roastedFor = stock.length
+    ? await prisma.roastingBatch.groupBy({ by: ["productionOrderId"], where: { productionOrderId: { in: stock.map((o) => o.id) }, isBlend: false, status: { notIn: ["Rejected", "Corrected"] } }, _sum: { greenBeanQuantity: true } })
+    : [];
+  const stockLines = new Map<string, { remainKg: number; p: NonNullable<(typeof stock)[number]["productSku"]>["product"] }>();
   for (const o of stock) {
     const pr = o.productSku?.product;
-    if (!pr || queue.some((c) => c.productId === pr.id && c.demandKg > 0)) continue;
-    const cur = stockLines.get(pr.id) ?? { greenKg: 0, p: pr };
-    cur.greenKg += Number(o.expectedGreenBeanKg ?? 0);
+    if (!pr) continue;
+    const roasted = roastedFor.find((x) => x.productionOrderId === o.id)?._sum.greenBeanQuantity ?? 0;
+    const cur = stockLines.get(pr.id) ?? { remainKg: 0, p: pr };
+    cur.remainKg += Math.max(0, Number(o.expectedGreenBeanKg ?? 0) - roasted);
     stockLines.set(pr.id, cur);
   }
-  const fromStock = [...stockLines.values()].filter((x) => x.greenKg > 0).map((x) => {
-    const count = Math.max(1, Math.ceil(x.greenKg / per - 1e-9));
-    const d = done.find((y) => y.productId === x.p.id);
-    return {
-      productId: x.p.id, nameAr: x.p.productNameAr ?? x.p.productNameEn, nameEn: x.p.productNameEn, demandKg: 0, greenKg: r3(x.greenKg), orders: [] as number[],
-      green: x.p.defaultGreenBean, bucketKg: per, buckets: count, lastKg: r3(x.greenKg - per * (count - 1)),
-      preparedToday: d?._count._all ?? 0, preparedKgToday: num(d?._sum.actualKg ?? 0), colorKey: colorFor(x.p.id),
-    };
-  });
-  return [...queue.filter((c) => c.demandKg > 0 || done.some((d) => d.productId === c.productId)).map((c) => {
-    const loss = Math.min(40, Math.max(0, c.expectedRoastLoss || 15)) / 100;
-    const greenKg = r3(c.demandKg / (1 - loss));
+  const ids = [...stockLines.keys()];
+  const [waiting, inDrum] = ids.length
+    ? await Promise.all([
+        prisma.greenBucket.groupBy({ by: ["productId"], where: { productId: { in: ids }, status: "PREPARED" }, _sum: { actualKg: true } }),
+        prisma.roastRun.groupBy({ by: ["productId"], where: { productId: { in: ids }, status: { in: ["CHARGED", "DROPPED"] } }, _sum: { greenKg: true } }),
+      ])
+    : [[], []];
+  const lossOf = (pct: number | null | undefined) => Math.min(40, Math.max(0, pct || 15)) / 100;
+  const stockKgOf = (productId: string) => {
+    const x = stockLines.get(productId);
+    if (!x || x.remainKg <= 0) return 0;
+    const c = queue.find((q) => q.productId === productId);
+    const demandGreen = c && c.demandKg > 0 ? c.demandKg / (1 - lossOf(c.expectedRoastLoss)) : 0;
+    const inflight = num(waiting.find((w) => w.productId === productId)?._sum.actualKg ?? 0) + num(inDrum.find((w) => w.productId === productId)?._sum.greenKg ?? 0);
+    const v = r3(Math.max(0, x.remainKg - Math.max(0, inflight - demandGreen)));
+    return v >= 0.05 ? v : 0;
+  };
+  const lineOf = (base: { productId: string; nameAr: string; nameEn: string; demandKg: number; orderGreenKg: number; orders: number[]; green: { id: string; serialNumber: string; quantityKg: number } | null }) => {
+    const stockKg = stockKgOf(base.productId);
+    const greenKg = r3(base.orderGreenKg + stockKg);
     const count = Math.max(1, Math.ceil(greenKg / per - 1e-9));
-    const d = done.find((x) => x.productId === c.productId);
+    const d = done.find((x) => x.productId === base.productId);
+    const { orderGreenKg: _o, ...rest } = base;
+    void _o;
     return {
-      productId: c.productId, nameAr: c.productNameAr ?? c.productNameEn, nameEn: c.productNameEn, demandKg: c.demandKg, greenKg,
-      orders: c.orders.map((o) => o.orderNumber), green: c.green, bucketKg: per, buckets: count,
-      lastKg: r3(greenKg - per * (count - 1)), preparedToday: d?._count._all ?? 0, preparedKgToday: num(d?._sum.actualKg ?? 0), colorKey: colorFor(c.productId),
+      ...rest, greenKg, stockKg, bucketKg: per, buckets: count, lastKg: r3(greenKg - per * (count - 1)),
+      preparedToday: d?._count._all ?? 0, preparedKgToday: num(d?._sum.actualKg ?? 0), colorKey: colorFor(base.productId),
     };
-  }), ...fromStock];
+  };
+  const fromQueue = queue.filter((c) => c.demandKg > 0 || done.some((d) => d.productId === c.productId) || stockKgOf(c.productId) > 0).map((c) => lineOf({
+    productId: c.productId, nameAr: c.productNameAr ?? c.productNameEn, nameEn: c.productNameEn, demandKg: c.demandKg,
+    orderGreenKg: c.demandKg > 0 ? r3(c.demandKg / (1 - lossOf(c.expectedRoastLoss))) : 0, orders: c.orders.map((o) => o.orderNumber), green: c.green,
+  }));
+  const fromStock = [...stockLines.values()].filter((x) => !fromQueue.some((l) => l.productId === x.p.id) && stockKgOf(x.p.id) > 0).map((x) => lineOf({
+    productId: x.p.id, nameAr: x.p.productNameAr ?? x.p.productNameEn, nameEn: x.p.productNameEn, demandKg: 0, orderGreenKg: 0, orders: [], green: x.p.defaultGreenBean,
+  }));
+  return [...fromQueue.filter((l) => l.greenKg > 0 || l.preparedToday > 0), ...fromStock];
 }
 
 /** A prep session's buckets (P3): every bucket with its state, and the leftovers of earlier days still in staging. */

@@ -16,7 +16,7 @@ import { useV2T } from "./i18n";
 import { LanguageToggle } from "@/components/shell/LanguageToggle";
 import "./v2.css";
 
-type Line = { productId: string; nameAr: string; nameEn: string; demandKg: number; greenKg: number; orders: number[]; green: { id: string; serialNumber: string; quantityKg: number } | null; bucketKg: number; buckets: number; lastKg: number; preparedToday: number; preparedKgToday: number; colorKey: string };
+type Line = { productId: string; nameAr: string; nameEn: string; demandKg: number; greenKg: number; orders: number[]; green: { id: string; serialNumber: string; quantityKg: number } | null; bucketKg: number; buckets: number; lastKg: number; preparedToday: number; preparedKgToday: number; colorKey: string; stockKg?: number };
 type SBucket = { id: string; barcode: string; seqNo: number; actualKg: string | number; plannedKg: string | number | null; status: string; colorKey: string | null; createdAt: string; product: { productNameAr: string | null; productNameEn: string } | null; greenBean?: { serialNumber: string }; runs?: { status: string; serial: string }[]; stale?: boolean; ageHours?: number };
 type Step = { s: "plan" } | { s: "weigh"; line: Line; sessionId: string; count: number; kg: number; index: number } | { s: "list"; sessionId: string };
 
@@ -194,7 +194,7 @@ export function Prep() {
             const c = coffeeColor(l.colorKey);
             return (
               <button key={l.productId} className={`rv2-planline${sel === l.productId ? " on" : ""}`} style={sel === l.productId ? { borderColor: c.strong, background: c.tint } : undefined} onClick={() => { setSel(l.productId); setCount(l.buckets); setPerKg(l.bucketKg); }} data-testid={`rv2-plan-${l.productId}`}>
-                <div><b>{t("planLine", { coffee: nameOf(l), kg: Math.round(l.greenKg), n: l.buckets, per: k2(l.bucketKg) })}</b><small>{l.orders.length ? t("forOrders", { list: l.orders.join(lang === "en" ? ", #" : "، #") }) : t("forStock")} · {l.preparedToday ? t("preparedToday", { n: l.preparedToday }) : t("readyToPrep")}</small></div>
+                <div><b>{t("planLine", { coffee: nameOf(l), kg: Math.round(l.greenKg), n: l.buckets, per: k2(l.bucketKg) })}</b><small>{l.orders.length ? t("forOrders", { list: l.orders.join(lang === "en" ? ", #" : "، #") }) : t("forStock")}{l.orders.length && l.stockKg ? ` + ${t("forStock")}` : ""} · {l.preparedToday ? t("preparedToday", { n: l.preparedToday }) : t("readyToPrep")}</small></div>
                 <i style={{ background: c.strong }} />
               </button>
             );

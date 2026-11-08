@@ -20,6 +20,7 @@ import { useLanguageSwitcher } from "@/lib/i18n/use-language-switcher";
 import { applyDocumentLang, persistLanguage } from "@/lib/i18n/language-switch";
 import type { Lang } from "@/lib/i18n/translations";
 import { STATION_IDLE_MS } from "@/lib/station/shared";
+import { isSessionlessStation } from "@/lib/station/board";
 import { st } from "@/lib/i18n/station";
 import { ActivationScreen, DeviceBar, NoScreen, PinScreen, RevokedScreen, SwitchScreen, TilesScreen, UnauthScreen, clock, type HandoverTask, type RosterEntry } from "./device";
 import { StationBar } from "./blocks";
@@ -37,6 +38,8 @@ type Gate =
 type Phase =
   | { p: "loading" } | { p: "failed" } | { p: "s1" } | { p: "revoked" } | { p: "personal"; user: StationUser }
   | { p: "gate"; station: StationInfo; stations: StationInfo[]; idleMinutes: number; gate: Gate }
+  // D15: a sessionless station (the orders board) — nobody signs in; the device shows its screen directly.
+  | { p: "board"; station: StationInfo }
   | { p: "in"; station: StationInfo; stations: StationInfo[]; idleMinutes: number; emp: DeviceEmployee; switching: boolean };
 
 /** W3: the station chosen on a device that serves several (kept per browser tab; never a credential). */
@@ -114,6 +117,11 @@ export function StationShell({ children }: { children: ReactNode }) {
       clearStationDrafts();
       setRoster(null);
       const chosen = chosenStation(stations, a.station);
+      if (isSessionlessStation(chosen.type)) {
+        setPhase({ p: "board", station: chosen });
+        if (chosen.home && !pathname.startsWith(chosen.home)) router.replace(chosen.home);
+        return;
+      }
       setPhase({ p: "gate", station: chosen, stations, idleMinutes: a.policy.idleMinutes, gate: gate ?? { v: "tiles" } });
       const rr = await fetch(`/api/station/roster?stationId=${encodeURIComponent(chosen.id)}`, { cache: "no-store" });
       if (rr.ok) setRoster(((await rr.json()) as { employees: RosterEntry[] }).employees);
@@ -238,6 +246,8 @@ export function StationShell({ children }: { children: ReactNode }) {
     );
   } else if (phase.p === "s1") {
     body = <ActivationScreen lang={lang} personalHref={loginUrl(undefined, "/station/roasting")} onActivated={() => void refresh()} />;
+  } else if (phase.p === "board") {
+    body = pathname.startsWith(phase.station.home ?? "/station/__none") ? children : <div className="ws-plain" role="status">{lang === "ar" ? "جارٍ التحميل…" : "Loading…"}</div>;
   } else if (phase.p === "revoked") {
     body = <RevokedScreen lang={lang} onAgain={() => setPhase({ p: "s1" })} />;
   } else if (phase.p === "gate") {

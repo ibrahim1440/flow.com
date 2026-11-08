@@ -19,12 +19,11 @@
 // Every write carries the caller's Idempotency-Key, kept in WorkstationActionLog (unique): a retry
 // answers with the first result. Order status wins over everything (src/lib/order-stage.ts): an
 // order «معلّق مؤقتاً» is listed as blocked and nothing can be prepared or handed off.
-// Customers appear by name and order number only (owner policy F4), never their contact record.
+// No customer at all (owner decision, 8 Nov 2026: «اسم العميل ما يطلع في الشاشات»): an order is its number and lines.
 import { assertLotsNotHeld } from "@/lib/services/qc/hold-guard";
 import { createHash } from "node:crypto";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma, TX_OPTS } from "@/lib/db";
-import { CUSTOMER_DELIVERY_SELECT } from "@/lib/auth/customer-detail";
 import { DELIVERY_ALLOWED_STATUSES, appendOrderActivity } from "@/lib/services/order-operations";
 import { matchLot, normalizeLotEntry, splitPick, LOT_SUFFIX_LENGTH } from "@/lib/station/lot-match";
 import { claimLive, prepState, type PrepOrderState, type PrepTotals } from "@/lib/station/prep-rules";
@@ -78,7 +77,6 @@ export type PrepLine = {
 export type PrepClaim = { id: string; byId: string; byName: string; at: string; expiresAt: string | null };
 export type PrepOrder = {
   id: string; orderNumber: number; status: string; createdAt: string;
-  customer: { name: string; nameAr: string | null };
   state: PrepOrderState;
   lines: PrepLine[];
   /** Kilogram (legacy) lines are not prepared at the station; they stay in the ERP. */
@@ -90,7 +88,6 @@ export type PrepOrder = {
 
 const ORDER_SELECT = {
   id: true, orderNumber: true, status: true, createdAt: true,
-  customer: { select: CUSTOMER_DELIVERY_SELECT },
   items: {
     orderBy: { id: "asc" as const },
     select: {
@@ -166,7 +163,6 @@ async function buildOrders(db: Db, orders: OrderRow[]): Promise<PrepOrder[]> {
     const h = handoffs.find((x) => x.orderId === o.id) ?? null;
     out.push({
       id: o.id, orderNumber: o.orderNumber, status: o.status, createdAt: o.createdAt.toISOString(),
-      customer: { name: o.customer.name, nameAr: o.customer.nameAr },
       state: prepState(o.status, totals, !!c), lines, legacyLines: legacy, totals,
       claim: c ? { id: c.id, byId: c.claimedById, byName: c.claimedByName, at: c.claimedAt.toISOString(), expiresAt: c.expiresAt?.toISOString() ?? null } : null,
       lastHandoff: h ? { at: h.createdAt.toISOString(), byName: h.preparedByName, stagingNote: h.stagingNote, packages: h.packages, units: h.units } : null,

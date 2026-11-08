@@ -2,6 +2,7 @@
 // Validation lives in ./product-catalog (database-free, unit-tested); this file only checks the
 // references the database holds and writes.
 import { NextResponse } from "@/lib/api-response";
+import { auditDefaultGreenOnCreate, defaultGreenRefusal } from "@/lib/services/production/stock-orders";
 import { prisma } from "@/lib/db";
 import { handlePrismaError } from "@/lib/api-error";
 import type { Prisma } from "@/generated/prisma/client";
@@ -56,7 +57,7 @@ export async function assertBarcodeFree(barcode: string | null, exceptSkuId?: st
  * and every SKU's BOM, or nothing. A ROASTED_COFFEE BOM line without a coffeeProductId means «this
  * product» (the one being created: «بن محمص · هذا المنتج»).
  */
-export async function createCatalogProduct(body: Record<string, unknown>): Promise<NextResponse> {
+export async function createCatalogProduct(body: Record<string, unknown>, actorId: string): Promise<NextResponse> {
   const fields = parseProductFields(body, false);
   if (!fields.ok) return NextResponse.json({ error: fields.error, field: fields.field }, { status: 400 });
   const skus = parseSkus(body.skus);
@@ -65,9 +66,10 @@ export async function createCatalogProduct(body: Record<string, unknown>): Promi
   try {
     const product = await prisma.$transaction(async (tx) => {
       await assertAssignableCategory(tx, fields.value.categoryId);
+      // D14: the same rule as «الدفعة الخضراء الافتراضية» — an active lot with stock — and the same audit row.
       if (fields.value.defaultGreenBeanId) {
-        const bean = await tx.greenBean.findUnique({ where: { id: fields.value.defaultGreenBeanId }, select: { id: true } });
-        if (!bean) throw new Refusal(400, { error: "Default green bean not found.", field: "defaultGreenBeanId" });
+        const refused = await defaultGreenRefusal(tx, fields.value.defaultGreenBeanId);
+        if (refused) throw new Refusal(refused.status, { error: refused.ar, errorEn: refused.en, code: refused.code, field: "defaultGreenBeanId" });
       }
       const codes = skus.value.map((s) => s.skuCode);
       const taken = await tx.productSKU.findFirst({ where: { skuCode: { in: codes } }, select: { skuCode: true } });
@@ -84,6 +86,7 @@ export async function createCatalogProduct(body: Record<string, unknown>): Promi
       const created = await tx.coffeeProduct.create({
         data: { ...(productData(fields.value) as Prisma.CoffeeProductUncheckedCreateInput) },
       });
+      if (created.defaultGreenBeanId) await auditDefaultGreenOnCreate(actorId, created.id, created.defaultGreenBeanId, tx);
       for (const s of skus.value) {
         await tx.productSKU.create({
           data: {

@@ -25,7 +25,8 @@ export const STATION_DEVICE_COOKIE_MAX_AGE = 400 * 24 * 60 * 60;
 /** A station session ends at most this long after sign-in (H2: shift length, 8 h). */
 export const STATION_SESSION_ABSOLUTE_MS = 8 * 60 * 60 * 1000;
 
-export const STATION_TYPES = ["ROASTING", "QUALITY", "PACKAGING"] as const;
+/** ORDERS_BOARD (D15, 8 Nov 2026): the read-only orders board — nobody signs in on it (services/station/board.ts). */
+export const STATION_TYPES = ["ROASTING", "QUALITY", "PACKAGING", "ORDERS_BOARD"] as const;
 export type StationType = (typeof STATION_TYPES)[number];
 
 /** The module privilege a station's work needs (the same guard the ERP uses; never a privileged key). */
@@ -34,6 +35,8 @@ export const STATION_PRIVILEGE: Record<StationType, { module: string; sub: strin
   ROASTING: { module: "production", sub: "start_batch" },
   QUALITY: { module: "qc", sub: "create_record" },
   PACKAGING: { module: "packaging", sub: null },
+  // Never used to sign in (the board has no session); the orders module is what an ERP session needs to read it.
+  ORDERS_BOARD: { module: "orders", sub: null },
 };
 /**
  * Workstations W4: the packaging station has two tabs that never share a queue, each with its own
@@ -47,9 +50,11 @@ export const STATION_TAB_PRIVILEGE: Record<StationTab, { module: string; sub: st
   packaging: { module: "packaging", sub: null },
   preparation: { module: "dispatch", sub: null },
 };
-export const STATION_TYPE_TABS: Record<StationType, StationTab[]> = { ROASTING: [], QUALITY: [], PACKAGING: ["packaging", "preparation"] };
+export const STATION_TYPE_TABS: Record<StationType, StationTab[]> = { ROASTING: [], QUALITY: [], PACKAGING: ["packaging", "preparation"], ORDERS_BOARD: [] };
 /** Where a signed-in employee works, per station type (W3: the QC station «محطة الجودة»). */
-export const STATION_HOME: Record<StationType, string | null> = { ROASTING: "/station/roasting", QUALITY: "/station/quality", PACKAGING: "/station/packaging" };
+export const STATION_HOME: Record<StationType, string | null> = { ROASTING: "/station/roasting", QUALITY: "/station/quality", PACKAGING: "/station/packaging", ORDERS_BOARD: "/station/board" };
+/** Station types nobody signs in on (no roster, no PIN, no session) — client-safe, in ./board. */
+export { SESSIONLESS_STATION_TYPES, isSessionlessStation } from "./board";
 
 // ── Policy (owner decision D7, 22 Oct 2026): configurable, these are the approved defaults ──
 export const POLICY_DEFAULTS = { idleMinutes: 5, pinMaxAttempts: 5, activationMinutes: 15 } as const;

@@ -6,6 +6,7 @@ import { handlePrismaError } from "@/lib/api-error";
 import { availableUnitsBySku, packSizeLabel } from "@/lib/services/finished-products";
 import { parseListQuery, productOrderBy, productWhere } from "@/lib/services/product-catalog";
 import { createCatalogProduct } from "@/lib/services/product-catalog-db";
+import { auditDefaultGreenOnCreate, defaultGreenRefusal } from "@/lib/services/production/stock-orders";
 
 export async function GET(request: Request) {
   const sp = new URL(request.url).searchParams;
@@ -119,7 +120,7 @@ export async function POST(request: Request) {
     if (body && Array.isArray(body.skus)) {
       if (!canEdit(user.permissions, "inventory"))
         return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-      return createCatalogProduct(body);
+      return createCatalogProduct(body, user.id);
     }
 
     if (!body.productNameEn || typeof body.productNameEn !== "string" || !body.productNameEn.trim())
@@ -134,13 +135,14 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "expectedRoastLoss must be a number between 0 and 50." }, { status: 400 });
     }
 
-    if (body.defaultGreenBeanId) {
-      const bean = await prisma.greenBean.findUnique({ where: { id: body.defaultGreenBeanId } });
-      if (!bean)
-        return NextResponse.json({ error: "Default green bean not found." }, { status: 400 });
+    const greenId = typeof body.defaultGreenBeanId === "string" && body.defaultGreenBeanId ? body.defaultGreenBeanId : null;
+    if (greenId) {
+      // D14: an active lot with stock (as «الدفعة الخضراء الافتراضية»), audited below.
+      const refused = await defaultGreenRefusal(prisma, greenId);
+      if (refused) return NextResponse.json({ error: refused.ar, errorEn: refused.en, code: refused.code, field: "defaultGreenBeanId" }, { status: refused.status });
     }
 
-    const product = await prisma.coffeeProduct.create({
+    const product = await prisma.$transaction(async (tx) => { const p = await tx.coffeeProduct.create({
       data: {
         productNameEn:     body.productNameEn.trim(),
         countryEn:         body.countryEn.trim(),
@@ -157,10 +159,12 @@ export async function POST(request: Request) {
         cupNotesAr:        nullify(body.cupNotesAr),
         roastPathEn:       nullify(body.roastPathEn),
         roastPathAr:       nullify(body.roastPathAr),
-        defaultGreenBeanId: (typeof body.defaultGreenBeanId === "string" && body.defaultGreenBeanId) ? body.defaultGreenBeanId : null,
+        defaultGreenBeanId: greenId,
         ...(expectedRoastLoss !== undefined ? { expectedRoastLoss } : {}),
       },
     });
+    if (greenId) await auditDefaultGreenOnCreate(user.id, p.id, greenId, tx);
+    return p; });
     return NextResponse.json(product, { status: 201 });
   } catch (err) {
     return handlePrismaError(err);

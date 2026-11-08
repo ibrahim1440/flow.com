@@ -1,4 +1,5 @@
 "use client";
+import { CHANNEL_LABEL, FORM_CHANNELS } from "@/lib/station/board";
 import { CustomerCreditNotice } from "@/components/credit/credit-ui";
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { requestShellCreate, useCreateRequest } from "@/components/shell/page-context";
@@ -215,8 +216,10 @@ export default function OrdersPage() {
     customerId: string;
     quotationNumber: string;
     approvalStatus: string;
+    /** «القناة»: "" = not chosen (derived: a rep's deal, else the back office), or the web store / the café. */
+    channel: string;
     items: { productSkuId: string; quantityUnits: number }[];
-  }>({ customerId: "", quotationNumber: "", approvalStatus: "Pending", items: [{ productSkuId: "", quantityUnits: 0 }] });
+  }>({ customerId: "", quotationNumber: "", approvalStatus: "Pending", channel: "", items: [{ productSkuId: "", quantityUnits: 0 }] });
   // «طلب مباشر»: the deal the order joins when the customer has several open deals ("" = the newest, the server's default).
   const [dealChoice, setDealChoice] = useState("");
   const [showNewCustomer, setShowNewCustomer] = useState(false);
@@ -330,7 +333,7 @@ export default function OrdersPage() {
       }
       setShowForm(false);
       setDealChoice("");
-      setForm({ customerId: "", quotationNumber: "", approvalStatus: "Pending", items: [{ productSkuId: "", quantityUnits: 0 }] });
+      setForm({ customerId: "", quotationNumber: "", approvalStatus: "Pending", channel: "", items: [{ productSkuId: "", quantityUnits: 0 }] });
       setPreview(null);
       loadData();
     } finally {
@@ -602,6 +605,13 @@ export default function OrdersPage() {
                 <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">{t("quotationNumber")}</label>
                 <input type="text" value={form.quotationNumber} onChange={(e) => setForm({ ...form, quotationNumber: e.target.value })}
                   className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1" htmlFor="order-channel">{lang === "ar" ? "القناة" : "Channel"}</label>
+                <Select id="order-channel" value={form.channel} onChange={(e) => setForm({ ...form, channel: e.target.value })} data-testid="order-channel">
+                  <option value="">{lang === "ar" ? "تلقائي (مندوب أو من النظام)" : "Automatic (rep or back office)"}</option>
+                  {FORM_CHANNELS.map((c) => <option key={c} value={c}>{CHANNEL_LABEL[c][lang === "ar" ? "ar" : "en"]}</option>)}
+                </Select>
               </div>
               {(() => {
                 // Section 8: one search box, then a quantity. No bean picker, no product

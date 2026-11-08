@@ -328,7 +328,7 @@ export async function createDirectSale(
     const priced = await priceDirectSale(tx, input.lines, discountPercent);
     const resolved = await resolveOrderLines(tx, priced.lines.map((l) => ({ productSkuId: l.productSkuId, quantityUnits: l.quantityUnits })));
     const note = typeof input.note === "string" ? input.note.trim().slice(0, 1000) || null : null;
-    const order = await createOrderWithNumber(tx, { customerId, notes: ["بيع مباشر", note].filter(Boolean).join(" — "), ownerId: actor.id }, resolved, false);
+    const order = await createOrderWithNumber(tx, { customerId, notes: ["بيع مباشر", note].filter(Boolean).join(" — "), ownerId: actor.id, channel: "DIRECT_SALE" }, resolved, false);
     if (needsApproval) {
       // Gate H1: the legacy pre-preparation status — the automatic preparation never runs from it, and every other order
       // path refuses the order while it waits (services/orders/discount-hold.ts).

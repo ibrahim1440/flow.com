@@ -601,6 +601,9 @@ model Order {
   discountRejectedById     String?
   discountRejectedAt       DateTime?
   discountRejectionNote    String?
+  /// «القناة» (20261224090000_station_orders_board): SALES | DIRECT_SALE | STORE | CAFE | BACK_OFFICE (CHECK). NULL on
+  /// orders created before it: readers derive the source (lib/station/board.ts `orderSource`).
+  channel                  String?
 
   @@index([createdAt])
   @@index([customerId, createdAt])
@@ -2472,7 +2475,7 @@ model AuthAuditLog {
 model Station {
   id            String                 @id @default(cuid())
   name          String
-  /// ROASTING | QUALITY | PACKAGING
+  /// ROASTING | QUALITY | PACKAGING | ORDERS_BOARD (a read-only board: nobody signs in, 20261224090000)
   type          String
   place         String?
   roasterId     String?

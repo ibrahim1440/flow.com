@@ -578,6 +578,21 @@ export async function roastingCeilingForItem(
  * Loss is clamped to (0.1 %, 99.9 %) to guard against division-by-zero and
  * nonsensical 0 % entries from data-entry mistakes.
  */
+/**
+ * The next «PRD-YYYY-NNNN»: the highest number already issued this year + 1, under the year's advisory lock (7761),
+ * held to the end of the caller's transaction. Shared by the order-driven planner and the stock orders.
+ */
+export async function nextProductionNumber(tx: Prisma.TransactionClient): Promise<string> {
+  const year = new Date().getFullYear();
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(7761, ${year}::int)`;
+  // The regex guard means a malformed row can never reach the cast, and MAX ignores gaps.
+  const [{ max: lastSeq }] = await tx.$queryRaw<{ max: number | null }[]>`
+    SELECT MAX(CAST(SUBSTRING("productionNumber" FROM 10) AS INTEGER)) AS max
+      FROM "ProductionOrder"
+     WHERE "productionNumber" ~ ${`^PRD-${year}-[0-9]+$`}`;
+  return `PRD-${year}-${String((lastSeq ?? 0) + 1).padStart(4, "0")}`;
+}
+
 export async function createProductionOrderFromSales(
   orderItemId: string,
   tx: PrismaTx,
@@ -640,16 +655,7 @@ export async function createProductionOrderFromSales(
   // held to the end of this transaction and needs no explicit unlock. Without it two
   // simultaneous requests read the same maximum and one dies on the unique constraint —
   // safe, but it surfaces to the operator as a duplicate error on a perfectly valid order.
-  const year = new Date().getFullYear();
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(7761, ${year}::int)`;
-
-  // The regex guard means a malformed row can never reach the cast, and MAX ignores gaps.
-  const [{ max: lastSeq }] = await tx.$queryRaw<{ max: number | null }[]>`
-    SELECT MAX(CAST(SUBSTRING("productionNumber" FROM 10) AS INTEGER)) AS max
-      FROM "ProductionOrder"
-     WHERE "productionNumber" ~ ${`^PRD-${year}-[0-9]+$`}`;
-
-  const productionNumber = `PRD-${year}-${String((lastSeq ?? 0) + 1).padStart(4, "0")}`;
+  const productionNumber = await nextProductionNumber(tx);
 
   return tx.productionOrder.create({
     data: {

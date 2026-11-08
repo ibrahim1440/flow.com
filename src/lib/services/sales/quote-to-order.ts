@@ -163,6 +163,8 @@ export async function createOrderFromQuote(
       customerId,
       // The quotation reference the operational screens already show, now actually true.
       quotationNumber: quote.quoteNumber,
+      // «القناة»: a rep's quotation (SALES) — an accountant's quotation without a deal is entered in the back office.
+      channel: quote.opportunityId ? "SALES" : "BACK_OFFICE",
       quotationSentDate: quote.issuedAt,
       notes: input.notes?.trim() || null,
       // The quotation's owner — the rep who made the sale — owns the order, falling back to

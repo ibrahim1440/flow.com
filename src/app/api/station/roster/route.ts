@@ -1,6 +1,7 @@
 import { NextResponse } from "@/lib/api-response";
 import { DEVICE_REQUIRED, DEVICE_REVOKED, currentDevice, deviceStation } from "@/lib/services/station/guard";
 import { stationRoster } from "@/lib/services/station/session";
+import { isSessionlessStation } from "@/lib/station/device";
 
 /**
  * GET /api/station/roster[?stationId=] — S2 «من يعمل الآن؟». The device cookie only (no person is signed in yet):
@@ -16,5 +17,7 @@ export async function GET(request: Request) {
   const wanted = new URL(request.url).searchParams.get("stationId");
   const station = await deviceStation(dev.device, wanted, dev.station);
   if (!station) return DEVICE_REQUIRED().response();
+  // The orders board (D15) has no roster: nobody signs in on it.
+  if (isSessionlessStation(station.type)) return NextResponse.json({ employees: [] }, { headers: { "Cache-Control": "no-store" } });
   return NextResponse.json({ employees: await stationRoster(dev.device, station.id) }, { headers: { "Cache-Control": "no-store" } });
 }
