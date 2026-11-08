@@ -155,10 +155,11 @@ export type OwedCustomer = {
  * (never a deal-level «paid»), before VAT by each document's own ratio, at the rep's CURRENT share (as sales and collected
  * are), plus the VAT-inclusive total and the count. Per customer, the whole amount too, so a shared deal can say so.
  */
-export function owedOf(docs: DocRow[], today: string, employeeId: string): { net: string; gross: string; invoices: number; customers: OwedCustomer[] } {
+/** `monthNet`: the part of `net` on invoices issued this month (D13: «كل الأشهر · منها X من هالشهر»). */
+export function owedOf(docs: DocRow[], today: string, employeeId: string): { net: string; gross: string; invoices: number; monthNet: string; customers: OwedCustomer[] } {
   type Acc = { c: Omit<OwedCustomer, "net" | "gross" | "fullNet" | "sharePct" | "oldestDays">; net: Decimal; gross: Decimal; full: Decimal; oldest: string };
   const by = new Map<string, Acc>();
-  let net = ZERO, gross = ZERO, count = 0;
+  let net = ZERO, gross = ZERO, count = 0, monthNet = ZERO;
   for (const d of docs) {
     if (d.status !== "ISSUED" || (d.kind !== "INVOICE" && d.kind !== "DEBIT_NOTE")) continue;
     const open = openOfDoc(d);
@@ -170,6 +171,7 @@ export function owedOf(docs: DocRow[], today: string, employeeId: string): { net
     const n = roundMoney(fullNet.times(share).dividedBy(100));
     const gr = roundMoney(open.times(share).dividedBy(100));
     net = net.plus(n); gross = gross.plus(gr); count++;
+    if (d.inMonth) monthNet = monthNet.plus(n);
     const a = by.get(d.customerId) ?? { c: { customerId: d.customerId, name: d.customerName ?? "", nameAr: d.customerNameAr, phone: d.customerPhone, invoices: 0 }, net: ZERO, gross: ZERO, full: ZERO, oldest: d.issueDate ?? today };
     a.net = a.net.plus(n); a.gross = a.gross.plus(gr); a.full = a.full.plus(fullNet); a.c.invoices++;
     if (d.issueDate && d.issueDate < a.oldest) a.oldest = d.issueDate;
@@ -183,7 +185,7 @@ export function owedOf(docs: DocRow[], today: string, employeeId: string): { net
       oldestDays: days(a.oldest),
     }))
     .sort((x, y) => y.oldestDays - x.oldestDays || Number(y.net) - Number(x.net));
-  return { net: roundMoney(net).toFixed(2), gross: roundMoney(gross).toFixed(2), invoices: count, customers };
+  return { net: roundMoney(net).toFixed(2), gross: roundMoney(gross).toFixed(2), invoices: count, monthNet: roundMoney(monthNet).toFixed(2), customers };
 }
 
 /**

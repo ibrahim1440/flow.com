@@ -175,7 +175,7 @@
 .d21 .md-sb-warn { display: grid; gap: 2px; width: 100%; padding: 10px 12px; border-radius: 10px; background: var(--status-warning-tint); color: var(--status-warning) }
 .d21 .md-sb-warn b { font-size: 13px }
 .d21 .md-sb-warn span { font-size: 12.5px }
-.d21 .md-sb-bar { width: 100%; padding-top: 24px }
+.d21 .md-sb-bar { width: 100%; padding-top: 6px }  /* D13: no pace label above the bar any more */
 .d21 .md-sb-track { position: relative; height: 12px; border-radius: 6px; background: var(--brand-line) }
 .d21 .md-sb-track > i { position: absolute; inset-block: 0; inset-inline-start: 0; border-radius: 6px; transition: width .6s var(--ease, ease-out) }
 .d21 .md-sb-track > i.soft { background: var(--brand-on-surface-soft) }
@@ -604,3 +604,10 @@
 /* D8.1: a row's title line carries its badges — «متأخرة» (red) and «تذكير». */
 .d21 .md-task-t { display: flex; align-items: center; gap: 6px; flex-wrap: wrap }
 .d21 .md-task-t .md-pill { height: 20px; font-size: 11.5px; padding: 0 7px }
+
+/* D13 (owner, 8 Nov): one figure and one percent on the target band; today's pace as a sentence under the bar. */
+.d21 .md-sb-pct { font: 400 24px/1.1 var(--f-num); color: var(--brand-on-surface); font-variant-numeric: tabular-nums; align-self: flex-end; padding-bottom: 2px }
+.d21 .md-sb-paceline { display: flex; align-items: center; gap: 6px; width: 100%; margin: 0; padding: 9px 12px; border-radius: 12px; font: 600 13.5px/20px var(--f-ui) }
+.d21 .md-sb-paceline.is-late { background: var(--status-warning-tint, #fbf2da); color: var(--status-warning, #946200) }
+.d21 .md-sb-paceline.is-ok { background: var(--status-success-tint, #e9f2e7); color: var(--status-success, #3b7a45) }
+@media (max-width: 767.98px) { .d21 .md-sb-figs { display: flex; align-items: flex-end; justify-content: space-between } }

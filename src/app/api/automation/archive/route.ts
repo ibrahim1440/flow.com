@@ -8,6 +8,7 @@ import { archivePdf } from "@/lib/automation/archive-pdf";
 import { customerInScope } from "@/lib/services/sales/customer-access";
 import { companyInfoFrom } from "@/lib/notify/templates/demo";
 import { sellerSnapshot } from "@/lib/services/invoicing/settings";
+import { isSalesRep, type Viewer } from "@/lib/nav/registry";
 
 const PER_PAGE = 50;
 const day = (v: string | null) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00+03:00`) : null);
@@ -20,6 +21,10 @@ const day = (v: string | null) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date
 export async function GET(request: Request) {
   const { user, error } = await requireAuth();
   if (error) return error;
+  // Owner, 8 Nov 2026: the archive is not a sales rep's (the same test as the menus and the page — nav isSalesRep).
+  if (isSalesRep({ role: user.role, permissions: user.permissions } as Viewer)) {
+    return NextResponse.json({ error: "لا يمكنك فتح هذه الشاشة", errorEn: "You cannot open this screen", code: "REP_NOT_ALLOWED" }, { status: 403 });
+  }
   // The administrator: the whole archive. Fix round 2: a manager reads the messages to customers, a rep those to the
   // customers of their book — each after a recent step-up, as a verified individual (it shows what customers were sent).
   const admin = user.role === "admin";

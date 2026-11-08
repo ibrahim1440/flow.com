@@ -26,7 +26,7 @@ export type BandTarget = {
     next: { percent: number; remaining: string; perDay: string | null; bonus: Bonus } | null;
     reachedBonus: Bonus; invoicedNotCollected: boolean;
   } | null;
-  owed: { net: string; gross: string; invoices: number; customers: OwedCustomer[] };
+  owed: { net: string; gross: string; invoices: number; monthNet?: string; customers: OwedCustomer[] };
   drafts: { amount: string; count: number };
   breakdown: { fromMonth: string; fromBefore: string; advances: string; total: string };
 };
@@ -83,7 +83,8 @@ export function SalesBand({ t, lang, who, phone, ro, viewerId, onLog }: {
         <button type="button" className="md-sb-card is-btn" onClick={() => setOpen("owed")} data-testid="md-owed" aria-haspopup="dialog">
           <small>{ar ? "عند العملاء" : "Owed by customers"}</small>
           <span className="md-sb-val"><b className="num">{n(t.owed.net)}</b> {sar(ar)}</span>
-          <small>{ar ? <><bdi className="num">{n(t.owed.invoices)}</bdi> {t.owed.invoices <= 10 && t.owed.invoices > 2 ? "فواتير" : "فاتورة"} · قبل الضريبة ←</> : <><bdi className="num">{n(t.owed.invoices)}</bdi> invoices · before VAT →</>}</small>
+          {/* D13 (owner, 8 Nov): every month's open invoices, and how much of it is this month's. */}
+          <small data-testid="md-owed-sub">{ar ? <>كل الأشهر{Number(t.owed.monthNet ?? 0) > 0 ? <> · منها <bdi className="num">{n(t.owed.monthNet ?? 0)}</bdi> من هالشهر</> : null} ←</> : <>All months{Number(t.owed.monthNet ?? 0) > 0 ? <> · SAR <bdi className="num">{n(t.owed.monthNet ?? 0)}</bdi> from this month</> : null} →</>}</small>
         </button>
       ) : (
         <div className="md-sb-card" data-testid="md-owed">
@@ -131,11 +132,13 @@ export function SalesBand({ t, lang, who, phone, ro, viewerId, onLog }: {
   // The pace tick: where the month says you should be today — only inside the current stage (in practice stage 1).
   const paceAmount = bar.pace !== null && stage.to !== null ? Math.round(((stage.from + bar.pace * (stage.to - stage.from)) / 100) * target) : null;
   const startLabel = stage.index === 0 ? "0" : `✓ ${pc(stage.from)}`;
+  // How far the collected is from today's pace (positive = behind), rounded to the riyal; none outside the stage's pace.
+  const gap = paceAmount !== null ? Math.round(paceAmount - Number(t.achieved)) : null;
   // The owner (8 Nov): the end label is the stage's percent only — no bonus text (the line below says the bonus).
   const endLabel = top ? (ar ? "+150%" : "150%+") : `${stage.to}%`;
   const aria = ar
-    ? `المحصّل ${pc(n(bar.collectedPct, 0))} من الهدف، المرحلة ${stage.index + 1} من 4، المبيعات ${pc(n(bar.salesPct, 0))}`
-    : `Collected ${n(bar.collectedPct, 0)}% of the target, stage ${stage.index + 1} of 4, sales ${n(bar.salesPct, 0)}%`;
+    ? `المحصّل ${pc(n(bar.collectedPct, 0))} من الهدف، المرحلة ${stage.index + 1} من 4`
+    : `Collected ${n(bar.collectedPct, 0)}% of the target, stage ${stage.index + 1} of 4`;
 
   return (
     <>
@@ -145,19 +148,15 @@ export function SalesBand({ t, lang, who, phone, ro, viewerId, onLog }: {
         <div className="md-sb-figs">
           <button type="button" className="md-sb-col" onClick={() => setOpen("breakdown")} data-testid="md-collected" aria-haspopup="dialog"
             aria-label={ar ? "تفصيل المحصّل" : "Collected breakdown"}>
-            <span className="md-sb-key"><i className="sw solid" aria-hidden />{ar ? "المحصّل · يُحسب للمكافأة" : "Collected · counts for the bonus"}</span>
+            {/* D13 (owner, 8 Nov): one figure, one percent — what was collected (the only one the bonus counts). */}
+            <span className="md-sb-key">{ar ? (third ? "حصّل" : "حصّلت") : "Collected"}</span>
             <span className="md-sb-head">
               <b className="num" data-testid="md-target-achieved">{n(t.achieved)}</b>
-              <span>{sar(ar)}</span><span aria-hidden>·</span>
-              <bdi className="num" dir="ltr" data-testid="md-target-pct">{n(bar.collectedPct, 0)}%</bdi>
+              <span>{sar(ar)}</span>
               <span className="md-sb-chev" aria-hidden>›</span>
             </span>
           </button>
-          <span className="md-sb-sales" data-testid="md-sales">
-            <i className="sw soft" aria-hidden />
-            <span>{ar ? `مبيعات ${month}${phone ? "" : " · فواتير صادرة"}` : `${month} sales${phone ? "" : " · issued invoices"}`}</span>
-            <b className="num">{n(t.sales)}</b><span>{sar(ar)}</span><span aria-hidden>·</span><bdi className="num" dir="ltr">{n(bar.salesPct, 0)}%</bdi>
-          </span>
+          <bdi className="num md-sb-pct" dir="ltr" data-testid="md-target-pct">{n(bar.collectedPct, 0)}%</bdi>
         </div>
 
         {celebrate && stage.index >= 1 ? (
@@ -182,16 +181,14 @@ export function SalesBand({ t, lang, who, phone, ro, viewerId, onLog }: {
         <div className="md-sb-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(Number(bar.collectedPct))}
           aria-valuetext={aria} aria-label={aria} data-testid="md-bar">
           <div className="md-sb-track">
-            <i className="soft" style={{ width: `${bar.salesWidth * 100}%` }} data-testid="md-bar-sales" />
             <i className="solid" style={{ width: `${bar.collectedWidth * 100}%` }} data-testid="md-bar-collected" />
-            {bar.pace !== null ? (
-              <span className="md-sb-pace" style={{ insetInlineStart: `${bar.pace * 100}%` }} data-testid="md-pace">
-                <em>{paceAmount !== null && !phone ? <><bdi className="num">{n(paceAmount)}</bdi> · </> : null}{ar ? "المفروض اليوم" : "Pace today"}</em>
-              </span>
-            ) : null}
           </div>
           <div className="md-sb-ends"><bdi className="num" dir={ar ? "rtl" : "ltr"}>{startLabel}</bdi><bdi className="num" dir="ltr" data-testid="md-bar-end">{endLabel}</bdi></div>
         </div>
+        {/* D13: where the month says the rep should be today, as a sentence (the bar's tick replaced). */}
+        {gap !== null ? (gap > 0
+          ? <p className="md-sb-paceline is-late" data-testid="md-pace">⚠️ {ar ? <>متأخر <bdi className="num">{n(gap)}</bdi> ر.س عن المفروض لليوم</> : <>SAR <bdi className="num">{n(gap)}</bdi> behind today&apos;s pace</>}</p>
+          : <p className="md-sb-paceline is-ok" data-testid="md-pace">✓ {ar ? <>ماشي صح{gap < 0 ? <> · متقدم <bdi className="num">{n(-gap)}</bdi> ر.س</> : null}</> : <>On pace{gap < 0 ? <> · SAR <bdi className="num">{n(-gap)}</bdi> ahead</> : null}</>}</p>) : null}
 
         {bar.next ? (
           <>

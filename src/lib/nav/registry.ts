@@ -82,6 +82,11 @@ export type NavNode = {
    * itself stays reachable (old links and bookmarks) — `routeAllowed` reads `anyOf` only.
    */
   hideForRep?: boolean;
+  /**
+   * With `hideForRep`: the page is CLOSED to a sales rep too — a direct URL shows «لا يمكنك فتح هذه الشاشة»
+   * (`routeAllowed`), not only hidden from the menus and the quick jump. (Owner, 8 Nov 2026: «الأرشيف».)
+   */
+  blockRouteForRep?: boolean;
   /** Admin-only double guard, kept from the previous sidebar for the settings screen. */
   adminOnly?: boolean;
   /**
@@ -824,6 +829,9 @@ export const NAV: NavNode[] = [
         href: "/dashboard/automation/archive",
         // Fix round 2: also the managers and reps of the message log, scoped the same way, after a step-up.
         anyOf: [{ module: "automation" }, { module: "sales" }],
+        // Owner, 8 Nov 2026: not for a sales rep — hidden from the menus and the quick jump, and the page closed to them
+        // (a sales manager, the admin role and the automation module keep it). «سجل الرسائل» stays.
+        hideForRep: true, blockRouteForRep: true,
       },
     ],
   },
@@ -926,6 +934,8 @@ export const NAV: NavNode[] = [
     ar: "خدماتي", en: "My HR",
     icon: UserRound,
     href: "/dashboard/me",
+    // Owner, 8 Nov 2026: hidden from a sales rep's menus and quick jump (the page stays reachable by its link for now).
+    hideForRep: true,
   },
   {
     // The signed-in person's own profile (language, PIN, two-step verification): every login,
@@ -1018,6 +1028,7 @@ function meetsModule(v: Viewer, r: Requirement): boolean {
 }
 
 /** A sales rep: the sales module, no `lead_assign` (the team's manager holds it), not the admin role. */
+export function isSalesRep(v: Viewer): boolean { return isRep(v); }
 function isRep(v: Viewer): boolean {
   return holds(v, { module: "sales" }) && !holds(v, { module: "sales", sub: "lead_assign" }) && !holds(v, { module: "sales", role: "admin" });
 }
@@ -1280,6 +1291,7 @@ export function routeAllowed(v: Viewer, pathname: string): boolean {
   if (claims.length === 0) return true;
   return claims.some((n) => {
     if (n.adminOnly && v.role !== "admin") return false;
+    if (n.blockRouteForRep && isRep(v)) return false;
     if (!n.anyOf || n.anyOf.length === 0) return true;
     return n.anyOf.some((r) => meetsModule(v, r));
   });
