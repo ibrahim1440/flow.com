@@ -199,7 +199,11 @@ export function StationV2({ roasterIds, roasterNames, otherRoasters = [], onPick
   const mineToSend = writesHoldingIdle(ops, user.id);
   useEffect(() => { holdIdle?.((!!floor && (!!floor.drum || floor.unweighed > 0)) || mineToSend > 0); return () => holdIdle?.(false); }, [floor, holdIdle, mineToSend]);
   // The hidden scanner input keeps the focus (a Bluetooth HID scanner types the code and Enter).
-  useEffect(() => { if (!keypad && !problemOpen && !coffeeAsk && !burnAsk && !delAsk && !switchBlocked && !fix) scanRef.current?.focus(); });
+  // The scanner field takes the focus back after every render — except while a dialog needs the keyboard. D16 fix (owner,
+  // 9 Nov 2026): «إنهاء البلاغ» (cause + fix) and the stop/keep choice are such dialogs too; without them here the iPad
+  // keyboard typed into the hidden scanner field, not the text box.
+  const dialogOpen = !!(keypad || problemOpen || coffeeAsk || burnAsk || delAsk || switchBlocked || fix || ending || afterReport);
+  useEffect(() => { if (!dialogOpen) scanRef.current?.focus(); });
 
   // ── Derived ──────────────────────────────────────────────────────────────────────────────
   const drum = floor?.drum ?? null;
