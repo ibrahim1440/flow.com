@@ -4,8 +4,10 @@
 //   1. «مين تبي توصل له هالأسبوع؟» — suggestions with a reason each, ✓ to pick: late to reorder against their usual cycle,
 //      money owed, a contract ending soon, not contacted lately — the same figures «يومي» shows (GET /api/sales/my-day).
 //   2. «وزّعهم على الأيام» — spread evenly over the week's remaining working days; one tap on a day chip moves one.
-//   3. «راجع وثبّت» — the week's targets against what is planned (what was already in the plan plus these), a nudge where
-//      a target is short, then one POST /api/sales/plan/items { items } (a twin already in the plan is skipped).
+//   3. D17 «شغلك الداخلي هالأسبوع» (optional, «تخطّ هالخطوة») — one tap adds the supervisor's weekly meeting, the weekly
+//      sales report, a field round, or something else, on its usual day; what already repeats shows «موجود ↻».
+//   4. «راجع وثبّت» — the week's targets against what is planned (what was already in the plan plus these), a nudge where
+//      a target is short, the internal work, then one POST /api/sales/plan/items { items } (a twin already in the plan is skipped).
 // Suggested, never required: the Sunday card offers it and «مو الحين» hides it for the week.
 import { useEffect, useState } from "react";
 import { D21Dialog } from "@/components/ui/Dialog";
@@ -13,6 +15,7 @@ import { Ico } from "@/components/shell/icons";
 import { dayName, dayNum, weekOf } from "./plan-dates";
 import { GOAL_T, KINDS, send, usePlanData } from "./khitati";
 import { useBackLayer } from "./back-layer";
+import { everyDay, useInternal } from "./internal";
 import { countNoun } from "@/components/ops/ui";
 
 /** «عميل واحد / عميلين / 3 عملاء / 11 عميل» (the counted-noun rule of components/ops/ui.tsx). */
@@ -22,6 +25,8 @@ import { CYCLE, GROUPS, planDays, suggestionsOf, type AMetric, type Sug, type We
 const kindName = (m: AMetric, ar: boolean) => { const k = KINDS.find((x) => x.k === m)!; return ar ? k.ar : k.en; };
 export { suggestionsOf, type WeekSource };
 
+
+type Int = { key: "meet" | "report" | "round" | "other"; cat: "MEETING" | "REPORT" | "FIELD_ROUND" | "OTHER"; label: string; pick: boolean; day: string; time: string; area: string; repeat: boolean };
 
 export function PlanWeekWizard({ ar, today, source, onClose, onDone }: { ar: boolean; today: string; source: WeekSource; onClose: () => void; onDone: (msg: string) => void }) {
   const days = planDays(today);
@@ -34,8 +39,28 @@ export function PlanWeekWizard({ ar, today, source, onClose, onDone }: { ar: boo
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const { plan } = usePlanData("WEEK", 0, undefined, ws);
+  const hints = useInternal(0);
+  // D17 step 3: the internal suggestions — picked by a tap, each on its usual day.
+  const thu = days.find((d) => new Date(`${d}T00:00:00Z`).getUTCDay() === 4) ?? days[days.length - 1];
+  const manager = hints?.people.find((p) => p.role === "manager") ?? null;
+  const [ints, setInts] = useState<Int[]>(() => [
+    // Abu Fahd: «كل أسبوع» is opt-in (OFF), and the meeting's time is asked here, not set to 09:00 silently.
+    { key: "meet", cat: "MEETING", label: "", pick: false, day: days[0], time: "", area: "", repeat: false },
+    { key: "report", cat: "REPORT", label: ar ? "تقرير المبيعات الأسبوعي" : "Weekly sales report", pick: false, day: thu, time: "", area: "", repeat: false },
+    { key: "round", cat: "FIELD_ROUND", label: "", pick: false, day: days[Math.min(2, days.length - 1)], time: "", area: "", repeat: false },
+    { key: "other", cat: "OTHER", label: "", pick: false, day: days[0], time: "", area: "", repeat: false },
+  ]);
+  const meetLabel = manager ? (ar ? `اجتماع المشرف الأسبوعي — ${manager.name.trim().split(/\s+/)[0]}` : `Weekly meeting with ${manager.name}`) : ar ? "اجتماع الفريق الأسبوعي" : "Weekly team meeting";
+  const labelOf = (x: Int) => (x.key === "meet" ? meetLabel : x.key === "round" ? (x.area.trim() ? `${ar ? "جولة في" : "Round in"} ${x.area.trim()}` : "") : x.label.trim());
+  // Already repeating (D17 «المتكرر»): shown as «موجود ↻», not added twice.
+  const existing = (x: Int) => (hints?.repeating ?? []).find((r) => (x.key === "meet" ? r.category === "MEETING" && (!manager || r.attendees.some((a) => a.id === manager.id))
+    : x.key === "report" ? r.category === "REPORT" && r.label === x.label : false)) ?? null;
+  const intPicked = ints.filter((x) => x.pick && !existing(x) && labelOf(x).length >= 2 && (x.key !== "round" || x.area.trim().length >= 2));
+  const setInt = (key: string, p: Partial<Int>) => setInts(ints.map((x) => (x.key === key ? { ...x, ...p } : x)));
+  // Step 2 is only for customers: none picked, «التالي» goes to step 3 and «رجوع» from it to step 1.
+  const prev = (n: number) => (n === 3 && !picked.length ? 1 : n - 1);
   // Back (the device's) goes to the step before, and from the first step closes (D16 gate, «أبو فهد»).
-  useBackLayer(step, () => (step > 1 ? setStep(step - 1) : onClose()));
+  useBackLayer(step, () => (step > 1 ? setStep(prev(step)) : onClose()));
   // Who is already in that week's plan is not suggested again (one added a minute ago included).
   const plannedIds = new Set((plan?.items ?? []).filter((i) => i.kind === "ACTION" && i.customer).map((i) => i.customer!.id));
   const shownSugs = sugs.filter((s) => s.group === "added" || !plannedIds.has(s.id));
@@ -78,7 +103,14 @@ export function PlanWeekWizard({ ar, today, source, onClose, onDone }: { ar: boo
   const extra = short ? shownSugs.filter((s) => !s.pick).slice(0, 2) : [];
   const save = async () => {
     setBusy(true); setErr("");
-    const items = picked.map((s) => ({ kind: "ACTION", metric: s.kind, customerId: s.id, plannedDay: spread[s.id], date: spread[s.id] }));
+    const items: Record<string, unknown>[] = picked.map((s) => ({ kind: "ACTION", metric: s.kind, customerId: s.id, plannedDay: spread[s.id], date: spread[s.id] }));
+    for (const x of intPicked) {
+      // The meeting's name is composed per viewer on the server («اجتماع مع …»), never the organiser's side.
+      items.push({ kind: "CHECK", category: x.cat, label: x.cat === "MEETING" ? null : labelOf(x), plannedDay: x.day, date: x.day, plannedTime: x.time || null,
+        ...(x.cat === "MEETING" ? { durationMin: 30, attendeeIds: manager ? [manager.id] : [] } : {}),
+        ...(x.cat === "FIELD_ROUND" ? { area: x.area.trim() } : {}),
+        ...(x.repeat ? { repeat: { until: null } } : {}) });
+    }
     const r = await send("/api/sales/plan/items", "POST", { items });
     setBusy(false);
     if (!r.ok) { setErr(String((ar ? r.data.error : r.data.errorEn ?? r.data.error) ?? (ar ? "تعذّر الحفظ." : "Could not save."))); return; }
@@ -86,17 +118,19 @@ export function PlanWeekWizard({ ar, today, source, onClose, onDone }: { ar: boo
     const skipped = Number(r.data.skipped ?? 0);
     onDone(ar ? `ثبّتنا خطتك: ${added}${skipped ? ` (و${skipped} كانت بخطتك من قبل)` : ""} ✓` : `Your plan is set: ${added} added${skipped ? `, ${skipped} already there` : ""} ✓`);
   };
-  const titles: [string, string][] = [["مين تبي توصل له هالأسبوع؟", "Who do you want to reach this week?"], ["وزّعهم على الأيام", "Spread them over the days"], ["راجع وثبّت", "Review and confirm"]];
-  const perDay = (d: string) => picked.filter((s) => spread[s.id] === d).length + (plan?.items ?? []).filter((i) => i.kind !== "GOAL" && i.plannedDay === d).length;
+  const titles: [string, string][] = [["مين تبي توصل له هالأسبوع؟", "Who do you want to reach this week?"], ["وزّعهم على الأيام", "Spread them over the days"], ["شغلك الداخلي هالأسبوع", "Your own work this week"], ["راجع وثبّت", "Review and confirm"]];
+  // Abu Fahd: the review's day counts include step 3's internal work.
+  const perDay = (d: string) => picked.filter((s) => spread[s.id] === d).length + (plan?.items ?? []).filter((i) => i.kind !== "GOAL" && i.plannedDay === d).length
+    + intPicked.filter((x) => x.day === d).length;
   return (
-    <D21Dialog lang={ar ? "ar" : "en"} title={ar ? titles[step - 1][0] : titles[step - 1][1]} sub={ar ? `خطّط أسبوعك · ${step} من 3` : `Plan your week · ${step} of 3`} onClose={onClose} width={520} testId="plan-wiz"
+    <D21Dialog lang={ar ? "ar" : "en"} title={ar ? titles[step - 1][0] : titles[step - 1][1]} sub={ar ? `خطّط أسبوعك · ${step} من 4` : `Plan your week · ${step} of 4`} onClose={onClose} width={520} testId="plan-wiz"
       actions={<>
-        {step < 3 ? <button type="button" className="btn p" disabled={!picked.length} onClick={() => setStep(step + 1)} data-testid="plan-wiz-next">{ar ? "التالي" : "Next"}</button>
-          : <button type="button" className="btn p" disabled={busy || !picked.length} onClick={save} data-testid="plan-wiz-save">{busy ? "…" : ar ? "ثبّت خطتي" : "Confirm my plan"}</button>}
-        {step > 1 ? <button type="button" className="btn" onClick={() => setStep(step - 1)} data-testid="plan-wiz-back">{ar ? "رجوع" : "Back"}</button> : <button type="button" className="btn" onClick={onClose}>{ar ? "إلغاء" : "Cancel"}</button>}
+        {step < 4 ? <button type="button" className="btn p" onClick={() => setStep(step === 1 && !picked.length ? 3 : step + 1)} data-testid="plan-wiz-next">{ar ? "التالي" : "Next"}</button>
+          : <button type="button" className="btn p" disabled={busy || (!picked.length && !intPicked.length)} onClick={save} data-testid="plan-wiz-save">{busy ? "…" : ar ? "ثبّت خطتي" : "Confirm my plan"}</button>}
+        {step > 1 ? <button type="button" className="btn" onClick={() => setStep(prev(step))} data-testid="plan-wiz-back">{ar ? "رجوع" : "Back"}</button> : <button type="button" className="btn" onClick={onClose}>{ar ? "إلغاء" : "Cancel"}</button>}
       </>}>
       <div className="pl-sheet kp-wiz">
-        <span className="kp-steps" aria-hidden>{[1, 2, 3].map((n) => <i key={n} className={n <= step ? "on" : undefined} />)}</span>
+        <span className="kp-steps" aria-hidden>{[1, 2, 3, 4].map((n) => <i key={n} className={n <= step ? "on" : undefined} />)}</span>
         {step === 1 ? (
           <>
             <small className="pl-hint">{ar ? "اقترحنا لك حسب عادة كل عميل. شيل أو زيد بنقرة." : "Suggested from each customer's habits. Tap to add or remove."}</small>
@@ -134,6 +168,41 @@ export function PlanWeekWizard({ ar, today, source, onClose, onDone }: { ar: boo
             ))}
             <small className="pl-hint">{ar ? "وزّعناهم بالتساوي على أيامك. نقرة على اليوم تغيّره، ونقرة على النوع تبدّله." : "Spread evenly over your days. Tap a day to move one, the kind to change it."}</small>
           </>
+        ) : step === 3 ? (
+          <>
+            <small className="pl-hint">{ar ? "نقرة تضيفه. اختياري — تقدر تتخطى." : "One tap adds it. Optional — you can skip."}</small>
+            {ints.map((x) => {
+              const ex = existing(x);
+              const title = x.key === "meet" ? meetLabel : x.key === "round" ? (ar ? "جولة ميدانية" : "Field round") : x.key === "other" ? (ar ? "شغلة ثانية" : "Something else") : x.label;
+              const why = ex ? `${ar ? "موجود" : "Already there"} ↻ ${everyDay(ex.weekday, ar)}${ex.plannedTime ? ` ${ex.plannedTime}` : ""}` : x.key === "report" ? (ar ? "يوم التسليم" : "Due day") : x.key === "round" ? (ar ? "وين؟ ومتى؟" : "Where and when?") : x.key === "other" ? (ar ? "اكتبها بنفسك" : "Write it yourself") : manager ? (ar ? "مع المشرف · نص ساعة" : "With your supervisor · 30 min") : ar ? "نص ساعة" : "30 min";
+              const on = x.pick || !!ex;
+              return (
+                <div key={x.key} className={`kp-intsug${on ? " on" : ""}`} data-testid={`plan-wiz-int-${x.key}`}>
+                  <button type="button" role="checkbox" aria-checked={on} disabled={!!ex} className="kp-pickrow" onClick={() => setInt(x.key, { pick: !x.pick })} data-testid={`plan-wiz-int-pick-${x.key}`}>
+                    <span className="kp-box" aria-hidden>{on ? <Ico name="tick" small /> : null}</span>
+                    <span><b><Ico name={x.cat === "MEETING" ? "meet" : x.cat === "FIELD_ROUND" ? "pin" : x.cat === "REPORT" ? "doc" : "note"} small />{title}</b><small>{why}</small></span>
+                  </button>
+                  {x.pick && !ex ? (
+                    <>
+                      {x.key === "round" ? <>
+                        <input className="pl-in" value={x.area} maxLength={100} onChange={(e) => setInt(x.key, { area: e.target.value })} placeholder={ar ? "وين؟ مثال: حي النرجس" : "Where?"} data-testid="plan-wiz-int-area" />
+                        {hints?.areas.length ? <span className="kp-chips kp-sand">{hints.areas.map((a) => <button key={a} type="button" aria-pressed={x.area.trim() === a} onClick={() => setInt(x.key, { area: a })}>{a}</button>)}</span> : null}
+                      </> : null}
+                      {x.key === "other" ? <input className="pl-in" value={x.label} maxLength={200} onChange={(e) => setInt(x.key, { label: e.target.value })} placeholder={ar ? "وش الشغلة؟" : "What is it?"} data-testid="plan-wiz-int-text" /> : null}
+                      <span className="kp-chips kp-sand">{days.map((d) => <button key={d} type="button" aria-pressed={x.day === d} onClick={() => setInt(x.key, { day: d })} data-testid={`plan-wiz-int-day-${x.key}-${d}`}>{dayName(d, ar)}</button>)}</span>
+                      {x.key === "meet" ? <span className="kp-chips kp-sand" role="group" aria-label={ar ? "الوقت" : "Time"} data-testid="plan-wiz-int-time">
+                        {["09:00", "10:00", "11:00", "13:00"].map((t) => <button key={t} type="button" aria-pressed={x.time === t} onClick={() => setInt(x.key, { time: x.time === t ? "" : t })} data-testid={`plan-wiz-int-time-${t}`}>{t}</button>)}
+                        <button type="button" aria-pressed={!x.time} onClick={() => setInt(x.key, { time: "" })}>{ar ? "بدون وقت" : "No time"}</button>
+                      </span> : null}
+                      {x.key !== "other" ? <label className="kp-switch sm"><span>{ar ? "خلّه كل أسبوع" : "Keep it every week"}</span>
+                        <input type="checkbox" role="switch" checked={x.repeat} onChange={(e) => setInt(x.key, { repeat: e.target.checked })} data-testid={`plan-wiz-int-repeat-${x.key}`} /></label> : null}
+                    </>
+                  ) : null}
+                </div>
+              );
+            })}
+            <button type="button" className="lk" onClick={() => { setInts(ints.map((x) => ({ ...x, pick: false }))); setStep(4); }} data-testid="plan-wiz-skip">{ar ? "تخطّ هالخطوة" : "Skip this step"}</button>
+          </>
         ) : (
           <>
             <b className="pl-q">{ar ? "خطتك مقابل أهداف الأسبوع" : "Your plan against the week's targets"}</b>
@@ -150,8 +219,14 @@ export function PlanWeekWizard({ ar, today, source, onClose, onDone }: { ar: boo
               </div>
             ) : null}
             {goals.some((g) => g.target && g.planned < g.target) ? <small className="pl-hint" data-testid="plan-wiz-legend"><span className="wa">—</span> {ar ? "أقل من هدف المشرف" : "below the supervisor's target"} · <span className="ok">✓</span> {ar ? "وصل الهدف" : "target reached"}</small> : null}
+            {intPicked.length ? (
+              <div className="kp-intrev" data-testid="plan-wiz-int-review">
+                <b className="pl-q">{ar ? "شغلك الداخلي" : "Your own work"}</b>
+                {intPicked.map((x) => <div key={x.key} className="kp-vs sm"><b>{labelOf(x)}{x.repeat ? " ↻" : ""}</b><span>{dayName(x.day, ar)}{x.time ? ` · ${x.time}` : ""}</span></div>)}
+              </div>
+            ) : null}
             <b className="pl-q">{ar ? "الأيام" : "The days"}</b>
-            {days.map((d) => <div key={d} className="kp-vs sm"><b>{dayName(d, ar)} {dayNum(d)}</b><span>{perDay(d)}</span></div>)}
+            {days.map((d) => <div key={d} className="kp-vs sm"><b>{dayName(d, ar)} {dayNum(d)}</b><span data-testid={`plan-wiz-daycount-${d}`}>{perDay(d)}</span></div>)}
             <small className="pl-hint">{ar ? "تقدر تعدّل خطتك أي وقت من تبويب «خطتي»." : "You can change your plan any time in «My plan»."}</small>
             {err ? <p className="pl-err" role="alert">{err}</p> : null}
           </>

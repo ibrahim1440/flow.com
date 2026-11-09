@@ -1144,12 +1144,17 @@ export const EVENTS: NotificationEventDef[] = [
       const what: Record<string, [string, string]> = {
         INVITED: ["دُعيت إلى", "You were invited to"], CHANGED: ["تغيّر موعد", "Rescheduled:"],
         CANCELLED: ["أُلغي", "Cancelled:"], SOON: ["يبدأ قريبًا", "Starting soon:"],
+        // D17: a weekly meeting from «خطتي» — one notice per colleague for the whole series.
+        WEEKLY_INVITED: ["دعوة اجتماع أسبوعي:", "Weekly meeting invitation:"], WEEKLY_CHANGED: ["تغيّر موعد الاجتماع الأسبوعي", "Weekly meeting rescheduled:"],
+        WEEKLY_ENDED: ["انتهى الاجتماع الأسبوعي", "Weekly meeting ended:"],
       };
       const w = what[s(f.change)] ?? ["موعد", "Appointment:"];
       return {
-        severity: f.change === "CANCELLED" ? "warning" : "info",
-        titleAr: `${w[0]} «${s(f.title)}»`, titleEn: `${w[1]} «${s(f.title)}»`,
-        bodyAr: [s(f.when), s(f.where)].filter(Boolean).join(" · "), bodyEn: [s(f.whenEn), s(f.where)].filter(Boolean).join(" · "),
+        severity: f.change === "CANCELLED" || f.change === "WEEKLY_ENDED" ? "warning" : "info",
+        // An invitation with the organiser's name (D17 «خطتي», Abu Fahd): «أبو فهد دعاك: «اجتماع مع أبو فهد»».
+        titleAr: f.change === "INVITED" && f.by ? `${s(f.by)} دعاك: «${s(f.title)}»` : `${w[0]} «${s(f.title)}»`,
+        titleEn: f.change === "INVITED" && f.by ? `${s(f.by)} invited you: «${s(f.title)}»` : `${w[1]} «${s(f.title)}»`,
+        bodyAr: [s(f.when), s(f.where), f.by && f.change !== "INVITED" ? `من ${s(f.by)}` : ""].filter(Boolean).join(" · "), bodyEn: [s(f.whenEn), s(f.where), f.by && f.change !== "INVITED" ? `From ${s(f.by)}` : ""].filter(Boolean).join(" · "),
         link: f.appointmentId ? `/dashboard/workspace/calendar?appointment=${enc(s(f.appointmentId))}` : "/dashboard/workspace/calendar",
       };
     },

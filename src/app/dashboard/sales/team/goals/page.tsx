@@ -146,7 +146,7 @@ export default function TeamGoalsPage() {
                     <button type="button" className="lk-inline" onClick={() => setCustoms((x) => ({ ...x, [r.id]: [...(x[r.id] ?? []), { label: "", target: "" }] }))}>+ {ar ? "رقم خاص" : "Custom"}</button>
                   </td>
                   <td><b className={`num${r.plan.planned && r.plan.done >= r.plan.planned ? " met" : ""}`}>{r.plan.planned ? (ar ? `${r.plan.done} من ${r.plan.planned}` : `${r.plan.done} of ${r.plan.planned}`) : "—"}</b>
-                    <small className={r.plan.planned ? undefined : "warn"}>{r.plan.planned ? (ar ? "بند" : "items") : ar ? "ما خطط" : "No plan"}</small></td>
+                    <small className={r.plan.planned ? undefined : "warn"}>{r.plan.planned ? (ar ? "" : "planned") : ar ? "ما خطط" : "No plan"}</small></td>
                   <td><b className="num">{r.plan.offPlan}</b><small>{ar ? "زيارة ومكالمة" : "visits & calls"}</small></td>
                 </tr>
                 </Fragment>

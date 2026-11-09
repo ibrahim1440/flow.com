@@ -18,7 +18,8 @@ export async function POST(request: Request) {
     const want = Array.isArray(body.ids) ? new Set(body.ids.filter((x): x is string => typeof x === "string")) : null;
     const today = riyadhIso(new Date());
     const plan = await loadPlan(prisma, user.id, "DAY", today);
-    const open = plan.items.filter((i) => i.kind !== "GOAL" && !i.checked && i.plannedDay === today && (!want || want.has(i.id)));
+    // D17: a meeting someone else organised is theirs to move — it stays on today.
+    const open = plan.items.filter((i) => i.kind !== "GOAL" && !i.checked && i.plannedDay === today && !i.invitedBy && (!want || want.has(i.id)));
     const to = nextWorkDay(today);
     // The twin rule (gate, 9 Nov): carried into a week that already has the same action for the customer, the two merge.
     const merged: { removedId: string; keptId: string }[] = [];

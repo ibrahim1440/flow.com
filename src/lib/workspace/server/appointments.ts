@@ -159,12 +159,14 @@ export async function conflicts(actor: WsActor, people: string[], startAt: Date,
   });
 }
 
-async function tellParticipants(tx: Tx, actor: WsActor, a: { id: string; title: string; startAt: Date; location: string | null }, people: string[], change: "INVITED" | "CHANGED" | "CANCELLED", stamp: string) {
+async function tellParticipants(tx: Tx, actor: WsActor, a: { id: string; title: string; startAt: Date; location: string | null }, people: string[], change: "INVITED" | "CHANGED" | "CANCELLED", stamp: string, by?: string | null) {
   const to = people.filter((p) => p !== actor.id);
   if (!to.length) return;
   const w = dueTexts(a.startAt);
-  await notify(tx, { event: "me.appointment", dedupeKey: `${a.id}:${change}:${stamp}`, actorId: actor.id, people: { recipient: to }, entity: { type: "WorkAppointment", id: a.id }, facts: { change, title: a.title, when: w.due, whenEn: w.dueEn, where: a.location, appointmentId: a.id } });
+  // `by` (D17 «خطتي»): the organiser's name — «أبو فهد دعاك: …» rather than a title written from the organiser's side.
+  await notify(tx, { event: "me.appointment", dedupeKey: `${a.id}:${change}:${stamp}`, actorId: actor.id, people: { recipient: to }, entity: { type: "WorkAppointment", id: a.id }, facts: { change, title: a.title, when: w.due, whenEn: w.dueEn, where: a.location, appointmentId: a.id, ...(by ? { by } : {}) } });
 }
+const nameOf = async (tx: Tx, id: string) => (await tx.employee.findUnique({ where: { id }, select: { name: true } }))?.name ?? null;
 
 export async function createAppointment(actor: WsActor, b: Body, now = new Date()) {
   const p = await parse(actor, b);
@@ -287,4 +289,89 @@ export async function appointmentsBetween(actor: WsActor, people: string[], from
     select: SELECT, orderBy: { startAt: "asc" }, take: 1000,
   });
   return rows.map((a) => present(a, actor, now));
+}
+
+// ─── D17 «خطتي»: a planned meeting whose colleagues are invited («أرسل له دعوة») ───────────────────────────────────────────
+// The plan item stays the rep's; the invitation is an ordinary appointment of theirs, so the colleagues see it where they see
+// every other one («جدولي اليوم», the calendar, the bell) and are told of a change or a cancellation the same way. These run
+// inside the plan's own transaction (services/sales/plans.ts); the organiser is the rep whose plan it is.
+const organizerActor = (id: string) => ({ id, role: "", permissions: {} }) as unknown as WsActor;
+
+/** `silent`: a weekly meeting's own weeks — the colleagues get ONE weekly notice (tellWeekly) and each week's reminder. */
+export async function createPlanMeeting(tx: Tx, organizerId: string, m: { title: string; startAt: Date; endAt: Date; participants: string[] }, now = new Date(), opts: { silent?: boolean } = {}) {
+  const people = [...new Set(m.participants.filter((p) => p !== organizerId))].slice(0, MAX_PARTICIPANTS);
+  if (people.length && (await tx.employee.count({ where: { id: { in: people }, active: true } })) !== people.length) {
+    throw wsError(400, "أحد المدعوين غير موجود أو حسابه معطّل.", "An attendee does not exist or is disabled.", "PARTICIPANT_INVALID");
+  }
+  const a = await tx.workAppointment.create({
+    data: { kind: "MEETING", title: m.title.slice(0, 300), startAt: m.startAt, endAt: m.endAt, organizerId, participants: { create: people.map((employeeId) => ({ employeeId })) } },
+    select: { id: true, title: true, startAt: true, location: true },
+  });
+  await planAppointmentReminders(tx, a.id, now);
+  if (!opts.silent) await tellParticipants(tx, organizerActor(organizerId), a, people, "INVITED", "0", await nameOf(tx, organizerId));
+  return a.id;
+}
+
+/** The planned meeting moved to another day / time: its appointment follows and the colleagues are told («CHANGED»). */
+export async function movePlanMeeting(tx: Tx, organizerId: string, id: string, startAt: Date, endAt: Date, now = new Date()) {
+  const cur = await tx.workAppointment.findUnique({ where: { id }, select: { organizerId: true, status: true, startAt: true, title: true, location: true, participants: { select: { employeeId: true } } } });
+  if (!cur || cur.organizerId !== organizerId || cur.status !== "SCHEDULED" || cur.startAt.getTime() === startAt.getTime()) return;
+  const { version } = await tx.workAppointment.update({ where: { id }, data: { startAt, endAt, version: { increment: 1 } }, select: { version: true } });
+  await planAppointmentReminders(tx, id, now);
+  // Keyed by the version (gate M1): a move back to a time used before is told again, never deduplicated away.
+  await tellParticipants(tx, organizerActor(organizerId), { id, title: cur.title, startAt, location: cur.location }, cur.participants.map((p) => p.employeeId), "CHANGED", `v${version}`, await nameOf(tx, organizerId));
+}
+
+/** The planned meeting was removed from the organiser's plan (or its weekly rule stopped): the colleagues are told. */
+export async function cancelPlanMeeting(tx: Tx, organizerId: string, id: string, now = new Date(), opts: { silent?: boolean } = {}) {
+  const cur = await tx.workAppointment.findUnique({ where: { id }, select: { organizerId: true, title: true, startAt: true, location: true, participants: { select: { employeeId: true } } } });
+  if (!cur || cur.organizerId !== organizerId) return;
+  const r = await tx.workAppointment.updateMany({ where: { id, status: "SCHEDULED" }, data: { status: "CANCELLED", cancelledAt: now, cancelledById: organizerId, version: { increment: 1 } } });
+  if (r.count !== 1) return;
+  await planAppointmentReminders(tx, id, now);
+  // Keyed by the version: a meeting cancelled, reopened («تراجع») and cancelled again is told each time.
+  const { version } = await tx.workAppointment.findUniqueOrThrow({ where: { id }, select: { version: true } });
+  if (!opts.silent) await tellParticipants(tx, organizerActor(organizerId), { id, title: cur.title, startAt: cur.startAt, location: cur.location }, cur.participants.map((p) => p.employeeId), "CANCELLED", `v${version}`, await nameOf(tx, organizerId));
+}
+
+/**
+ * A weekly meeting (D17 gate M2) is told ONCE per colleague — «دعوة اجتماع أسبوعي: كل ثلاثاء 10:00», a change of its
+ * day/time, its end — not once per generated week; each week still has its own reminder before it starts.
+ */
+export async function tellWeekly(tx: Tx, organizerId: string, w: { ruleId: string; appointmentId: string | null; title: string; whenAr: string; whenEn: string; stamp: string },
+  people: string[], change: "WEEKLY_INVITED" | "WEEKLY_CHANGED" | "WEEKLY_ENDED") {
+  const to = [...new Set(people)].filter((p) => p !== organizerId);
+  if (!to.length) return;
+  const by = (await tx.employee.findUnique({ where: { id: organizerId }, select: { name: true } }))?.name ?? null;
+  await notify(tx, { event: "me.appointment", dedupeKey: `rule:${w.ruleId}:${change}:${w.stamp}`, actorId: organizerId, people: { recipient: to },
+    entity: { type: "SalesPlanRecurrence", id: w.ruleId }, facts: { change, title: w.title, when: w.whenAr, whenEn: w.whenEn, by, appointmentId: w.appointmentId } });
+}
+
+/** The organiser ticked the planned meeting (or took the tick back, «تراجع»): the appointment is DONE / SCHEDULED again. */
+export async function markPlanMeeting(tx: Tx, organizerId: string, id: string, done: boolean, now = new Date()) {
+  const r = await tx.workAppointment.updateMany({ where: { id, organizerId, status: done ? "SCHEDULED" : "DONE" }, data: { status: done ? "DONE" : "SCHEDULED", version: { increment: 1 } } });
+  if (r.count) await planAppointmentReminders(tx, id, now);
+}
+
+/**
+ * «تراجع» after removing an invited meeting (D17 gate): the cancelled appointment is reopened — only from CANCELLED and only
+ * by its organiser, so a second «تراجع» changes nothing — and the colleagues are invited again (one notice each).
+ */
+export async function reopenPlanMeeting(tx: Tx, organizerId: string, id: string, now = new Date()): Promise<boolean> {
+  const r = await tx.workAppointment.updateMany({ where: { id, organizerId, status: "CANCELLED" }, data: { status: "SCHEDULED", cancelledAt: null, cancelledById: null, cancelReason: null, version: { increment: 1 } } });
+  if (r.count !== 1) return false;
+  const a = await tx.workAppointment.findUniqueOrThrow({ where: { id }, select: { title: true, startAt: true, location: true, version: true, participants: { select: { employeeId: true } } } });
+  await planAppointmentReminders(tx, id, now);
+  // Abu Fahd (D17): an undo within the window sends NEITHER notice — the «أُلغي» not yet read or e-mailed is taken back,
+  // and those colleagues are not told «دُعيت» again. Anyone who already read / was e-mailed the cancellation is invited again.
+  // One statement (gate R3): only what is still unread, not e-mailed and not being e-mailed is taken back — a dispatcher
+  // claim between a read and a delete can never lose a notice being sent.
+  const takeBack = await tx.$queryRaw<{ recipientId: string }[]>`
+    DELETE FROM "Notification"
+     WHERE "dedupeKey" LIKE ${`me.appointment:${id}:CANCELLED:%`} AND "createdAt" >= ${new Date(now.getTime() - 10 * 60_000)}
+       AND "readAt" IS NULL AND "emailedAt" IS NULL AND "emailState" NOT IN ('SENDING', 'SENT')
+    RETURNING "recipientId"`;
+  const quiet = new Set(takeBack.map((n) => n.recipientId));
+  await tellParticipants(tx, organizerActor(organizerId), { id, title: a.title, startAt: a.startAt, location: a.location }, a.participants.map((p) => p.employeeId).filter((p) => !quiet.has(p)), "INVITED", `reopen-v${a.version}`, await nameOf(tx, organizerId));
+  return true;
 }

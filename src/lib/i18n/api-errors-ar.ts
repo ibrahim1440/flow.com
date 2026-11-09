@@ -252,6 +252,9 @@ export const API_ERRORS_AR: Readonly<Record<string, string>> = {
   "The assignment cannot start before the plan version it points at.": "الإسناد لا يبدأ قبل إصدار الخطة.",
   "The base rate must be between 0% and 100%.": "النسبة الأساسية من 0% إلى 100%.",
   "The company name is required.": "اسم الشركة مطلوب.",
+  // D17: «أضف عميل محتمل» from a field round that is not the caller's own.
+  "The field round was not found.": "الجولة غير موجودة.",
+  "A customer with this phone number already exists.": "هذا الجوال لعميل مسجّل عندنا.",
   "The default VAT is a percentage from 0 to 100, with at most two decimals.": "ضريبة القيمة المضافة الافتراضية نسبة من 0 إلى 100 بمنزلتين على الأكثر.",
   "The shortfall limit is a percentage from 0 to 100, with at most two decimals.": "حد نسبة النقص من 0 إلى 100، بمنزلتين عشريتين على الأكثر.",
   "The shortfall value limit is an amount in SAR of 0 or more, with at most two decimals.": "حد قيمة النقص مبلغ بالريال من صفر فأكثر، بمنزلتين عشريتين على الأكثر.",

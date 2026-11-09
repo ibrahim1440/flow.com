@@ -4,7 +4,8 @@ import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
-import { normalizationFor, findDuplicateCandidates } from "@/lib/services/sales/leads";
+import { normalizationFor, findDuplicateCandidates, normalizePhone } from "@/lib/services/sales/leads";
+import { customerInScope } from "@/lib/services/sales/customer-access";
 
 /**
  * GET /api/sales/leads — the lead list, scoped to what the caller may see.
@@ -146,6 +147,15 @@ export async function POST(request: Request) {
       }
     }
 
+    // D17 «وش طلع من الجولة؟ › أضف عميل محتمل»: the field round (in the caller's own plan) the lead was found on.
+    const fieldRoundItemId = typeof b.fieldRoundItemId === "string" && b.fieldRoundItemId ? b.fieldRoundItemId : null;
+    if (fieldRoundItemId) {
+      const round = await prisma.salesPlanItem.findUnique({ where: { id: fieldRoundItemId }, select: { employeeId: true, category: true } });
+      if (!round || round.employeeId !== user.id || round.category !== "FIELD_ROUND") {
+        return NextResponse.json({ error: "The field round was not found." }, { status: 400 });
+      }
+    }
+
     const norm = normalizationFor({ companyName, phone: b.phone as string | null });
 
     // Duplicates are reported, never merged and never silently blocked. Several buyers at
@@ -155,6 +165,18 @@ export async function POST(request: Request) {
       phone: b.phone as string | null,
     });
     const strong = candidates.filter((c) => c.strong);
+    // D17 (Abu Fahd): a shop met on a field round may already be a CUSTOMER — the same phone (normalised) stops the add
+    // until confirmed. A customer outside the caller's book is reported without its name or id.
+    const phoneKey = fieldRoundItemId ? normalizePhone(b.phone as string | null) : null;
+    if (phoneKey && b.acknowledgeDuplicate !== true) {
+      const hits = await prisma.$queryRaw<{ id: string; name: string; nameAr: string | null }[]>`
+        SELECT id, name, "nameAr" FROM "Customer"
+         WHERE phone IS NOT NULL AND right(regexp_replace(phone, '[^0-9]', '', 'g'), 9) = right(${phoneKey}, 9) LIMIT 5`;
+      if (hits.length) {
+        const customers = await Promise.all(hits.map(async (c) => ((await customerInScope(user, c.id)) ? { id: c.id, name: c.nameAr ?? c.name } : { id: null, name: null })));
+        return NextResponse.json({ error: "A customer with this phone number already exists.", customers, duplicates: strong }, { status: 409 });
+      }
+    }
     if (strong.length > 0 && b.acknowledgeDuplicate !== true) {
       return NextResponse.json(
         {
@@ -190,6 +212,7 @@ export async function POST(request: Request) {
           sourceNote: typeof b.sourceNote === "string" ? b.sourceNote.trim() || null : null,
           notes: typeof b.notes === "string" ? b.notes.trim() || null : null,
           nextFollowUpAt: followUp,
+          fieldRoundItemId,
           ownerId,
           createdById: user.id,
           ...norm,

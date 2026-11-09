@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { PlanError, moveItem, removeItem, riyadhIso } from "@/lib/services/sales/plans";
+import { markPlanMeeting } from "@/lib/workspace/server/appointments";
 
 type Params = { params: Promise<{ id: string }> };
 const notFound = () => NextResponse.json({ error: "غير موجود.", errorEn: "Not found." }, { status: 404 });
@@ -17,12 +18,29 @@ export async function PATCH(request: Request, { params }: Params) {
   if (error) return error;
   try {
     const { id } = await params;
-    const item = await prisma.salesPlanItem.findUnique({ where: { id }, select: { id: true, employeeId: true, kind: true, metric: true } });
+    const item = await prisma.salesPlanItem.findUnique({ where: { id }, select: { id: true, employeeId: true, kind: true, metric: true, category: true, appointmentId: true } });
     if (!item || item.employeeId !== user.id) return notFound();
-    const body = (await request.json().catch(() => ({}))) as { checked?: unknown; manualDone?: unknown; plannedDay?: unknown; plannedTime?: unknown };
+    const body = (await request.json().catch(() => ({}))) as { checked?: unknown; manualDone?: unknown; plannedDay?: unknown; plannedTime?: unknown; shopsVisited?: unknown };
     // D16: a free item, or a planned sample («وش صار؟ › أرسلتها» — handed over in person, no shipment record), is ticked here.
     if ((item.kind === "CHECK" || (item.kind === "ACTION" && item.metric === "SAMPLES")) && typeof body.checked === "boolean") {
-      await prisma.salesPlanItem.update({ where: { id }, data: { checkedAt: body.checked ? new Date() : null } });
+      // D17: a field round's outcome — «كم محل زرت؟» — comes with its tick («خلصت الجولة»).
+      let shopsVisited: number | null | undefined;
+      if (item.category === "FIELD_ROUND" && body.shopsVisited !== undefined) {
+        const n = body.shopsVisited === null || body.shopsVisited === "" ? null : Number(body.shopsVisited);
+        if (n !== null && (!Number.isInteger(n) || n < 0 || n > 999)) return NextResponse.json({ error: "عدد المحلات من 0 إلى 999.", errorEn: "Shops visited: 0–999." }, { status: 400 });
+        shopsVisited = n;
+      }
+      const checked = body.checked;
+      await prisma.$transaction(async (tx) => {
+        await tx.salesPlanItem.update({ where: { id }, data: { checkedAt: checked ? new Date() : null, ...(shopsVisited !== undefined ? { shopsVisited } : {}) } });
+        // D17: the rep's own invited meeting is DONE for the colleagues too (and open again on «تراجع»).
+        if (item.appointmentId) await markPlanMeeting(tx, user.id, item.appointmentId, checked);
+      });
+    } else if (item.category === "FIELD_ROUND" && body.shopsVisited !== undefined && body.checked === undefined) {
+      // D17 (Abu Fahd): «كم محل زرت؟» is kept as the rep counts — closing the sheet or a reload loses nothing.
+      const n = body.shopsVisited === null || body.shopsVisited === "" ? null : Number(body.shopsVisited);
+      if (n !== null && (!Number.isInteger(n) || n < 0 || n > 999)) return NextResponse.json({ error: "عدد المحلات من 0 إلى 999.", errorEn: "Shops visited: 0–999." }, { status: 400 });
+      await prisma.salesPlanItem.update({ where: { id }, data: { shopsVisited: n } });
     } else if (item.kind === "GOAL" && item.metric === "CUSTOM" && body.manualDone !== undefined) {
       const n = Number(String(body.manualDone).replace(/,/g, ""));
       if (!Number.isFinite(n) || n < 0) return NextResponse.json({ error: "الإنجاز رقم موجب.", errorEn: "Progress is a non-negative number." }, { status: 400 });

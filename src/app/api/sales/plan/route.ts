@@ -4,7 +4,7 @@ import { requireModule } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { seesTeamReports } from "@/lib/services/sales/scope";
 import { canSeeCustomerContact } from "@/lib/auth/customer-detail";
-import { PERIODS, PlanError, loadPlan, periodStartOf, riyadhIso, setSelfTarget, type Period } from "@/lib/services/sales/plans";
+import { PERIODS, PlanError, generateRecurring, loadPlan, periodStartOf, riyadhIso, ruleIssues, setSelfTarget, type Period } from "@/lib/services/sales/plans";
 
 /**
  * «خطة الأسبوع» (owner-approved Figma page 07, 3 Nov 2026).
@@ -31,9 +31,18 @@ export async function GET(request: Request) {
     const today = riyadhIso(new Date());
     const day = /^\d{4}-\d{2}-\d{2}$/.test(sp.get("date") ?? "") ? sp.get("date")! : today;
     const start = periodStartOf(period, day);
+    // D17: the caller's weekly rules for this week and the next four (idempotent; cheap when there are none).
+    // A failure here never fails the read (gate B2): the plan is shown and the error logged.
+    let repeatIssues: string[] = [];
+    if (!rep || rep === user.id) {
+      const ok = await prisma.$transaction((tx) => generateRecurring(tx, user.id, today)).then(() => true, (e) => { console.error("[plan] weekly generation failed:", e instanceof Error ? e.message : e); return false; });
+      // Gate R3 L4: a rule skipped by the read (an error, or its backoff) is told to the rep, not only logged.
+      const running = (await prisma.salesPlanRecurrence.findMany({ where: { employeeId: user.id, stoppedAt: null }, select: { id: true } })).map((r) => r.id);
+      repeatIssues = ok ? ruleIssues(running) : running;
+    }
     // The customers' phone and address (the row's call / WhatsApp / map) only with the customer-contact right.
     const plan = await loadPlan(prisma, rep || user.id, period, start, new Date(), { contact: canSeeCustomerContact(user.permissions) });
-    return NextResponse.json({ ...plan, today, readOnly: !!rep && rep !== user.id, canSetGoals: supervisor(user) }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ ...plan, today, repeatIssues, readOnly: !!rep && rep !== user.id, canSetGoals: supervisor(user) }, { headers: { "Cache-Control": "no-store" } });
   } catch (e) { return err(e); }
 }
 

@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { customerInScope } from "@/lib/services/sales/customer-access";
-import { PlanError, addItem, addItems, riyadhIso } from "@/lib/services/sales/plans";
+import { PlanError, addFromInvitation, addItem, addItems, riyadhIso } from "@/lib/services/sales/plans";
 
 /**
  * POST /api/sales/plan/items { kind: ACTION|CHECK, metric?, customerId?, plannedDay?, plannedTime?, label?, date? } — the rep
@@ -15,6 +15,11 @@ export async function POST(request: Request) {
   if (error) return error;
   try {
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    // D17 «حطها في خطتي»: a meeting a colleague invited the caller to.
+    if (typeof body.appointmentId === "string" && body.appointmentId) {
+      const row = await prisma.$transaction((tx) => addFromInvitation(tx, user.id, body.appointmentId as string, riyadhIso(new Date())));
+      return NextResponse.json({ ok: true, id: row.id }, { status: 201 });
+    }
     // D16 «خطّط أسبوعك › ثبّت خطتي»: { items: [...] } adds several at once (a twin is skipped, not refused).
     if (Array.isArray(body.items)) {
       const list = body.items as Record<string, unknown>[];

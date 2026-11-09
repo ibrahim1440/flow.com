@@ -722,3 +722,67 @@
 @media (max-width: 767.98px) { .kp-toast { bottom: calc(84px + env(safe-area-inset-bottom, 0px)) } }
 .kp-err { padding: 10px 12px; border-radius: 10px; background: var(--status-danger-tint); font-weight: 600 }
 .kp-late { color: var(--status-warning); font-weight: 600 }
+
+/* ── D17 «شغلي» (owner-approved Figma D17, 9 Nov 2026): internal work in sand beside the customer work in green — the two
+   groups of «وش؟», the internal questions, the row's «شغلي» tag and weekly mark, «وش طلع من الجولة؟», «المتكرر», invitations. */
+.kp-group, .kp-sheet .kp-group { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: var(--action-primary) }
+.kp-group .ico { width: 14px; height: 14px }
+.kp-group.sand, .kp-tag, .kp-rep { color: var(--kp-sand, #8a673a) }
+.kp-sand4 { grid-template-columns: repeat(4, 1fr) }
+.kp-sand4 > button.on { border-color: var(--kp-sand, #8a673a); background: var(--kp-sand-tint, #f6efe6); color: var(--kp-sand, #8a673a) }
+.kp-sand4 > button.on .ico { color: var(--kp-sand, #8a673a) }
+.kp-sand > button[aria-pressed="true"], .kp-chips.kp-sand > button[aria-pressed="true"] { background: var(--kp-sand, #8a673a); border-color: var(--kp-sand, #8a673a) }
+.pl-note.kp-sand, .kp-sum.kp-sand { background: var(--kp-sand-tint, #f6efe6); color: var(--kp-sand, #8a673a) }
+.kp-tag { display: inline-flex; align-items: center; margin-inline-start: 6px; padding: 0 8px; border-radius: 999px; background: var(--kp-sand-tint, #f6efe6); font-size: 11px; font-weight: 700; vertical-align: 2px }
+.kp-rep { display: inline-flex; align-items: center; gap: 3px; font-weight: 700 }
+.kp-row.kp-int .kp-row-t small > .ico:first-child { color: var(--kp-sand, #8a673a) }
+.d21 .kp-row.kp-int .pl-c.on, .kp-row.kp-int .pl-c.on { background: var(--kp-sand, #8a673a); border-color: var(--kp-sand, #8a673a) }
+.kp-act.sand { color: var(--kp-sand, #8a673a); border-color: color-mix(in srgb, var(--kp-sand, #8a673a) 35%, transparent); cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 600 }
+.kp-act.dan { color: var(--status-danger); cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 600 }
+button.kp-act { cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 600 }
+.kp-switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; font-size: 14px; font-weight: 600; cursor: pointer }
+.kp-switch > span { display: inline-flex; align-items: center; gap: 6px }
+.kp-switch.sm { min-height: 36px; font-size: 13px }
+.kp-switch input[role="switch"] { appearance: none; flex: none; width: 42px; height: 26px; margin: 0; border-radius: 999px; background: var(--border-strong); position: relative; cursor: pointer; transition: background .18s }
+.kp-switch input[role="switch"]::after { content: ""; position: absolute; inset-inline-start: 3px; top: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: inset-inline-start .18s }
+.kp-switch input[role="switch"]:checked { background: var(--kp-sand, #8a673a) }
+.kp-switch input[role="switch"]:checked::after { inset-inline-start: 19px }
+.kp-switch input[role="switch"]:disabled { opacity: .45; cursor: default }
+.kp-switch input[role="switch"]:focus-visible { outline: 2px solid var(--action-primary); outline-offset: 2px }
+.kp-invite { padding: 0 12px; border-radius: 10px; background: var(--surface-subtle) }
+.kp-repeat { display: grid; gap: 8px }
+.kp-repeat.on { padding: 10px 12px; border-radius: 12px; background: var(--kp-sand-tint, #f6efe6) }
+.kp-repeat.on .kp-switch > span { color: var(--kp-sand, #8a673a) }
+.kp-step { display: inline-flex; align-items: stretch; width: fit-content; border: 1px solid var(--border-strong); border-radius: 10px; overflow: hidden }
+.kp-step > button { width: 48px; min-height: 44px; border: 0; background: var(--surface-subtle); color: var(--kp-sand, #8a673a); font: 700 20px/1 var(--f-ui); cursor: pointer }
+.kp-step > input { width: 64px; border: 0; text-align: center; font: 700 18px/1 var(--f-num); background: var(--surface); color: var(--text-primary) }
+.kp-leads { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px }
+.kp-leads > li { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 0 12px; border-radius: 10px; background: var(--action-primary-tint) }
+.kp-leads > li span { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--action-primary) }
+.kp-leadform { display: grid; gap: 8px; padding: 12px; border-radius: 12px; background: var(--surface-subtle) }
+.kp-leadform > b { color: var(--kp-sand, #8a673a); font-size: 13.5px }
+.kp-sandbtn { justify-content: center; color: var(--kp-sand, #8a673a); border-color: var(--kp-sand, #8a673a) }
+.kp-dup { display: grid; gap: 6px; padding: 10px 12px; border-radius: 10px; background: var(--status-warning-tint); color: var(--text-primary) }
+.kp-dup > b { color: var(--status-warning) }
+.d21 .kp-invite-card, .kp-invite-card { display: grid; gap: 6px; background: var(--kp-sand-tint, #f6efe6); border-color: color-mix(in srgb, var(--kp-sand, #8a673a) 30%, transparent) }
+.kp-invite-card > b { display: inline-flex; align-items: center; gap: 6px; color: var(--kp-sand, #8a673a); font-size: 15px }
+.kp-invite-card > small { color: var(--text-primary); font-size: 13.5px }
+.kp-invite-card .kp-acts { justify-content: flex-start }
+.d21 .kp-repeating, .kp-repeating { display: grid; gap: 10px }
+.kp-repeating .kp-acts { justify-content: flex-start }
+.kp-intsug { display: grid; gap: 8px; padding: 2px; border-radius: 12px }
+.kp-intsug.on { padding: 10px; border: 2px solid var(--kp-sand, #8a673a); background: var(--kp-sand-tint, #f6efe6) }
+.kp-intsug.on > .kp-pickrow { border: 0; background: transparent; padding: 0; min-height: 40px }
+.kp-intsug .kp-pickrow b { display: inline-flex; align-items: center; gap: 6px }
+.kp-intsug.on .kp-box { background: var(--kp-sand, #8a673a); border-color: var(--kp-sand, #8a673a) }
+.kp-intsug .kp-pickrow:disabled { cursor: default; opacity: .85 }
+.kp-intrev { display: grid; gap: 6px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border-subtle) }
+.kp-intrev > .pl-q { color: var(--kp-sand, #8a673a) }
+@media (max-width: 767.98px) { .kp-sand4 { grid-template-columns: repeat(4, 1fr) } .kp-sand4 > button { font-size: 12px; padding: 10px 2px } }
+@media (prefers-reduced-motion: reduce) { .kp-switch input[role="switch"], .kp-switch input[role="switch"]::after { transition: none } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --kp-sand: #d1ad7a; --kp-sand-tint: #3a3022 } }
+:root[data-theme="dark"] { --kp-sand: #d1ad7a; --kp-sand-tint: #3a3022 }
+.kp-leads > li.off { background: var(--status-warning-tint) } .kp-leads > li.off small { color: var(--status-warning); font-weight: 600 }
+.kp-chips > button.kp-person { white-space: normal; text-align: start; line-height: 1.3; padding-block: 6px }
+.kp-repbadge { font-size: 12px } .kp-replink { display: inline-flex; align-items: center; gap: 4px; color: var(--kp-sand, #8a673a); font-weight: 700 }
+.kp-repissue { display: flex; align-items: center; gap: 6px; text-decoration: none; font-weight: 600 }

@@ -130,6 +130,8 @@ model Employee {
   workReminders          WorkReminder[]               @relation("WorkReminderRecipient")
   salesPlanItems         SalesPlanItem[]              @relation("SalesPlanItemEmployee")
   salesPlanItemsCreated  SalesPlanItem[]              @relation("SalesPlanItemCreatedBy")
+  salesPlanRecurrences   SalesPlanRecurrence[]        @relation("SalesPlanRecurrenceEmployee")
+  salesPlanRecurrencesBy SalesPlanRecurrence[]        @relation("SalesPlanRecurrenceCreatedBy")
 
   @@index([accessRoleId])
 }
@@ -3318,8 +3320,13 @@ model Lead {
 
   @@index([ownerId, status])
   @@index([status, nextFollowUpAt])
+  /// D17: the field round («جولة ميدانية» in «خطتي») this lead was added from.
+  fieldRoundItemId String?
+  fieldRoundItem   SalesPlanItem? @relation("LeadFieldRound", fields: [fieldRoundItemId], references: [id], onDelete: SetNull)
+
   @@index([normalizedCompany])
   @@index([normalizedPhone])
+  @@index([fieldRoundItemId], map: "Lead_fieldRoundItem_idx")
 }
 
 /// The proof that a lead became a customer and an opportunity.
@@ -9447,6 +9454,7 @@ model WorkAppointment {
 
   participants WorkAppointmentParticipant[]
   reminders    WorkReminder[]
+  planItems    SalesPlanItem[]              @relation("SalesPlanItemAppointment")
 
   @@unique([seriesId, occurrence])
   @@index([organizerId, startAt])
@@ -10387,6 +10395,21 @@ model SalesPlanItem {
   plannedDay  DateTime? @db.Date
   /// D16 (20261225090000_sales_plan_time): "HH:MM" Riyadh on a dated ACTION/CHECK — a time makes it an appointment.
   plannedTime String?
+  /// D17 (20261226090000_sales_plan_internal): a free item's kind — MEETING | FIELD_ROUND | REPORT | OTHER (NULL = OTHER).
+  category      String?
+  /// A meeting's length (minutes) and colleagues (Employee ids); `appointment` once they are invited (their calendar).
+  durationMin   Int?
+  attendeeIds   String[]         @default([])
+  appointmentId String?
+  appointment   WorkAppointment? @relation("SalesPlanItemAppointment", fields: [appointmentId], references: [id], onDelete: SetNull)
+  /// A field round's place, the new customers aimed for, and the shops visited (its outcome).
+  area          String?
+  targetNew     Int?
+  shopsVisited  Int?
+  /// The weekly rule the item was generated from.
+  recurrenceId  String?
+  recurrence    SalesPlanRecurrence? @relation(fields: [recurrenceId], references: [id], onDelete: SetNull)
+  roundLeads    Lead[]           @relation("LeadFieldRound")
   position    Int       @default(0)
   createdById String?
   createdBy   Employee? @relation("SalesPlanItemCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
@@ -10395,6 +10418,48 @@ model SalesPlanItem {
 
   @@index([employeeId, period, periodStart], map: "SalesPlanItem_employee_period_idx")
   @@index([customerId], map: "SalesPlanItem_customer_idx")
+  @@index([appointmentId], map: "SalesPlanItem_appointment_idx")
+  @@index([recurrenceId], map: "SalesPlanItem_recurrence_idx")
+}
+
+/// D17 «كرّرها كل أسبوع»: a rep's weekly internal item — one weekday, until a day or no end. Generated lazily (loadPlan /
+/// on save) for the current week and four ahead; SalesPlanRecurrenceWeek records each generated week (idempotent).
+model SalesPlanRecurrence {
+  id          String    @id @default(cuid())
+  employeeId  String
+  employee    Employee  @relation("SalesPlanRecurrenceEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  category    String
+  label       String
+  /// 0 = Sunday … 4 = Thursday.
+  weekday     Int
+  plannedTime String?
+  durationMin Int?
+  attendeeIds String[]  @default([])
+  invite      Boolean   @default(false)
+  area        String?
+  targetNew   Int?
+  startWeek   DateTime  @db.Date
+  untilDay    DateTime? @db.Date
+  stoppedAt   DateTime?
+  createdById String?
+  createdBy   Employee? @relation("SalesPlanRecurrenceCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  items SalesPlanItem[]
+  weeks SalesPlanRecurrenceWeek[]
+
+  @@index([employeeId], map: "SalesPlanRecurrence_employee_idx")
+}
+
+model SalesPlanRecurrenceWeek {
+  recurrenceId String
+  recurrence   SalesPlanRecurrence @relation(fields: [recurrenceId], references: [id], onDelete: Cascade)
+  weekStart    DateTime            @db.Date
+  itemId       String?
+  createdAt    DateTime            @default(now())
+
+  @@id([recurrenceId, weekStart])
 }
 
 // ─── Roasting station v2 (P0, migration 20261223090000_roast_station_v2) ─────────────────────────────────────

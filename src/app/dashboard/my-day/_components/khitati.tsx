@@ -26,9 +26,14 @@ import { dayLabel, isWork, nextWork, stripDays, timeLabel, type AMetric } from "
 export { dayLabel, isWork, nextWork, stripDays, timeLabel, type AMetric };
 import { telHref, waNumber } from "./text";
 import { useBackLayer } from "./back-layer";
+import { InternalFields, InvitesCard, NEW_INTERNAL, RepeatingCard, RoundSheet, durationText, everyDay, internalOk, internalTitle, leadsText, shopsText, useInternal, type Appt, type InternalValue } from "./internal";
 import "../my-day.css";
 
-export type Kind = AMetric | "CHECK";
+/** D17: the customer kinds, and «شغلي» — a meeting, a field round, a report / desk work, «شغلة ثانية» (CHECK). */
+export type Kind = AMetric | "CHECK" | "MEETING" | "FIELD_ROUND" | "REPORT";
+export type IKind = "MEETING" | "FIELD_ROUND" | "REPORT" | "CHECK";
+export const INTERNAL: IKind[] = ["MEETING", "FIELD_ROUND", "REPORT", "CHECK"];
+export const isInternal = (k: Kind): k is IKind => (INTERNAL as Kind[]).includes(k);
 type GMetric = AMetric | "NEW_CUSTOMERS";
 export type Cust = { id: string; name: string; phone?: string | null; address?: string | null };
 export type PItem = {
@@ -37,6 +42,9 @@ export type PItem = {
   doneAt: string | null; doneOutcome: string | null; doneBody: string | null; weekStart: string | null; doneHow: "record" | "auto" | "manual" | null;
   /** «وش صار؟» for a call-list row (not a plan item): the deal of its follow-up / sample, kept on the recorded call (gate). */
   dealId?: string | null;
+  /** D17 «شغلي» (services/sales/plans.ts PlanItem). */
+  category?: "MEETING" | "FIELD_ROUND" | "REPORT" | "OTHER" | null; title?: string | null; durationMin?: number | null; attendees?: { id: string; name: string }[]; invited?: boolean; invitedBy?: string | null;
+  area?: string | null; targetNew?: number | null; shopsVisited?: number | null; roundLeads?: { id: string; name: string }[]; recurrence?: { id: string; weekday: number } | null; appointmentId?: string | null;
 };
 type Off = { id: string; metric: AMetric; customer: Cust | null; title: string | null; at: string; outcome: string | null; body: string | null };
 export type PlanData = {
@@ -44,6 +52,8 @@ export type PlanData = {
   counts: Record<GMetric, number>; readOnly: boolean; canSetGoals: boolean;
   /** Whether the caller may see the customers' phone and address (the row's call / WhatsApp / map). */
   contact?: boolean;
+  /** D17 (gate R3): weekly rules the last read could not prepare — «خطتي» says so and links to them. */
+  repeatIssues?: string[];
 };
 
 export const KINDS: { k: Kind; ar: string; en: string; icon: D21IconName }[] = [
@@ -52,13 +62,18 @@ export const KINDS: { k: Kind; ar: string; en: string; icon: D21IconName }[] = [
   { k: "QUOTES", ar: "عرض سعر", en: "Quotation", icon: "quote" },
   { k: "COLLECTION", ar: "تحصيل", en: "Collection", icon: "wallet" },
   { k: "SAMPLES", ar: "عيّنة", en: "Sample", icon: "flask" },
+  { k: "MEETING", ar: "اجتماع", en: "Meeting", icon: "meet" },
+  { k: "FIELD_ROUND", ar: "جولة ميدانية", en: "Field round", icon: "pin" },
+  { k: "REPORT", ar: "تقرير / مكتبي", en: "Report / desk", icon: "doc" },
   { k: "CHECK", ar: "شغلة ثانية", en: "Something else", icon: "note" },
 ];
 const KIND_OF = Object.fromEntries(KINDS.map((x) => [x.k, x])) as Record<Kind, (typeof KINDS)[number]>;
 export const GOAL_T: Record<GMetric, [string, string]> = { VISITS: ["زيارات", "Visits"], CALLS: ["مكالمات", "Calls"], QUOTES: ["عروض سعر", "Quotations"], COLLECTION: ["تحصيل", "Collections"], SAMPLES: ["عيّنات", "Samples"], NEW_CUSTOMERS: ["عملاء جدد", "New customers"] };
 const GOAL_ORDER: GMetric[] = ["VISITS", "CALLS", "QUOTES", "COLLECTION", "SAMPLES", "NEW_CUSTOMERS"];
-export const kindOf = (it: Pick<PItem, "kind" | "metric">): Kind => (it.kind === "CHECK" ? "CHECK" : ((it.metric as AMetric) ?? "VISITS"));
-const titleOf = (it: PItem) => (it.kind === "CHECK" ? it.label ?? "" : it.customer?.name ?? "");
+export const kindOf = (it: Pick<PItem, "kind" | "metric"> & { category?: string | null }): Kind =>
+  (it.kind === "CHECK" ? (it.category === "MEETING" || it.category === "FIELD_ROUND" || it.category === "REPORT" ? it.category : "CHECK") : ((it.metric as AMetric) ?? "VISITS"));
+// D17 (Abu Fahd): a meeting's name is composed for THIS viewer on the server (`title`), never the organiser's «اجتماع مع <you>».
+const titleOf = (it: PItem) => (it.kind === "CHECK" ? it.title ?? it.label ?? "" : it.customer?.name ?? "");
 
 /** Riyadh "HH:MM" now. */
 const nowHmOf = () => new Date(Date.now() + 3 * 3_600_000).toISOString().slice(11, 16);
@@ -86,7 +101,7 @@ export async function send(url: string, method: string, json?: unknown): Promise
   const data = (await r.json().catch(() => ({}))) as Record<string, unknown>;
   return { ok: r.ok, status: r.status, data };
 }
-const errOf = (d: Record<string, unknown>, ar: boolean) => String((ar ? d.error : d.errorEn ?? d.error) ?? (ar ? "تعذّر الحفظ." : "Could not save."));
+export const errOf = (d: Record<string, unknown>, ar: boolean) => String((ar ? d.error : d.errorEn ?? d.error) ?? (ar ? "تعذّر الحفظ." : "Could not save."));
 
 export function usePlanData(period: "DAY" | "WEEK", reload: number, rep?: string, date?: string, enabled = true) {
   const [plan, setPlan] = useState<PlanData | null>(null);
@@ -128,7 +143,6 @@ export function AddPlanSheet({ ar, today, customer, rep, presetDay, cleanUrl, on
   const [who, setWho] = useState<Cust | null>(customer ?? null);
   const [changing, setChanging] = useState(!customer);
   const [q, setQ] = useState("");
-  const [label, setLabel] = useState("");
   const [note, setNote] = useState("");
   const initial = presetDay !== undefined ? presetDay : customer ? (strip[0] === today ? strip[1] : strip[0]) : strip[0];
   const [day, setDay] = useState<string | null>(initial);
@@ -138,6 +152,10 @@ export function AddPlanSheet({ ar, today, customer, rep, presetDay, cleanUrl, on
   // The error belongs to what was tried: changing the kind, the customer or the day clears it (shown near the customer).
   const [failure, setFailure] = useState<{ key: string; msg: string } | null>(null);
   const [customers, setCustomers] = useState<Cust[] | null>(null);
+  // D17 «شغلي»: the internal kind's answers, and the people / places / suggestions it offers (not for a supervisor's add).
+  const [iv, setIv] = useState<InternalValue>(NEW_INTERNAL);
+  const hints = useInternal(0);
+  const internal = isInternal(kind);
   const book = useMyBook(!rep);
   useBackLayer(1, onClose, { cleanUrl });
   useEffect(() => {
@@ -158,18 +176,27 @@ export function AddPlanSheet({ ar, today, customer, rep, presetDay, cleanUrl, on
   const found = q.trim() ? (customers ?? []).filter((c) => c.name.toLowerCase().includes(q.trim().toLowerCase())).slice(0, 6) : [];
   // «تاريخ ثاني» needs a picked date — today or later (the server refuses a past day too: PAST_DAY).
   const dayOk = !other || (!!day && day >= today);
-  const ok = (kind === "CHECK" ? label.trim().length >= 2 : !!who) && dayOk;
+  // The supervisor's meeting in a rep's plan: the rep is invited with the others (the supervisor organises it).
+  const inviteOk = !(kind === "MEETING" && iv.invite) || (!!day && !!time && (iv.attendees.length > 0 || !!rep));
+  const ok = (internal ? internalOk(kind, iv) && inviteOk : !!who) && dayOk;
   const tryKey = `${kind}|${who?.id ?? ""}|${day ?? ""}|${time}`;
   const err = failure && failure.key === tryKey ? failure.msg : "";
   const weekDate = day ?? (isWork(today) ? today : nextWork(today));
   const k = KIND_OF[kind];
   const whenText = day ? `${dayLabel(day, today, ar)}${time ? ` ${timeLabel(time, ar)}` : ""}` : ar ? "خلال الأسبوع" : "During the week";
-  const summary = `${ar ? k.ar : k.en}${kind !== "CHECK" && who ? (ar ? ` لـ${who.name}` : ` · ${who.name}`) : kind === "CHECK" && label.trim() ? ` · ${label.trim()}` : ""} · ${whenText}${time && day ? (ar ? " · موعد" : " · appointment") : ""}`;
+  const ititle = internal ? internalTitle(kind, iv, ar) : "";
+  const summary = internal
+    ? `${ititle || (ar ? k.ar : k.en)} · ${whenText}${kind === "MEETING" ? ` · ${durationText(iv.durationMin, ar)}${iv.attendees.length ? (iv.invite ? (ar ? " — توصلهم دعوة" : " — invitation sent") : ar ? " — بدون دعوة" : " — no invitation") : ""}`
+      : kind === "FIELD_ROUND" && iv.targetNew ? (ar ? ` · هدفك ${iv.targetNew} عملاء جدد` : ` · aim ${iv.targetNew} new`) : ""}${iv.repeat && day ? ` · ${everyDay(new Date(`${day}T00:00:00Z`).getUTCDay(), ar)}${iv.repeat.until ? "" : ar ? " · بدون نهاية" : " · no end"}` : ""}`
+    : `${ar ? k.ar : k.en}${who ? (ar ? ` لـ${who.name}` : ` · ${who.name}`) : ""} · ${whenText}${time && day ? (ar ? " · موعد" : " · appointment") : ""}`;
   const save = async () => {
     if (!ok || busy) return;
     setBusy(true); setFailure(null);
-    const body: Record<string, unknown> = kind === "CHECK"
-      ? { kind: "CHECK", label: label.trim(), plannedDay: day, plannedTime: day && time ? time : null, date: weekDate }
+    const body: Record<string, unknown> = internal
+      ? { kind: "CHECK", category: kind === "CHECK" ? "OTHER" : kind, label: kind === "MEETING" ? null : ititle, plannedDay: day, plannedTime: day && time ? time : null, date: weekDate,
+          ...(kind === "MEETING" ? { durationMin: iv.durationMin, attendeeIds: iv.attendees.map((a) => a.id), invite: iv.invite && (iv.attendees.length > 0 || !!rep) } : {}),
+          ...(kind === "FIELD_ROUND" ? { area: iv.area.trim(), targetNew: iv.targetNew } : {}),
+          ...(iv.repeat && day && !rep ? { repeat: { until: iv.repeat.until } } : {}) }
       : { kind: "ACTION", metric: kind, customerId: who!.id, label: note.trim() || null, plannedDay: day, plannedTime: day && time ? time : null, date: weekDate };
     const r = await send(rep ? "/api/sales/team-goals/items" : "/api/sales/plan/items", "POST", rep ? { ...body, employeeId: rep.id } : body);
     setBusy(false);
@@ -183,14 +210,21 @@ export function AddPlanSheet({ ar, today, customer, rep, presetDay, cleanUrl, on
         <button type="button" className="btn" onClick={onClose}>{ar ? "إلغاء" : "Cancel"}</button></>}>
       <div className="pl-sheet kp-sheet">
         <b className="pl-q">{ar ? "وش؟" : "What?"}</b>
-        <div className="pl-tiles kp-tiles" role="radiogroup" aria-label={ar ? "النوع" : "Kind"}>
-          {KINDS.map((t) => <button key={t.k} type="button" role="radio" aria-checked={kind === t.k} className={kind === t.k ? "on" : undefined} onClick={() => setKind(t.k)} data-testid={`plan-kind-${t.k}`}><Ico name={t.icon} />{ar ? t.ar : t.en}</button>)}
+        {/* D17: two labelled groups — «مع عميل» (green) and «شغلي» (sand); a supervisor adds customer work or «شغلة ثانية». */}
+        <small className="kp-group" data-testid="plan-group-customer"><Ico name="users" small />{ar ? "مع عميل" : "With a customer"}</small>
+        <div className="pl-tiles kp-tiles" role="radiogroup" aria-label={ar ? "مع عميل" : "With a customer"}>
+          {KINDS.filter((t) => !isInternal(t.k)).map((t) => <button key={t.k} type="button" role="radio" aria-checked={kind === t.k} className={kind === t.k ? "on" : undefined} onClick={() => setKind(t.k)} data-testid={`plan-kind-${t.k}`}><Ico name={t.icon} />{ar ? t.ar : t.en}</button>)}
         </div>
-        {kind === "CHECK" ? (
-          <>
-            <b className="pl-q">{ar ? "وش الشغلة؟" : "What is it?"}</b>
-            <input className="pl-in" value={label} maxLength={200} onChange={(e) => setLabel(e.target.value)} placeholder={ar ? "مثال: طباعة كتالوج المعرض" : "e.g. print the fair catalogue"} data-testid="plan-check-text" />
-          </>
+        {customer ? null : <>
+        <small className="kp-group sand" data-testid="plan-group-mine"><Ico name="brief" small />{ar ? "شغلي" : "My work"}
+          {internal && iv.repeat && day ? <span className="kp-rep kp-repbadge" data-testid="plan-repeat-badge"> · <Ico name="repeat" small />{everyDay(new Date(`${day}T00:00:00Z`).getUTCDay(), ar)}</span> : null}</small>
+        <div className="pl-tiles kp-tiles kp-sand4" role="radiogroup" aria-label={ar ? "شغلي" : "My work"}>
+          {KINDS.filter((t) => isInternal(t.k)).map((t) => <button key={t.k} type="button" role="radio" aria-checked={kind === t.k} className={kind === t.k ? "on" : undefined}
+            onClick={() => { setKind(t.k); if (t.k === "MEETING" && !time && day) setTime("09:00"); }} data-testid={`plan-kind-${t.k}`}><Ico name={t.icon} />{ar ? t.ar : t.en}</button>)}
+        </div>
+        </>}
+        {internal ? (
+          <InternalFields ar={ar} kind={kind as "MEETING" | "FIELD_ROUND" | "REPORT" | "CHECK"} value={iv} onChange={setIv} hints={hints} day={day} time={time} forRep={rep?.name} />
         ) : (
           <>
             <b className="pl-q">{ar ? "لمين؟" : "For whom?"}</b>
@@ -216,7 +250,7 @@ export function AddPlanSheet({ ar, today, customer, rep, presetDay, cleanUrl, on
           </>
         )}
         {err ? <p className="pl-err kp-err" role="alert" data-testid="plan-add-error">{err}</p> : null}
-        <b className="pl-q">{ar ? "متى؟" : "When?"}</b>
+        <b className="pl-q">{kind === "REPORT" ? (ar ? "متى تسلّمه؟" : "Due?") : ar ? "متى؟" : "When?"}</b>
         <div className="kp-chips" role="group" aria-label={ar ? "اليوم" : "Day"} data-testid="plan-days">
           {strip.map((d) => <button key={d} type="button" aria-pressed={!other && day === d} onClick={() => { setOther(false); setDay(d); }} data-testid={`plan-day-${d}`}>{dayLabel(d, today, ar)}</button>)}
           <button type="button" aria-pressed={!other && day === null} onClick={() => { setOther(false); setDay(null); setTime(""); }} data-testid="plan-day-week">{ar ? "خلال الأسبوع" : "During the week"}</button>
@@ -234,9 +268,12 @@ export function AddPlanSheet({ ar, today, customer, rep, presetDay, cleanUrl, on
           <input type="time" className="pl-in" value={time} disabled={!day} onChange={(e) => setTime(e.target.value)} aria-label={ar ? "الوقت" : "Time"} data-testid="plan-time" />
           {time ? <button type="button" className="kp-chipbtn" onClick={() => setTime("")}>{ar ? "بدون وقت" : "No time"}</button> : null}
         </span>
+        {internal && kind === "MEETING" && (iv.invite || rep) && day === today && time && time <= nowHmOf()
+          ? <small className="pl-err" role="alert" data-testid="plan-invite-past">{ar ? "وقت الاجتماع فات — ما تنرسل دعوة لوقت فات. اختر وقت ثاني." : "That time has passed — no invitation for a past time."}</small> : null}
         {day === today && time && time < nowHmOf() ? <small className="kp-late" role="status" data-testid="plan-time-passed">{ar ? "الوقت هذا فات اليوم — تقدر تحفظه إذا تسجّله متأخر." : "That time has already passed today — you can still save it."}</small> : null}
         <small className="pl-hint">{!day ? (ar ? "اختر يوم عشان تحط وقت." : "Pick a day to set a time.") : ar ? "إذا حطيت وقت يصير «موعد» ويطلع بوقته في «خطة اليوم»." : "With a time it is an appointment, shown at its time in «Today's plan»."}</small>
-        {kind !== "CHECK" ? <input className="pl-in" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} placeholder={ar ? "ملاحظة (اختياري)" : "Note (optional)"} data-testid="plan-note" /> : null}
+        {internal ? <InternalFields ar={ar} kind={kind as IKind} value={iv} onChange={setIv} hints={hints} day={day} time={time} part="bottom" forRep={rep?.name} /> : null}
+        {!internal ? <input className="pl-in" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} placeholder={ar ? "ملاحظة (اختياري)" : "Note (optional)"} data-testid="plan-note" /> : null}
         {ok && !err ? <p className="pl-note kp-sum" data-testid="plan-add-summary"><Ico name="tick" small />{summary}</p> : null}
       </div>
     </D21Dialog>
@@ -266,6 +303,9 @@ const OPTS: Record<Kind, Opt[]> = {
     { k: "ok", ar: "تمّت ✓", en: "Done ✓", manual: true },
     { k: "no", ar: "ما تمّت", en: "Didn't happen", sub: ["اختر يوم ثاني", "Pick another day"], move: true },
   ],
+  MEETING: [{ k: "ok", ar: "تمّت ✓", en: "Done ✓", manual: true }, { k: "no", ar: "ما تمّت", en: "Didn't happen", sub: ["اختر يوم ثاني", "Pick another day"], move: true }],
+  REPORT: [{ k: "ok", ar: "تمّت ✓", en: "Done ✓", manual: true }, { k: "no", ar: "ما تمّت", en: "Didn't happen", sub: ["اختر يوم ثاني", "Pick another day"], move: true }],
+  FIELD_ROUND: [{ k: "no", ar: "ما تمّت — أجّلها", en: "Not yet — move it", move: true }],
   QUOTES: [{ k: "no", ar: "ما تمّت — أجّلها", en: "Not yet — move it", move: true }],
   COLLECTION: [{ k: "no", ar: "ما تمّت — أجّلها", en: "Not yet — move it", move: true }],
 };
@@ -368,8 +408,10 @@ export function WhatHappened({ ar, it, today, onClose, onSaved }: { ar: boolean;
 }
 
 // ─── A row of the plan ────────────────────────────────────────────────────────────────────────────────────────────
-function PlanRow({ it, ar, today, onTick, onRemove, actions = true, compact = false, nowHm }: {
+function PlanRow({ it, ar, today, onTick, onRemove, actions = true, compact = false, nowHm, onInvite, onRound }: {
   it: PItem; ar: boolean; today: string; onTick?: () => void; onRemove?: () => void;
+  /** D17: «أرسل الدعوة» on the rep's planned meeting that was not sent; «وش طلع منها؟» on an open field round. */
+  onInvite?: () => void; onRound?: () => void;
   /** Riyadh "HH:MM" now — an open appointment of today whose time has gone shows «فات الوقت». */
   nowHm?: string;
   /** The call / WhatsApp / map buttons — only when the caller may see the customer's contact (the plan's `contact`). */
@@ -382,18 +424,33 @@ function PlanRow({ it, ar, today, onTick, onRemove, actions = true, compact = fa
   const wa = c ? waNumber(c.phone) : null;
   const when = it.plannedTime ? `${timeLabel(it.plannedTime, ar)} · ${ar ? "موعد" : "appointment"}` : it.plannedDay === today ? (ar ? "خلال اليوم" : "Any time today") : null;
   const late = !it.checked && !!it.plannedTime && !!nowHm && it.plannedDay === today && it.plannedTime < nowHm;
+  // D17 «شغلي»: sand icon and circle, the «شغلي» tag, a meeting's length and people, a round's aim / outcome, the weekly mark.
+  const mine = isInternal(kind);
+  const extra = kind === "MEETING" && it.durationMin ? durationText(it.durationMin, ar) : kind === "FIELD_ROUND" && it.targetNew && !it.checked ? (ar ? `هدفك ${it.targetNew} عملاء جدد` : `aim ${it.targetNew} new`) : null;
+  const people = kind === "MEETING" ? (it.invitedBy ? (ar ? `المنظّم: ${it.invitedBy}` : `Organiser: ${it.invitedBy}`)
+    : it.attendees?.length ? `${ar ? "معك" : "With"}: ${it.attendees.map((a) => a.name.trim()).join(ar ? "، " : ", ")} · ${it.invited ? (ar ? "وصلتهم الدعوة" : "invited") : ar ? "ما انرسلت لهم دعوة" : "not invited"}` : null) : null;
+  const roundDone = kind === "FIELD_ROUND" && it.checked ? `✓ ${shopsText(it.shopsVisited ?? 0, ar)} · ${leadsText(it.roundLeads?.length ?? 0, ar)}` : null;
   return (
-    <li className={`kp-row${it.checked ? " done" : ""}${compact ? " sm" : ""}`} data-testid="plan-row" data-kind={kind}>
+    <li className={`kp-row${it.checked ? " done" : ""}${compact ? " sm" : ""}${mine ? " kp-int" : ""}`} data-testid="plan-row" data-kind={kind}>
       <div className="kp-row-main">
         <Circle done={it.checked} onClick={onTick} label={it.checked ? (ar ? "تمّت" : "Done") : ar ? `وش صار: ${titleOf(it)}` : `What happened: ${titleOf(it)}`} />
         <button type="button" className="kp-row-t" onClick={onTick} disabled={!onTick}>
-          <b className={it.checked && it.doneHow !== "auto" ? "strike" : undefined}>{titleOf(it)}</b>
-          <small><Ico name={k.icon} small />{ar ? k.ar : k.en}{when ? <span className={it.plannedTime ? "appt" : undefined}> · {when}</span> : null}{late ? <span className="kp-late" data-testid="plan-late"> · {ar ? "فات الوقت" : "Time passed"}</span> : null}</small>
+          <b className={it.checked && it.doneHow !== "auto" ? "strike" : undefined}>{titleOf(it)}{mine && !it.invitedBy ? <span className="kp-tag" data-testid="plan-tag-mine">{ar ? "شغلي" : "Mine"}</span> : null}</b>
+          <small><Ico name={k.icon} small />{ar ? k.ar : k.en}{when ? <span className={it.plannedTime ? "appt" : undefined}> · {when}</span> : null}{extra ? ` · ${extra}` : null}
+            {it.recurrence ? <span className="kp-rep" data-testid="plan-repeat-mark"> · <Ico name="repeat" small />{everyDay(it.recurrence.weekday, ar)}</span> : null}
+            {late ? <span className="kp-late" data-testid="plan-late"> · {ar ? "فات الوقت" : "Time passed"}</span> : null}</small>
+          {people ? <small data-testid="plan-meet-line">{people}</small> : null}
           {it.source === "ADMIN" ? <FromBoss name={it.setBy} ar={ar} /> : null}
-          {it.checked ? <small className={it.doneHow === "auto" ? "auto" : "ok"} data-testid={it.doneHow === "auto" ? "plan-auto" : undefined}>{doneLine(it, ar)}</small> : it.kind === "ACTION" && it.label ? <small>{it.label}</small> : null}
+          {it.checked ? <small className={it.doneHow === "auto" ? "auto" : "ok"} data-testid={it.doneHow === "auto" ? "plan-auto" : undefined}>{roundDone ?? doneLine(it, ar)}</small> : it.kind === "ACTION" && it.label ? <small>{it.label}</small> : null}
         </button>
         {onRemove ? <button type="button" className="pl-x" onClick={onRemove} aria-label={ar ? "شيله من الخطة" : "Remove from the plan"} data-testid="plan-remove"><Ico name="close" small /></button> : null}
       </div>
+      {!it.checked && (onInvite || onRound) ? (
+        <div className="kp-acts">
+          {onRound ? <button type="button" className="kp-act sand" onClick={onRound} data-testid="plan-round-open"><Ico name="check" small />{ar ? "وش طلع منها؟" : "How did it go?"}</button> : null}
+          {onInvite ? <button type="button" className="kp-act sand" onClick={onInvite} data-testid="plan-invite-send"><Ico name="meet" small />{ar ? "أرسل الدعوة" : "Send the invitation"}</button> : null}
+        </div>
+      ) : null}
       {actions && !it.checked && c && (tel || wa || c.address) ? (
         <div className="kp-acts">
           {tel ? <a className="kp-act" href={tel}><Ico name="phone" small />{ar ? "اتصال" : "Call"}</a> : null}
@@ -407,8 +464,10 @@ function PlanRow({ it, ar, today, onTick, onRemove, actions = true, compact = fa
 
 // ─── Reminders and appointments made before D16 (until moved into the plan) ──────────────────────────────────────
 type Legacy = { key: string; at: number; title: string; sub: string | null; kind: "appt" | "reminder" | "task"; late: boolean; href: string; done: boolean; task?: Task; crm?: CrmDue; can: boolean };
-type WsToday = { crm: CrmDue[]; schedule: { id: string; title: string; startAt: string; status: string; customer: { name: string } | null }[] };
-function useLegacy(today: string) {
+type WsAppt = Appt & { customer: { name: string } | null };
+type WsToday = { crm: CrmDue[]; schedule: WsAppt[]; upcoming?: WsAppt[] };
+/** `linked`: the appointments already shown as plan rows (D17: an invited meeting, or a colleague's put in the plan). */
+function useLegacy(today: string, linked: Set<string> = new Set()) {
   const tasks = useWs<{ items: Task[] }>("/api/workspace/tasks?scope=mine&status=open&limit=50");
   const ws = useWs<WsToday>("/api/workspace/today");
   const end = Date.parse(`${today}T00:00:00Z`) - 3 * 3_600_000 + 86_400_000;
@@ -426,11 +485,46 @@ function useLegacy(today: string) {
     rows.push({ key: `c:${c.id}`, at, title: c.subject, sub: c.record, kind: "reminder", late: at < start, href: c.openUrl, done: false, crm: c, can: c.canRecord });
   }
   for (const a of ws.data?.schedule ?? []) {
+    if (linked.has(a.id)) continue;
     const at = new Date(a.startAt).getTime();
     rows.push({ key: `a:${a.id}`, at, title: a.title, sub: a.customer?.name ?? null, kind: "appt", late: false, href: `/dashboard/workspace/calendar?appointment=${a.id}`, done: a.status === "DONE", can: false });
   }
   rows.sort((x, y) => Number(y.late) - Number(x.late) || x.at - y.at);
-  return { rows, reload: () => { tasks.reload(); ws.reload(); } };
+  // D17: a colleague's meeting this rep is invited to (not the organiser — no «edit») and has not put in the plan.
+  const invites = [...(ws.data?.schedule ?? []), ...(ws.data?.upcoming ?? [])]
+    .filter((a) => a.status === "SCHEDULED" && (a.kind ?? "MEETING") === "MEETING" && !(a.actions ?? []).includes("edit") && !linked.has(a.id));
+  return { rows, invites, reload: () => { tasks.reload(); ws.reload(); } };
+}
+
+// ─── D17: ticking ─────────────────────────────────────────────────────────────────────────────────────────────────
+/**
+ * The circle: an open meeting / report / «شغلة ثانية» is done with ONE tap (and «تراجع»); an open field round asks «وش طلع
+ * منها؟»; anything else (and a done item) opens «وش صار؟» as in D16. «أرسل الدعوة» sends a planned meeting's invitation.
+ */
+function useTicks(ar: boolean, bump: () => void, say: (f: { text: string; undo?: () => void }) => void) {
+  const [what, setWhat] = useState<PItem | null>(null);
+  const [round, setRound] = useState<PItem | null>(null);
+  const tick = (it: PItem) => {
+    const k = kindOf(it);
+    if (!it.checked && k === "FIELD_ROUND") { setRound(it); return; }
+    if (!it.checked && isInternal(k)) {
+      void (async () => {
+        const r = await send(`/api/sales/plan/items/${it.id}`, "PATCH", { checked: true });
+        bump();
+        if (!r.ok) { say({ text: errOf(r.data, ar) }); return; }
+        say({ text: ar ? `خلصت: ${titleOf(it)}` : `Done: ${titleOf(it)}`, undo: async () => { await send(`/api/sales/plan/items/${it.id}`, "PATCH", { checked: false }); bump(); } });
+      })();
+      return;
+    }
+    setWhat(it);
+  };
+  const invite = async (it: PItem) => {
+    const r = await send(`/api/sales/plan/items/${it.id}/invite`, "POST");
+    bump();
+    say({ text: r.ok ? (ar ? `انرسلت الدعوة: ${titleOf(it)}` : `Invitation sent: ${titleOf(it)}`) : errOf(r.data, ar) });
+  };
+  const canInvite = (it: PItem, today: string) => kindOf(it) === "MEETING" && it.source === "SELF" && !it.checked && !it.invited && !it.invitedBy && !!it.attendees?.length && !!it.plannedTime && !!it.plannedDay && it.plannedDay >= today;
+  return { what, setWhat, round, setRound, tick, invite, canInvite };
 }
 
 // ─── «خطة اليوم» ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -447,14 +541,17 @@ export function TodayPlan({ ar, reloadKey, onFlash, onPlanWeek, onAdd, needYou }
   const today = plan?.today ?? now.iso;
   const sunday = wd(today) === 0;
   const week = usePlanData("WEEK", reloadKey + reload, undefined, undefined, sunday);
-  const legacy = useLegacy(today);
-  const [what, setWhat] = useState<PItem | null>(null);
+  const hints = useInternal(reloadKey + reload);
+  // The meetings already in the plan (today's rows, and any day ahead): shown once, never offered again as an invitation.
+  const linked = useMemo(() => new Set([...(plan?.items ?? []).map((i) => i.appointmentId), ...(hints?.inPlan ?? [])].filter((x): x is string => !!x)), [plan, hints]);
+  const legacy = useLegacy(today, linked);
   const [legacyResult, setLegacyResult] = useState<Legacy | null>(null);
   const [picking, setPicking] = useState<Set<string> | null>(null);
   const [busy, setBusy] = useState(false);
   const sunKey = `kp-sunday-${weekOf(today)}`;
   const [sunHidden, setSunHidden] = useState(() => { try { return typeof window !== "undefined" && window.localStorage.getItem(sunKey) === "1"; } catch { return false; } });
   const bump = useCallback(() => { setReload((r) => r + 1); legacy.reload(); }, [legacy]);
+  const { what, setWhat, round, setRound, tick, invite, canInvite } = useTicks(ar, bump, onFlash);
   if (failed) return <section className="md-card kp-today" data-testid="md-plan-today"><p className="md-empty-line">{ar ? "تعذّر تحميل خطة اليوم." : "Could not load today's plan."}</p></section>;
   const items = (plan?.items ?? []).filter((i) => i.kind !== "GOAL" && i.plannedDay === today).sort(byTime);
   const open = items.filter((i) => !i.checked);
@@ -500,6 +597,7 @@ export function TodayPlan({ ar, reloadKey, onFlash, onPlanWeek, onAdd, needYou }
             <button type="button" className="btn" onClick={hideSunday} data-testid="plan-sunday-skip">{ar ? "مو الحين" : "Not now"}</button></div>
         </section>
       ) : null}
+      {plan && !plan.readOnly ? <InvitesCard ar={ar} invites={legacy.invites} onAdded={(m) => { bump(); onFlash({ text: m }); }} /> : null}
       <section className="md-card kp-today" data-testid="md-plan-today" aria-labelledby="kp-today-h">
         <div className="md-h">
           <h2 id="kp-today-h"><Ico name="check" small className="md-h-ico2" />{ar ? "خطة اليوم" : "Today's plan"}{total ? <small className="kp-count" data-testid="plan-today-count">{ar ? `${doneN + legacy.rows.filter((r) => r.done).length} من ${total} خلصت` : `${doneN} of ${total} done`}</small> : null}</h2>
@@ -517,7 +615,8 @@ export function TodayPlan({ ar, reloadKey, onFlash, onPlanWeek, onAdd, needYou }
           <>
             <span className="kp-bar" aria-hidden><i style={{ width: `${pct}%` }} /></span>
             <ol className="kp-list">
-              {items.map((it) => <PlanRow key={it.id} it={it} ar={ar} today={today} actions={!!plan.contact} nowHm={nowHm} onTick={plan.readOnly ? undefined : () => setWhat(it)} />)}
+              {items.map((it) => <PlanRow key={it.id} it={it} ar={ar} today={today} actions={!!plan.contact} nowHm={nowHm} onTick={plan.readOnly ? undefined : () => tick(it)}
+                onRound={!plan.readOnly && kindOf(it) === "FIELD_ROUND" ? () => setRound(it) : undefined} onInvite={!plan.readOnly && canInvite(it, today) ? () => void invite(it) : undefined} />)}
               {legacy.rows.map((r) => (
                 <li key={r.key} className={`kp-row${r.done ? " done" : ""}`} data-testid="plan-legacy">
                   <div className="kp-row-main">
@@ -550,6 +649,7 @@ export function TodayPlan({ ar, reloadKey, onFlash, onPlanWeek, onAdd, needYou }
         ) : null}
       </section>
       {what && plan ? <WhatHappened ar={ar} it={what} today={today} onClose={() => setWhat(null)} onSaved={(m) => { setWhat(null); bump(); onFlash({ text: m }); }} /> : null}
+      {round && plan ? <RoundSheet ar={ar} it={round} today={today} canAddLeads={!!hints?.canAddLeads} onClose={() => { setRound(null); bump(); }} onSaved={(m) => { setRound(null); bump(); onFlash({ text: m }); }} /> : null}
       {legacyResult ? (
         <HrRoot>
           {legacyResult.crm ? <CrmResultDialog crm={legacyResult.crm} onClose={() => setLegacyResult(null)} onDone={(m) => { setLegacyResult(null); legacy.reload(); onFlash({ text: m }); }} /> : null}
@@ -618,7 +718,6 @@ export function WeekPlan({ ar, rep, date, onPlanWeek, onFlash }: {
   const [reload, setReload] = useState(0);
   const { plan, failed } = usePlanData("WEEK", reload, rep?.id, cursor);
   const admin = !!rep;
-  const [what, setWhat] = useState<PItem | null>(null);
   const [adding, setAdding] = useState<{ day: string | null } | null>(null);
   const [target, setTarget] = useState<Goal | null>(null);
   const [openDays, setOpenDays] = useState<Record<string, boolean>>({});
@@ -627,6 +726,8 @@ export function WeekPlan({ ar, rep, date, onPlanWeek, onFlash }: {
   const say = (f: { text: string; undo?: () => void }) => (onFlash ? onFlash(f) : setOwnToast(f));
   const flash = (text: string) => say({ text });
   const bump = () => setReload((r) => r + 1);
+  const { what, setWhat, round, setRound, tick, invite, canInvite } = useTicks(ar, bump, say);
+  const hints = useInternal(reload, !admin);
   if (failed) return <section className="md-card"><p className="md-empty-line">{ar ? "تعذّر تحميل الخطة." : "Could not load the plan."}</p></section>;
   if (!plan) return <section className="md-card" aria-busy><p className="md-empty-line">{ar ? "جارٍ التحميل…" : "Loading…"}</p></section>;
   const ws = plan.weekStart;
@@ -645,7 +746,9 @@ export function WeekPlan({ ar, rep, date, onPlanWeek, onFlash }: {
     if (!r.ok) { flash(errOf(r.data, ar)); return; }
     bump();
     const back = { kind: it.kind, metric: it.kind === "ACTION" ? it.metric : undefined, customerId: it.customer?.id, label: it.label, plannedDay: it.plannedDay,
-      plannedTime: it.plannedTime, date: it.plannedDay ?? it.weekStart ?? ws, restore: true };
+      plannedTime: it.plannedTime, date: it.plannedDay ?? it.weekStart ?? ws, restore: true,
+      // D17: put back as it was (the invitation, once cancelled, is sent again from the row: «أرسل الدعوة»).
+      ...(it.kind === "CHECK" ? { category: it.category ?? "OTHER", durationMin: it.durationMin ?? null, attendeeIds: (it.attendees ?? []).map((a) => a.id), area: it.area ?? null, targetNew: it.targetNew ?? null } : {}) };
     say({
       text: ar ? `انشال من الخطة: ${titleOf(it)}` : `Removed: ${titleOf(it)}`,
       undo: async () => {
@@ -656,8 +759,10 @@ export function WeekPlan({ ar, rep, date, onPlanWeek, onFlash }: {
     });
   };
   const mayRemove = (it: PItem) => !it.checked && (admin ? it.source === "ADMIN" : !plan.readOnly && it.source === "SELF");
+  const mine = !admin && !plan.readOnly;
   const row = (it: PItem) => <PlanRow key={it.id} it={it} ar={ar} today={today} compact actions={false}
-    onTick={!admin && !plan.readOnly ? () => setWhat(it) : undefined} onRemove={mayRemove(it) ? () => void remove(it) : undefined} />;
+    onTick={mine ? () => tick(it) : undefined} onRemove={mayRemove(it) ? () => void remove(it) : undefined}
+    onRound={mine && kindOf(it) === "FIELD_ROUND" ? () => setRound(it) : undefined} onInvite={mine && canInvite(it, today) ? () => void invite(it) : undefined} />;
   // The targets and «خارج الخطة» sit beside the days on a desktop; on a phone the order is targets · days · «خارج الخطة».
   const goalsCard = (
       <section className="md-card kp-goals" data-testid="plan-goals">
@@ -701,10 +806,15 @@ export function WeekPlan({ ar, rep, date, onPlanWeek, onFlash }: {
             <button type="button" onClick={() => setCursor(addDays(ws, 7))} aria-label={ar ? "الأسبوع الجاي" : "Next week"} data-testid="plan-next"><Ico name="chev" small /></button>
           </span>
           {!isThisWeek ? <button type="button" className="lk" onClick={() => setCursor(undefined)} data-testid="plan-now">{ar ? "ارجع لهذا الأسبوع" : "Back to this week"}</button> : null}
+          {!admin && hints?.repeating.length ? <a className="lk kp-replink" href="#plan-repeating" data-testid="plan-repeating-link"><Ico name="repeat" small />{ar ? `المتكرر (${hints.repeating.length})` : `Repeating (${hints.repeating.length})`}</a> : null}
           {!admin && !plan.readOnly && onPlanWeek ? <button type="button" className="btn sm" onClick={onPlanWeek} data-testid="plan-week-wizard"><Ico name="cal" small />{ar ? "خطّط أسبوعك" : "Plan your week"}</button> : null}
           {canAdd ? <button type="button" className="btn p sm" onClick={() => setAdding({ day: null })} data-testid="plan-add"><Ico name="plus" small />{admin ? (ar ? "أضف لخطته" : "Add") : ar ? "أضف لخطتي" : "Add to my plan"}</button> : null}
         </div>
       </div>
+      {!admin && plan.repeatIssues?.length ? (
+        <a className="pl-note kp-sand kp-repissue" href="#plan-repeating" data-testid="plan-repeat-issue"><Ico name="repeat" small />
+          {ar ? "↻ تعذّر تجهيز بعض المتكرر — افتح المتكرر" : "↻ Some repeating items could not be prepared — open Repeating"}</a>
+      ) : null}
       <div className="kp-week-body">
         {goalsCard}
         <div className="kp-days">
@@ -734,10 +844,12 @@ export function WeekPlan({ ar, rep, date, onPlanWeek, onFlash }: {
         </div>
         {offCard}
       </div>
+      {!admin && hints ? <RepeatingCard ar={ar} rules={hints.repeating} issues={plan.repeatIssues ?? []} onChanged={(m) => { bump(); flash(m); }} /> : null}
       {ro ? <p className="pl-hint">{ar ? "أسبوع فات — للاطلاع." : "A past week — read-only."}</p> : null}
       {ownToast ? <PlanToast ar={ar} flash={ownToast} onClose={() => setOwnToast(null)} /> : null}
       {adding ? <AddPlanSheet ar={ar} today={today} rep={rep} presetDay={adding.day ?? undefined} onClose={() => setAdding(null)} onSaved={(m) => { setAdding(null); bump(); flash(m); }} /> : null}
       {what ? <WhatHappened ar={ar} it={what} today={today} onClose={() => setWhat(null)} onSaved={(m) => { setWhat(null); bump(); flash(m); }} /> : null}
+      {round ? <RoundSheet ar={ar} it={round} today={today} canAddLeads={!!hints?.canAddLeads} onClose={() => { setRound(null); bump(); }} onSaved={(m) => { setRound(null); bump(); flash(m); }} /> : null}
       {target ? <TargetDialog ar={ar} start={ws} metric={target.metric} current={target.target} onClose={() => setTarget(null)} onSaved={() => { setTarget(null); bump(); }} /> : null}
     </div>
   );
