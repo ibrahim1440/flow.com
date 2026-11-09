@@ -611,3 +611,114 @@
 .d21 .md-sb-paceline.is-late { background: var(--status-warning-tint, #fbf2da); color: var(--status-warning, #946200) }
 .d21 .md-sb-paceline.is-ok { background: var(--status-success-tint, #e9f2e7); color: var(--status-success, #3b7a45) }
 @media (max-width: 767.98px) { .d21 .md-sb-figs { display: flex; align-items: flex-end; justify-content: space-between } }
+
+/* ── D16 «خطتي» (owner-approved Figma D16, 9 Nov 2026): «خطة اليوم», the one add sheet, «وش صار؟», the week tab, the
+   weekly planner. Unscoped where a sheet opens outside «يومي» (the customer page imports this file through the sheet). */
+.kp-chips { display: flex; flex-wrap: wrap; gap: 6px }
+.kp-chips > button { display: inline-flex; align-items: center; gap: 6px; min-height: 38px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border-subtle); background: var(--surface); font: inherit; font-size: 13.5px; font-weight: 500; color: var(--text-primary); cursor: pointer }
+.kp-chips > button small { color: var(--text-muted); font-weight: 400 }
+.kp-chips > button[aria-pressed="true"] { background: var(--action-primary); border-color: var(--action-primary); color: #fff; font-weight: 700 }
+.kp-chips > button[aria-pressed="true"] small { color: rgba(255,255,255,.85) }
+.kp-chips > .kp-other { color: var(--action-primary) }
+.kp-chipbtn { display: inline-flex; align-items: center; min-height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border-subtle); background: var(--surface); font: inherit; font-size: 12.5px; font-weight: 600; color: var(--action-primary); cursor: pointer }
+.kp-tiles > button { min-height: 64px }
+.kp-who { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border-subtle); background: var(--surface-subtle); font-size: 14.5px }
+.kp-who b { flex: 1 } .kp-who.on { border: 2px solid var(--action-primary); background: var(--action-primary-tint); color: var(--action-primary) }
+.kp-time { display: flex; gap: 8px; align-items: center } .kp-time .pl-in { flex: 1 }
+.kp-sum { font-weight: 600 }
+.d21 .kp-today { display: grid; gap: 12px }
+.d21 .kp-today .md-h h2 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap }
+.d21 .kp-count { font-size: 13px; font-weight: 500; color: var(--text-muted) }
+.d21 .kp-add { display: inline-flex; align-items: center; gap: 4px; min-height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border-subtle); background: var(--surface); font: inherit; font-size: 13.5px; font-weight: 700; color: var(--action-primary); cursor: pointer }
+.kp-bar { display: block; height: 6px; border-radius: 3px; background: var(--border-subtle); overflow: hidden }
+.kp-bar > i { display: block; height: 100%; border-radius: 3px; background: var(--action-primary) }
+.kp-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px }
+.kp-row { display: grid; gap: 10px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border-subtle); background: var(--surface) }
+.kp-row.sm { padding: 8px 10px; gap: 6px; border-radius: 10px }
+.kp-row-main { display: flex; align-items: flex-start; gap: 10px }
+.kp-row-t { flex: 1; min-width: 0; display: grid; gap: 2px; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: start; cursor: pointer; text-decoration: none }
+.kp-row-t:disabled { cursor: default }
+.kp-row-t b { font-size: 15px; font-weight: 600; color: var(--text-primary) } .kp-row.sm .kp-row-t b { font-size: 14px }
+.kp-row-t small { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-muted) }
+.kp-row-t small .ico { width: 14px; height: 14px }
+.kp-row-t small .appt { color: var(--action-primary); font-weight: 600 }
+.kp-row-t small.ok { color: var(--text-secondary) } .kp-row-t small.auto { color: var(--action-primary); font-weight: 600 }
+.kp-row.done .kp-row-t b { color: var(--text-secondary) } .kp-row-t b.strike { text-decoration: line-through }
+.kp-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end }
+.kp-act { display: inline-flex; align-items: center; gap: 4px; min-height: 34px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--surface); font-size: 12.5px; font-weight: 600; color: var(--action-primary); text-decoration: none }
+.kp-act .ico { width: 14px; height: 14px }
+.kp-boss { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--text-muted) } .kp-boss .ico { width: 12px; height: 12px }
+.kp-empty { display: grid; justify-items: center; gap: 8px; padding: 24px 16px; text-align: center }
+.kp-empty > b { font-size: 18px } .kp-empty > small { color: var(--text-muted); font-size: 13.5px }
+.kp-empty-ico, .kp-sunday-ico { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%; background: var(--action-primary-tint); color: var(--action-primary) }
+.kp-eod { display: grid; gap: 8px; padding: 14px; border-radius: 12px; background: var(--status-warning-tint); color: var(--text-primary) }
+.kp-eod > b { font-size: 16px } .kp-eod > small { color: var(--text-secondary) }
+.kp-eod-a { display: flex; gap: 8px } .kp-eod-a .btn { flex: 1; justify-content: center }
+.kp-pick { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px } .kp-pick label { display: flex; gap: 8px; align-items: center; font-size: 14px }
+.d21 .kp-sunday { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; background: var(--action-primary-tint); border-color: color-mix(in srgb, var(--action-primary) 25%, transparent) }
+.kp-sunday-ico { width: 44px; height: 44px; border-radius: 12px; background: var(--surface) }
+.kp-sunday-t { flex: 1; min-width: 200px; display: grid; gap: 2px } .kp-sunday-t b { font-size: 16px } .kp-sunday-t small { color: var(--text-secondary) }
+.kp-sunday-a { display: flex; gap: 8px }
+/* The «خطتي» tab: phone stacks; desktop puts the targets beside the day columns. */
+.kp-week { display: grid; gap: 16px }
+.kp-week-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap }
+.kp-week-head h2 { margin: 0; font-size: 22px } .kp-week-head small { color: var(--text-muted) }
+.kp-week-a { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
+.kp-week-body { display: grid; gap: 16px }
+.kp-goals, .kp-off { display: grid; gap: 12px }
+.kp-goal { display: grid; gap: 6px }
+.kp-goal-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px }
+.kp-goal-h > span { display: inline-flex; align-items: center; gap: 6px }
+.kp-lock { display: inline-flex; align-items: center; gap: 3px; margin-inline-start: 6px; font-size: 11px; font-weight: 500; color: var(--text-muted) } .kp-lock .ico { width: 12px; height: 12px }
+.kp-days { display: grid; gap: 8px; align-content: start }
+.kp-day { display: grid; gap: 8px; padding: 12px; border-radius: 12px; border: 1px solid var(--border-subtle); background: var(--surface) }
+.kp-day.today { border: 2px solid var(--action-primary) }
+.kp-day.undated { background: var(--surface-subtle) }
+.kp-day-h { display: flex; align-items: center; gap: 8px; padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; text-align: start }
+.kp-day-h.static { cursor: default }
+.kp-day-h b { flex: 1; display: inline-flex; align-items: center; gap: 6px; font-size: 15px } .kp-day.today .kp-day-h b { color: var(--action-primary) }
+.kp-day-h small { font-size: 13px; color: var(--text-muted) }
+.kp-day-chev { transition: transform .18s } .kp-day.open .kp-day-chev { transform: rotate(180deg) }
+.kp-day-b { display: none; gap: 8px } .kp-day.open .kp-day-b { display: grid }
+.kp-today-pill { padding: 1px 8px; border-radius: 999px; background: var(--action-primary); color: #fff; font-size: 11px; font-weight: 700 }
+.kp-add-day { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; border-radius: 10px; border: 1px dashed var(--border-strong); background: none; font: inherit; font-size: 13px; font-weight: 600; color: var(--action-primary); cursor: pointer }
+@media (min-width: 1100px) {
+  .kp-week-body { grid-template-columns: 300px minmax(0, 1fr); grid-template-areas: "goals days" "off days"; grid-template-rows: auto 1fr; align-items: start }
+  .kp-week-body > .kp-goals { grid-area: goals } .kp-week-body > .kp-off { grid-area: off } .kp-week-body > .kp-days { grid-area: days }
+  .kp-days { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); align-items: start }
+  .kp-day-b { display: grid } .kp-day-chev { display: none } .kp-day-h { cursor: default }
+}
+/* The weekly planner. */
+.kp-steps { display: flex; gap: 6px } .kp-steps > i { flex: 1; height: 4px; border-radius: 2px; background: var(--border-subtle) } .kp-steps > i.on { background: var(--action-primary) }
+.kp-wiz-g { display: grid; gap: 6px } .kp-wiz-gt { font-size: 13px; color: var(--text-muted) }
+.kp-pickrow { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--border-subtle); background: var(--surface); font: inherit; color: inherit; text-align: start; cursor: pointer }
+.kp-pickrow > span:last-child { display: grid; gap: 1px } .kp-pickrow b { font-size: 14.5px } .kp-pickrow small { font-size: 12px; color: var(--text-muted) }
+.kp-pickrow.on { border: 2px solid var(--action-primary); background: var(--action-primary-tint) }
+.kp-box { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; border: 1.5px solid var(--border-strong); background: var(--surface); color: #fff }
+.kp-pickrow.on .kp-box { background: var(--action-primary); border-color: var(--action-primary) }
+.kp-wiz-n { font-weight: 600; color: var(--text-secondary) }
+.kp-perday { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px }
+.kp-perday > span { display: grid; justify-items: center; padding: 6px 0; border-radius: 8px; border: 1px solid var(--border-subtle) } .kp-perday b { font-size: 16px } .kp-perday small { font-size: 11px; color: var(--text-muted) }
+.kp-spread { display: grid; gap: 8px; padding: 12px; border-radius: 12px; border: 1px solid var(--border-subtle) }
+.kp-spread-h { display: flex; justify-content: space-between; align-items: center; gap: 8px }
+.kp-spread .kp-chips > button { min-height: 34px; padding: 0 10px; font-size: 12.5px }
+.kp-vs { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border-subtle) }
+.kp-vs.sm { padding: 6px 10px; border: 0; border-bottom: 1px solid var(--border-subtle); border-radius: 0 }
+.kp-vs .ok { color: var(--status-success); font-weight: 700 } .kp-vs .wa { color: var(--status-warning); font-weight: 700 }
+.kp-nudge { display: grid; gap: 8px; padding: 12px; border-radius: 12px; background: var(--status-warning-tint); color: var(--status-warning); font-size: 13px }
+@media (max-width: 767.98px) {
+  .kp-week-a { width: 100% } .kp-week-a .btn { flex: 1; justify-content: center; min-height: 44px }
+  .kp-sunday-a { width: 100% } .kp-sunday-a .btn { flex: 1; justify-content: center }
+  .kp-chips > button { min-height: 44px }
+}
+@media (prefers-reduced-motion: reduce) { .kp-day-chev { transition: none } }
+/* D16 gate («أبو فهد»): the toast is fixed to the viewport, bottom-centre above the phone's tab bar, safe-area aware. */
+.kp-toast { position: fixed; z-index: 60; inset-inline: 16px; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); margin-inline: auto; max-width: 520px;
+  display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 12px; background: var(--text-primary); color: var(--surface);
+  font-size: 14px; font-weight: 600; box-shadow: 0 6px 24px rgba(0,0,0,.18) }
+.kp-toast > span { flex: 1; min-width: 0 }
+.kp-toast-undo { flex: none; min-height: 36px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: #fff; text-decoration: underline; text-underline-offset: 3px; font: inherit; font-weight: 800; cursor: pointer }
+.kp-toast-x { flex: none; width: 32px; height: 32px; border: 0; background: transparent; color: inherit; font-size: 18px; cursor: pointer; opacity: .8 }
+@media (max-width: 767.98px) { .kp-toast { bottom: calc(84px + env(safe-area-inset-bottom, 0px)) } }
+.kp-err { padding: 10px 12px; border-radius: 10px; background: var(--status-danger-tint); font-weight: 600 }
+.kp-late { color: var(--status-warning); font-weight: 600 }

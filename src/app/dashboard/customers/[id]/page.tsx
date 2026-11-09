@@ -27,6 +27,8 @@ import { hasValidity } from "@/lib/services/customers/contract-rules";
 import { ContractFact } from "./_components/contract-fact";
 import { SampleDialog } from "../../sales/_components/SampleDialog";
 import { nationalAddressLine } from "@/components/customers/identity-fields";
+import { AddPlanSheet } from "../../my-day/_components/khitati";
+import { useDropStaleLayer } from "../../my-day/_components/back-layer";
 import "../customers.css";
 import "./account.css";
 
@@ -108,6 +110,9 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   const [dialog, setDialog] = useState<null | { activity: ActivityKind } | { pick: QuickPick } | { sample: { dealId: string | null; sampled: string[]; manager: boolean } } | "details" | "ownerContact" | "file" | "hold" | "holdDirect" | "lift" | { contact: Contact | null }>(null);
   const [quickBusy, setQuickBusy] = useState(false);
   const [more, setMore] = useState(false);
+  // D16: the Riyadh day «أضف لخطتي» was opened on (null = closed).
+  const [planOpen, setPlanOpen] = useState<string | null>(null);
+  useDropStaleLayer();
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
   const [allEntries, setAllEntries] = useState(false);
@@ -315,6 +320,13 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   const sampleBtn = mayLog ? (
     <button type="button" className="btn" data-testid="act-sample" disabled={quickBusy} onClick={() => startQuick("sample")}>
       <Ico name="flask" small />{L("عيّنة", "Sample")}
+    </button>
+  ) : null;
+  // D16 «أضف لخطتي» (Figma D16 A7): the one sheet with this customer set and «بكرة» chosen — two taps. The plan is the
+  // sales module's (POST /api/sales/plan/items), so the button shows where the sales section does.
+  const planBtn = sections.sales ? (
+    <button type="button" className="btn" data-testid="act-plan" onClick={() => setPlanOpen(new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10))}>
+      <Ico name="plus" small />{L("أضف لخطتي", "Add to my plan")}
     </button>
   ) : null;
   const quoteBtn = sections.sales && can.quote ? (
@@ -971,6 +983,8 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
 
   const dialogs = (
     <>
+      {planOpen && <AddPlanSheet ar={ar} today={planOpen} customer={{ id, name, phone: dialPhone, address: c.address ?? null }}
+        onClose={() => setPlanOpen(null)} onSaved={(m) => { setPlanOpen(null); setNotice({ text: m, ok: true }); }} />}
       {dialog && typeof dialog === "object" && "activity" in dialog && <ActivityDialog ar={ar} customerId={id} customerName={name} deals={openDeals} defaultDealId={null} initialKind={dialog.activity}
         onClose={() => { setDialog(null); if (backToMyDay) router.push("/dashboard/my-day"); }}
         onDone={() => {
@@ -1016,6 +1030,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
           {noticeEl}
           {(subline || tierPill) && <p className="acc-subline">{tierPill}{tierPill && subline ? " " : null}{subline}{dialPhone ? <> · {tel ? <a href={tel} className="acc-tel n" dir="ltr" data-testid="account-phone">{dialPhone}</a> : <bdi className="n" dir="ltr">{dialPhone}</bdi>}</> : null}</p>}
           {creditBand}
+          {planBtn ? <div className="acc-plan-row">{planBtn}</div> : null}
           {strip}
           {sections.sales && (
             <section data-testid="open-deal" className="acc-ph-deal">
@@ -1074,6 +1089,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
           </div>
           </div>
           <div className="act acc-actbar" data-testid="account-actions">
+            {planBtn}
             {callBtn}
             {waBtn}
             {logBtn}

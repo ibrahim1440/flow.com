@@ -256,3 +256,5 @@
 .d21 .acc-phone .acc-strip > div:nth-child(5):last-child, .d21 .acc-phone .acc-strip > .contract-fact { grid-column: 1 / -1 }
 .d21 .acc-phone .acc-strip .mid { font-size: 16px }
 .d21 .acc-phone .acc-side-card, .d21 .acc-phone > .acc-card { margin-bottom: 12px }
+/* D16 «أضف لخطتي» on the phone page: one full-width button under the customer's line. */
+.acc-plan-row { display: flex; margin: 8px 0 4px } .acc-plan-row .btn { flex: 1; justify-content: center; min-height: 44px }

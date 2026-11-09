@@ -62,7 +62,7 @@ export async function PUT(request: Request) {
     await prisma.$transaction((tx) => setAdminGoals(tx, user.id, period, start, body.goals as never));
     return NextResponse.json({ ok: true, period, start });
   } catch (e) {
-    if (e instanceof PlanError) return NextResponse.json({ error: e.ar, errorEn: e.message }, { status: e.status });
+    if (e instanceof PlanError) return NextResponse.json({ error: e.ar, errorEn: e.message, code: e.code }, { status: e.status });
     return handleDomainError(e);
   }
 }

@@ -136,28 +136,46 @@ export async function recordsFor(db: Pick<PrismaClient, "$queryRaw">, employeeId
 export type ActionRef = { id: string; metric: ActionMetric; customerId: string; weekStart: string; plannedDay: string | null; createdAt: Date };
 
 /**
- * Which record fulfils which planned action: the same kind, the same customer, inside the item's week (Riyadh), the earliest
- * record first; one record fulfils one item. Items planned for a day are served before undated ones, then by age.
- * Returns item id → record, and the records nobody planned («خارج الخطة»).
+ * Which record fulfils which planned action: the same kind, the same customer, one record per item.
+ * Owner decision M1 (9 Nov 2026): an item planned for a DAY is ticked by a record of that Riyadh day or of a LATER day of
+ * the same week (a visit planned Monday and made Tuesday counts) — never by one from before its day. Priority:
+ *   1. every dated item takes a record of its own day first (Wednesday's own call stays Wednesday's);
+ *   2. then, in planned-day order, the earliest unused record of a later day of its week (Monday's item claims Tuesday's);
+ *   3. undated items take any unused record of their week (Riyadh), the oldest item first.
+ * Records nobody took are «خارج الخطة». The counts of the targets (countsFor) and the commissions do not read this.
  */
 export function matchPlan(items: ActionRef[], records: PlanRecord[]): { done: Map<string, PlanRecord>; unplanned: PlanRecord[] } {
   const used = new Set<string>();
   const done = new Map<string, PlanRecord>();
-  const order = [...items].sort((a, b) => (a.plannedDay ?? "9999").localeCompare(b.plannedDay ?? "9999") || a.createdAt.getTime() - b.createdAt.getTime());
-  for (const it of order) {
-    const { from, to } = windowOf(it.weekStart, periodEndOf("WEEK", it.weekStart));
-    const r = records.find((x) => !used.has(x.id) && x.metric === it.metric && x.customerId === it.customerId && x.at >= from && x.at < to);
+  const byDay = (a: ActionRef, b: ActionRef) => (a.plannedDay ?? "9999").localeCompare(b.plannedDay ?? "9999") || a.createdAt.getTime() - b.createdAt.getTime();
+  const dated = items.filter((i) => i.plannedDay).sort(byDay);
+  const undated = items.filter((i) => !i.plannedDay).sort(byDay);
+  const take = (it: ActionRef, from: Date, to: Date) => {
+    if (done.has(it.id)) return;
+    const r = records.filter((x) => !used.has(x.id) && x.metric === it.metric && x.customerId === it.customerId && x.at >= from && x.at < to)
+      .sort((x, y) => x.at.getTime() - y.at.getTime())[0];
     if (r) { used.add(r.id); done.set(it.id, r); }
-  }
+  };
+  for (const it of dated) { const w = windowOf(it.plannedDay!, periodEndOf("DAY", it.plannedDay!)); take(it, w.from, w.to); }
+  for (const it of dated) { const w = windowOf(it.plannedDay!, periodEndOf("WEEK", it.weekStart)); take(it, w.from, w.to); }
+  for (const it of undated) { const w = windowOf(it.weekStart, periodEndOf("WEEK", it.weekStart)); take(it, w.from, w.to); }
   return { done, unplanned: records.filter((r) => !used.has(r.id)) };
 }
 
 export type PlanItem = {
   id: string; source: "ADMIN" | "SELF"; kind: "GOAL" | "CHECK" | "ACTION"; metric: Metric | null; label: string | null;
   target: number | null; done: number | null; checked: boolean; position: number; setBy: string | null;
-  customer: { id: string; name: string } | null; plannedDay: string | null; doneAt: string | null; doneOutcome: string | null; doneBody: string | null;
+  /** D16: the customer's phone and address — the row's call / WhatsApp / map buttons; null without the contact right. */
+  customer: { id: string; name: string; phone?: string | null; address?: string | null } | null; plannedDay: string | null; doneAt: string | null; doneOutcome: string | null; doneBody: string | null;
   /** The week (its Sunday) an action or free item belongs to; null for a number. */
   weekStart: string | null;
+  /** D16: "HH:MM" (Riyadh) — a time makes the item an appointment («موعد»); null = a day only («تذكير»). */
+  plannedTime: string | null;
+  /**
+   * D16 — how a done item got done: "record" (the rep recorded the visit / call), "auto" (a quotation, a collection or a
+   * sample shipment the system saw — «انحسبت تلقائياً»), "manual" (a free item, or a sample ticked by hand); null = open.
+   */
+  doneHow: "record" | "auto" | "manual" | null;
 };
 export type OffPlan = { id: string; metric: ActionMetric; customer: { id: string; name: string } | null; title: string | null; at: string; outcome: string | null; body: string | null };
 
@@ -168,7 +186,7 @@ const isoDay = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
  * that fall in it (the week's items; for a day, those planned that day or undated; for a month, the weeks that touch it),
  * each action DONE when the rep's own record of it exists in its week, and the period's visits and calls nobody planned.
  */
-export async function loadPlan(db: Db, employeeId: string, period: Period, start: string, now = new Date()) {
+export async function loadPlan(db: Db, employeeId: string, period: Period, start: string, now = new Date(), opts: { contact?: boolean } = {}) {
   const end = periodEndOf(period, start);
   const weekFrom = periodStartOf("WEEK", start);
   const { from, to } = windowOf(start, end);
@@ -184,15 +202,18 @@ export async function loadPlan(db: Db, employeeId: string, period: Period, start
         { period, periodStart: new Date(`${start}T00:00:00Z`) },
       ] },
       orderBy: [{ plannedDay: { sort: "asc", nulls: "last" } }, { position: "asc" }, { createdAt: "asc" }],
-      select: { id: true, source: true, kind: true, metric: true, label: true, checkedAt: true, position: true, periodStart: true, plannedDay: true, createdAt: true,
-        customer: { select: { id: true, name: true, nameAr: true } }, createdBy: { select: { name: true } } },
+      select: { id: true, source: true, kind: true, metric: true, label: true, checkedAt: true, position: true, periodStart: true, plannedDay: true, plannedTime: true, createdAt: true,
+        // D16 gate P1: the phone and address only for a caller with the customer-contact right (canSeeCustomerContact).
+        customer: { select: { id: true, name: true, nameAr: true, phone: !!opts.contact, address: !!opts.contact } }, createdBy: { select: { name: true } } },
     }),
   ]);
   const inView = rows.filter((r) => {
     const d = isoDay(r.plannedDay);
     return d ? d >= start && d < end : period !== "DAY" || isoDay(r.periodStart) === weekFrom;
   });
-  const lastWeek = inView.reduce((m, r) => { const w = isoDay(r.periodStart)!; return w > m ? w : m; }, weekFrom);
+  // Gate N1: the matching runs over every planned item of the weeks fetched (not only those in view), so a day's view
+  // ticks exactly what the week's view ticks — Monday's item never takes Tuesday's call because Tuesday is out of view.
+  const lastWeek = rows.reduce((m, r) => { const w = isoDay(r.periodStart)!; return w > m ? w : m; }, weekFrom);
   const recEnd = periodEndOf("WEEK", lastWeek) > end ? periodEndOf("WEEK", lastWeek) : end;
   const recWin = windowOf(weekFrom < start ? weekFrom : start, recEnd);
   const cap = (d: Date) => (d < now ? d : now);
@@ -200,37 +221,44 @@ export async function loadPlan(db: Db, employeeId: string, period: Period, start
     recordsFor(db, employeeId, recWin.from, cap(recWin.to)),
     countsFor(db, employeeId, from, cap(to)),
   ]);
-  const actions: ActionRef[] = inView.filter((r) => r.kind === "ACTION" && r.customer && isActionMetric(r.metric))
+  // A sample ticked by hand (D16) is done already: it does not take a record from another planned item.
+  const actions: ActionRef[] = rows.filter((r) => r.kind === "ACTION" && r.customer && isActionMetric(r.metric) && !r.checkedAt)
     .map((r) => ({ id: r.id, metric: r.metric as ActionMetric, customerId: r.customer!.id, weekStart: isoDay(r.periodStart)!, plannedDay: isoDay(r.plannedDay), createdAt: r.createdAt }));
   const { done, unplanned } = matchPlan(actions, records);
-  const name = (c: { id: string; name: string; nameAr: string | null } | null) => (c ? { id: c.id, name: c.nameAr ?? c.name } : null);
+  const name = (c: { id: string; name: string; nameAr: string | null; phone?: string | null; address?: string | null } | null) =>
+    (c ? { id: c.id, name: c.nameAr ?? c.name, phone: c.phone ?? null, address: c.address ?? null } : null);
   const items: PlanItem[] = [
     ...goals.map((r) => ({
       id: r.id, source: r.source as PlanItem["source"], kind: "GOAL" as const, metric: (r.metric as Metric | null) ?? null, label: r.label,
       target: r.target === null ? null : Number(r.target),
       done: r.metric === "CUSTOM" ? Number(r.manualDone ?? 0) : counts[r.metric as keyof Counts] ?? 0,
       checked: false, position: r.position, setBy: r.source === "ADMIN" ? r.createdBy?.name ?? null : null,
-      customer: null, plannedDay: null, doneAt: null, doneOutcome: null, doneBody: null, weekStart: null,
+      customer: null, plannedDay: null, doneAt: null, doneOutcome: null, doneBody: null, weekStart: null, plannedTime: null, doneHow: null,
     })),
     ...inView.map((r) => {
       const rec = done.get(r.id);
+      const manual = !!r.checkedAt;
+      const doneHow: PlanItem["doneHow"] = r.kind === "CHECK" ? (manual ? "manual" : null)
+        : manual ? "manual" : rec ? (r.metric === "VISITS" || r.metric === "CALLS" ? "record" : "auto") : null;
       return {
         id: r.id, source: r.source as PlanItem["source"], kind: r.kind as PlanItem["kind"], metric: (r.metric as Metric | null) ?? null, label: r.label,
-        target: null, done: null, checked: r.kind === "CHECK" ? !!r.checkedAt : !!rec, position: r.position,
+        target: null, done: null, checked: !!doneHow, position: r.position,
         setBy: r.source === "ADMIN" ? r.createdBy?.name ?? null : null, customer: name(r.customer), plannedDay: isoDay(r.plannedDay),
-        doneAt: rec ? rec.at.toISOString() : r.kind === "CHECK" && r.checkedAt ? r.checkedAt.toISOString() : null,
+        doneAt: rec ? rec.at.toISOString() : r.checkedAt ? r.checkedAt.toISOString() : null,
         doneOutcome: rec?.outcome ?? null, doneBody: rec?.body ?? null, weekStart: isoDay(r.periodStart),
+        plannedTime: r.plannedTime ?? null, doneHow,
       };
     }),
   ];
   const offPlan: OffPlan[] = unplanned
     .filter((r) => (r.metric === "VISITS" || r.metric === "CALLS") && r.at >= from && r.at < to)
     .map((r) => ({ id: r.id, metric: r.metric, customer: r.customerId ? { id: r.customerId, name: r.customerName ?? "" } : null, title: r.title, at: r.at.toISOString(), outcome: r.outcome, body: r.body }));
-  return { period, start, end, weekStart: weekFrom, items, offPlan, counts };
+  return { period, start, end, weekStart: weekFrom, items, offPlan, counts, contact: !!opts.contact };
 }
 
 export class PlanError extends Error {
-  constructor(public status: number, public ar: string, en: string) { super(en); }
+  /** `code`: a stable name the client may act on (e.g. PAST_DAY, TWIN). */
+  constructor(public status: number, public ar: string, en: string, public code?: string) { super(en); }
 }
 
 const num = (v: unknown): number | null => {
@@ -241,51 +269,172 @@ const num = (v: unknown): number | null => {
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const cleanText = (v: unknown) => (typeof v === "string" ? v.trim().replace(/\s+/g, " ") : "");
 
-export type ItemInput = { kind?: unknown; metric?: unknown; customerId?: unknown; plannedDay?: unknown; label?: unknown; date?: unknown };
+/**
+ * `restore`: the «تراجع» of a removal puts the item back as it was, even on a day already past (D16 gate); never set by
+ * the add sheet, which refuses a past day.
+ */
+export type ItemInput = { kind?: unknown; metric?: unknown; customerId?: unknown; plannedDay?: unknown; plannedTime?: unknown; label?: unknown; date?: unknown; restore?: unknown };
+const HHMM = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
+
+/** "9:5" / "09:05" / "" → "09:05" | null; anything else is refused. A time needs a day (D16: a time = an appointment). */
+export function cleanTime(v: unknown, plannedDay: string | null): string | null {
+  if (v === null || v === undefined || v === "") return null;
+  const m = /^(\d{1,2}):(\d{1,2})$/.exec(String(v).trim());
+  const t = m ? `${m[1].padStart(2, "0")}:${m[2].padStart(2, "0")}` : "";
+  if (!HHMM.test(t)) throw new PlanError(400, "الوقت غير صحيح.", "Bad time.");
+  if (!plannedDay) throw new PlanError(400, "اختر اليوم قبل الوقت.", "Choose the day before the time.");
+  return t;
+}
+
+/** The next working day after `day` (Sunday–Thursday; Friday and Saturday skipped) — «انقلها لبكرة». */
+export function nextWorkDay(day: string): string {
+  let t = Date.parse(`${day}T00:00:00Z`) + DAY;
+  while ([5, 6].includes(new Date(t).getUTCDay())) t += DAY;
+  return isoOf(t);
+}
 
 /** One planned item, checked: what the database CHECK accepts, said in plain words. The week is the planned day's, or `today`'s. */
-export function cleanItem(it: ItemInput, today: string): { kind: "ACTION" | "CHECK"; metric: ActionMetric | null; customerId: string | null; label: string | null; plannedDay: string | null; weekStart: string } {
+export function cleanItem(it: ItemInput, today: string): { kind: "ACTION" | "CHECK"; metric: ActionMetric | null; customerId: string | null; label: string | null; plannedDay: string | null; plannedTime: string | null; weekStart: string } {
   const kind = it.kind === "CHECK" ? "CHECK" : it.kind === "ACTION" ? "ACTION" : null;
-  if (!kind) throw new PlanError(400, "نوع البند غير معروف.", "Unknown item kind.");
+  if (!kind) throw new PlanError(400, "اختر النوع.", "Unknown item kind.");
   const plannedDay = it.plannedDay === null || it.plannedDay === undefined || it.plannedDay === "" ? null : String(it.plannedDay);
   if (plannedDay !== null && !ISO.test(plannedDay)) throw new PlanError(400, "اليوم غير صحيح.", "Bad day.");
+  // D16 gate («أبو فهد»): a day already past is refused (it would vanish from «خطة اليوم» and the week) — except a restore.
+  if (plannedDay !== null && plannedDay < today && it.restore !== true) throw new PlanError(400, "هذا اليوم فات. اختر اليوم أو بعده.", "That day has passed. Choose today or later.", "PAST_DAY");
   const base = plannedDay ?? (typeof it.date === "string" && ISO.test(it.date) ? it.date : today);
   const label = cleanText(it.label);
+  const plannedTime = cleanTime(it.plannedTime, plannedDay);
   if (kind === "CHECK") {
     if (label.length < 2 || label.length > 200) throw new PlanError(400, "اكتب الشغلة (حرفين على الأقل).", "Write the item (2–200 characters).");
-    return { kind, metric: null, customerId: null, label, plannedDay, weekStart: periodStartOf("WEEK", base) };
+    return { kind, metric: null, customerId: null, label, plannedDay, plannedTime, weekStart: periodStartOf("WEEK", base) };
   }
   if (!isActionMetric(it.metric)) throw new PlanError(400, "اختر وش بتسوي.", "Choose what you will do.");
   if (typeof it.customerId !== "string" || !it.customerId) throw new PlanError(400, "اختر العميل.", "Choose the customer.");
   if (label && (label.length < 2 || label.length > 200)) throw new PlanError(400, "الملاحظة طويلة.", "The note is too long.");
-  return { kind, metric: it.metric, customerId: it.customerId, label: label || null, plannedDay, weekStart: periodStartOf("WEEK", base) };
+  return { kind, metric: it.metric, customerId: it.customerId, label: label || null, plannedDay, plannedTime, weekStart: periodStartOf("WEEK", base) };
 }
 
-/** Put one item in a rep's week — the rep's own (SELF), or the supervisor's (ADMIN). The same action twice in a week is refused. */
+/**
+ * Put one item in a rep's week — the rep's own (SELF), or the supervisor's (ADMIN). The same action for the same customer
+ * on the same day (or twice undated in the week) is refused — two calls on different days of a week are fine (D16 gate).
+ */
 export async function addItem(tx: Tx, who: { employeeId: string; actorId: string; source: "SELF" | "ADMIN" }, input: ItemInput, today: string) {
   const c = cleanItem(input, today);
+  // A restore onto a day already past (gate): only the item this same person removed in the last two minutes, once.
+  if (c.plannedDay && c.plannedDay < today) await consumeRemoval(tx, who, c);
   const periodStart = new Date(`${c.weekStart}T00:00:00Z`);
   if (c.kind === "ACTION") {
     const customer = await tx.customer.findUnique({ where: { id: c.customerId! }, select: { id: true } });
     if (!customer) throw new PlanError(404, "العميل غير موجود.", "Customer not found.");
-    const twin = await tx.salesPlanItem.findFirst({ where: { employeeId: who.employeeId, period: "WEEK", periodStart, kind: "ACTION", metric: c.metric, customerId: c.customerId }, select: { id: true } });
-    if (twin) throw new PlanError(409, "هذا العميل مخطط له نفس الشغلة هالأسبوع.", "Already planned for this customer this week.");
+    const twin = await tx.salesPlanItem.findFirst({ where: { employeeId: who.employeeId, period: "WEEK", periodStart, kind: "ACTION", metric: c.metric, customerId: c.customerId,
+      plannedDay: c.plannedDay ? new Date(`${c.plannedDay}T00:00:00Z`) : null }, select: { id: true } });
+    if (twin) throw new PlanError(409, c.plannedDay ? "نفس الشي مخطّط لهالعميل في نفس اليوم." : "نفس الشي مخطّط لهالعميل خلال هالأسبوع بدون يوم.", "The same is already planned for this customer that day.", "TWIN");
   }
   const position = await tx.salesPlanItem.count({ where: { employeeId: who.employeeId, period: "WEEK", periodStart } });
   return tx.salesPlanItem.create({
     data: { employeeId: who.employeeId, period: "WEEK", periodStart, source: who.source, kind: c.kind, metric: c.metric, customerId: c.customerId, label: c.label,
-      plannedDay: c.plannedDay ? new Date(`${c.plannedDay}T00:00:00Z`) : null, position, createdById: who.actorId },
+      plannedDay: c.plannedDay ? new Date(`${c.plannedDay}T00:00:00Z`) : null, plannedTime: c.plannedTime, position, createdById: who.actorId },
     select: { id: true },
   });
 }
 
-/** Move an item to another day (or «هالأسبوع» with null); a day in another week moves it to that week. */
-export async function moveItem(tx: Tx, id: string, plannedDay: string | null, today: string) {
+const RESTORE_WINDOW_MS = 2 * 60_000;
+type Removed = { itemId: string; employeeId: string; kind: string; metric: string | null; customerId: string | null; label: string | null; plannedDay: string | null; plannedTime: string | null };
+
+/**
+ * «شيله من الخطة» (D16): the item is deleted and the removal written to AuthAuditLog (PLAN_ITEM_REMOVED, by whoever removed
+ * it) — what «تراجع» may put back, and only that (gate: `restore` is no way to backdate an item).
+ */
+export async function removeItem(tx: Tx, id: string, actorId: string) {
+  const it = await tx.salesPlanItem.findUnique({ where: { id }, select: { id: true, employeeId: true, kind: true, metric: true, customerId: true, label: true, plannedDay: true, plannedTime: true } });
+  if (!it) return null;
+  await tx.salesPlanItem.delete({ where: { id } });
+  const { ipHashOf } = await import("@/lib/accounting/ops/purchase-activity");
+  const meta: Removed = { itemId: it.id, employeeId: it.employeeId, kind: it.kind, metric: it.metric, customerId: it.customerId, label: it.label, plannedDay: isoDay(it.plannedDay), plannedTime: it.plannedTime };
+  await tx.authAuditLog.create({ data: { userId: actorId, action: "PLAN_ITEM_REMOVED", result: "SUCCESS", sourceInterface: "WEB", ipHash: await ipHashOf(null), metadata: meta } });
+  return it;
+}
+
+/** The removal a restore onto a past day stands for: the same person, the same item's fields, within two minutes, unused. */
+async function consumeRemoval(tx: Tx, who: { employeeId: string; actorId: string }, c: ReturnType<typeof cleanItem>) {
+  const since = new Date(Date.now() - RESTORE_WINDOW_MS);
+  const [removed, used] = await Promise.all([
+    tx.authAuditLog.findMany({ where: { userId: who.actorId, action: "PLAN_ITEM_REMOVED", occurredAt: { gte: since } }, orderBy: { occurredAt: "desc" }, take: 20, select: { id: true, metadata: true } }),
+    tx.authAuditLog.findMany({ where: { userId: who.actorId, action: "PLAN_ITEM_RESTORED", occurredAt: { gte: since } }, take: 20, select: { metadata: true } }),
+  ]);
+  const usedIds = new Set(used.map((u) => (u.metadata as { removalId?: string } | null)?.removalId));
+  const hit = removed.find((r) => {
+    const m = r.metadata as Removed | null;
+    return !!m && !usedIds.has(r.id) && m.employeeId === who.employeeId && m.kind === c.kind && (m.metric ?? null) === c.metric
+      && (m.customerId ?? null) === c.customerId && m.plannedDay === c.plannedDay && (m.kind !== "CHECK" || m.label === c.label);
+  });
+  if (!hit) throw new PlanError(400, "هذا اليوم فات. اختر اليوم أو بعده.", "That day has passed. Choose today or later.", "PAST_DAY");
+  // One restore per removal even when two «تراجع» race (gate R3): the restore row's id is the removal's, inserted FIRST — the
+  // second call waits on the first's insert and then hits the primary key.
+  const { ipHashOf } = await import("@/lib/accounting/ops/purchase-activity");
+  const inserted = await tx.$executeRaw`INSERT INTO "AuthAuditLog" ("id", "userId", "action", "result", "sourceInterface", "ipHash", "metadata", "occurredAt")
+    VALUES (${`restore_${hit.id}`}, ${who.actorId}, 'PLAN_ITEM_RESTORED', 'SUCCESS', 'WEB', ${await ipHashOf(null)}, ${JSON.stringify({ removalId: hit.id })}::jsonb, now() AT TIME ZONE 'UTC')
+    ON CONFLICT ("id") DO NOTHING`;
+  if (inserted === 0) throw new PlanError(409, "رجع هذا من قبل.", "This was already put back.", "ALREADY_RESTORED");
+}
+
+/**
+ * «خطّط أسبوعك › ثبّت خطتي» (D16): several items at once, in one transaction. An action already planned for that customer
+ * that week is skipped (not an error) — the rep may run the planner twice; anything else invalid refuses the whole batch.
+ */
+export async function addItems(tx: Tx, who: { employeeId: string; actorId: string; source: "SELF" | "ADMIN" }, inputs: ItemInput[], today: string) {
+  if (!Array.isArray(inputs) || !inputs.length || inputs.length > 60) throw new PlanError(400, "اختر من 1 إلى 60.", "Choose 1 to 60 items.");
+  const added: string[] = [];
+  let skipped = 0;
+  for (const it of inputs) {
+    try { added.push((await addItem(tx, who, it, today)).id); }
+    catch (e) { if (e instanceof PlanError && e.status === 409) { skipped++; continue; } throw e; }
+  }
+  return { added, skipped };
+}
+
+/**
+ * Move an item to another day (or «خلال الأسبوع» with null); a day in another week moves it to that week. D16: the time
+ * moves with it only when given — moved to another day without one, an appointment becomes a reminder of that day (the
+ * rep sets the new time there). The twin rule of addItem holds here too (gate, 9 Nov): when the target DAY already has the
+ * same action for the same customer, a move is refused (`onTwin: "refuse"`, the default — 409 with a plain message) or,
+ * for «انقلها لبكرة», MERGED (`onTwin: "merge"`): one item is kept — the supervisor's if either is theirs, else the one
+ * already there — taking the moved one's time when it has none, and the other is removed. Answers what happened.
+ */
+export async function moveItem(tx: Tx, id: string, plannedDay: string | null, today: string, time?: unknown, onTwin: "refuse" | "merge" = "refuse"):
+  Promise<{ merged: false; skipped?: true } | { merged: true; keptId: string; removedId: string }> {
   if (plannedDay !== null && !ISO.test(plannedDay)) throw new PlanError(400, "اليوم غير صحيح.", "Bad day.");
-  const it = await tx.salesPlanItem.findUnique({ where: { id }, select: { periodStart: true, kind: true } });
-  if (!it || it.kind === "GOAL") throw new PlanError(400, "ما يتأجّل هذا البند.", "This item cannot be moved.");
+  if (plannedDay !== null && plannedDay < today) throw new PlanError(400, "هذا اليوم فات. اختر اليوم أو بعده.", "That day has passed. Choose today or later.", "PAST_DAY");
+  const it = await tx.salesPlanItem.findUnique({ where: { id }, select: { employeeId: true, periodStart: true, kind: true, metric: true, customerId: true, source: true, plannedDay: true, plannedTime: true } });
+  if (!it || it.kind === "GOAL") throw new PlanError(400, "ما يتأجّل هذا الشي.", "This item cannot be moved.");
+  const sameDay = isoDay(it.plannedDay) === plannedDay;
+  const plannedTime = time !== undefined ? cleanTime(time, plannedDay) : sameDay ? it.plannedTime : null;
   const week = plannedDay ? periodStartOf("WEEK", plannedDay) : isoDay(it.periodStart) ?? periodStartOf("WEEK", today);
-  await tx.salesPlanItem.update({ where: { id }, data: { plannedDay: plannedDay ? new Date(`${plannedDay}T00:00:00Z`) : null, periodStart: new Date(`${week}T00:00:00Z`) } });
+  const periodStart = new Date(`${week}T00:00:00Z`);
+  const dayValue = plannedDay ? new Date(`${plannedDay}T00:00:00Z`) : null;
+  if (it.kind === "ACTION" && !sameDay) {
+    const twin = await tx.salesPlanItem.findFirst({
+      where: { employeeId: it.employeeId, period: "WEEK", periodStart, kind: "ACTION", metric: it.metric, customerId: it.customerId, plannedDay: dayValue, id: { not: id } },
+      select: { id: true, source: true, plannedDay: true, plannedTime: true },
+    });
+    if (twin) {
+      if (onTwin === "refuse") throw new PlanError(409, "نفس الشي مخطّط لهالعميل في ذاك اليوم.", "The same is already planned for this customer that day.", "TWIN");
+      // Two of the supervisor's: neither is the rep's to remove (gate) — it stays where it is, and carry says so.
+      if (it.source === "ADMIN" && twin.source === "ADMIN") return { merged: false, skipped: true };
+      // Keep the supervisor's item when either is theirs (the rep may not remove it); otherwise the one already there.
+      const keepMoved = it.source === "ADMIN" && twin.source !== "ADMIN";
+      if (keepMoved) {
+        await tx.salesPlanItem.delete({ where: { id: twin.id } });
+        await tx.salesPlanItem.update({ where: { id }, data: { plannedDay: dayValue, plannedTime: plannedTime ?? twin.plannedTime, periodStart } });
+        return { merged: true, keptId: id, removedId: twin.id };
+      }
+      if (!twin.plannedTime && plannedTime && twin.plannedDay) await tx.salesPlanItem.update({ where: { id: twin.id }, data: { plannedTime } });
+      await tx.salesPlanItem.delete({ where: { id } });
+      return { merged: true, keptId: twin.id, removedId: id };
+    }
+  }
+  await tx.salesPlanItem.update({ where: { id }, data: { plannedDay: dayValue, plannedTime, periodStart } });
+  return { merged: false };
 }
 
 /** The rep's own number for a counted kind in a period (`null` removes it). A number the supervisor set is not overridden. */

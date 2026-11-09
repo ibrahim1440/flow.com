@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Pencil, Trash2 } from "lucide-react";
 import { useUser } from "../user-context";
-import { canEdit, hasSubPrivilege } from "@/lib/auth-shared";
+import { canEdit, hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
 import { Ico } from "@/components/shell/icons";
 import { SectionPages, useCreateRequest, usePhone, useD21Phone } from "@/components/shell/page-context";
@@ -207,9 +207,12 @@ export default function CustomersPage() {
 
   async function loadData() {
     setLoading(true);
+    // The green lots are the inventory's / production's (GET /api/green-beans): not asked for without one of them (a
+    // rep got a 403 on every visit — D16 gate, «أبو فهد»).
+    const seesBeans = !!user && (hasModuleAccess(user.permissions, "inventory") || hasModuleAccess(user.permissions, "production"));
     const [custRes, beanRes] = await Promise.all([
       fetch(listUrl),
-      fetch("/api/green-beans"),
+      seesBeans ? fetch("/api/green-beans") : Promise.resolve(null),
     ]);
     if (custRes.ok) {
       const list = (await custRes.json()) as Customer[];
@@ -219,7 +222,7 @@ export default function CustomersPage() {
       const found = want ? list.find((c) => c.id === want.id) : undefined;
       if (found && want) { setSelected(found); setTab(want.tab); }
     }
-    if (beanRes.ok) setBeans(await beanRes.json());
+    if (beanRes?.ok) setBeans(await beanRes.json());
     setLoading(false);
     fetch("/api/customers/credit-badges").then((r) => (r.ok ? r.json() : null)).then((d) => { if (d?.badges) setBadges(d.badges); }).catch(() => undefined);
   }

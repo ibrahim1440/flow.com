@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { seesTeamReports } from "@/lib/services/sales/scope";
+import { canSeeCustomerContact } from "@/lib/auth/customer-detail";
 import { PERIODS, PlanError, loadPlan, periodStartOf, riyadhIso, setSelfTarget, type Period } from "@/lib/services/sales/plans";
 
 /**
@@ -17,7 +18,7 @@ import { PERIODS, PlanError, loadPlan, periodStartOf, riyadhIso, setSelfTarget, 
 // The supervisor: the same mark as the team reports (sales › lead_assign, or the admin role).
 const supervisor = (u: { permissions: unknown; role?: string | null }) => seesTeamReports(u.permissions as never, u.role);
 const periodOf = (v: string | null): Period => ((PERIODS as readonly string[]).includes(String(v)) ? (v as Period) : "WEEK");
-const err = (e: unknown) => (e instanceof PlanError ? NextResponse.json({ error: e.ar, errorEn: e.message }, { status: e.status }) : handleDomainError(e));
+const err = (e: unknown) => (e instanceof PlanError ? NextResponse.json({ error: e.ar, errorEn: e.message, code: e.code }, { status: e.status }) : handleDomainError(e));
 
 export async function GET(request: Request) {
   const { user, error } = await requireModule("sales");
@@ -30,7 +31,8 @@ export async function GET(request: Request) {
     const today = riyadhIso(new Date());
     const day = /^\d{4}-\d{2}-\d{2}$/.test(sp.get("date") ?? "") ? sp.get("date")! : today;
     const start = periodStartOf(period, day);
-    const plan = await loadPlan(prisma, rep || user.id, period, start);
+    // The customers' phone and address (the row's call / WhatsApp / map) only with the customer-contact right.
+    const plan = await loadPlan(prisma, rep || user.id, period, start, new Date(), { contact: canSeeCustomerContact(user.permissions) });
     return NextResponse.json({ ...plan, today, readOnly: !!rep && rep !== user.id, canSetGoals: supervisor(user) }, { headers: { "Cache-Control": "no-store" } });
   } catch (e) { return err(e); }
 }

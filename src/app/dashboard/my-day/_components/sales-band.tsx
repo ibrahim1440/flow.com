@@ -58,9 +58,12 @@ function useCelebration(key: string | null): boolean {
   return show;
 }
 
-export function SalesBand({ t, lang, who, phone, ro, viewerId, onLog }: {
+export function SalesBand({ t, lang, who, phone, ro, viewerId, onLog, weekGoals }: {
   t: BandTarget; lang: Lang; who: string | null; phone: boolean; ro: boolean; viewerId: string;
   onLog: (c: LogTarget, kind: "CALL" | "WHATSAPP") => void;
+  /** D16 gate («أبو فهد»): the supervisor's targets of this week («زيارات 9 من 15 · …») — shown instead of «ما فيه هدف»
+   *  when there is no monthly target but there are weekly ones. */
+  weekGoals?: string | null;
 }) {
   const ar = lang === "ar";
   const third = who !== null;
@@ -114,8 +117,12 @@ export function SalesBand({ t, lang, who, phone, ro, viewerId, onLog }: {
       <section className="md-sb is-empty" data-testid="md-target" aria-label={ar ? `هدف ${month}` : `${month} target`}>
         <div className="md-sb-main">
           <span className="md-sb-lbl">{ar ? `هدف ${month}` : `${month} target`}</span>
+          {weekGoals && !third ? (
+            <p className="md-sb-msg" data-testid="md-week-targets">{ar ? "أهداف هالأسبوع من مشرفك: " : "This week's targets from your supervisor: "}<bdi>{weekGoals}</bdi> <Link href="/dashboard/my-day?tab=plan">{ar ? "خطتي ←" : "My plan →"}</Link></p>
+          ) : (
           <p className="md-sb-msg" data-testid="md-no-target">{third ? (ar ? <>ما فيه هدف مسجّل لـ<bdi>{who}</bdi> هذا الشهر.</> : <>No target is set for <bdi>{who}</bdi> this month.</>)
             : ar ? "ما فيه هدف مسجّل لك هذا الشهر — اطلب من مديرك يحدد هدفك." : "No target is set for you this month — ask your manager to set one."}</p>
+          )}
           {quiet ? <p className="md-sb-sub">{ar ? "ولا فيه مبيعات أو تحصيل بعد. أول فاتورة تصدر لك وأول تحصيل ينعتمد يطلعون هنا." : "No sales or collections yet. Your first issued invoice and first approved collection will show here."}</p>
             : <p className="md-sb-sub">{ar ? <>المحصّل <bdi className="num">{n(t.achieved)}</bdi> ر.س · مبيعات {month} <bdi className="num">{n(t.sales)}</bdi> ر.س</> : <>Collected SAR <bdi className="num">{n(t.achieved)}</bdi> · {month} sales SAR <bdi className="num">{n(t.sales)}</bdi></>}</p>}
           <Link className="md-sb-link" href="/dashboard/sales/my-commissions">{ar ? "هدفي وعمولتي ←" : "My target and commission →"}</Link>

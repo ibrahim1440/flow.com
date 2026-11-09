@@ -21,10 +21,10 @@ import { HrRoot } from "@/components/hr/ui";
 import { ActivityDialog } from "../customers/[id]/dialogs";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { Ico } from "@/components/shell/icons";
-import { AddMenu, HubTabs, TodaySchedule, hubTabOf } from "./_components/hub";
-import { PlanCard, PlanSection } from "./_components/plan";
-import WsCalendarPage from "../workspace/calendar/page";
-import { TasksCard } from "./_components/tasks-card";
+import { AddMenu, HubTabs, hubTabOf, type HubTab } from "./_components/hub";
+import { AddPlanSheet, GOAL_T, PlanToast, TodayPlan, WeekPlan, WhatHappened, usePlanData, type PItem } from "./_components/khitati";
+import { PlanWeekWizard, suggestionsOf, type WeekSource } from "./_components/plan-week";
+import { useDropStaleLayer } from "./_components/back-layer";
 import { SalesBand, type BandTarget, type LogTarget } from "./_components/sales-band";
 import { filterCallList, callFilterOf, type CallFilter } from "@/lib/services/sales/my-day/filters";
 import {
@@ -75,14 +75,34 @@ function MyDay() {
   const [all, setAll] = useState(false);
   // The full list's filter chips (council fix round 2, item 7).
   const [filter, setFilter] = useState<CallFilter>("ALL");
+  const [flash, setFlash] = useState<{ text: string; undo?: () => void } | null>(null);
   const [logFor, setLogFor] = useState<{ item: CallItem; kind: "CALL" | "WHATSAPP" } | null>(null);
-  const openLog = useCallback((item: CallItem, kind: "CALL" | "WHATSAPP" = "CALL") => setLogFor({ item, kind }), []);
+  const openLog = useCallback((item: CallItem, kind: "CALL" | "WHATSAPP" = "CALL") => { setFlash(null); setLogFor({ item, kind }); }, []);
   // «عند العملاء» (D11 sheet E): a call / WhatsApp opens the same log dialog as «كلّمهم اليوم».
   const openLogFor = useCallback((c: LogTarget, kind: "CALL" | "WHATSAPP") => setLogFor({
     item: { key: `owed:${c.customerId}`, customerId: c.customerId, name: c.name, nameAr: c.nameAr, phone: c.phone, tier: null, kgPerMonth: 0,
       reason: { code: "NO_CONTACT", days: null, thresholdDays: 0 }, others: [], intervalDays: null, lastContactDays: null }, kind,
   }), []);
-  const [flash, setFlash] = useState<{ text: string; undo?: () => void } | null>(null);
+  // D16 «خطتي»: «أضف لخطتي» (one sheet; `?add=plan` from «＋ جديد», the old `?plan=new` too) and «خطّط أسبوعك».
+  const [adding, setAdding] = useState(false);
+  const [wizard, setWizard] = useState(false);
+  const [planTick, setPlanTick] = useState(0);
+  const addAsked = sp.get("add") === "plan" || sp.get("plan") === "new";
+  const [seenAdd, setSeenAdd] = useState(false);
+  // Opened by the link: the sheet takes the parameter off the page's own entry as it opens (gate C1), so neither Back,
+  // a save nor a reload opens it again.
+  const [addFromLink, setAddFromLink] = useState(false);
+  if (addAsked && !seenAdd) { setSeenAdd(true); setAdding(true); setAddFromLink(true); }
+  if (!addAsked && seenAdd) setSeenAdd(false);
+  // D16 gate («أبو فهد»): who is already in «خطة اليوم» leaves «كلّمهم اليوم»; the week's targets for the band.
+  const dayPlan = usePlanData("DAY", planTick, undefined, undefined, !rep);
+  const weekPlan = usePlanData("WEEK", planTick, undefined, undefined, !rep);
+  const plannedToday = new Set((dayPlan.plan?.items ?? []).filter((i) => i.kind === "ACTION" && i.plannedDay === dayPlan.plan?.today && i.customer).map((i) => i.customer!.id));
+  // A sheet opening takes the last toast away (it would cover the sheet's top — «أبو فهد» retest).
+  const openSheet = useCallback((open: () => void) => { setFlash(null); open(); }, []);
+  const goTab = useCallback((t: HubTab) => router.replace(t === "today" ? "/dashboard/my-day" : `/dashboard/my-day?tab=${t}`, { scroll: false }), [router]);
+  const closeAdd = useCallback(() => { setAdding(false); setAddFromLink(false); }, []);
+  useDropStaleLayer();
   const [reps, setReps] = useState<{ id: string; name: string }[]>([]);
   // D8.1: back from logging on a customer page («＋ جديد › نشاط» started here): say it was saved, then drop the flag.
   const logged = sp.get("logged") === "1";
@@ -132,12 +152,14 @@ function MyDay() {
   const ro = data.readOnly;
   const firstName = (data.rep.name || "").trim().split(/\s+/)[0] ?? "";
   const now = new Date(data.generatedAt);
+  // D16 gate: a customer already in «خطة اليوم» is not repeated in «كلّمهم اليوم».
+  const callList = data.callList.filter((c) => !c.customerId || !plannedToday.has(c.customerId));
   // «كلّمته — بانتظار الطلب» rows stay on the list but are not calls to make: the counts leave them out.
-  const callCount = data.callList.filter((c) => c.reason.code !== "CALLED").length;
-  const listed = data.callList.length;
+  const callCount = callList.filter((c) => c.reason.code !== "CALLED").length;
+  const listed = callList.length;
   // The whole list is on screen when «الكل» is open or when it is short anyway: then the chips filter it.
   const full = all || listed <= TOP;
-  const shown = full ? filterCallList(data.callList, filter) : data.callList.slice(0, TOP);
+  const shown = full ? filterCallList(callList, filter) : callList.slice(0, TOP);
   const empty = data.counts.total === 0;
   const who = ro ? firstName : null;
 
@@ -156,16 +178,11 @@ function MyDay() {
     </div>
   ) : null;
 
-  const flashBar = flash ? (
-    <div className="notice ok" role="status" data-testid="md-flash">
-      <span style={{ flex: 1 }}>{flash.text}</span>
-      {flash.undo ? <button type="button" className="btn sm" onClick={flash.undo}>{ar ? "تراجع" : "Undo"}</button> : null}
-      <button type="button" className="btn g sm" onClick={() => setFlash(null)} aria-label={ar ? "إخفاء" : "Dismiss"}>×</button>
-    </div>
-  ) : null;
+  // D16 gate («أبو فهد»): one toast, fixed to the viewport above the tab bar — no jump, never off-screen.
+  const flashBar = flash ? <PlanToast ar={ar} flash={flash} onClose={() => setFlash(null)} /> : null;
 
   // The day at a glance under the greeting (approved Figma «يومي — تصور», 3 Nov 2026): what kinds of calls wait today.
-  const kinds = summaryOf(data.callList);
+  const kinds = summaryOf(callList);
   const perms = user?.permissions;
   const acts = !ro && perms ? [
     hasSubPrivilege(perms, "orders", "create") ? { href: "/dashboard/my-day?new=order", ar: "+ طلب جديد", en: "+ New order", p: true, id: "md-new-order" } : null,
@@ -186,31 +203,56 @@ function MyDay() {
       <div className="md-hello-side">
         <Streak d={data} lang={lang} third={ro} />
         {/* D8.1: no overdue pill — overdue items show once, in «مهام اليوم» / «مهامي», with a red «متأخرة» badge. */}
-        {!ro ? <AddMenu ar={ar} links={acts.map((a) => ({ href: a.href, ar: a.ar.replace(/^\+ /, ""), en: a.en.replace(/^\+ /, ""), id: a.id }))} onDone={(m) => { setFlash({ text: m }); reload(); setTick((t) => t + 1); }} /> : null}
+        {!ro ? <AddMenu ar={ar} links={acts.map((a) => ({ href: a.href, ar: a.ar.replace(/^\+ /, ""), en: a.en.replace(/^\+ /, ""), id: a.id }))} onDone={(m) => { setFlash({ text: m }); reload(); setTick((t) => t + 1); }} onPlan={() => openSheet(() => setAdding(true))} /> : null}
       </div>
     </div>
   );
 
-  // «يومي الموحّد»: the tabs (never on a manager's read-only view of a rep's day); «مهامي» and «التقويم» are «مساحة عملي»'s
-  // own screens, shown in place.
-  const tabsBar = !ro ? <HubTabs tab={tab} ar={ar} /> : null;
-  if (!ro && tab !== "today") {
+  // D16: the tabs «اليوم · خطتي» (never on a manager's read-only view of a rep's day).
+  const tabsBar = !ro ? <HubTabs tab={tab} ar={ar} onTab={goTab} /> : null;
+  const today = new Date(Date.parse(data.generatedAt) + 3 * 3_600_000).toISOString().slice(0, 10);
+  const weekSource: WeekSource = { callList: data.callList, contracts: data.contracts, owed: data.target.owed?.customers ?? [] };
+  const planned = () => { setPlanTick((t) => t + 1); };
+  const weekGoals = (() => {
+    const p = weekPlan.plan;
+    if (!p) return null;
+    const gs = p.items.filter((i) => i.kind === "GOAL" && i.source === "ADMIN" && i.metric && i.metric in GOAL_T && i.target);
+    return gs.length ? gs.map((g) => `${GOAL_T[g.metric as keyof typeof GOAL_T][ar ? 0 : 1]} ${p.counts[g.metric as keyof typeof p.counts] ?? 0} ${ar ? "من" : "of"} ${g.target}`).join(" · ") : null;
+  })();
+  const planLayer = !ro ? (
+    <>
+      {adding ? <AddPlanSheet ar={ar} today={today} cleanUrl={addFromLink ? (tab === "today" ? "/dashboard/my-day" : `/dashboard/my-day?tab=${tab}`) : undefined} onClose={closeAdd} onSaved={(m) => { closeAdd(); planned(); setFlash({ text: m }); }} /> : null}
+      {wizard ? <PlanWeekWizard ar={ar} today={today} source={weekSource} onClose={() => setWizard(false)} onDone={(m) => { setWizard(false); planned(); setFlash({ text: m }); }} /> : null}
+    </>
+  ) : null;
+  // «خطة اليوم» — the first block of «اليوم» (Figma D16 A1).
+  const todayPlan = !ro ? <TodayPlan ar={ar} reloadKey={planTick} onFlash={setFlash} onPlanWeek={() => openSheet(() => setWizard(true))} onAdd={() => openSheet(() => setAdding(true))} needYou={suggestionsOf(weekSource, ar).length} /> : null;
+  if (!ro && tab === "plan") {
     return (
       <div className="pg">
         <div className="md" data-testid="md-page" data-tab={tab}>
           {flashBar}
           {hello}
           {tabsBar}
-          {/* «مهامي وخطتي» (owner-approved Figma D8 / 07): the plan, the week beside it and the «مهامي» card under the
-              week — the full tasks page and «الأنشطة والمتابعات» are one tap away, no longer embedded here. */}
-          {tab === "tasks" ? <PlanSection ar={ar} openAdd={sp.get("plan") === "new"} onAddOpened={() => router.replace("/dashboard/my-day?tab=tasks", { scroll: false })} side={<TasksCard ar={ar} mode="plan" onChanged={(m) => setFlash({ text: m })} />} /> : null}
-          {tab === "calendar" ? <div className="md-embed" data-testid="md-embed-calendar"><WsCalendarPage /></div> : null}
+          <WeekPlan key={planTick} ar={ar} onPlanWeek={() => openSheet(() => setWizard(true))} onFlash={setFlash} />
         </div>
+        {planLayer}
       </div>
     );
   }
 
-  const quick = logFor && !ro ? (
+  // D16 gate («أبو فهد»): «سجّل النتيجة» of a call opens «وش صار؟» — the same sheet as the plan; its next step goes into
+  // «خطتي». A WhatsApp keeps its own log (the plan's sheet has no WhatsApp).
+  const callAsPlan: PItem | null = logFor && logFor.kind === "CALL" && logFor.item.customerId ? {
+    id: "", source: "SELF", kind: "ACTION", metric: "CALLS", label: null, target: null, done: null, checked: false, setBy: null,
+    customer: { id: logFor.item.customerId, name: nameOf(logFor.item, ar), phone: logFor.item.phone }, plannedDay: null, plannedTime: null,
+    doneAt: null, doneOutcome: null, doneBody: null, weekStart: null, doneHow: null,
+    // A follow-up or a sample row: the call stays on that deal's timeline (gate).
+    dealId: logFor.item.reason.code === "FOLLOW_UP" || logFor.item.reason.code === "SAMPLE" ? logFor.item.reason.dealId : null,
+  } : null;
+  const quick = callAsPlan && !ro ? (
+    <WhatHappened ar={ar} it={callAsPlan} today={today} onClose={() => setLogFor(null)} onSaved={(m) => { setLogFor(null); setFlash({ text: m }); reload(); planned(); }} />
+  ) : logFor && !ro ? (
     <HrRoot>
       <ActivityDialog ar={ar} customerId={logFor.item.customerId} customerName={nameOf(logFor.item, ar)} deals={[]} initialKind={logFor.kind}
         defaultDealId={logFor.item.reason.code === "FOLLOW_UP" || logFor.item.reason.code === "SAMPLE" ? logFor.item.reason.dealId : null}
@@ -226,15 +268,13 @@ function MyDay() {
           {flashBar}
           {hello}
           {tabsBar}
+          {todayPlan}
           {empty ? <NoBookNotice lang={lang} /> : null}
-          {/* Owner (6 Nov 2026): on a phone the target first — it is what gets the rep going — then «كلّمهم اليوم». */}
-          <SalesBand t={data.target} lang={lang} who={who} phone ro={ro} viewerId={data.viewerId} onLog={openLogFor} />
-          <CallCard d={data} lang={lang} items={shown} total={listed} all={full} onAll={() => setAll((v) => !v)} ro={ro} empty={empty}
+          {/* Owner (6 Nov 2026): on a phone the target, then «كلّمهم اليوم» — under «خطة اليوم» (D16). */}
+          <SalesBand t={data.target} lang={lang} who={who} phone ro={ro} viewerId={data.viewerId} onLog={openLogFor} weekGoals={weekGoals} />
+          <CallCard d={{ ...data, callList }} lang={lang} items={shown} total={listed} all={full} onAll={() => setAll((v) => !v)} ro={ro} empty={empty}
             filter={filter} onFilter={setFilter} onDone={openLog} onSnooze={snooze} phone />
           <AttentionStrip d={data} lang={lang} ro={ro} />
-          {!ro ? <TodaySchedule ar={ar} reloadKey={tick} /> : null}
-          {!ro ? <PlanCard ar={ar} /> : null}
-          {!ro ? <TasksCard ar={ar} mode="today" onChanged={(m) => { setFlash({ text: m }); reload(); }} /> : null}
           <DealsCard d={data} lang={lang} />
           <CustomersCard d={data} lang={lang} />
           {/* Under the four main cards (council fix round 1, P0-5): contracts, the book by tier with each one's share, growing. */}
@@ -243,6 +283,7 @@ function MyDay() {
           <details className="md-fold" data-testid="md-fold-growing"><summary>{ar ? "ينمون معك" : "Growing with you"}</summary><GrowingCard d={data} lang={lang} /></details>
         </div>
         {quick}
+        {planLayer}
       </div>
     );
   }
@@ -254,12 +295,11 @@ function MyDay() {
         {flashBar}
         {hello}
         {tabsBar}
+        {todayPlan}
         {empty ? <NoBookNotice lang={lang} /> : null}
-        <SalesBand t={data.target} lang={lang} who={who} phone={false} ro={ro} viewerId={data.viewerId} onLog={openLogFor} />
+        <SalesBand t={data.target} lang={lang} who={who} phone={false} ro={ro} viewerId={data.viewerId} onLog={openLogFor} weekGoals={weekGoals} />
         <AttentionStrip d={data} lang={lang} ro={ro} />
-        {/* Figma 06 (160:107): «جدول اليوم» wide, the plan and «مهام اليوم» stacked beside it; «كلّمهم اليوم» on its own row. */}
-        {!ro ? <div className="md-grid2 md-today-row"><TodaySchedule ar={ar} reloadKey={tick} /><div className="md-today-side"><PlanCard ar={ar} /><TasksCard ar={ar} mode="today" onChanged={(m) => { setFlash({ text: m }); reload(); }} /></div></div> : null}
-        <CallCard d={data} lang={lang} items={shown} total={listed} all={full} onAll={() => setAll((v) => !v)} ro={ro} empty={empty}
+        <CallCard d={{ ...data, callList }} lang={lang} items={shown} total={listed} all={full} onAll={() => setAll((v) => !v)} ro={ro} empty={empty}
           filter={filter} onFilter={setFilter} onDone={openLog} onSnooze={snooze} />
         {/* What the owner kept from after the design (6 Nov 2026), under the rows Figma draws. */}
         <div className="md-grid2">
@@ -275,6 +315,7 @@ function MyDay() {
         </div>
       </div>
       {quick}
+      {planLayer}
     </div>
   );
 }

@@ -10385,6 +10385,8 @@ model SalesPlanItem {
   customerId  String?
   customer    Customer? @relation("SalesPlanItemCustomer", fields: [customerId], references: [id], onDelete: Cascade)
   plannedDay  DateTime? @db.Date
+  /// D16 (20261225090000_sales_plan_time): "HH:MM" Riyadh on a dated ACTION/CHECK — a time makes it an appointment.
+  plannedTime String?
   position    Int       @default(0)
   createdById String?
   createdBy   Employee? @relation("SalesPlanItemCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)

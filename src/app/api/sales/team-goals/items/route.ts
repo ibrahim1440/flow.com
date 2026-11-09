@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     const row = await prisma.$transaction((tx) => addItem(tx, { employeeId: rep.id, actorId: user.id, source: "ADMIN" }, body, riyadhIso(new Date())));
     return NextResponse.json({ ok: true, id: row.id }, { status: 201 });
   } catch (e) {
-    if (e instanceof PlanError) return NextResponse.json({ error: e.ar, errorEn: e.message }, { status: e.status });
+    if (e instanceof PlanError) return NextResponse.json({ error: e.ar, errorEn: e.message, code: e.code }, { status: e.status });
     return handleDomainError(e);
   }
 }

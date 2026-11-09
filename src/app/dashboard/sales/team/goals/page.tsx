@@ -9,7 +9,7 @@ import { useLang } from "../../_components/ui";
 import { PerfHeader, PerfLoading, PerfNotice } from "../../_components/perf";
 import { useUser } from "../../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
-import { METRIC_AR, PlanView } from "../../../my-day/_components/plan";
+import { METRIC_AR, WeekPlan } from "../../../my-day/_components/khitati";
 import { Ico } from "@/components/shell/icons";
 import "../../../my-day/my-day.css";
 import "./goals.css";
@@ -98,7 +98,7 @@ export default function TeamGoalsPage() {
   return (
     <div className="pg tg" data-testid="team-goals">
       <PerfHeader ar={ar} title={ar ? "خطة الفريق" : "Team plan"} phoneTitle={ar ? "خطة الفريق" : "Team plan"}
-        meta={[ar ? "الأرقام تظهر للمندوب في خطته «من المشرف»، وتنحسب تلقائيًا من نشاطه. افتح خطة أي مندوب وأضف له بنود." : "Shown in each rep's plan «from your supervisor», counted automatically. Open a rep's plan to add items."]}
+        meta={[ar ? "الأرقام تظهر للمندوب في خطته «من المشرف»، وتنحسب تلقائيًا من نشاطه. افتح خطة أي مندوب وأضف لخطته." : "Shown in each rep's plan «from your supervisor», counted automatically. Open a rep's plan to add items."]}
         actions={<span className="tg-acts"><Link className="btn" href="/dashboard/sales/team">{ar ? "متابعة الفريق" : "Team overview"}</Link>
           <button type="button" className="btn" onClick={copyPrevious} disabled={!data}>{ar ? "انسخ من الفترة اللي فاتت" : "Copy the previous period"}</button>
           <button type="button" className="btn p" onClick={save} disabled={!data || busy} data-testid="team-goals-save">{busy ? "…" : ar ? "حفظ الأرقام" : "Save the numbers"}</button></span>} />
@@ -116,7 +116,7 @@ export default function TeamGoalsPage() {
       {!data ? <PerfLoading ar={ar} /> : data.reps.length === 0 ? <p>{ar ? "ما فيه مندوبين." : "No reps."}</p> : (
         <div className="tg-scroll">
           <table className="t tg-table">
-            <thead><tr><th>{ar ? "المندوب" : "Rep"}</th>{COLS.map((m) => <th key={m}>{ar ? METRIC_AR[m] : m}{m === "COLLECTION" ? (ar ? " (ر.س)" : " (SAR)") : ""}</th>)}<th>{ar ? "أهداف خاصة" : "Custom goals"}</th><th>{ar ? "الخطة" : "Plan"}</th><th>{ar ? "خارج الخطة" : "Unplanned"}</th></tr></thead>
+            <thead><tr><th>{ar ? "المندوب" : "Rep"}</th>{COLS.map((m) => <th key={m}>{ar ? METRIC_AR[m] : m}{m === "COLLECTION" ? (ar ? " (ر.س)" : " (SAR)") : ""}</th>)}<th>{ar ? "أرقام خاصة" : "Custom numbers"}</th><th>{ar ? "الخطة" : "Plan"}</th><th>{ar ? "خارج الخطة" : "Unplanned"}</th></tr></thead>
             <tbody>
               {data.reps.map((r) => (
                 <Fragment key={r.id}>
@@ -143,7 +143,7 @@ export default function TeamGoalsPage() {
                         <input className="tg-in num tg-small" inputMode="decimal" placeholder="—" value={c.target} onChange={(e) => setCustoms((x) => ({ ...x, [r.id]: x[r.id].map((y, i) => (i === k ? { ...y, target: e.target.value } : y)) }))} />
                       </span>
                     ))}
-                    <button type="button" className="lk-inline" onClick={() => setCustoms((x) => ({ ...x, [r.id]: [...(x[r.id] ?? []), { label: "", target: "" }] }))}>+ {ar ? "هدف خاص" : "Custom"}</button>
+                    <button type="button" className="lk-inline" onClick={() => setCustoms((x) => ({ ...x, [r.id]: [...(x[r.id] ?? []), { label: "", target: "" }] }))}>+ {ar ? "رقم خاص" : "Custom"}</button>
                   </td>
                   <td><b className={`num${r.plan.planned && r.plan.done >= r.plan.planned ? " met" : ""}`}>{r.plan.planned ? (ar ? `${r.plan.done} من ${r.plan.planned}` : `${r.plan.done} of ${r.plan.planned}`) : "—"}</b>
                     <small className={r.plan.planned ? undefined : "warn"}>{r.plan.planned ? (ar ? "بند" : "items") : ar ? "ما خطط" : "No plan"}</small></td>
@@ -156,7 +156,7 @@ export default function TeamGoalsPage() {
           <p className="tg-foot">{ar ? "اترك الخانة فاضية إذا ما تبي تحدد هدف. المجموع: " : "Leave a box empty for no goal. Total: "}{COLS.filter((m) => totals[m]).map((m) => `${METRIC_AR[m]} ${n(totals[m]!)}`).join(" · ") || "—"}</p>
         </div>
       )}
-      {data && open ? (() => { const r = data.reps.find((x) => x.id === open); return r ? <section className="tg-plan" data-testid="tg-plan"><PlanView ar={ar} rep={{ id: r.id, name: r.name }} date={data.start} defaultPeriod={data.period} /></section> : null; })() : null}
+      {data && open ? (() => { const r = data.reps.find((x) => x.id === open); return r ? <section className="tg-plan" data-testid="tg-plan"><WeekPlan ar={ar} rep={{ id: r.id, name: r.name }} date={data.start} /></section> : null; })() : null}
       <div className="tg-how">
         <b>{ar ? "كيف ينحسب كل هدف تلقائيًا" : "How each goal is counted"}</b>
         <ul>
