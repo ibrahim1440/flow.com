@@ -1,9 +1,13 @@
 import { requireStation } from "@/lib/services/station/http";
 import { v2Floor, v2Run } from "@/lib/services/station/roast-v2-http";
 import { fail, floorView } from "@/lib/services/station/roast-v2";
+import { isProblemSupervisor } from "@/lib/station/v2/problem";
 
 type Params = { params: Promise<{ id: string }> };
-/** GET — the V2 floor (D12 R1–R13) in one read; a paired device reads its own roaster only. */
+/**
+ * GET — the V2 floor (D12 R1–R13) in one read; a paired device reads its own roaster only. D16: `canResolve` — the person
+ * at the station is a report supervisor (decided here, on the server: the device sends the screen no permissions).
+ */
 export async function GET(_request: Request, { params }: Params) {
   const { user, error, station } = await requireStation();
   if (error) return error;
@@ -11,6 +15,6 @@ export async function GET(_request: Request, { params }: Params) {
   const { id } = await params;
   return v2Run(async () => {
     if (g.ctx.stationRoasterId && g.ctx.stationRoasterId !== id) throw fail(403, "STATION_ROASTER_MISMATCH", "هذا الجهاز لحمّاصة أخرى.", "This device belongs to another roaster.");
-    return floorView(id);
+    return { ...(await floorView(id)), canResolve: isProblemSupervisor(g.ctx.actor) };
   });
 }

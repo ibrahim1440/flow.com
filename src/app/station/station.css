@@ -411,3 +411,6 @@
 
 /* The bar's language switch: a ≥ 44 px touch target on every station screen (roast v2 gate R3). */
 .ws-bar .d21-lang-btn { width: 44px; min-width: 44px; height: 44px; }
+
+/* D16 E2 — a lot roasted during a minor roaster report: text + the info colour (never colour alone). */
+.d21 .qc-minor { color: var(--status-info); font-weight: 600; }

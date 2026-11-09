@@ -10621,7 +10621,10 @@ model RoastRun {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @default(now()) @updatedAt
 
-  stationEvents RoastStationEvent[]
+  stationEvents RoastStationEvent[] @relation("ProblemRun")
+  /// D16: charged while a MINOR report was open on its roaster (the report it carries; never blocks anything).
+  problemId     String?
+  problem       RoastStationEvent? @relation("RunProblem", fields: [problemId], references: [id], onDelete: SetNull)
 
   @@index([roasterId, status], map: "RoastRun_roaster_status_idx")
   @@index([basketId])
@@ -10657,7 +10660,7 @@ model RoastStationEvent {
   reason         String
   note           String?
   runId          String?
-  run            RoastRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+  run            RoastRun? @relation("ProblemRun", fields: [runId], references: [id], onDelete: SetNull)
   /// The roaster at the report: the roast in the drum, the unweighed roasts.
   roasterState   Json?
   /// OPEN | RESOLVED
@@ -10670,6 +10673,14 @@ model RoastStationEvent {
   resolvedById   String?
   resolveKey     String?   @unique
   resolveNote    String?
+  /// D16 (20261228090000_roast_problem_minor): true = charging stops until a supervisor ends it (every report before
+  /// D16); false = a minor problem the roaster keeps roasting through. A PAUSE always stops (CHECK).
+  blocking       Boolean   @default(true)
+  /// «إيش كانت المشكلة؟» / «إيش الحل؟» — written when the report is ended (≤ 500 characters, CHECK).
+  resolveCause   String?
+  resolveFix     String?
+  /// The roasts charged while this report was open as a minor problem (RoastRun.problemId).
+  markedRuns     RoastRun[] @relation("RunProblem")
 
   @@index([roasterId, reportedAt], map: "RoastStationEvent_roaster_idx")
 }

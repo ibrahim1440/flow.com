@@ -39,6 +39,8 @@ const BATCH_SELECT = {
   product: { select: { id: true, productNameEn: true, productNameAr: true } },
   greenBean: { select: { serialNumber: true, beanType: true, beanTypeAr: true, country: true, countryAr: true, process: true, processAr: true } },
   orderItem: { select: { id: true, beanTypeName: true, productSku: { select: { productId: true, product: { select: { productNameEn: true, productNameAr: true } } } }, order: { select: { orderNumber: true } } } },
+  // D16 E2: a roast of this lot charged while a minor report was open on its roaster (the mark QC sees).
+  basket: { select: { runs: { where: { problemId: { not: null } }, select: { problem: { select: { id: true, kind: true, reason: true, status: true } } }, take: 1 } } },
 } satisfies Prisma.RoastingBatchSelect;
 type BatchRow = Prisma.RoastingBatchGetPayload<{ select: typeof BATCH_SELECT }>;
 
@@ -69,17 +71,25 @@ export async function sensoryDoneToday(db: Db, spec: SpecSnapshot, productId: st
 export type QueueBatch = {
   id: string; batchNumber: string; status: string; nameEn: string; nameAr: string | null; roastedKg: number; availableKg: number;
   orderNumber: number | null; qcDeadline: string | null; recordedAt: string; records: number; accepts: number; specState: "APPROVED" | "CALIBRATING" | "UNKNOWN"; isBlend: boolean;
+  /** D16 E2: roasted during a minor report («حُمّصت أثناء بلاغ بسيط»), or null. */
+  minorProblem: { id: string; kind: string; reason: string; status: string } | null;
 };
 export type HeldBatch = QueueBatch & {
   heldAt: string | null; foreign: boolean; reasons: HoldReason[]; inspectorName: string | null;
   exception: { id: string; number: string; status: string } | null; disposition: { id: string; number: string; kind: string; status: string } | null;
 };
 
+/** D16 E2: the minor report one of the lot's roasts was charged under, if any. */
+export function minorProblemOf(b: { basket?: { runs: { problem: { id: string; kind: string; reason: string; status: string } | null }[] } | null }) {
+  return b.basket?.runs.find((r) => r.problem)?.problem ?? null;
+}
+
 function queueRow(b: BatchRow & { qcRecords: { decision: string }[] }): QueueBatch {
   return {
     id: b.id, batchNumber: b.batchNumber, status: b.status, ...nameOf(b), roastedKg: kg3(b.roastedBeanQuantity), availableKg: kg3(b.roastedAvailableKg),
     orderNumber: b.orderItem?.order?.orderNumber ?? null, qcDeadline: b.qcDeadline?.toISOString() ?? null, recordedAt: b.createdAt.toISOString(),
     records: b.qcRecords.length, accepts: b.qcRecords.filter((r) => r.decision === "Accept").length, specState: b.profileVersionId ? "APPROVED" : "CALIBRATING", isBlend: b.isBlend,
+    minorProblem: minorProblemOf(b),
   };
 }
 
@@ -145,6 +155,7 @@ export async function qcBatchDetail(batchId: string) {
   return {
     batch: {
       id: b.id, batchNumber: b.batchNumber, status: b.status, ...nameOf(b), roastedKg: kg3(b.roastedBeanQuantity), greenKg: kg3(b.greenBeanQuantity), availableKg: kg3(b.roastedAvailableKg),
+      minorProblem: minorProblemOf(b),
       lossPct: b.isBlend ? null : lossPercent(b.greenBeanQuantity, b.roastedBeanQuantity), roastedAt: b.createdAt.toISOString(), qcDeadline: b.qcDeadline?.toISOString() ?? null,
       orderNumber: b.orderItem?.order?.orderNumber ?? null, roaster: roaster?.name ?? null, isBlend: b.isBlend,
       green: b.greenBean ? { serialNumber: b.greenBean.serialNumber, nameEn: b.greenBean.beanType, nameAr: b.greenBean.beanTypeAr } : null,

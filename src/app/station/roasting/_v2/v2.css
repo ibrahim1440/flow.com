@@ -228,3 +228,21 @@
 .rv2-notice { margin: 8px 16px 0; padding: 10px 14px; border-radius: 10px; background: var(--status-success-tint, #e9f2e7); color: var(--status-success, #3b7a45); font-weight: 600; }
 .rv2 .rv2-lang .d21-lang-btn { width: 44px; min-width: 44px; height: 44px; font-size: 15px; }
 .rv2 .rv2-report { white-space: nowrap; }
+
+/* ── D16 (owner-approved 9 Nov 2026): the minor report, its mark, the stop/keep choice and ending a report ── */
+.rv2-problem.rv2-problem-minor { background: var(--status-info-tint, #eaf0f5); border-bottom-color: var(--status-info, #3b6385); }
+.rv2-problem.rv2-problem-minor b { color: var(--status-info, #3b6385); }
+.rv2-end { background: var(--action-primary, #5c5c38); color: var(--text-inverse, #fffdf7); border-color: var(--action-primary, #5c5c38); }
+.rv2-minor-mark { color: var(--status-info, #3b6385); font-weight: 600; }
+.rv2-notice.rv2-notice-minor { background: var(--status-info-tint, #eaf0f5); color: var(--status-info, #3b6385); box-shadow: inset 0 0 0 1.5px var(--status-info, #3b6385); }
+.rv2-choices { display: flex; flex-direction: column; gap: 12px; }
+.rv2-choices button { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; text-align: start; min-height: 120px; padding: 18px 22px; border-radius: 14px; border: 1.5px solid var(--border-control, #8a8578); background: var(--surface, #fff); font: inherit; color: var(--text-primary, #28241a); cursor: pointer; }
+.rv2-choices button b { font-size: 22px; color: var(--action-primary, #5c5c38); }
+.rv2-choices button.stop b { color: var(--status-danger, #b42318); }
+.rv2-choices button span { font-size: 15px; color: var(--text-secondary, #4a473d); line-height: 1.5; }
+.rv2-choices button.on { border: 2.5px solid var(--action-primary, #5c5c38); background: var(--action-primary-tint, #f0f0e9); }
+.rv2-choices button.on.stop { border-color: var(--status-danger, #b42318); background: var(--status-danger-tint, #fcebe8); }
+.rv2-modal.rv2-modal-center { justify-content: center; }
+.rv2-text { min-height: 96px; padding: 12px 14px; border-radius: 12px; border: 1.5px solid var(--border-control, #8a8578); font: inherit; font-size: 17px; resize: vertical; }
+.rv2-text:focus-visible { outline: 2px solid var(--focus-ring, #5c5c38); outline-offset: 2px; }
+.rv2-stop { border-color: var(--status-danger, #b42318); color: var(--status-danger, #b42318); background: var(--surface, #fff); }

@@ -8,6 +8,7 @@
 // المعايرة» shows no numbers, and an out-of-spec batch is HELD — never rejected at the station.
 // The server decides everything (H12); every write carries an Idempotency-Key kept until the answer
 // is conclusive. Nothing here releases, disposes or destroys: those are ERP decisions by another person.
+import { problemReasonText } from "@/lib/station/v2/problem";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useStation } from "../../_ui/context";
 import { st } from "@/lib/i18n/station";
@@ -32,6 +33,7 @@ type Detail = {
   batch: {
     id: string; batchNumber: string; status: string; nameEn: string; nameAr: string | null; roastedKg: number; greenKg: number; availableKg: number; lossPct: number | null; roastedAt: string; qcDeadline: string | null;
     orderNumber: number | null; roaster: string | null; isBlend: boolean; hold: { at: string | null; recordId: string | null; foreign: boolean } | null;
+    minorProblem: { id: string; kind: string; reason: string; status: string } | null;
   };
   spec: SpecSnapshot; sensoryDueFirstOfDay: boolean; minEvaluators: number; records: RecordRow[];
   exceptions: { id: string; number: string; status: string; reason: string; requestedByName: string; decidedByName: string | null; createdAt: string }[];
@@ -194,7 +196,7 @@ function QueueView(p: Shared) {
           {q.pending.map((b, i) => (
             <Row key={b.id} on={i === 0} onClick={() => void openBatch(b.id)} testId={`qc-row-${b.batchNumber}`}
               title={<><bdi>{nm(b)}</bdi> · <Bid>{b.batchNumber}</Bid></>}
-              sub={<>{owner(b)} · {kg2(b.roastedKg)} {L("كغ", "kg")}{b.records ? <> · {b.accepts === 1 ? L("سجل قبول واحد", "one accept record") : L(`${b.records} سجلات`, `${b.records} records`)}</> : null}{b.specState === "CALIBRATING" ? <> · {L("المواصفة قيد المعايرة", "Spec under calibration")}</> : null}{b.isBlend ? <> · {L("خلطة", "blend")}</> : null}</>}
+              sub={<>{owner(b)} · {kg2(b.roastedKg)} {L("كغ", "kg")}{b.records ? <> · {b.accepts === 1 ? L("سجل قبول واحد", "one accept record") : L(`${b.records} سجلات`, `${b.records} records`)}</> : null}{b.specState === "CALIBRATING" ? <> · {L("المواصفة قيد المعايرة", "Spec under calibration")}</> : null}{b.isBlend ? <> · {L("خلطة", "blend")}</> : null}{b.minorProblem ? <> · <span className="qc-minor" data-testid={`qc-minor-${b.batchNumber}`}>● {L(`حُمّصت أثناء بلاغ بسيط: ${problemReasonText(b.minorProblem.reason, "ar")}`, `Roasted during a minor report: ${problemReasonText(b.minorProblem.reason, "en")}`)}</span></> : null}</>}
               right={<div style={{ textAlign: "end" }}><div className="lbl">{L("المهلة", "Deadline")}</div><div className="ws-row-time">{when(b.qcDeadline)}</div></div>} />
           ))}
         </div>
@@ -219,6 +221,7 @@ function Facts2({ d, p }: { d: Detail; p: Shared }) {
       <div><div className="lbl">{L("الفاقد · للمرجع فقط", "Loss · reference only")}</div><div className="ws-fact-v" data-testid="qc-loss">{b.lossPct === null ? "—" : <Num>{b.lossPct.toFixed(1)}%</Num>}</div></div>
       <div><div className="lbl">{L("حُمّصت", "Roasted at")}</div><div className="ws-fact-v">{when(b.roastedAt)}</div></div>
       {b.roaster ? <div><div className="lbl">{L("المحمصة", "Roaster")}</div><div className="ws-fact-v">{b.roaster}</div></div> : null}
+      {b.minorProblem ? <div data-testid="qc-minor-fact"><div className="lbl">{L("بلاغ", "Report")}</div><div className="ws-fact-v qc-minor">● {L(`حُمّصت أثناء بلاغ بسيط: ${problemReasonText(b.minorProblem.reason, "ar")}`, `Roasted during a minor report: ${problemReasonText(b.minorProblem.reason, "en")}`)}</div></div> : null}
     </div>
   );
 }

@@ -1,0 +1,11 @@
+/* D16 E1 «بلاغات المحامص» — the table stacks into one card per report on a narrow screen (gate L2: no overflow at 390 px).
+   Each cell names its column (data-label), so nothing is lost when the header row goes. Scoped to .rp-table. */
+.rp-table th, .rp-table td { padding: 10px 8px; text-align: start; }
+@media (max-width: 760px) {
+  .rp-table, .rp-table tbody, .rp-table tr, .rp-table td { display: block; width: 100%; box-sizing: border-box; }
+  .rp-table thead { display: none; }
+  .rp-table tr { margin-bottom: 12px; padding: 12px; border: 1px solid var(--border-subtle, #efeadf) !important; border-radius: 12px; background: var(--surface, #fff); }
+  .rp-table td { padding: 4px 0; overflow-wrap: anywhere; }
+  .rp-table td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; color: var(--text-muted, #6e6a61); }
+  .rp-table td.rp-action { padding-top: 10px; }
+}

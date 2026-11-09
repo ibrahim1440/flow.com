@@ -24,11 +24,15 @@ type Bucket = { id: string; barcode: string; seqNo: number; actualKg: string | n
 type Run = {
   id: string; serial: string; status: string; chargedAt: string; droppedAt: string | null; basketId: string | null; productId: string;
   bucket: Bucket; product: Product; basket?: { id: string; status: string; single: boolean } | null;
+  /** D16: charged while a minor report was open (the report's id). */
+  problemId?: string | null;
 };
 type Floor = {
   roaster: { id: string; name: string; manufacturerModel: string | null; status: string; stationMode: string; defaultTargetKg: number };
   drum: Run | null; dropped: Run[]; baskets: { id: string; status: string; single: boolean; productId: string | null; runIds: string[] }[];
-  unweighed: number; openProblem: { id: string; kind: string; reason: string; note: string | null; reportedAt: string; reportedByName: string | null; ageMinutes: number } | null;
+  unweighed: number; openProblem: { id: string; kind: string; reason: string; note: string | null; reportedAt: string; reportedByName: string | null; ageMinutes: number; blocking: boolean; markedRuns: number } | null;
+  /** D16: the person at the station is a report supervisor (decided on the server). */
+  canResolve?: boolean;
   prepared: Bucket[]; next: Bucket | null; plan: { productId: string; product: Product | null; remaining: number; totalKg: number } | null;
   undoable: { kind: "CHARGE" | "DROP"; runId: string; at: string } | null; canCharge: boolean; serverTime: string;
   lotsToday?: { id: string; batchNumber: string; at: string; roastedKg: number; greenKg: number; product: Product | null; corrected: boolean; inUse: boolean }[];
@@ -67,6 +71,7 @@ function RunCard({ run, line, coffee }: { run: Run; line: string; coffee: string
         <b>{t("bucketCoffee", { n: run.bucket.seqNo, coffee })}</b>
         <span>{line}</span>
         <small>{t("droppedAt", { at: run.droppedAt ? time(run.droppedAt) : "—" })} <bdi dir="ltr">{run.serial}</bdi></small>
+        {run.problemId ? <small className="rv2-minor-mark" data-testid={`rv2-minor-${run.bucket.seqNo}`}>{t("minorMark")}</small> : null}
       </div>
       <i style={{ background: c.strong }} />
     </div>
@@ -105,11 +110,20 @@ export function StationV2({ roasterIds, roasterNames, otherRoasters = [], onPick
   const [burnAsk, setBurnAsk] = useState<string | null>(null);
   const [problemOpen, setProblemOpen] = useState(false);
   const [problem, setProblem] = useState<{ kind: string; reason: string; note: string }>({ kind: "MALFUNCTION", reason: "", note: "" });
+  // D16 P2: right after «إرسال» — stop or keep roasting (the report's id and the choice); P6: ending it (cause + fix).
+  const [afterReport, setAfterReport] = useState<{ id: string; kind: string; reason: string; at: string; choice: "stop" | "keep" | null } | null>(null);
+  const [ending, setEnding] = useState<{ cause: string; fix: string } | null>(null);
+  // D16 P4 (owner: option 2) — the note after a charge under a minor report; it never stops anything and goes by itself.
+  const [minorToast, setMinorToast] = useState("");
+  useEffect(() => {
+    if (!minorToast) return;
+    const id = setTimeout(() => setMinorToast(""), 8000);
+    return () => clearTimeout(id);
+  }, [minorToast]);
   const [combined, setCombined] = useState<Combined>(null);
   const [sound, setSoundState] = useState(() => soundOn());
   const [notice, setNotice] = useState("");
   const scanRef = useRef<HTMLInputElement>(null);
-  const isSupervisor = !!(user.permissions?.production?.sub?.manage_roasters || user.permissions?.production?.sub?.manage_schedule) || user.role === "admin";
 
   // ── Reads ────────────────────────────────────────────────────────────────────────────────
   // The queue sends only the signed-in employee's operations (never replayed as somebody else).
@@ -233,9 +247,15 @@ export function StationV2({ roasterIds, roasterNames, otherRoasters = [], onPick
       if (target) setKeypad({ basketId: target.basket.id, value: "" });
       return null;
     }
-    if (r?.ok) { setGateTap(null); setGateOp(null); setChosen(null); doFlash("drum", "ok"); }
+    if (r?.ok) {
+      setGateTap(null); setGateOp(null); setChosen(null); doFlash("drum", "ok");
+      // D16 P4 (owner: option 2): a short note that never stops the charge — the roast carries the minor report's mark.
+      const m = (r.body as Run & { minorProblem?: { reason: string; markedRuns: number } | null }).minorProblem;
+      const n = (r.body as Run).bucket?.seqNo;
+      if (m) setMinorToast(t("minorToast", { n: n ?? "", reason: (REASONS as readonly string[]).includes(m.reason) ? t(`r${m.reason}` as V2Key) : m.reason, count: m.markedRuns }));
+    }
     return r;
-  }, [doFlash, readyBasket, basketRuns]);
+  }, [doFlash, readyBasket, basketRuns, t]);
 
   const charge = useCallback(async (b: Bucket, tappedAt: string = new Date().toISOString()) => {
     const r = await handle<Run & { code?: string }>("drum", () => queuedWrite(chargeSpec(b, tappedAt)));
@@ -252,7 +272,7 @@ export function StationV2({ roasterIds, roasterNames, otherRoasters = [], onPick
   const dropAndCharge = useCallback(async (b: Bucket | null, confirmed = false) => {
     if (!drum) { if (b) await charge(b, gateTap ?? undefined); await load(); return; }
     if (b && !confirmed && b.productId && b.productId !== drum.productId) { setCoffeeAsk(b); return; }
-    if (!b || floor?.openProblem) {
+    if (!b || floor?.openProblem?.blocking) {
       await drop(drum);
       setRecorded(null);
       await load();
@@ -394,16 +414,50 @@ export function StationV2({ roasterIds, roasterNames, otherRoasters = [], onPick
 
   const sendProblem = useCallback(async () => {
     if (!problem.reason) { setErr(t("chooseReason")); return; }
-    const r = await handle("drum", () => postJson(`${V2}/roasters/${roasterId}/problems`, { kind: problem.kind, reason: problem.reason, note: problem.note || undefined, runId: drum?.id }));
-    if (r?.ok) { setProblemOpen(false); setProblem({ kind: "MALFUNCTION", reason: "", note: "" }); doFlash("drum", "warn"); }
+    const r = await handle("drum", () => postJson<{ problem: { id: string; kind: string; reason: string; reportedAt: string } }>(`${V2}/roasters/${roasterId}/problems`, { kind: problem.kind, reason: problem.reason, note: problem.note || undefined, runId: drum?.id }));
+    if (r?.ok) {
+      setProblemOpen(false); setProblem({ kind: "MALFUNCTION", reason: "", note: "" }); doFlash("drum", "warn");
+      // D16 P2: anything but a PAUSE asks right away — stop roasting (the default, already in force) or keep roasting.
+      const p = r.body.problem;
+      if (p && p.kind !== "PAUSE") setAfterReport({ id: p.id, kind: p.kind, reason: p.reason, at: p.reportedAt, choice: null });
+    }
     await load();
   }, [handle, problem, roasterId, drum, load, doFlash, t]);
+
+  /** D16 P2 «تأكيد»: «متابعة التحميص» makes the report minor; «إيقاف التحميص» keeps it as it is (blocking). */
+  const confirmAfterReport = useCallback(async () => {
+    if (!afterReport) return;
+    if (!afterReport.choice) { setErr(t("chooseFirst")); return; }
+    if (afterReport.choice === "keep") {
+      const r = await handle("drum", () => postJson(`${V2}/roasters/${roasterId}/problems/${afterReport.id}/mode`, { blocking: false }));
+      if (!r?.ok) { await load(); return; }
+    }
+    setAfterReport(null);
+    await load();
+  }, [afterReport, handle, roasterId, load, t]);
 
   const resume = useCallback(async () => {
     if (!floor?.openProblem) return;
     await handle("drum", () => postJson(`${V2}/roasters/${roasterId}/problems/${floor.openProblem!.id}/resume`, {}));
     await load();
   }, [handle, floor, roasterId, load]);
+
+  /** Gate M1 (safety): anyone at the roaster turns a minor report back into «إيقاف التحميص» (audited on the server). */
+  const stopRoasting = useCallback(async () => {
+    if (!floor?.openProblem) return;
+    const r = await handle("drum", () => postJson(`${V2}/roasters/${roasterId}/problems/${floor.openProblem!.id}/mode`, { blocking: true }));
+    if (r?.ok) { doFlash("drum", "warn"); setNotice(t("stopNowDone")); }
+    await load();
+  }, [handle, floor, roasterId, load, doFlash, t]);
+
+  /** D16 P6 «إنهاء البلاغ»: the supervisor writes the cause and the fix (both required). */
+  const endProblem = useCallback(async () => {
+    if (!floor?.openProblem || !ending) return;
+    if (!ending.cause.trim() || !ending.fix.trim()) { setErr(t("endNeedBoth")); return; }
+    const r = await handle("drum", () => postJson(`${V2}/roasters/${roasterId}/problems/${floor.openProblem!.id}/resume`, { cause: ending.cause, fix: ending.fix }));
+    if (r?.ok) { setEnding(null); doFlash("drum", "ok"); }
+    await load();
+  }, [handle, floor, ending, roasterId, load, doFlash, t]);
 
   // Scanner (HID keyboard wedge): the code, then Enter. A bucket of staging is confirmed as the next one; anything else
   // opens the grid of the remaining bucket numbers (R8).
@@ -421,7 +475,9 @@ export function StationV2({ roasterIds, roasterNames, otherRoasters = [], onPick
   const flashCls = (col: NonNullable<Flash>["col"]) => (flash && flash.col === col ? ` rv2-flash-${flash.tone}` : "");
   const drumColor = drum ? colorOf(drum.bucket) : nextBucket ? colorOf(nextBucket) : colorOf(null);
   const gridBuckets = prepared.filter((b) => !nextBucket?.productId || b.productId === nextBucket.productId).sort((a, b) => a.seqNo - b.seqNo);
-  const problemBlocks = !!floor.openProblem;
+  const problemBlocks = !!floor.openProblem?.blocking;
+  const reasonText = (r: string) => ((REASONS as readonly string[]).includes(r) ? t(`r${r}` as V2Key) : r);
+  const kindText = (k: string) => (k === "MALFUNCTION" ? t("kindMalfunction") : t("kindPause"));
   /** The writes chained after `op` (a drop's charge), deleted with it. */
   const dependentsOf = (op: QueuedOp) => {
     const keys = new Set([op.key]);
@@ -497,17 +553,26 @@ export function StationV2({ roasterIds, roasterNames, otherRoasters = [], onPick
       {!online && (
         <div className="rv2-offline" role="status" data-testid="rv2-offline">{t("offlineBanner", { n: pending })}</div>
       )}
-      {floor.openProblem && (
-        <div className="rv2-problem" role="alert" data-testid="rv2-problem-banner">
-          <div>
-            <b>{t("problemOpen", { kind: floor.openProblem.kind === "MALFUNCTION" ? t("kindMalfunction") : t("kindPause"), min: floor.openProblem.ageMinutes })}</b>
-            <small>{t("problemReason", { reason: (REASONS as readonly string[]).includes(floor.openProblem.reason) ? t(`r${floor.openProblem.reason}` as V2Key) : floor.openProblem.reason, at: time(floor.openProblem.reportedAt) })}{floor.openProblem.kind === "MALFUNCTION" ? t("supervisorCloses") : ""}</small>
+      {floor.openProblem && (() => {
+        const p = floor.openProblem!;
+        const minor = !p.blocking;
+        // D16: a PAUSE is resumed by the roaster (as before); anything else is ended by a supervisor, with cause and fix.
+        const action = p.kind === "PAUSE"
+          ? <button className="rv2-mid" onClick={() => void resume()} data-testid="rv2-resume">{t("resume")}</button>
+          : floor.canResolve
+            ? <button className="rv2-mid rv2-end" onClick={() => setEnding({ cause: "", fix: "" })} data-testid="rv2-end-problem">{t("endProblem")}</button>
+            : <span className="rv2-wait" data-testid="rv2-await-supervisor">{t("awaitSupervisor")}</span>;
+        return (
+          <div className={`rv2-problem${minor ? " rv2-problem-minor" : ""}`} role="alert" data-testid="rv2-problem-banner" data-blocking={p.blocking ? "1" : "0"}>
+            <div>
+              <b>{minor ? t("problemMinorOpen", { kind: kindText(p.kind), min: p.ageMinutes }) : t("problemOpen", { kind: kindText(p.kind), min: p.ageMinutes })}</b>
+              <small>{minor ? t("problemMinorSub", { reason: reasonText(p.reason), at: time(p.reportedAt), n: p.markedRuns }) : t("problemReason", { reason: reasonText(p.reason), at: time(p.reportedAt) })}{p.kind === "PAUSE" ? "" : floor.canResolve ? t("youMayEnd") : t("supervisorCloses")}</small>
+            </div>
+            {minor ? <button className="rv2-mid rv2-stop" onClick={() => void stopRoasting()} disabled={busy} data-testid="rv2-stop-roasting">{t("stopNow")}</button> : null}
+            {action}
           </div>
-          {floor.openProblem.kind === "MALFUNCTION" && !isSupervisor
-            ? <span className="rv2-wait" data-testid="rv2-await-supervisor">{t("awaitSupervisor")}</span>
-            : <button className="rv2-mid" onClick={() => void resume()} data-testid="rv2-resume">{t("resume")}</button>}
-        </div>
-      )}
+        );
+      })()}
       {authLost && (
         <div className="rv2-session" role="alert" data-testid="rv2-session-lost">
           <span>{t("sessionLost", { n: mineLeft })}</span>
@@ -516,6 +581,7 @@ export function StationV2({ roasterIds, roasterNames, otherRoasters = [], onPick
       )}
       {err && <div className="rv2-err" role="alert" data-testid="rv2-error" onClick={() => setErr("")}>{err}</div>}
       {notice && !err && <div className="rv2-notice" role="status" data-testid="rv2-notice" onClick={() => setNotice("")}>{notice}</div>}
+      {minorToast && <div className="rv2-notice rv2-notice-minor" role="status" aria-live="polite" data-testid="rv2-minor-toast" onClick={() => setMinorToast("")}>{minorToast}</div>}
 
       <main className="rv2-cols">
         {/* ── 🔥 الدرام ── */}
@@ -748,6 +814,47 @@ export function StationV2({ roasterIds, roasterNames, otherRoasters = [], onPick
             <div className="rv2-row">
               <button className="rv2-big" onClick={() => void sendProblem()} disabled={busy} data-testid="rv2-problem-send">{t("send")}</button>
               <button className="rv2-mid" onClick={() => setProblemOpen(false)}>{t("cancel")}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* D16 P2 — right after «إرسال»: stop or keep roasting. */}
+      {afterReport && (
+        <div className="rv2-modal" role="dialog" aria-modal data-testid="rv2-after-report">
+          <div className="rv2-sheet">
+            <h2>{t("afterReportTitle")}</h2>
+            <small>{t("afterReportSub", { kind: kindText(afterReport.kind), reason: reasonText(afterReport.reason), at: time(afterReport.at) })}</small>
+            <div className="rv2-choices">
+              <button className={afterReport.choice === "stop" ? "on stop" : "stop"} aria-pressed={afterReport.choice === "stop"} onClick={() => setAfterReport({ ...afterReport, choice: "stop" })} data-testid="rv2-choice-stop">
+                <b>{t("stopRoasting")}</b><span>{t("stopRoastingBody")}</span>
+              </button>
+              <button className={afterReport.choice === "keep" ? "on" : ""} aria-pressed={afterReport.choice === "keep"} onClick={() => setAfterReport({ ...afterReport, choice: "keep" })} data-testid="rv2-choice-keep">
+                <b>{t("keepRoasting")}</b><span>{t("keepRoastingBody")}</span>
+              </button>
+            </div>
+            <small>{t("afterReportNote")}</small>
+            <button className={`rv2-big${afterReport.choice ? "" : " rv2-disabled"}`} onClick={() => void confirmAfterReport()} disabled={busy || !afterReport.choice} data-testid="rv2-after-confirm">
+              {afterReport.choice === "keep" ? t("confirmKeep") : t("confirmStop")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* D16 P6 — ending the report: what the problem was, and the fix (both required). */}
+      {ending && floor.openProblem && (
+        <div className="rv2-modal rv2-modal-center" role="dialog" aria-modal data-testid="rv2-end-sheet">
+          <div className="rv2-sheet">
+            <h2>{t("endTitle")}</h2>
+            <small>{t("endSub", { kind: kindText(floor.openProblem.kind), reason: reasonText(floor.openProblem.reason), at: time(floor.openProblem.reportedAt), min: floor.openProblem.ageMinutes, by: floor.openProblem.reportedByName ?? "" })}</small>
+            <label htmlFor="rv2-end-cause">{t("endCause")}</label>
+            <textarea id="rv2-end-cause" className="rv2-text" rows={3} maxLength={500} placeholder={t("endCausePh")} value={ending.cause} onChange={(e) => setEnding({ ...ending, cause: e.target.value })} data-testid="rv2-end-cause" />
+            <label htmlFor="rv2-end-fix">{t("endFix")}</label>
+            <textarea id="rv2-end-fix" className="rv2-text" rows={3} maxLength={500} placeholder={t("endFixPh")} value={ending.fix} onChange={(e) => setEnding({ ...ending, fix: e.target.value })} data-testid="rv2-end-fix" />
+            <small>{t("endHelp")}</small>
+            <div className="rv2-row">
+              <button className={`rv2-big${ending.cause.trim() && ending.fix.trim() ? "" : " rv2-disabled"}`} onClick={() => void endProblem()} disabled={busy || !ending.cause.trim() || !ending.fix.trim()} data-testid="rv2-end-confirm">{t("endConfirm")}</button>
+              <button className="rv2-mid" onClick={() => setEnding(null)}>{t("back")}</button>
             </div>
           </div>
         </div>

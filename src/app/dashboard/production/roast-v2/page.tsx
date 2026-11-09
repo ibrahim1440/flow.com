@@ -1,10 +1,12 @@
 "use client";
 /**
- * Roasting station v2 — the supervisor's two small tools (D12): the discards waiting for a review (never by the person who
+ * Roasting station v2 — the supervisor's tools (D12): the discards waiting for a review (never by the person who
  * discarded the roast), and a lot correction (cancel-and-re-record with a reason; the lot reversed per component).
+ * D16: «بلاغات المحامص» first (#problems, where the station-problem notification opens).
  */
 import { useCallback, useEffect, useState } from "react";
 import { newRequestKey } from "@/lib/request-key";
+import { RoastProblems } from "./_ui/RoastProblems";
 
 type Discard = { id: string; serial: string; discardedAt: string; discardReason: string; discardValue: string | null; operatorName: string | null; overdue: boolean; bucket: { seqNo: number; barcode: string } };
 const V2 = "/api/station/roasting/v2";
@@ -26,9 +28,10 @@ export default function RoastV2Supervisor() {
     return r.ok ? j : null;
   };
   return (
-    <div dir="rtl" style={{ padding: 24, display: "flex", flexDirection: "column", gap: 20, maxWidth: 900 }} data-testid="rv2-supervisor">
+    <div dir="rtl" style={{ padding: 24, display: "flex", flexDirection: "column", gap: 20, maxWidth: 1100 }} data-testid="rv2-supervisor">
       <h1 style={{ margin: 0, fontSize: 24 }}>محطة التحميص v2 · المشرف</h1>
       {msg && <div role="status" style={{ padding: 10, borderRadius: 8, background: "var(--surface-subtle,#fbf9f4)" }}>{msg}</div>}
+      <RoastProblems />
       <section>
         <h2 style={{ fontSize: 18 }}>تحميصات تالفة بانتظار المراجعة</h2>
         {rows === null ? <p>…</p> : rows.length === 0 ? <p>لا تالف بانتظار المراجعة.</p> : (

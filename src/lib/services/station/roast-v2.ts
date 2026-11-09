@@ -47,6 +47,8 @@ import { hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 import { assertAdminRoleGate } from "@/lib/auth-server";
 import { STAGING_LOCATION_ID } from "@/lib/inventory/locations";
 import { lossVerdict } from "@/lib/station/shared";
+import { PROBLEM_TEXT_MAX, chargeBlockedBy, endNeedsTexts, maySetProblemMode, mayEndProblem, problemText } from "@/lib/station/v2/problem";
+import { audit } from "@/lib/hr/core";
 import { notify } from "@/lib/notifications/notify";
 import { isAssignedOperator } from "@/lib/services/roaster-operators";
 import { emitAutomationEvent } from "@/lib/automation/emit";
@@ -64,7 +66,8 @@ import { assertLocationHas, productionLocation, setStockLocation } from "@/lib/s
 
 type Tx = Prisma.TransactionClient;
 /** `stationRoasterId`: a paired station device works on its own roaster only (every floor action checks it). */
-export type V2Actor = { id: string; name: string; role: string; permissions: Permissions; sessionId?: string; authTime?: Date | string; stationRoasterId?: string | null };
+/** `supervisor`: the station assignment's «مشرف» flag on a paired device (D16: a report supervisor); absent at the desk. */
+export type V2Actor = { id: string; name: string; role: string; permissions: Permissions; sessionId?: string; authTime?: Date | string; stationRoasterId?: string | null; supervisor?: boolean };
 
 /** More than this many dropped, unweighed roasts on a roaster → the next charge is refused. */
 export const UNWEIGHED_LIMIT = 2;
@@ -331,8 +334,10 @@ export async function chargeRun(actor: V2Actor, body: Record<string, unknown>, k
     }
     scoped(actor, roasterId);
     const roaster = await v2Roaster(tx, roasterId);
-    const problem = await tx.roastStationEvent.findFirst({ where: { roasterId, status: "OPEN" }, select: { id: true, kind: true } });
-    if (problem) throw fail(409, "ROASTER_PROBLEM_OPEN", "يوجد بلاغ مفتوح على الحمّاصة؛ لا شحن حتى يُنهى.", "A problem report is open on this roaster; no charge until it is ended.", { problemId: problem.id, kind: problem.kind });
+    // D16: an open BLOCKING report refuses the charge; a minor one lets it go and the roast carries its mark.
+    const problem = await tx.roastStationEvent.findFirst({ where: { roasterId, status: "OPEN" }, select: { id: true, kind: true, blocking: true, reason: true, reportedAt: true } });
+    if (chargeBlockedBy(problem)) throw fail(409, "ROASTER_PROBLEM_OPEN", "يوجد بلاغ مفتوح على الحمّاصة؛ لا شحن حتى يُنهى.", "A problem report is open on this roaster; no charge until it is ended.", { problemId: problem!.id, kind: problem!.kind });
+    const minor = problem && !problem.blocking ? problem : null;
     const inDrum = await tx.roastRun.findFirst({ where: { roasterId, status: "CHARGED" }, select: { serial: true } });
     if (inDrum) throw fail(409, "DRUM_BUSY", `في الدرام تحميصة ${inDrum.serial} لم تُفرَّغ بعد.`, `Roast ${inDrum.serial} is still in the drum.`, { serial: inDrum.serial });
     const unweighed = await tx.roastRun.count({ where: { roasterId, status: "DROPPED" } });
@@ -379,12 +384,15 @@ export async function chargeRun(actor: V2Actor, body: Record<string, unknown>, k
       data: {
         serial, bucketId: b.id, roasterId, productId, operatorId: actor.id, operatorName: actor.name, greenKg: b.actualKg, status: "CHARGED", chargedAt,
         scheduledSlotId: slotId, profile, capacityAck: check.ack?.direction ?? null, adminBypass: check.bypass, chargeKey: key,
+        problemId: minor?.id ?? null,
       },
       include: RUN_VIEW,
     });
     await tx.greenBucket.update({ where: { id: b.id }, data: { status: "CHARGED" } });
     if (slot && slot.status === "PLANNED") await tx.scheduledSlot.update({ where: { id: slot.id }, data: { status: "IN_PROGRESS", startedAt: new Date(), startedById: actor.id, updatedById: actor.id } });
-    return { ...run, roaster: { id: roaster.id, name: roaster.name }, replayed: false };
+    // The station's toast (D16 P4, owner option 2): the mark and how many roasts it now carries.
+    const minorProblem = minor ? { id: minor.id, kind: minor.kind, reason: minor.reason, reportedAt: minor.reportedAt, markedRuns: await tx.roastRun.count({ where: { problemId: minor.id, status: { not: "UNDONE" } } }) } : null;
+    return { ...run, roaster: { id: roaster.id, name: roaster.name }, minorProblem, replayed: false };
   }, TX_OPTS);
 }
 
@@ -1042,10 +1050,49 @@ export async function reportProblemV2(actor: V2Actor, roasterId: string, body: R
   }, TX_OPTS);
 }
 
-/** «استئناف»: ends an OPEN problem. A MALFUNCTION is ended by a supervisor (manage_roasters / manage_schedule); a PAUSE by the operator too. */
+/**
+ * D16 P2 — right after «إرسال»: «إيقاف التحميص» (blocking, the default of every new report) or «متابعة التحميص · مشكلة
+ * بسيطة» (blocking = false: charging goes on, each roast carries the mark). To minor: the reporter or a supervisor, never a
+ * PAUSE (CHECK). Back to «إيقاف التحميص» (gate M1, safety): anyone at the roaster — the minor banner offers it. Every
+ * change is audited (ROAST_PROBLEM_STOPPED / ROAST_PROBLEM_MINOR). Setting the same value again is a no-op (safe to retry).
+ */
+export async function setProblemModeV2(actor: V2Actor, roasterId: string, problemId: string, body: Record<string, unknown>, keyRaw: unknown) {
+  requireKey(keyRaw);
+  if (typeof body.blocking !== "boolean") throw fail(400, "PROBLEM_MODE_REQUIRED", "اختر: إيقاف التحميص أو متابعته.", "Choose: stop roasting or keep roasting.");
+  const blocking = body.blocking;
+  scoped(actor, roasterId);
+  return prisma.$transaction(async (tx) => {
+    await setAuditContext(tx, auditCtx(actor, blocking ? "problem: stop roasting" : "problem: keep roasting (minor)"));
+    await roasterLock(tx, roasterId);
+    const p = await tx.roastStationEvent.findUnique({ where: { id: problemId } });
+    if (!p || p.roasterId !== roasterId) throw fail(404, "PROBLEM_NOT_FOUND", "البلاغ غير موجود على هذه الحمّاصة.", "Problem not found on this roaster.");
+    if (p.status !== "OPEN") throw fail(409, "PROBLEM_NOT_OPEN", "البلاغ أُنهي.", "The report was ended.");
+    if (p.kind === "PAUSE" && !blocking) throw fail(409, "PAUSE_ALWAYS_STOPS", "الإيقاف المؤقت يوقف التحميص دائمًا.", "A pause always stops roasting.");
+    if (!maySetProblemMode(actor, p, blocking)) throw fail(403, "SUPERVISOR_REQUIRED", "يحوّل البلاغ إلى بسيط من أبلغ عنه أو المشرف.", "Only the reporter or a supervisor makes a report minor.");
+    if (p.blocking === blocking) return { problem: p, replayed: true };
+    const out = await tx.roastStationEvent.update({ where: { id: p.id }, data: { blocking } });
+    await audit(tx, {
+      action: blocking ? "ROAST_PROBLEM_STOPPED" : "ROAST_PROBLEM_MINOR", entityType: "RoastStationEvent", entityId: p.id, actorId: actor.id,
+      before: { blocking: p.blocking }, after: { blocking, roasterId, kind: p.kind, reason: p.reason, byName: actor.name },
+    });
+    return { problem: out, replayed: false };
+  }, TX_OPTS);
+}
+
+/**
+ * «إنهاء البلاغ» / «استئناف»: ends an OPEN report. A PAUSE is ended by the roaster too (as before); anything else by a
+ * supervisor (D16, owner decision 1: the station «مشرف» flag, manage_roasters, manage_schedule or the administrator), who
+ * writes «إيش كانت المشكلة؟» (cause) and «إيش الحل؟» (fix) — both required, ≤ 500 characters. The same call serves the
+ * station and the ERP «بلاغات المحامص» page.
+ */
 export async function resumeProblemV2(actor: V2Actor, roasterId: string, problemId: string, body: Record<string, unknown>, keyRaw: unknown) {
   const key = requireKey(keyRaw);
   const note = textOf(body.note, 1, 300);
+  for (const f of ["cause", "fix"] as const) {
+    if (typeof body[f] === "string" && (body[f] as string).trim().length > PROBLEM_TEXT_MAX) throw fail(400, "PROBLEM_TEXT_TOO_LONG", `النص أطول من ${PROBLEM_TEXT_MAX} حرف.`, `The text is longer than ${PROBLEM_TEXT_MAX} characters.`, { field: f });
+  }
+  const cause = problemText(body.cause);
+  const fix = problemText(body.fix);
   scoped(actor, roasterId);
   return prisma.$transaction(async (tx) => {
     await setAuditContext(tx, auditCtx(actor, "problem resumed"));
@@ -1058,12 +1105,39 @@ export async function resumeProblemV2(actor: V2Actor, roasterId: string, problem
     const p = await tx.roastStationEvent.findUnique({ where: { id: problemId } });
     if (!p || p.roasterId !== roasterId) throw fail(404, "PROBLEM_NOT_FOUND", "البلاغ غير موجود على هذه الحمّاصة.", "Problem not found on this roaster.");
     if (p.status === "RESOLVED") return { problem: p, replayed: true };
-    if (p.kind === "MALFUNCTION" && !hasSubPrivilege(actor.permissions, "production", "manage_roasters") && !hasSubPrivilege(actor.permissions, "production", "manage_schedule")) {
-      throw fail(403, "SUPERVISOR_REQUIRED", "يُنهي بلاغ العطل المشرف.", "A malfunction is ended by a supervisor.");
+    if (!mayEndProblem(actor, p.kind)) {
+      throw fail(403, "SUPERVISOR_REQUIRED", "يُنهي هذا البلاغ المشرف.", "This report is ended by a supervisor.");
     }
-    const out = await tx.roastStationEvent.update({ where: { id: p.id }, data: { status: "RESOLVED", resolvedAt: new Date(), resolvedById: actor.id, resolveKey: key, resolveNote: note } });
+    if (endNeedsTexts(p.kind) && (!cause || !fix)) {
+      throw fail(400, "PROBLEM_CAUSE_FIX_REQUIRED", "اكتب إيش كانت المشكلة وإيش الحل.", "Write what the problem was and how it was fixed.", { missing: [!cause ? "cause" : null, !fix ? "fix" : null].filter(Boolean) });
+    }
+    const out = await tx.roastStationEvent.update({ where: { id: p.id }, data: { status: "RESOLVED", resolvedAt: new Date(), resolvedById: actor.id, resolveKey: key, resolveNote: note, resolveCause: cause, resolveFix: fix } });
     return { problem: out, replayed: false };
   }, TX_OPTS);
+}
+
+/**
+ * D16 E1 «بلاغات المحامص» (ERP): the open reports first (oldest first), then the ended ones of the last 30 days (newest
+ * first, at most 50) — with the roasts each minor report marked, and who ended it with the cause and the fix.
+ */
+export async function listProblemsV2(now = new Date()) {
+  const select = {
+    id: true, roasterId: true, kind: true, reason: true, note: true, blocking: true, status: true, roasterState: true,
+    reportedById: true, reportedByName: true, reportedAt: true, resolvedAt: true, resolvedById: true, resolveNote: true, resolveCause: true, resolveFix: true,
+    roaster: { select: { id: true, name: true, manufacturerModel: true } },
+    run: { select: { serial: true } },
+    markedRuns: { where: { status: { not: "UNDONE" } }, orderBy: { chargedAt: "asc" as const }, select: { id: true, serial: true } },
+  } satisfies Prisma.RoastStationEventSelect;
+  const [open, closed] = await Promise.all([
+    prisma.roastStationEvent.findMany({ where: { status: "OPEN" }, orderBy: { reportedAt: "asc" }, select }),
+    prisma.roastStationEvent.findMany({ where: { status: "RESOLVED", resolvedAt: { gte: new Date(+now - 30 * 86_400_000) } }, orderBy: { resolvedAt: "desc" }, take: 50, select }),
+  ]);
+  const ids = [...new Set(closed.map((p) => p.resolvedById).filter((x): x is string => !!x))];
+  const names = new Map((ids.length ? await prisma.employee.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }) : []).map((e) => [e.id, e.name]));
+  const view = (p: (typeof open)[number]) => ({
+    ...p, ageMinutes: Math.floor((+(p.resolvedAt ?? now) - +p.reportedAt) / 60_000), resolvedByName: p.resolvedById ? names.get(p.resolvedById) ?? null : null,
+  });
+  return { open: open.map(view), closed: closed.map(view), serverTime: now.toISOString() };
 }
 
 // ─── The station screens (D12): one read for the floor, the prep plan and a session's buckets ──────────
@@ -1122,11 +1196,11 @@ export async function floorView(roasterId: string, now = new Date()) {
     dropped: dropped.map((r) => ({ ...r, basket: baskets.find((b) => b.id === r.basketId) ?? null })),
     baskets: baskets.map((b) => ({ ...b, runIds: dropped.filter((r) => r.basketId === b.id).map((r) => r.id) })).filter((b) => b.runIds.length),
     unweighed: dropped.length,
-    openProblem: problem ? { ...problem, ageMinutes: Math.floor((+now - +problem.reportedAt) / 60_000) } : null,
+    openProblem: problem ? { ...problem, ageMinutes: Math.floor((+now - +problem.reportedAt) / 60_000), markedRuns: problem.blocking ? 0 : await prisma.roastRun.count({ where: { problemId: problem.id, status: { not: "UNDONE" } } }) } : null,
     prepared, next,
     plan: coffee ? { productId: coffee, product: sameCoffee[0]?.product ?? drum?.product ?? (await prisma.coffeeProduct.findUnique({ where: { id: coffee }, select: productLite })), remaining: sameCoffee.length, totalKg: num(planBuckets?._sum.actualKg ?? 0) } : null,
     undoable,
-    canCharge: !drum && !problem && dropped.length <= UNWEIGHED_LIMIT && roaster.stationMode === "V2",
+    canCharge: !drum && !chargeBlockedBy(problem) && dropped.length <= UNWEIGHED_LIMIT && roaster.stationMode === "V2",
     serverTime: now.toISOString(),
   };
 }
@@ -1224,7 +1298,7 @@ export async function roasterState(roasterId: string) {
     prisma.roastStationEvent.findFirst({ where: { roasterId, status: "OPEN" } }),
   ]);
   const openProblem = problem ? { ...problem, ageMinutes: Math.floor((Date.now() - +problem.reportedAt) / 60_000) } : null;
-  return { roaster, drum, baskets, unweighed, openProblem, canCharge: !drum && !problem && unweighed <= UNWEIGHED_LIMIT && roaster.stationMode === "V2" };
+  return { roaster, drum, baskets, unweighed, openProblem, canCharge: !drum && !chargeBlockedBy(problem) && unweighed <= UNWEIGHED_LIMIT && roaster.stationMode === "V2" };
 }
 
 /** Switch a roaster between the V1 and V2 stations. Back to V1 only with nothing open on it. */

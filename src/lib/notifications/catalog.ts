@@ -674,7 +674,7 @@ export const EVENTS: NotificationEventDef[] = [
     render: (f) => ({
       titleAr: `مشكلة في محطة التحميص: ${s(f.kindAr)}`, titleEn: `Roasting station problem: ${s(f.kindEn)}`,
       bodyAr: [`أبلغ ${s(f.byName)}`, s(f.reason)].filter(Boolean).join(" · "), bodyEn: [`Reported by ${s(f.byName)}`, s(f.reason)].filter(Boolean).join(" · "),
-      link: "/dashboard/production",
+      link: "/dashboard/production/roast-v2#problems", // D16: «بلاغات المحامص»
     }),
   },
   {

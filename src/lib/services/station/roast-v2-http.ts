@@ -29,8 +29,10 @@ export function v2Supervisor(user: GuardUser, sub: "manage_schedule" | "manage_r
   return { ctx: { actor: { ...actorOf(user), stationRoasterId }, stationRoasterId }, error: null };
 }
 
-function actorOf(user: GuardUser): V2Actor {
-  return { id: user.id, name: user.name, role: user.role, permissions: user.permissions, sessionId: user.sessionId ?? undefined, authTime: user.authTime };
+export function actorOf(user: GuardUser): V2Actor {
+  // D16: the station assignment's «مشرف» flag (a paired device's StationActor) makes a report supervisor.
+  const supervisor = (user as { supervisor?: unknown }).supervisor === true;
+  return { id: user.id, name: user.name, role: user.role, permissions: user.permissions, sessionId: user.sessionId ?? undefined, authTime: user.authTime, supervisor };
 }
 
 /** The Idempotency-Key header (or null — the service refuses a missing key where it needs one). */
