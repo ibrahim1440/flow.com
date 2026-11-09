@@ -166,12 +166,13 @@ export async function POST(request: Request) {
     });
     const strong = candidates.filter((c) => c.strong);
     // D17 (Abu Fahd): a shop met on a field round may already be a CUSTOMER — the same phone (normalised) stops the add
-    // until confirmed. A customer outside the caller's book is reported without its name or id.
+    // until confirmed. A customer outside the caller's book is reported without its name or id. The expression is EXACTLY
+    // the one of "Customer_phone_last9_idx" (20261227090000) so the lookup uses the index; phoneKey is already the last 9 digits.
     const phoneKey = fieldRoundItemId ? normalizePhone(b.phone as string | null) : null;
     if (phoneKey && b.acknowledgeDuplicate !== true) {
       const hits = await prisma.$queryRaw<{ id: string; name: string; nameAr: string | null }[]>`
         SELECT id, name, "nameAr" FROM "Customer"
-         WHERE phone IS NOT NULL AND right(regexp_replace(phone, '[^0-9]', '', 'g'), 9) = right(${phoneKey}, 9) LIMIT 5`;
+         WHERE "phone" IS NOT NULL AND right(regexp_replace("phone", '[^0-9]', '', 'g'), 9) = ${phoneKey} LIMIT 5`;
       if (hits.length) {
         const customers = await Promise.all(hits.map(async (c) => ((await customerInScope(user, c.id)) ? { id: c.id, name: c.nameAr ?? c.name } : { id: null, name: null })));
         return NextResponse.json({ error: "A customer with this phone number already exists.", customers, duplicates: strong }, { status: 409 });
