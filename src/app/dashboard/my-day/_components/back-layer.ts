@@ -16,13 +16,18 @@ const LIVE = new Set<string>();
 type LayerState = { kpLayer?: string; kpDepth?: number } & Record<string, unknown>;
 const current = () => (typeof window === "undefined" ? null : (window.history.state as LayerState | null));
 
-export function useBackLayer(depth: number, onBack: () => void, opts: { cleanUrl?: string } = {}) {
+/**
+ * `opts.guard` (D18, Abu Fahd 3): asked before Back closes — false keeps the sheet open (its history entry is put back).
+ */
+export function useBackLayer(depth: number, onBack: () => void, opts: { cleanUrl?: string; guard?: () => boolean } = {}) {
   // Unique per sheet instance and session: React's useId repeats across pages (the stale-entry guard keys on it).
   const reactId = useId();
   const [id] = useState(() => `${reactId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
   const pushed = useRef(0);
   const ignore = useRef(0);
   const cb = useRef(onBack);
+  const guard = useRef(opts.guard);
+  useEffect(() => { guard.current = opts.guard; }, [opts.guard]);
   const cleanUrl = useRef(opts.cleanUrl);
   const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ours = () => current()?.kpLayer === id;
@@ -55,6 +60,11 @@ export function useBackLayer(depth: number, onBack: () => void, opts: { cleanUrl
       if (ignore.current > 0) { ignore.current -= 1; return; }
       if (pushed.current <= 0) return;
       pushed.current -= 1;
+      if (guard.current && !guard.current()) {
+        pushed.current += 1;
+        window.history.pushState({ ...(current() ?? {}), kpLayer: id, kpDepth: pushed.current }, "");
+        return;
+      }
       cb.current();
     };
     window.addEventListener("popstate", onPop);

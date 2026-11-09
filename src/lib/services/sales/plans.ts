@@ -326,6 +326,8 @@ export async function loadPlan(db: Db, employeeId: string, period: Period, start
 export class PlanError extends Error {
   /** `code`: a stable name the client may act on (e.g. PAST_DAY, TWIN). */
   constructor(public status: number, public ar: string, en: string, public code?: string) { super(en); }
+  /** D18 gate L1: in a batch, which item was refused (0-based) — the sheet marks that row. */
+  index?: number;
 }
 
 const num = (v: unknown): number | null => {
@@ -599,9 +601,21 @@ export async function addItems(tx: Tx, who: { employeeId: string; actorId: strin
   if (!Array.isArray(inputs) || !inputs.length || inputs.length > 60) throw new PlanError(400, "اختر من 1 إلى 60.", "Choose 1 to 60 items.");
   const added: string[] = [];
   let skipped = 0;
-  for (const it of inputs) {
+  for (const [i, it] of inputs.entries()) {
     try { added.push((await addItem(tx, who, it, today)).id); }
-    catch (e) { if (e instanceof PlanError && e.status === 409) { skipped++; continue; } throw e; }
+    catch (e) {
+      if (e instanceof PlanError && e.status === 409) { skipped++; continue; }
+      // D18 gate L1: say which one — its number and, for a customer's, the customer — so the sheet can mark that row.
+      if (e instanceof PlanError) {
+        const cid = it && typeof it === "object" && typeof (it as Record<string, unknown>).customerId === "string" ? (it as Record<string, unknown>).customerId as string : null;
+        const c = cid ? await tx.customer.findUnique({ where: { id: cid }, select: { name: true, nameAr: true } }) : null;
+        const name = c ? c.nameAr ?? c.name : null;
+        const out = new PlanError(e.status, `السطر ${i + 1}${name ? ` (${name})` : ""}: ${e.ar}`, `Row ${i + 1}${name ? ` (${name})` : ""}: ${e.message}`, e.code);
+        out.index = i;
+        throw out;
+      }
+      throw e;
+    }
   }
   return { added, skipped };
 }
@@ -619,7 +633,7 @@ export async function moveItem(tx: Tx, id: string, plannedDay: string | null, to
   if (plannedDay !== null && !ISO.test(plannedDay)) throw new PlanError(400, "اليوم غير صحيح.", "Bad day.");
   if (plannedDay !== null && plannedDay < today) throw new PlanError(400, "هذا اليوم فات. اختر اليوم أو بعده.", "That day has passed. Choose today or later.", "PAST_DAY");
   const it = await tx.salesPlanItem.findUnique({ where: { id }, select: { employeeId: true, periodStart: true, kind: true, metric: true, customerId: true, source: true, plannedDay: true, plannedTime: true,
-    appointmentId: true, durationMin: true, appointment: { select: { organizerId: true } } } });
+    appointmentId: true, durationMin: true, recurrenceId: true, appointment: { select: { organizerId: true } } } });
   if (!it || it.kind === "GOAL") throw new PlanError(400, "ما يتأجّل هذا الشي.", "This item cannot be moved.");
   // D17: a meeting someone else organised moves only in their calendar; an invited meeting of the rep's keeps a day and time.
   if (it.appointment && it.appointment.organizerId !== it.employeeId) throw new PlanError(400, "هذا الاجتماع منظّمه غيرك — يتغيّر من عنده.", "Someone else organised this meeting.", "NOT_ORGANIZER");
@@ -651,7 +665,10 @@ export async function moveItem(tx: Tx, id: string, plannedDay: string | null, to
       return { merged: true, keptId: twin.id, removedId: id };
     }
   }
-  await tx.salesPlanItem.update({ where: { id }, data: { plannedDay: dayValue, plannedTime, periodStart } });
+  // D18 gate L2: a weekly item moved off its day leaves the rule — the rule's later edits (dropAhead) no longer take it
+  // away; its week stays claimed, so that week is not generated again.
+  const detach = it.recurrenceId && !sameDay ? { recurrenceId: null } : {};
+  await tx.salesPlanItem.update({ where: { id }, data: { plannedDay: dayValue, plannedTime, periodStart, ...detach } });
   if (it.appointmentId && plannedDay && plannedTime) {
     const { movePlanMeeting } = await import("@/lib/workspace/server/appointments");
     const w = meetingWindow(plannedDay, plannedTime, it.durationMin);
@@ -760,7 +777,13 @@ async function dropAhead(tx: Tx, rule: { id: string; employeeId: string }, today
     for (const i of items) if (i.appointmentId) await cancelPlanMeeting(tx, rule.employeeId, i.appointmentId, new Date(), { silent: true });
   }
   await tx.salesPlanItem.deleteMany({ where: { id: { in: items.map((i) => i.id) } } });
-  await tx.salesPlanRecurrenceWeek.deleteMany({ where: { recurrenceId: rule.id, weekStart: { gt: after } } });
+  // D18 gate N1: a week whose item the rep moved away (detached, D18 L2) keeps its claim — it is not planned again, or
+  // the plan would hold both the moved item and a new one.
+  const claims = await tx.salesPlanRecurrenceWeek.findMany({ where: { recurrenceId: rule.id, weekStart: { gt: after }, itemId: { not: null } }, select: { itemId: true } });
+  const moved = claims.length
+    ? (await tx.salesPlanItem.findMany({ where: { id: { in: claims.map((c) => c.itemId!) }, OR: [{ recurrenceId: null }, { recurrenceId: { not: rule.id } }] }, select: { id: true } })).map((m) => m.id)
+    : [];
+  await tx.salesPlanRecurrenceWeek.deleteMany({ where: { recurrenceId: rule.id, weekStart: { gt: after }, ...(moved.length ? { OR: [{ itemId: null }, { itemId: { notIn: moved } }] } : {}) } });
 }
 
 async function ownRule(tx: Tx, employeeId: string, id: string) {

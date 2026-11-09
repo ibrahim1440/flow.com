@@ -780,9 +780,54 @@ button.kp-act { cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 
 .kp-intrev > .pl-q { color: var(--kp-sand, #8a673a) }
 @media (max-width: 767.98px) { .kp-sand4 { grid-template-columns: repeat(4, 1fr) } .kp-sand4 > button { font-size: 12px; padding: 10px 2px } }
 @media (prefers-reduced-motion: reduce) { .kp-switch input[role="switch"], .kp-switch input[role="switch"]::after { transition: none } }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --kp-sand: #d1ad7a; --kp-sand-tint: #3a3022 } }
-:root[data-theme="dark"] { --kp-sand: #d1ad7a; --kp-sand-tint: #3a3022 }
+/* D18 (owner's screenshot): the app is light only (components/shell/direction-2.1.css) — its text stays dark on a phone in
+   dark mode, so the sand tokens stay light too (D17 switched only these to dark: a brown card under dark text, unreadable).
+   Sand on its tint 4.51:1, ink on the tint 11.85:1. */
+:root { --kp-sand: #8a673a; --kp-sand-tint: #f6efe6; --kp-sand-ink: #25312b }
+.kp-intsug.on, .kp-intsug.on .kp-pickrow b { color: var(--kp-sand-ink) }
+.kp-intsug.on .kp-pickrow small { color: #5e5446 }
 .kp-leads > li.off { background: var(--status-warning-tint) } .kp-leads > li.off small { color: var(--status-warning); font-weight: 600 }
 .kp-chips > button.kp-person { white-space: normal; text-align: start; line-height: 1.3; padding-block: 6px }
 .kp-repbadge { font-size: 12px } .kp-replink { display: inline-flex; align-items: center; gap: 4px; color: var(--kp-sand, #8a673a); font-weight: 700 }
 .kp-repissue { display: flex; align-items: center; gap: 6px; text-decoration: none; font-weight: 600 }
+
+/* ─── D18 «＋» several at once, the wizard's days, «انقل» (owner-approved Figma D18 1965:2) ─────────────────────────── */
+.kp-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 12px; background: var(--surface-subtle) }
+.kp-seg > button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; border: 0; border-radius: 9px; background: transparent; font: inherit; font-size: 14.5px; font-weight: 700; color: var(--text-muted); cursor: pointer }
+.kp-seg > button[aria-selected="true"] { background: var(--surface); color: var(--action-primary); box-shadow: 0 1px 2px rgba(0,0,0,.08) }
+.kp-seg > button.sand[aria-selected="true"] { background: var(--kp-sand); color: #fff }
+.kp-seg > button.sand[aria-selected="true"] .kp-rep { color: #fff }
+.kp-kinds { display: flex; flex-wrap: wrap; gap: 6px }
+.kp-kinds > button { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border-subtle); background: var(--surface); font: inherit; font-size: 14px; font-weight: 600; color: var(--text-primary); cursor: pointer }
+.kp-kinds > button[aria-checked="true"] { background: var(--action-primary); border-color: var(--action-primary); color: #fff }
+.kp-kinds.sand > button[aria-checked="true"] { background: var(--kp-sand); border-color: var(--kp-sand) }
+.pl-cust .kp-box { margin-inline-end: 2px } .pl-cust.on .kp-box { background: var(--action-primary); border-color: var(--action-primary) }
+.kp-basket { display: grid; gap: 8px; padding: 10px; border-radius: 12px; background: var(--surface-subtle) }
+.kp-basket-t { font-size: 13.5px }
+.kp-line { display: grid; gap: 8px; padding: 10px; border-radius: 10px; border: 1px solid var(--border-subtle); background: var(--surface) }
+.kp-line.sand { border-color: color-mix(in srgb, var(--kp-sand) 35%, transparent) }
+.kp-line-h { display: flex; align-items: center; gap: 8px } .kp-line-h > b { flex: 1; font-size: 14.5px }
+.kp-line-when { font-size: 12.5px; font-weight: 600; color: var(--kp-sand); background: var(--kp-sand-tint); padding: 2px 10px; border-radius: 999px }
+.kp-kindsel { min-height: 34px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--action-primary); background: var(--action-primary-tint); color: var(--action-primary); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer }
+.kp-chips.sm > button { min-height: 34px; padding: 0 10px; font-size: 12.5px }
+.kp-line-time { width: 112px; min-height: 34px; padding: 0 8px }
+.kp-queue { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; border-radius: 10px; border: 1.5px dashed var(--kp-sand); background: transparent; color: var(--kp-sand); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer }
+.kp-queue:disabled { opacity: .5; cursor: default }
+.kp-perday > button { display: grid; justify-items: center; padding: 6px 0; min-height: 52px; border-radius: 10px; border: 1px solid var(--border-subtle); background: var(--surface); font: inherit; color: inherit; cursor: pointer }
+.kp-perday > button[aria-pressed="true"] { border: 2px solid var(--action-primary); background: var(--action-primary-tint); color: var(--action-primary) }
+.kp-perday > button[aria-pressed="true"] small { color: var(--action-primary) }
+.kp-focus-hint { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--action-primary-tint); color: var(--action-primary); font-size: 13px; font-weight: 600 }
+.kp-spread.hl { border-color: var(--action-primary) }
+.kp-spread-name { flex: 1; display: inline-flex; align-items: baseline; gap: 4px; min-height: 36px; padding: 0; border: 0; background: transparent; font: inherit; color: inherit; text-align: start }
+.kp-spread-name:not(:disabled) { cursor: pointer } .kp-spread-name small { color: var(--action-primary); font-weight: 700 }
+.kp-more { display: grid; gap: 6px; padding-top: 8px; border-top: 1px dashed var(--border-subtle) }
+.kp-addmore { display: inline-flex; align-items: center; gap: 4px; justify-self: start; min-height: 36px; font-size: 13px; font-weight: 700 }
+.kp-addmore.sand { color: var(--kp-sand) }
+.kp-orgmove { font-size: 12px; color: var(--text-muted); align-self: center }
+.kp-move { display: grid; gap: 10px }
+.kp-move-big { min-height: 48px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); font: inherit; font-size: 15px; font-weight: 700; color: var(--text-primary); cursor: pointer }
+.kp-move-big.p { background: var(--action-primary); border-color: var(--action-primary); color: #fff }
+.kp-move-big.muted { color: var(--text-muted); font-weight: 600 }
+.kp-move-big:disabled, .kp-move .kp-chips > button:disabled { opacity: .55; cursor: default }
+button.kp-act { font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer }
+.kp-line.bad { border: 2px solid var(--status-danger) }

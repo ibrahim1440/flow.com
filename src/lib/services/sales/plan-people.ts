@@ -6,19 +6,40 @@ import { hasSubPrivilege } from "@/lib/auth-shared";
 import { effectivePermissions } from "@/lib/notifications/recipients";
 
 type Db = Pick<PrismaClient | PrismaNS.TransactionClient, "employee" | "$queryRaw">;
+type DbHr = Pick<PrismaClient | PrismaNS.TransactionClient, "employee" | "$queryRaw" | "hrEmployee">;
+/** D18 (Abu Fahd B2): the admin role is the system's owner / test accounts — never «مشرفي» by role alone. */
+const ADMIN_ROLES = new Set(["admin"]);
 export type PlanPerson = { id: string; name: string; role?: "manager" };
 
-/** The active sales supervisors (sales › lead_assign, role defaults included), by name, at most `limit`. */
+/** The active sales supervisors (sales › lead_assign, role defaults included; not the admin role), by name, at most `limit`. */
 export async function salesSupervisors(db: Db, exclude: string, limit = 5): Promise<PlanPerson[]> {
   const rows = await db.employee.findMany({ where: { active: true, id: { not: exclude } }, select: { id: true, name: true, role: true, permissions: true }, orderBy: { name: "asc" } });
   const out: PlanPerson[] = [];
   for (const r of rows) {
+    if (ADMIN_ROLES.has(r.role)) continue;
     let boss = false;
     try { boss = hasSubPrivilege(effectivePermissions(r), "sales", "lead_assign"); } catch { boss = false; }
     if (boss) out.push({ id: r.id, name: r.name, role: "manager" });
     if (out.length >= limit) break;
   }
   return out;
+}
+
+/**
+ * D18 (Abu Fahd B2) — the rep's ACTUAL supervisor, first: the HR manager (whatever the role); else the sales supervisors
+ * by role (sales › lead_assign), the admin role left out. Only the FIRST is «مشرفي»; the others are offered unmarked.
+ * There is no sales team in the data model, so «the rep's team» is the HR line (the HR manager) — without one, the
+ * company's supervisors by name.
+ */
+export async function mySupervisors(db: DbHr, me: string): Promise<{ first: PlanPerson | null; others: PlanPerson[] }> {
+  const hr = await db.hrEmployee.findUnique({ where: { accountId: me }, select: { manager: { select: { accountId: true } } } });
+  const hrId = hr?.manager?.accountId ?? null;
+  if (hrId && hrId !== me) {
+    const e = await db.employee.findFirst({ where: { id: hrId, active: true }, select: { id: true, name: true } });
+    if (e) return { first: { id: e.id, name: e.name, role: "manager" }, others: [] };
+  }
+  const bosses = await salesSupervisors(db, me);
+  return { first: bosses[0] ?? null, others: bosses.slice(1).map((b) => ({ id: b.id, name: b.name })) };
 }
 
 /** `%`, `_` and `\` taken literally in an ILIKE pattern (… ESCAPE '\'). */

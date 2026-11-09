@@ -4,7 +4,7 @@ import { requireModule } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { listRecurrences, riyadhIso } from "@/lib/services/sales/plans";
-import { salesSupervisors, searchPeople } from "@/lib/services/sales/plan-people";
+import { mySupervisors, searchPeople } from "@/lib/services/sales/plan-people";
 
 /** The fixed suggestions of «وش هو؟» for a report (owner decision c: three fixed + the rep's last three). */
 const REPORTS = ["تقرير المبيعات الأسبوعي", "تحديث أسعار المنافسين", "ترتيب ملفات العملاء"];
@@ -34,22 +34,23 @@ export async function GET(request: Request) {
       listRecurrences(prisma, user.id, today),
       prisma.salesPlanItem.findMany({ where: { employeeId: user.id, appointmentId: { not: null }, plannedDay: { gte: new Date(`${today}T00:00:00Z`) } }, select: { appointmentId: true } }),
     ]);
-    // «مشرفي» (Abu Fahd): the HR manager, else the sales supervisors by role.
-    const managerId = me?.manager?.accountId ?? null;
-    const bosses = managerId ? [] : await salesSupervisors(prisma, user.id);
+    // «مشرفي» (Abu Fahd; D18 B2): ONE person — the HR manager, else the first sales supervisor by role (never the admin
+    // role); the other supervisors are offered without the mark.
+    const sup = await mySupervisors(prisma, user.id);
+    const managerId = sup.first?.id ?? null;
+    const bosses = sup.others;
     const teamIds = me?.managerId
       ? (await prisma.hrEmployee.findMany({ where: { managerId: me.managerId, accountId: { not: null } }, select: { accountId: true } })).map((r) => r.accountId!).filter((id) => id !== user.id)
       : [];
     const invited: string[] = [];
-    for (const r of recent) for (const a of r.attendeeIds) if (!invited.includes(a) && a !== managerId) invited.push(a);
+    for (const r of recent) for (const a of r.attendeeIds) if (!invited.includes(a) && a !== managerId && !bosses.some((b) => b.id === a)) invited.push(a);
     const wanted = [...new Set([...(managerId ? [managerId] : []), ...bosses.map((b) => b.id), ...invited.slice(0, 3), ...teamIds])];
     const names = new Map((await prisma.employee.findMany({ where: { id: { in: wanted }, active: true }, select: { id: true, name: true } })).map((e) => [e.id, e.name]));
-    const person = (id: string, role: "manager" | "recent") => (names.has(id) ? { id, name: names.get(id)!, role } : null);
+    const person = (id: string, role?: "manager" | "recent") => (names.has(id) ? { id, name: names.get(id)!, ...(role ? { role } : {}) } : null);
     const uniq = (xs: (string | null)[]) => [...new Set(xs.filter((x): x is string => !!x))];
     return NextResponse.json({
       me: user.id,
-      people: [managerId ? person(managerId, "manager") : null, ...bosses.map((b) => person(b.id, "manager")),
-        ...invited.filter((id) => !bosses.some((b) => b.id === id)).slice(0, 3).map((id) => person(id, "recent"))].filter(Boolean),
+      people: [managerId ? person(managerId, "manager") : null, ...invited.slice(0, 3).map((id) => person(id, "recent")), ...bosses.map((b) => person(b.id))].filter(Boolean),
       team: teamIds.filter((id) => names.has(id)).map((id) => ({ id, name: names.get(id)! })),
       areas: uniq(recent.filter((r) => r.category === "FIELD_ROUND").map((r) => r.area)).slice(0, 3),
       reports: uniq([...REPORTS, ...recent.filter((r) => r.category === "REPORT").map((r) => r.label)]).slice(0, REPORTS.length + 3),
