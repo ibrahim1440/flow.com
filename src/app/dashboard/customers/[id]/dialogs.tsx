@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Dialog, Field } from "@/components/hr/ui";
 import { api } from "../../sales/_components/ui";
 import { OUTCOME_LABELS } from "@/components/d21/labels";
+import { dealLabel, NO_DEAL_LABEL } from "@/lib/sales/deal-label";
 import { ACTIVITY_OUTCOMES } from "@/lib/services/sales/qualification";
 import type { Contact, Customer, Deal } from "./types";
 import { IdentityFields, changedIdentityBody, changedIdentityKeys, identityFrom, legacyRegistrationNote, showsLegacyAddress, type IdentityForm } from "@/components/customers/identity-fields";
@@ -45,7 +46,6 @@ export const SEGMENT_LABELS: Record<string, { ar: string; en: string }> = {
   OTHER: { ar: "أخرى", en: "Other" },
 };
 
-const fmtMoney = (v: string) => Number(v).toLocaleString("en-US", { maximumFractionDigits: 2 });
 
 export const FILE_CATEGORY_LABELS: Record<string, { ar: string; en: string }> = {
   CONTRACT: { ar: "عقد", en: "Contract" },
@@ -182,8 +182,10 @@ const QUICK_OUTCOMES = ["INTERESTED", "NO_ANSWER", "LEFT_MESSAGE", "FOLLOW_UP_RE
  * this one. `customerId` null = a deal with no customer (from «يومي»): it posts to the deal (POST /api/sales/activities).
  * A WhatsApp or an email starts at «تُركت رسالة» — nothing says the customer answered until the rep says so.
  */
-export function ActivityDialog({ ar, customerId, customerName, deals, defaultDealId, initialKind = "CALL", onClose, onDone }: {
-  ar: boolean; customerId: string | null; customerName?: string; deals: Pick<Deal, "id" | "title">[]; defaultDealId?: string | null;
+/** A deal the dialog may link the activity to: what its label is built from (D21). */
+type LinkDeal = Pick<Deal, "id" | "title"> & Partial<Pick<Deal, "amount" | "createdAt" | "stage" | "_count">>;
+export function ActivityDialog({ ar, customerId, customerName, customerNames, deals, defaultDealId, initialKind = "CALL", onClose, onDone }: {
+  ar: boolean; customerId: string | null; customerName?: string; customerNames?: (string | null | undefined)[]; deals: LinkDeal[]; defaultDealId?: string | null;
   initialKind?: ActivityKind; onClose: () => void; onDone: () => void;
 }) {
   const L = (a: string, e: string) => (ar ? a : e);
@@ -274,10 +276,16 @@ export function ActivityDialog({ ar, customerId, customerName, deals, defaultDea
             placeholder={isNote ? "" : L("مثلًا: يبغون كولومبي للشتاء", "e.g. they want a Colombian for winter")} />
         </Field>
         {deals.length > 0 ? (
-          <Field label={L("الصفقة", "Deal")} help={L("اختياري", "Optional")}>
+          // D21 (owner-approved Figma 2000:2, wording أ): a question, and each deal by its type · amount · date (not the
+          // customer's name its generated title repeats); a title someone wrote stays first. The second line is the hint.
+          <Field label={L("تربطه بصفقة؟", "Link it to a deal?")} help={L("إذا الكلام عن عرض أو طلب معيّن، اختره", "If it is about a particular quotation or order, pick it")}>
             <Select className="hr-select" value={dealId} onChange={(e) => setDealId(e.target.value)} data-testid="activity-deal">
-              <option value="">{L("العميل فقط", "The customer only")}</option>
-              {deals.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
+              <option value="">{ar ? NO_DEAL_LABEL.ar : NO_DEAL_LABEL.en}</option>
+              {deals.map((d) => {
+                const l = dealLabel({ title: d.title, amount: d.amount, createdAt: d.createdAt, stageAr: d.stage?.nameAr, stageEn: d.stage?.nameEn, quotes: d._count?.quotes, samples: d._count?.samples },
+                  { lang: ar ? "ar" : "en", customerNames: customerNames ?? [customerName] });
+                return <option key={d.id} value={d.id} data-hint={l.hint || undefined}>{l.label}</option>;
+              })}
             </Select>
           </Field>
         ) : null}
@@ -323,9 +331,10 @@ export function ActivityDialog({ ar, customerId, customerName, deals, defaultDea
 }
 
 /** Several open deals of yours with this customer: which one? One tap, the most recent first. */
-export function DealPickDialog({ ar, purpose, deals, onClose, onPick }: {
+export function DealPickDialog({ ar, purpose, deals, customerNames, onClose, onPick }: {
   ar: boolean; purpose: "quote" | "sample";
-  deals: { id: string; title: string; stageAr: string; stageEn: string; amount: string | null }[];
+  deals: { id: string; title: string; stageAr: string; stageEn: string; amount: string | null; createdAt?: string | null; quotes?: number; samples?: number }[];
+  customerNames?: (string | null | undefined)[];
   onClose: () => void; onPick: (id: string) => void;
 }) {
   const L = (a: string, e: string) => (ar ? a : e);
@@ -334,14 +343,19 @@ export function DealPickDialog({ ar, purpose, deals, onClose, onPick }: {
       sub={L("عندك أكثر من صفقة مفتوحة مع هذا العميل", "You have more than one open deal with this customer")} onClose={onClose} testId="deal-pick-dialog"
       actions={<button type="button" className="hr-btn" onClick={onClose}>{L("إلغاء", "Cancel")}</button>}>
       <ul className="acc-pick" role="list">
-        {deals.map((d, i) => (
-          <li key={d.id}>
-            <button type="button" className={`acc-pick-row${i === 0 ? " first" : ""}`} onClick={() => onPick(d.id)} data-testid={`deal-pick-${d.id}`} autoFocus={i === 0}>
-              <b><bdi>{d.title}</bdi></b>
-              <small>{ar ? d.stageAr : d.stageEn}{d.amount && Number(d.amount) > 0 ? <> · <bdi className="n">{fmtMoney(d.amount)}</bdi> {L("ريال", "SAR")}</> : null}</small>
-            </button>
-          </li>
-        ))}
+        {deals.map((d, i) => {
+          // D21: the same label as «تربطه بصفقة؟» — type · amount · date, the stage below; a written title stays first.
+          const l = dealLabel({ title: d.title, amount: d.amount, createdAt: d.createdAt, stageAr: d.stageAr, stageEn: d.stageEn, quotes: d.quotes, samples: d.samples },
+            { lang: ar ? "ar" : "en", customerNames });
+          return (
+            <li key={d.id}>
+              <button type="button" className={`acc-pick-row${i === 0 ? " first" : ""}`} onClick={() => onPick(d.id)} data-testid={`deal-pick-${d.id}`} autoFocus={i === 0}>
+                <b><bdi>{l.label}</bdi></b>
+                {l.hint ? <small><bdi>{l.hint}</bdi></small> : null}
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </Dialog>
   );

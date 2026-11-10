@@ -11,6 +11,7 @@ import { dayCount, daysFromToday } from "@/components/d21/format";
 import { ACTIVITY_OUTCOMES, qualifies } from "@/lib/services/sales/qualification";
 import { EMPTY_QUALIFICATION, QualificationFields, missingText, qualificationPayload, type QualificationDraft } from "../_components/QualificationFields";
 import type { Target } from "@/lib/services/sales/activity-targets";
+import { dealFacts } from "@/lib/sales/deal-label";
 
 /**
  * «+ تسجيل نشاط» on the follow-ups page (D6.3, `1532:2`): choose the record, then the fields
@@ -48,17 +49,24 @@ const SCOPES: { key: Scope; en: string; ar: string }[] = [
 ];
 const FIRST = 4;
 
-/** The record's name as the row shows it: «محمصة النخبة — خلطة خاصة», or the lead's company. */
+const customerNamesOf = (t: Target) => [t.customer?.name, t.customer?.nameAr];
+/** A deal's «عرض سعر · 644.00 ⃁ · 6 نوفمبر», and whether its title was generated from the customer's name (D21). */
+const factsOf = (t: Target, ar: boolean) =>
+  dealFacts({ title: t.name, amount: t.deal?.amount, createdAt: t.deal?.createdAt, quotes: t.deal?.quotes, samples: t.deal?.samples }, { lang: ar ? "ar" : "en", customerNames: customerNamesOf(t) });
+
+/** The record's name as the row shows it: «محمصة النخبة — خلطة خاصة», or the lead's company. A deal whose title the
+ *  system generated from the customer's name («… — عرض سعر 2026-11-06») is named by the customer alone (D21). */
 export function targetName(t: Target, ar: boolean): string {
   if (t.kind === "lead") return ar ? (t.nameAr ?? t.name) : t.name;
   const c = t.customer ? (ar ? (t.customer.nameAr ?? t.customer.name) : t.customer.name) : null;
+  if (c && factsOf(t, ar).generated) return c;
   if (!c || t.name === c || t.name.startsWith(c)) return t.name;
   return `${c} — ${t.name}`;
 }
 
-/** «صفقة · عرض سعر · تأكيد الكميات بعد العيّنة», «عميل محتمل · متابعة بعد المعرض». */
+/** «عرض سعر · 644.00 ⃁ · 6 نوفمبر · تفاوض · تأكيد الكميات بعد العيّنة», «عميل محتمل · متابعة بعد المعرض». */
 function targetSub(t: Target, ar: boolean): string {
-  const parts = [t.kind === "deal" ? (ar ? "صفقة" : "Deal") : (ar ? "عميل محتمل" : "Lead")];
+  const parts = [t.kind === "deal" ? factsOf(t, ar).facts : (ar ? "عميل محتمل" : "Lead")];
   if (t.stage) parts.push(ar ? t.stage.nameAr : t.stage.nameEn);
   if (t.subject) parts.push(t.subject);
   return parts.join(" · ");

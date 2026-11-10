@@ -106,7 +106,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   const search = useSearchParams();
   const backToMyDay = search?.get("back") === "my-day";
   const [tab, setTab] = useState<Tab>(search?.get("tab") === "files" ? "files" : "overview");
-  type QuickPick = { purpose: "quote" | "sample"; deals: { id: string; title: string; stageAr: string; stageEn: string; amount: string | null }[] };
+  type QuickPick = { purpose: "quote" | "sample"; deals: { id: string; title: string; stageAr: string; stageEn: string; amount: string | null; createdAt?: string | null; quotes?: number; samples?: number }[] };
   const [dialog, setDialog] = useState<null | { activity: ActivityKind } | { pick: QuickPick } | { sample: { dealId: string | null; sampled: string[]; manager: boolean } } | "details" | "ownerContact" | "file" | "hold" | "holdDirect" | "lift" | { contact: Contact | null }>(null);
   const [quickBusy, setQuickBusy] = useState(false);
   const [more, setMore] = useState(false);
@@ -985,7 +985,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
     <>
       {planOpen && <AddPlanSheet ar={ar} today={planOpen} customer={{ id, name, phone: dialPhone, address: c.address ?? null }}
         onClose={() => setPlanOpen(null)} onSaved={(m) => { setPlanOpen(null); setNotice({ text: m, ok: true }); }} />}
-      {dialog && typeof dialog === "object" && "activity" in dialog && <ActivityDialog ar={ar} customerId={id} customerName={name} deals={openDeals} defaultDealId={null} initialKind={dialog.activity}
+      {dialog && typeof dialog === "object" && "activity" in dialog && <ActivityDialog ar={ar} customerId={id} customerName={name} customerNames={[c?.name, c?.nameAr]} deals={openDeals} defaultDealId={null} initialKind={dialog.activity}
         onClose={() => { setDialog(null); if (backToMyDay) router.push("/dashboard/my-day"); }}
         onDone={() => {
           setDialog(null);
@@ -993,7 +993,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
           if (backToMyDay) { router.push("/dashboard/my-day?logged=1"); return; }
           setNotice({ text: L("سُجّل النشاط.", "Activity logged."), ok: true }); reload();
         }} />}
-      {dialog && typeof dialog === "object" && "pick" in dialog && <DealPickDialog ar={ar} purpose={dialog.pick.purpose} deals={dialog.pick.deals}
+      {dialog && typeof dialog === "object" && "pick" in dialog && <DealPickDialog ar={ar} purpose={dialog.pick.purpose} deals={dialog.pick.deals} customerNames={[c?.name, c?.nameAr]}
         onClose={() => setDialog(null)} onPick={(dealId) => { const purpose = dialog.pick.purpose; setDialog(null); void goWithDeal(purpose, dealId); }} />}
       {dialog && typeof dialog === "object" && "sample" in dialog && <SampleDialog ar={ar} opportunityId={dialog.sample.dealId} customerId={id} sampledProductIds={dialog.sample.sampled} manager={dialog.sample.manager}
         onClose={() => setDialog(null)}

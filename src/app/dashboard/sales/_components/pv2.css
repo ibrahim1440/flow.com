@@ -131,7 +131,12 @@
 /* PV2 · StageStep (1762:43) and the stepper card (1766:797) */
 .d21 .pv2-stepper-card { border: 1px solid var(--border-subtle); border-radius: 10px; padding: 16px 24px 12px; margin-bottom: 20px; display: flex; flex-direction: column; gap: 10px }
 .d21 .pv2-stepper { list-style: none; margin: 0; padding: 0; display: flex; align-items: flex-start; gap: 4px }
-.d21 .pv2-stepper > li { flex: none; width: 150px; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center }
+/* A pipeline with more stages than fit (the owner may add them): a step gives up width down to 72 px with its label
+   wrapping, and past that the stepper scrolls inside its own card — the page never scrolls sideways (crm-ui G, 10 Nov). */
+.d21 .pv2-stepper-card { min-width: 0 }
+.d21 .pv2-stepper { min-width: 0; overflow-x: auto; scrollbar-width: thin }
+.d21 .pv2-stepper > li { flex: 0 1 150px; width: 150px; min-width: 72px; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center }
+.d21 .pv2-stepper .lb, .d21 .pv2-stepper .sb { overflow-wrap: anywhere }
 .d21 .pv2-stepper > li.ln { flex: 1 1 0; width: auto; min-width: 12px; padding-top: 12px }
 .d21 .pv2-stepper > li.ln::before { content: ""; display: block; height: 2px; border-radius: 1px; background: var(--border-subtle); transform-origin: right; transition: background-color 0.2s var(--pv2-ease) }
 [dir="ltr"].d21 .pv2-stepper > li.ln::before, .d21 [dir="ltr"] .pv2-stepper > li.ln::before { transform-origin: left }
@@ -288,7 +293,7 @@
   .d21 .pv2-dh .meta { column-gap: 12px; row-gap: 0 }
   .d21 .pv2-dh .meta i { display: none }
   .d21 .pv2-stepper-card { border: 0; padding: 0; margin: 0 0 16px }
-  .d21 .pv2-stepper > li { width: 64px }
+  .d21 .pv2-stepper > li { width: 64px; flex-basis: 64px; min-width: 56px }
   .d21 .pv2-stepper > li.ln { min-width: 8px; padding-top: 12px }
   .d21 .pv2-stepper .lb { font-size: 12.5px; line-height: 18px }
   .d21 .pv2-stepper-note { display: none }

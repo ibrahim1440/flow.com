@@ -45,6 +45,7 @@ type LeadRow = {
 };
 type DealRow = {
   id: string; title: string; customerName: string | null; customerNameAr: string | null;
+  amount: unknown; dealCreatedAt: Date | null; quotes: number | null; samples: number | null;
   stageEn: string; stageAr: string; subject: string | null; dueAt: Date | null;
 };
 type GroupRow = {
@@ -52,7 +53,11 @@ type GroupRow = {
   companyName: string | null; companyNameAr: string | null; contactName: string | null;
   title: string | null; customerName: string | null; customerNameAr: string | null;
   stageEn: string | null; stageAr: string | null;
+  amount: unknown; dealCreatedAt: Date | null; quotes: number | null; samples: number | null;
 };
+const dealFactsOf = (r: { amount: unknown; dealCreatedAt: Date | null; quotes: number | null; samples: number | null }) => ({
+  amount: r.amount == null ? null : String(r.amount), createdAt: iso(r.dealCreatedAt), quotes: Number(r.quotes ?? 0), samples: Number(r.samples ?? 0),
+});
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
 
@@ -62,7 +67,7 @@ function fromGroupRow(r: GroupRow): Target {
       kind: "deal", id: r.opportunityId, name: r.title ?? "", nameAr: null,
       customer: r.customerName ? { name: r.customerName, nameAr: r.customerNameAr } : null,
       stage: r.stageEn ? { nameEn: r.stageEn, nameAr: r.stageAr ?? r.stageEn } : null,
-      subject: r.subject, dueAt: iso(r.dueAt),
+      subject: r.subject, dueAt: iso(r.dueAt), deal: dealFactsOf(r),
     };
   }
   return {
@@ -114,7 +119,9 @@ export async function GET(request: Request) {
           LIMIT ${SEARCH_LIMIT}` : Promise.resolve([] as LeadRow[]),
         wantLeads ? prisma.$queryRaw<{ n: bigint }[]>`SELECT COUNT(*) n FROM "Lead" l WHERE ${leadWhere}` : Promise.resolve([{ n: BigInt(0) }]),
         wantDeals ? prisma.$queryRaw<DealRow[]>`
-          SELECT o.id, o.title, c.name AS "customerName", c."nameAr" AS "customerNameAr",
+          SELECT o.id, o.title, c.name AS "customerName", c."nameAr" AS "customerNameAr", o.amount, o."createdAt" AS "dealCreatedAt",
+                 (SELECT count(*)::int FROM "Quote" q WHERE q."opportunityId" = o.id) AS quotes,
+                 (SELECT count(*)::int FROM "SampleShipment" sm WHERE sm."opportunityId" = o.id) AS samples,
                  s."nameEn" AS "stageEn", s."nameAr" AS "stageAr", f.subject, f."dueAt"
           FROM "Opportunity" o
           LEFT JOIN "Customer" c ON c.id = o."customerId"
@@ -146,7 +153,7 @@ export async function GET(request: Request) {
           rows: deals.map<Target>((d) => ({
             kind: "deal", id: d.id, name: d.title, nameAr: null,
             customer: d.customerName ? { name: d.customerName, nameAr: d.customerNameAr } : null,
-            stage: { nameEn: d.stageEn, nameAr: d.stageAr }, subject: d.subject, dueAt: iso(d.dueAt),
+            stage: { nameEn: d.stageEn, nameAr: d.stageAr }, subject: d.subject, dueAt: iso(d.dueAt), deal: dealFactsOf(d),
           })),
         },
       });
@@ -178,7 +185,9 @@ export async function GET(request: Request) {
     const detail = Prisma.sql`
       d."leadId", d."opportunityId", d.subject, d."dueAt", d."createdAt",
       l."companyName", l."companyNameAr", l."contactName",
-      o.title, c.name AS "customerName", c."nameAr" AS "customerNameAr",
+      o.title, c.name AS "customerName", c."nameAr" AS "customerNameAr", o.amount, o."createdAt" AS "dealCreatedAt",
+      (SELECT count(*)::int FROM "Quote" q WHERE q."opportunityId" = o.id) AS quotes,
+      (SELECT count(*)::int FROM "SampleShipment" sm WHERE sm."opportunityId" = o.id) AS samples,
       s."nameEn" AS "stageEn", s."nameAr" AS "stageAr"
       FROM d
       LEFT JOIN "Lead" l ON l.id = d."leadId" AND d."opportunityId" IS NULL
