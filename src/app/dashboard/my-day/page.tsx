@@ -268,10 +268,10 @@ function MyDay() {
           {flashBar}
           {hello}
           {tabsBar}
+          {/* Owner (10 Nov 2026): the target band first, then «خطة اليوم» and the tasks, then «كلّمهم اليوم». */}
+          <SalesBand t={data.target} lang={lang} who={who} phone ro={ro} viewerId={data.viewerId} onLog={openLogFor} weekGoals={weekGoals} />
           {todayPlan}
           {empty ? <NoBookNotice lang={lang} /> : null}
-          {/* Owner (6 Nov 2026): on a phone the target, then «كلّمهم اليوم» — under «خطة اليوم» (D16). */}
-          <SalesBand t={data.target} lang={lang} who={who} phone ro={ro} viewerId={data.viewerId} onLog={openLogFor} weekGoals={weekGoals} />
           <CallCard d={{ ...data, callList }} lang={lang} items={shown} total={listed} all={full} onAll={() => setAll((v) => !v)} ro={ro} empty={empty}
             filter={filter} onFilter={setFilter} onDone={openLog} onSnooze={snooze} phone />
           <AttentionStrip d={data} lang={lang} ro={ro} />
@@ -295,9 +295,10 @@ function MyDay() {
         {flashBar}
         {hello}
         {tabsBar}
+        {/* Owner (10 Nov 2026): the target band first, then «خطة اليوم» and the tasks. */}
+        <SalesBand t={data.target} lang={lang} who={who} phone={false} ro={ro} viewerId={data.viewerId} onLog={openLogFor} weekGoals={weekGoals} />
         {todayPlan}
         {empty ? <NoBookNotice lang={lang} /> : null}
-        <SalesBand t={data.target} lang={lang} who={who} phone={false} ro={ro} viewerId={data.viewerId} onLog={openLogFor} weekGoals={weekGoals} />
         <AttentionStrip d={data} lang={lang} ro={ro} />
         <CallCard d={{ ...data, callList }} lang={lang} items={shown} total={listed} all={full} onAll={() => setAll((v) => !v)} ro={ro} empty={empty}
           filter={filter} onFilter={setFilter} onDone={openLog} onSnooze={snooze} />
