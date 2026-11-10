@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useLang, Spinner, api } from "../../_components/ui";
 import { useQuotesBase } from "../base";
@@ -35,10 +35,21 @@ export default function NewQuotePage() {
   }, [opportunityId, router, base]);
   const error = createError;
 
+  // ONE draft per arrival (test hygiene, 10 Nov): the effect can run again — React's development double-run, or a
+  // dependency (the language, the base) settling after the first paint — and a second POST was refused (409) and showed
+  // «already exists» instead of the draft the first one made. The first request is the only one, and its answer always
+  // opens the draft.
+  const started = useRef<string | null>(null);
+  // …and an answer that arrives after the person has LEFT this page never moves them (gate L3). Set per mount: React's
+  // development double-run unmounts and mounts again, so the flag is true again by the time the answer lands.
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
     if (!opportunityId) return;
+    const arrival = `${opportunityId}:${fromCustomer ? "customer" : ""}`;
+    if (started.current === arrival) return;
+    started.current = arrival;
 
-    let cancelled = false;
     (async () => {
       // Valid for thirty days by default — a figure the person can change before issuing,
       // and one that is at least not in the past, which an empty date would leave them to
@@ -48,17 +59,13 @@ export default function NewQuotePage() {
         method: "POST",
         body: { opportunityId, validUntil, lines: [], ...(fromCustomer ? { from: "customer" } : {}) },
       });
-      if (cancelled) return;
+      if (!alive.current) return;
       if (res.ok && res.data.quote) {
         router.replace(`${base}/${res.data.quote.id}`);
       } else {
         setCreateError(res.data.error ?? (ar ? "تعذّر إنشاء العرض." : "Could not create the quotation."));
       }
     })();
-
-    return () => {
-      cancelled = true;
-    };
   }, [opportunityId, router, ar, base, fromCustomer]);
 
   if (error) {

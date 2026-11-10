@@ -1,15 +1,18 @@
 "use client";
 
 import { localizeApiError } from "@/lib/i18n/api-errors";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
-import { Paperclip, Plus, Upload } from "lucide-react";
+import { Camera, Paperclip, Plus, Upload } from "lucide-react";
 import {
   Field, TextInput, TextArea, Button, Modal,
   Money, Num, ROW_ACTION, api, formatDay, num, moneyText,
 } from "../../_components/ui";
 import { RIYAL } from "@/lib/money/riyal";
 import { amountForServer, amountValue, cleanAmount, parsePastedAmount } from "@/lib/money/amount-input";
+import { useUser } from "../../../user-context";
+import { prepareReceipt } from "@/lib/files/receipt-prep";
+import { hasSubPrivilege } from "@/lib/auth-shared";
 import "./collections.css";
 
 /**
@@ -30,7 +33,7 @@ export type CollectionRow = {
   status: "PENDING_VERIFICATION" | "APPROVED" | "REJECTED" | "REVERSED";
   amountGross: string;
   amountTax: string;
-  amountNet: string;
+  amountNet: string | null;
   currency: string;
   paymentMethod: string;
   collectedAt: string;
@@ -52,7 +55,7 @@ export type Summary = {
   document: { quoteId: string; quoteNumber: string; currency: string; gross: string; tax: string; net: string } | null;
   approvedGross: string;
   approvedTax: string;
-  approvedNet: string;
+  approvedNet: string | null;
   pendingGross: string;
   reversedGross: string;
   unpaidGross: string;
@@ -123,6 +126,36 @@ export function CollectionsPanel({
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  // D20: a receipt attached LATER to the rep's own pending collection (POST …/evidence enforces the same rule).
+  const viewer = useUser();
+  const me = viewer?.id ?? null;
+  // أبو فهد: the accountant's lines (the net basis, «لم يُنشئ عمولة», the manual-verification note) are Finance's
+  // reading; a rep sees one plain line instead — «بانتظار المحاسب يعتمد». Finance's view is unchanged.
+  const financeView = !!viewer && hasSubPrivilege(viewer.permissions, "commissions", "collection_verify");
+  const laterInput = useRef<HTMLInputElement>(null);
+  const [laterFor, setLaterFor] = useState<string | null>(null);
+  const [laterBusy, setLaterBusy] = useState<string | null>(null);
+  // أبو فهد B1: the answer is said ON the row (the panel's `error` only shows inside the record dialog): the refusal or
+  // failure in words, and «✓ انرفع الإيصال» once it is in.
+  const [laterMsg, setLaterMsg] = useState<{ id: string; ok: boolean; text: string } | null>(null);
+  async function attachLater(collectionId: string, chosen: File) {
+    setLaterBusy(collectionId);
+    setLaterMsg(null);
+    // Gate L1: JPEG / PNG / PDF within 5 MB; another photo (HEIC, WebP, large) becomes a JPEG first.
+    const ready = await prepareReceipt(chosen);
+    if (!ready.ok) { setLaterBusy(null); setLaterMsg({ id: collectionId, ok: false, text: ar ? ready.ar : ready.en }); return; }
+    const form = new FormData();
+    form.append("file", ready.file);
+    const up = await fetch(`/api/sales/collections/${collectionId}/evidence`, { method: "POST", body: form }).catch(() => null);
+    setLaterBusy(null);
+    if (!up || !up.ok) {
+      const data = up ? await up.json().catch(() => ({})) : {};
+      setLaterMsg({ id: collectionId, ok: false, text: (ar ? "ما انرفع الإيصال: " : "The receipt did not upload: ") + (localizeApiError(data) ?? (ar ? "تعذّر الاتصال." : "Could not connect.")) });
+      return;
+    }
+    setLaterMsg({ id: collectionId, ok: true, text: ar ? "✓ انرفع الإيصال" : "✓ Receipt uploaded" });
+    onChanged();
+  }
   const [error, setError] = useState("");
   const [amount, setAmount] = useState("");
   const [pasteBad, setPasteBad] = useState(false);
@@ -268,8 +301,8 @@ export function CollectionsPanel({
           <dl className="props" style={{ gridTemplateColumns: "180px minmax(0,1fr)", marginBottom: 14 }}>
             {[
               [ar ? "قيمة العرض المقبول" : "Accepted quotation", doc.gross, null],
-              [ar ? "محصَّل ومعتمَد" : "Approved", summary.approvedGross, ar ? `الأساس الصافي ${moneyText(summary.approvedNet, doc.currency, lang)}` : `net basis ${moneyText(summary.approvedNet, doc.currency, lang)}`],
-              [ar ? "بانتظار التحقق" : "Awaiting verification", summary.pendingGross, ar ? "لم يُنشئ عمولة" : "no commission yet"],
+              [ar ? "محصَّل ومعتمَد" : "Approved", summary.approvedGross, financeView ? (ar ? `الأساس الصافي ${moneyText(summary.approvedNet ?? "0", doc.currency, lang)}` : `net basis ${moneyText(summary.approvedNet ?? "0", doc.currency, lang)}`) : null],
+              [ar ? "بانتظار التحقق" : "Awaiting verification", summary.pendingGross, financeView ? (ar ? "لم يُنشئ عمولة" : "no commission yet") : (Number(summary.pendingGross) > 0 ? (ar ? "بانتظار المحاسب يعتمد" : "waiting for the accountant to approve") : null)],
               // D19: the unpaid balance is the big figure above; the capacity («المتاح») is the form's ceiling.
             ].map(([k, v, hint]) => (
               <div key={k as string} style={{ display: "contents" }}>
@@ -312,8 +345,8 @@ export function CollectionsPanel({
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4, fontSize: 12.5 }}>
                       {/* The commission each approved collection produced, named per person. */}
                       {r.status === "PENDING_VERIFICATION" ? (
-                        <span style={{ color: "var(--text-muted)" }}>
-                          {ar ? "العمولة بانتظار الاعتماد المالي" : "commission pending finance approval"}
+                        <span style={{ color: "var(--text-muted)" }} data-testid={`collection-wait-${r.id}`}>
+                          {financeView ? (ar ? "العمولة بانتظار الاعتماد المالي" : "commission pending finance approval") : (ar ? "بانتظار المحاسب يعتمد" : "Waiting for the accountant to approve")}
                         </span>
                       ) : accruals.length > 0 ? (
                         accruals.map((a, i) => (
@@ -322,23 +355,39 @@ export function CollectionsPanel({
                           </span>
                         ))
                       ) : null}
+                      {r._count.evidence === 0 && r.paymentMethod === "BANK_TRANSFER" ? (
+                        <span className="col-noreceipt" data-testid={`collection-no-receipt-${r.id}`}>{ar ? "بدون إيصال" : "No receipt"}</span>
+                      ) : null}
                       {r._count.evidence > 0 && (
                         <Link href={`/api/sales/collections/${r.id}/evidence`} style={{ color: "var(--action-primary)", display: "inline-flex", alignItems: "center", gap: 4 }}>
                           <Paperclip size={12} aria-hidden /> <Num>{num(r._count.evidence, lang)}</Num>
                         </Link>
                       )}
                     </div>
+                    {laterMsg && laterMsg.id === r.id ? (
+                      <p className={laterMsg.ok ? "col-later-ok" : "col-later-err"} role={laterMsg.ok ? "status" : "alert"} data-testid={`collection-attach-msg-${r.id}`}>{laterMsg.text}</p>
+                    ) : null}
+                    {r.status === "PENDING_VERIFICATION" && r._count.evidence === 0 && me && r.submittedBy?.id === me ? (
+                      <button type="button" className="col-later" disabled={laterBusy === r.id}
+                        onClick={() => { setLaterFor(r.id); laterInput.current?.click(); }} data-testid={`collection-attach-later-${r.id}`}>
+                        <Camera size={15} aria-hidden /> {laterBusy === r.id ? (ar ? "يرفع…" : "Uploading…") : (ar ? "أرفق الإيصال" : "Attach the receipt")}
+                      </button>
+                    ) : null}
                   </li>
                 );
               })}
             </ul>
           )}
 
-          <p className="lbl" style={{ fontWeight: 400, marginTop: 10 }}>
-            {ar
-              ? "تحقّق مالي يدوي. لا يوجد ربط بنكي، ولا يُنشئ أي مبلغ عمولةً قبل اعتماده."
-              : "Manual finance verification. There is no bank connection, and no amount creates commission before it is approved."}
-          </p>
+          <input ref={laterInput} type="file" accept="image/*,application/pdf" capture="environment" hidden data-testid="collection-attach-later-input"
+            onChange={(e) => { const picked = e.target.files?.[0]; e.target.value = ""; if (picked && laterFor) void attachLater(laterFor, picked); }} />
+          {financeView ? (
+            <p className="lbl" style={{ fontWeight: 400, marginTop: 10 }} data-testid="collection-finance-note">
+              {ar
+                ? "تحقّق مالي يدوي. لا يوجد ربط بنكي، ولا يُنشئ أي مبلغ عمولةً قبل اعتماده."
+                : "Manual finance verification. There is no bank connection, and no amount creates commission before it is approved."}
+            </p>
+          ) : null}
         </>
       )}
 

@@ -175,6 +175,9 @@ async function directSaleDiscountItems(actor: WsActor): Promise<ApprovalItem[]> 
     select: { id: true, orderNumber: true, ownerId: true, createdAt: true, requestedDiscountPercent: true, customer: { select: { name: true, nameAr: true } }, owner: { select: { name: true } },
       items: { select: { productSkuId: true, quantityUnits: true } } },
   });
+  // How each sale will be paid (its own audit row, written at «إرسال») — the card names it (أبو فهد, D20).
+  const created = orders.length ? await prisma.hrAuditLog.findMany({ where: { action: "DIRECT_SALE_CREATED", entityType: "Order", entityId: { in: orders.map((o) => o.id) } }, select: { entityId: true, after: true } }) : [];
+  const paymentOf = new Map(created.map((r) => [r.entityId, ((r.after ?? {}) as { payment?: string }).payment ?? null]));
   const out: ApprovalItem[] = [];
   for (const o of orders) {
     if (!isSimpleMode() && o.ownerId === actor.id) continue;
@@ -194,6 +197,7 @@ async function directSaleDiscountItems(actor: WsActor): Promise<ApprovalItem[]> 
       facts: {
         orderNumber: o.orderNumber, customer: o.customer.nameAr || o.customer.name, dealOwner: o.owner?.name ?? null,
         discountPercent: p, thresholdPercent: threshold.toString(), subtotal: priced?.subtotal ?? null, discountTotal: priced?.discount ?? null, grandTotal: priced?.gross ?? null, currency: "SAR",
+        payment: paymentOf.get(o.id) ?? null,
       },
       warnings: priceProblem ? [{ ar: `ما ينحسب سعر الطلب الحين: ${priceProblem} — صحّح الصنف أو ارفض الخصم.`, en: "The order cannot be priced now (a product is unavailable or unpriced) — fix the product or refuse the discount." }] : [],
       decide: { url: `/api/sales/direct-sale/${encodeURIComponent(o.id)}/discount-approval`, rejectNeedsReason: true, expected: { discountPercent: p, ...(priced ? { grandTotal: priced.gross } : {}) }, stepUp: true },

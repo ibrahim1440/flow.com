@@ -80,8 +80,20 @@ export function normaliseLines(raw: unknown): { productSkuId: string; quantityUn
   return [...byId].map(([productSkuId, quantityUnits]) => ({ productSkuId, quantityUnits }));
 }
 
-export const PAYMENT_CHOICES = ["CASH", "CARD", "CREDIT"] as const;
+export const PAYMENT_CHOICES = ["CASH", "CARD", "BANK_TRANSFER", "CREDIT"] as const;
 export type PaymentChoice = (typeof PAYMENT_CHOICES)[number];
+/** The collection's method for a paid-now choice (D20: «تحويل بنكي» — owner decision, option 2, the receipt optional). */
+export const collectionMethodOf = (m: Exclude<PaymentChoice, "CREDIT">) => (m === "CASH" ? "CASH" : m === "CARD" ? "POS_CARD" : "BANK_TRANSFER") as "CASH" | "POS_CARD" | "BANK_TRANSFER";
+/** «كاش» / «شبكة» / «تحويل بنكي» / «آجل» — the order's activity line. */
+export const paymentLabelAr = (m: PaymentChoice) => (m === "CASH" ? "كاش" : m === "CARD" ? "شبكة" : m === "BANK_TRANSFER" ? "تحويل بنكي" : "آجل");
+/** The transfer's reference (optional, D20): trimmed, at most 100 characters; only kept for a bank transfer. */
+export function parseTransferReference(raw: unknown, method: PaymentChoice): string | null {
+  if (method !== "BANK_TRANSFER" || typeof raw !== "string") return null;
+  const t = raw.trim();
+  if (!t) return null;
+  if (t.length > 100) throw refuse(400, "REFERENCE_TOO_LONG", "رقم الحوالة طويل — اكتب 100 حرف بالكثير.", "The transfer reference may not exceed 100 characters.");
+  return t;
+}
 
 /** The sale's discount, % of every line (0 – DISCOUNT_MAX, 2 dp). Pure. Above the quotation threshold (configurable,
  *  quote-settings.ts) it needs sales › quote_approve_discount: without it the sale WAITS for a supervisor (owner decision,
@@ -199,11 +211,11 @@ export type DirectSaleResult = {
 };
 
 /** What the sale's own audit row says (written in the sale's transaction): its key, payment and note. */
-type SaleRecord = { requestKey: string; payment: PaymentChoice; note: string | null; customerId: string };
+type SaleRecord = { requestKey: string; payment: PaymentChoice; note: string | null; customerId: string; reference: string | null };
 async function saleRecord(tx: Tx, orderId: string): Promise<SaleRecord | null> {
   const row = await tx.hrAuditLog.findFirst({ where: { action: "DIRECT_SALE_CREATED", entityType: "Order", entityId: orderId }, orderBy: { createdAt: "asc" }, select: { after: true } });
   const a = row?.after as Partial<SaleRecord> | null;
-  return a?.requestKey && a.payment && a.customerId ? { requestKey: a.requestKey, payment: a.payment, note: a.note ?? null, customerId: a.customerId } : null;
+  return a?.requestKey && a.payment && a.customerId ? { requestKey: a.requestKey, payment: a.payment, note: a.note ?? null, customerId: a.customerId, reference: a.reference ?? null } : null;
 }
 
 /** The order's lines as a direct-sale cart (SKU + units). */
@@ -218,7 +230,7 @@ async function orderLines(tx: Tx, orderId: string) {
  * decision 2). Run at «إرسال» for a sale that needs no approval, or at the supervisor's approval for one that did — the
  * rep is always the actor (the deal, the request and the collection are the rep's).
  */
-async function completeSale(tx: Tx, input: { orderId: string; orderNumber: number; customerId: string; rep: DirectSaleActor; key: string; discountPercent: Prisma.Decimal; method: PaymentChoice; note: string | null; ctx: AuditContext; now: Date }) {
+async function completeSale(tx: Tx, input: { orderId: string; orderNumber: number; customerId: string; rep: DirectSaleActor; key: string; discountPercent: Prisma.Decimal; method: PaymentChoice; reference?: string | null; note: string | null; ctx: AuditContext; now: Date }) {
   const { orderId, rep, key, method } = input;
   const priced = await priceDirectSale(tx, await orderLines(tx, orderId), input.discountPercent);
   // The customer's open deals as they stand BEFORE the sale (the link re-syncs a joined deal's amount), so a cancelled
@@ -256,7 +268,7 @@ async function completeSale(tx: Tx, input: { orderId: string; orderNumber: numbe
     if (!opportunityId) throw refuse(409, "NO_DEAL", "ما انربط الطلب بصفقة، فما ينسجل التحصيل.", "The order has no deal to collect against.");
     const c = await submitCollection(tx, {
       opportunityId, amountGross: new Prisma.Decimal(priced.gross), currency: "SAR", collectedAt: input.now,
-      paymentMethod: method === "CASH" ? "CASH" : "POS_CARD", referenceNumber: null, note: `بيع مباشر — طلب #${input.orderNumber}`,
+      paymentMethod: collectionMethodOf(method), referenceNumber: method === "BANK_TRANSFER" ? input.reference ?? null : null, note: `بيع مباشر — طلب #${input.orderNumber}`,
       idempotencyKey: key, submittedById: rep.id,
       // P0 G1: the sale's own order (not the deal's first) — its invoice is the one this money pays.
       orderId,
@@ -299,7 +311,7 @@ async function describeSale(tx: Tx, orderId: string, method: PaymentChoice, repI
 
 /** «إرسال». Throws `{ _appCode, code, errorAr }` refusals (handleDomainError maps them). */
 export async function createDirectSale(
-  input: { customerId: unknown; lines: unknown; requestKey: unknown; note?: unknown; discountPercent?: unknown; payment?: unknown },
+  input: { customerId: unknown; lines: unknown; requestKey: unknown; note?: unknown; discountPercent?: unknown; payment?: unknown; reference?: unknown },
   actor: DirectSaleActor,
   ctx: AuditContext,
   now: Date = new Date(),
@@ -309,7 +321,8 @@ export async function createDirectSale(
   const customerId = await assertDirectSaleCustomer(prisma, actor, input.customerId);
   const { percent: discountPercent, needsApproval } = parseDiscount(input.discountPercent, await discountThreshold(prisma), mayApproveDiscount(actor.permissions));
   const method = (PAYMENT_CHOICES as readonly string[]).includes(String(input.payment)) ? input.payment as PaymentChoice : null;
-  if (!method) throw refuse(400, "PAYMENT_REQUIRED", "اختر طريقة الدفع: كاش أو شبكة أو آجل.", "Choose how the customer pays: cash, card or on account.");
+  if (!method) throw refuse(400, "PAYMENT_REQUIRED", "اختر طريقة الدفع: كاش أو شبكة أو تحويل بنكي أو آجل.", "Choose how the customer pays: cash, card, bank transfer or on account.");
+  const reference = parseTransferReference(input.reference, method);
   if (method !== "CREDIT" && !hasSubPrivilege(actor.permissions as Permissions, "sales", "collection_submit")) {
     throw refuse(403, "COLLECTION_FORBIDDEN", "ما عندك صلاحية تسجيل تحصيل — اختر «آجل».", "You may not record a collection — choose on account.");
   }
@@ -337,12 +350,12 @@ export async function createDirectSale(
     }
     await appendOrderActivity(tx, {
       orderId: order.id, type: "DIRECT_SALE", authorId: actor.id, authorName: actor.name,
-      message: `بيع مباشر · ${method === "CREDIT" ? "آجل" : method === "CASH" ? "كاش" : "شبكة"}${needsApproval ? ` · خصم ${discountPercent.toString()}٪ بانتظار موافقة المشرف` : ""}`,
+      message: `بيع مباشر · ${paymentLabelAr(method)}${needsApproval ? ` · خصم ${discountPercent.toString()}٪ بانتظار موافقة المشرف` : ""}`,
       metadata: { payment: method, discountPercent: priced.discountPercent, pending: needsApproval },
     });
     await audit(tx, {
       action: "DIRECT_SALE_CREATED", entityType: "Order", entityId: order.id, actorId: actor.id,
-      after: { orderNumber: order.orderNumber, customerId, requestKey: key, payment: method, note, discountPercent: priced.discountPercent, pending: needsApproval, subtotal: priced.subtotal, gross: priced.gross, lines: priced.lines.length },
+      after: { orderNumber: order.orderNumber, customerId, requestKey: key, payment: method, reference, note, discountPercent: priced.discountPercent, pending: needsApproval, subtotal: priced.subtotal, gross: priced.gross, lines: priced.lines.length },
     });
     if (needsApproval) {
       await notifyPending(tx, { id: order.id, orderNumber: order.orderNumber, customerId }, discountPercent, actor.id);
@@ -351,7 +364,7 @@ export async function createDirectSale(
         totals: { net: priced.net, tax: priced.tax, gross: priced.gross, discountPercent: priced.discountPercent }, payment: { method, collectionId: null },
       } satisfies DirectSaleResult;
     }
-    const done = await completeSale(tx, { orderId: order.id, orderNumber: order.orderNumber, customerId, rep: actor, key, discountPercent, method, note, ctx, now });
+    const done = await completeSale(tx, { orderId: order.id, orderNumber: order.orderNumber, customerId, rep: actor, key, discountPercent, method, reference, note, ctx, now });
     return {
       replayed: false, order: { id: order.id, orderNumber: order.orderNumber, status: order.status }, discountApproval: "NONE", opportunityId: done.opportunityId, invoice: done.invoice,
       totals: { net: done.priced.net, tax: done.priced.tax, gross: done.priced.gross, discountPercent: done.priced.discountPercent }, payment: { method, collectionId: done.collectionId },
@@ -403,19 +416,22 @@ export async function decideDirectSaleDiscount(input: { orderId: string; decisio
     }
     const sale = await saleRecord(tx, o.id);
     if (!sale) throw refuse(409, "NOT_A_DIRECT_SALE", "الطلب ما هو بيع مباشر.", "This order is not a direct sale.");
+    // أبو فهد B2: an approved TRANSFER has its collection only now, with no receipt — the rep is told where to add it.
+    let receiptDue: { dealId: string } | null = null;
     if (input.decision === "REJECT") {
       await tx.order.update({ where: { id: o.id }, data: { discountApprovalStatus: "REJECTED", discountRejectedById: input.actor.id, discountRejectedAt: now, discountRejectionNote: note } });
       await appendOrderActivity(tx, { orderId: o.id, type: "DIRECT_SALE", authorId: input.actor.id, authorName: input.actor.name, message: `الخصم انرفض: ${note}`, metadata: { decision: "REJECT", percent: percent.toFixed(2) } });
     } else {
       await tx.order.update({ where: { id: o.id }, data: { status: o.status === "Waiting Approval" ? "Waiting Preparation Review" : o.status, discountApprovalStatus: "APPROVED", discountApprovedById: input.actor.id, discountApprovedAt: now } });
       await appendOrderActivity(tx, { orderId: o.id, type: "DIRECT_SALE", authorId: input.actor.id, authorName: input.actor.name, message: `اعتُمد الخصم ${percent.toString()}٪`, metadata: { decision: "APPROVE", percent: percent.toFixed(2) } });
-      await completeSale(tx, { orderId: o.id, orderNumber: o.orderNumber, customerId: sale.customerId, rep: await repOf(tx, o.ownerId), key: sale.requestKey, discountPercent: percent, method: sale.payment, note: sale.note, ctx: input.ctx, now });
+      const done = await completeSale(tx, { orderId: o.id, orderNumber: o.orderNumber, customerId: sale.customerId, rep: await repOf(tx, o.ownerId), key: sale.requestKey, discountPercent: percent, method: sale.payment, reference: sale.reference, note: sale.note, ctx: input.ctx, now });
+      if (sale.payment === "BANK_TRANSFER" && done.opportunityId && done.collectionId) receiptDue = { dealId: done.opportunityId };
     }
     await audit(tx, { action: input.decision === "APPROVE" ? "DIRECT_SALE_DISCOUNT_APPROVED" : "DIRECT_SALE_DISCOUNT_REJECTED", entityType: "Order", entityId: o.id, actorId: input.actor.id, after: { percent: percent.toFixed(2), gross: priced?.gross ?? null, note: note || null } });
     await notify(tx, {
       event: "sales.direct_discount_decided", dedupeKey: `${o.id}:${input.decision}:${now.toISOString()}`,
       actorId: input.actor.id, entity: { type: "Order", id: o.id },
-      facts: { orderNumber: o.orderNumber, decision: input.decision, note: note || null, orderId: o.id, threshold: (await discountThreshold(tx)).toString() },
+      facts: { orderNumber: o.orderNumber, decision: input.decision, note: note || null, orderId: o.id, threshold: (await discountThreshold(tx)).toString(), receiptDealId: receiptDue?.dealId ?? null },
       people: { orderOwner: o.ownerId },
     });
     return { state: input.decision === "APPROVE" ? "APPROVED" as const : "REJECTED" as const, orderId: o.id, ownerId: o.ownerId };
@@ -443,7 +459,7 @@ export async function resubmitDirectSale(input: { orderId: string; discountPerce
       await notifyPending(tx, o, percent, input.actor.id);
     } else {
       await tx.order.update({ where: { id: o.id }, data: { status: o.status === "Waiting Approval" ? "Waiting Preparation Review" : o.status, discountApprovalStatus: "NONE", requestedDiscountPercent: null } });
-      await completeSale(tx, { orderId: o.id, orderNumber: o.orderNumber, customerId: sale.customerId, rep: input.actor, key: sale.requestKey, discountPercent: percent, method: sale.payment, note: sale.note, ctx: input.ctx, now });
+      await completeSale(tx, { orderId: o.id, orderNumber: o.orderNumber, customerId: sale.customerId, rep: input.actor, key: sale.requestKey, discountPercent: percent, method: sale.payment, reference: sale.reference, note: sale.note, ctx: input.ctx, now });
     }
     await appendOrderActivity(tx, { orderId: o.id, type: "DIRECT_SALE", authorId: input.actor.id, authorName: input.actor.name, message: needsApproval ? `أُعيد الإرسال بخصم ${percent.toString()}٪ — بانتظار موافقة المشرف` : `أُعيد الإرسال بخصم ${percent.toString()}٪`, metadata: { resubmit: true, percent: percent.toFixed(2) } });
     await audit(tx, { action: "DIRECT_SALE_RESUBMITTED", entityType: "Order", entityId: o.id, actorId: input.actor.id, after: { percent: percent.toFixed(2), pending: needsApproval } });

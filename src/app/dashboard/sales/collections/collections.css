@@ -82,8 +82,19 @@
   .d21 .c-drawer > .ft .btn { height: 44px; flex: 1; justify-content: center }
   .d21 .c-figs { grid-template-columns: 130px minmax(0, 1fr) }
 }
-.d21 .t.coll .acts { flex-wrap: nowrap }
-.d21 .t.coll td:last-child { white-space: nowrap }
+/* The actions wrap onto a second line instead of running past the table's end (gate note, 10 Nov: «رفض» was cut at
+   1440 when a row offered open + approve + reject). Each button keeps its own label on one line. */
+.d21 .t.coll .acts { flex-wrap: wrap; row-gap: 6px }
+.d21 .t.coll .acts > * { white-space: nowrap }
+.d21 .t.coll td:last-child { white-space: normal; min-width: 220px }
 
 /* Qoyod parity (accountant workspace): the customer select in the filter card, drawn like the card's date range. */
 .d21 .c-qselect { height: 34px; min-width: 180px; padding: 0 8px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--surface); font: inherit; font-size: 13.5px; color: var(--text-primary); }
+
+/* D20 (Figma 1993:112): a bank transfer waiting for verification without a receipt — a clear flag, never a block. */
+.c-noreceipt { display: inline-flex; align-items: center; margin-top: 4px; padding: 2px 10px; border-radius: 999px; background: var(--status-warning-tint, #fbf3e5); color: var(--status-warning, #95651e); font-size: 12.5px; font-weight: 600; white-space: nowrap }
+.c-noreceipt-f { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px; border: 1px solid color-mix(in srgb, var(--status-warning, #95651e) 40%, transparent); border-radius: 999px; background: var(--status-warning-tint, #fbf3e5); color: var(--status-warning, #95651e); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer }
+.c-noreceipt-f.on { background: var(--status-warning, #95651e); color: #fff }
+.c-noreceipt-f .n { font-variant-numeric: tabular-nums }
+.c-noreceipt-f:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }
+.c-noreceipt-done { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; padding: 10px 14px; border-radius: 10px; background: var(--status-success-tint, #ebf1ea); color: var(--status-success); font-weight: 600 }

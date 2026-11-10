@@ -19,7 +19,13 @@ export async function GET(_request: Request, { params }: Params) {
       select: { id: true, orderNumber: true, status: true, ownerId: true, discountApprovalStatus: true, requestedDiscountPercent: true, discountRejectionNote: true, customer: { select: { name: true, nameAr: true } } },
     });
     if (!o || o.ownerId !== user.id) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });
+    // D20 (أبو فهد B2): after the approval, a transfer still without its receipt — the page asks for it.
+    const due = await prisma.salesCollection.findFirst({
+      where: { orderId: o.id, submittedById: user.id, paymentMethod: "BANK_TRANSFER", status: "PENDING_VERIFICATION", evidence: { none: {} } },
+      select: { id: true, opportunityId: true },
+    });
     return NextResponse.json({
+      receiptDue: due ? { collectionId: due.id, dealId: due.opportunityId } : null,
       id: o.id, orderNumber: o.orderNumber, status: o.status, discountApproval: o.discountApprovalStatus,
       requestedDiscountPercent: o.requestedDiscountPercent?.toString() ?? null, rejectionNote: o.discountRejectionNote,
       customer: { name: o.customer.name, nameAr: o.customer.nameAr }, threshold: (await discountThreshold(prisma)).toString(),

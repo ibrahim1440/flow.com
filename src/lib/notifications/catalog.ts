@@ -187,11 +187,13 @@ export const EVENTS: NotificationEventDef[] = [
     trigger: "POST /api/sales/direct-sale/[orderId]/discount-approval (decideDirectSaleDiscount)",
     render: (f) => ({
       severity: f.decision === "APPROVE" ? "success" : "warning",
-      titleAr: f.decision === "APPROVE" ? `اعتُمد الخصم — الطلب ${s(f.orderNumber)} راح للمحاسب` : `الخصم انرفض على الطلب ${s(f.orderNumber)}`,
-      titleEn: f.decision === "APPROVE" ? `Discount approved — order ${s(f.orderNumber)} went to the accountant` : `The discount on order ${s(f.orderNumber)} was refused`,
+      // A bank transfer approved without its receipt (D20, أبو فهد B2): the title asks for it and the link opens the deal's
+      // collections, where «أرفق الإيصال» is.
+      titleAr: f.decision === "APPROVE" ? (f.receiptDealId ? "اعتُمد الخصم — ارفع إيصال التحويل من صفحة الصفقة" : `اعتُمد الخصم — الطلب ${s(f.orderNumber)} راح للمحاسب`) : `الخصم انرفض على الطلب ${s(f.orderNumber)}`,
+      titleEn: f.decision === "APPROVE" ? (f.receiptDealId ? "Discount approved — upload the transfer receipt from the deal page" : `Discount approved — order ${s(f.orderNumber)} went to the accountant`) : `The discount on order ${s(f.orderNumber)} was refused`,
       bodyAr: f.decision === "APPROVE" ? s(f.note) : `${s(f.note)} — أرسله بخصم ${s(f.threshold)}٪ أو أقل، أو ألغِ الطلب.`.replace(/^ — /, ""),
       bodyEn: f.decision === "APPROVE" ? s(f.note) : `${s(f.note)} — resubmit at ${s(f.threshold)}% or less, or cancel the order.`.replace(/^ — /, ""),
-      link: `/dashboard/sales/direct-sale?order=${enc(s(f.orderId))}`,
+      link: f.decision === "APPROVE" && f.receiptDealId ? `/dashboard/sales/deals/${enc(s(f.receiptDealId))}#collections` : `/dashboard/sales/direct-sale?order=${enc(s(f.orderId))}`,
     }),
   },
   // Readiness review P1-6: samples and stage-move requests were pull-only (the approvals inbox, the dispatch tab).

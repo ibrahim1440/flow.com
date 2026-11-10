@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   try { body = await request.json(); } catch { return NextResponse.json({ error: "طلب غير صالح.", errorEn: "Invalid JSON body.", code: "BAD_INPUT" }, { status: 400 }); }
   try {
     const r = await createDirectSale(
-      { customerId: body.customerId, lines: body.lines, requestKey: body.requestKey, note: body.note, discountPercent: body.discountPercent, payment: body.payment },
+      { customerId: body.customerId, lines: body.lines, requestKey: body.requestKey, note: body.note, discountPercent: body.discountPercent, payment: body.payment, reference: body.reference },
       user,
       auditFromRequest(request, user.id),
     );

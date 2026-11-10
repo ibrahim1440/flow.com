@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { sniffEvidenceType } from "@/lib/files/evidence-sniff";
+export { sniffEvidenceType };
 
 /**
  * Collection evidence — the private attachment adapter.
@@ -45,21 +47,6 @@ export const ALLOWED_EVIDENCE_LABEL = "PDF, JPEG, PNG";
  *
  * A file that is not one of these is refused rather than stored under a guess.
  */
-export function sniffEvidenceType(bytes: Uint8Array): EvidenceKind | null {
-  const at = (i: number) => (i < bytes.length ? bytes[i] : -1);
-
-  if (at(0) === 0x25 && at(1) === 0x50 && at(2) === 0x44 && at(3) === 0x46 && at(4) === 0x2d) {
-    return "application/pdf";
-  }
-  if (at(0) === 0xff && at(1) === 0xd8 && at(2) === 0xff) {
-    return "image/jpeg";
-  }
-  const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-  if (png.every((b, i) => at(i) === b)) {
-    return "image/png";
-  }
-  return null;
-}
 
 export type ValidatedEvidence = {
   mimeType: EvidenceKind;

@@ -44,7 +44,8 @@ type Collection = {
   status: "PENDING_VERIFICATION" | "APPROVED" | "REJECTED" | "REVERSED";
   amountGross: string;
   amountTax: string;
-  amountNet: string;
+  /** null for a recorder — the server keeps the net basis for Finance (R3-L1). */
+  amountNet: string | null;
   currency: string;
   paymentMethod: string;
   collectedAt: string;
@@ -171,6 +172,7 @@ export default function CollectionsPage() {
 
   const [data, setData] = useState<Payload | null>(null);
   const [status, setStatus] = useState("");
+  const [onlyNoReceipt, setOnlyNoReceipt] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -193,7 +195,14 @@ export default function CollectionsPage() {
   const cf = useFilters({ from: "", to: "", customer: "", locations: [] as string[] });
   const riyadhDay = (iso: string) => new Date(Date.parse(iso) + 3 * 3600_000).toISOString().slice(0, 10);
   const custKey = (r: Collection) => r.customer?.id ?? "";
-  const qRows = (data?.rows ?? []).filter((r) => !qoyod || ((!cf.applied.from || riyadhDay(r.collectedAt) >= cf.applied.from)
+  // D20: a bank transfer still waiting for verification with no receipt — flagged on its row, and a quick filter.
+  const noReceipt = (r: Collection) => r.status === "PENDING_VERIFICATION" && r.paymentMethod === "BANK_TRANSFER" && r._count.evidence === 0;
+  const noReceiptChip = (r: Collection) => (
+    <span className="c-noreceipt" data-testid={`no-receipt-${r.id}`} title={ar ? "تحويل بنكي بدون إيصال — طابقه مع كشف البنك" : "Bank transfer without a receipt — match it to the bank statement"}>
+      {ar ? "بدون إيصال" : "No receipt"}
+    </span>
+  );
+  const qRows = (data?.rows ?? []).filter((r) => !onlyNoReceipt || noReceipt(r)).filter((r) => !qoyod || ((!cf.applied.from || riyadhDay(r.collectedAt) >= cf.applied.from)
     && (!cf.applied.to || riyadhDay(r.collectedAt) <= cf.applied.to) && (!cf.applied.customer || custKey(r) === cf.applied.customer)
     && (!cf.applied.locations.length || cf.applied.locations.includes(r.branchId ?? UNASSIGNED_LOCATION))));
   const { pageRows, pager } = usePaging(qRows);
@@ -298,7 +307,7 @@ export default function CollectionsPage() {
   const pending = rows.filter((r) => r.status === "PENDING_VERIFICATION");
   const approved = rows.filter((r) => r.status === "APPROVED");
   const sum = (list: Collection[], key: "amountGross" | "amountNet") =>
-    list.reduce((a, r) => a + Number(r[key]), 0).toFixed(2);
+    list.reduce((a, r) => a + Number(r[key] ?? 0), 0).toFixed(2);
   // The header's figures: the server's sums over the whole scope (exact, whatever segment is
   // open); the on-screen rows only for an older payload without them.
   const serverSum = (st: string, key: "gross" | "net") => data.totals ? (data.totals[st]?.[key] ?? "0.00") : null;
@@ -341,6 +350,20 @@ export default function CollectionsPage() {
     </>
   );
 
+  const noReceiptCount = rows.filter(noReceipt).length;
+  // أبو فهد B5: the filter on, nothing left without a receipt — said plainly, with the way back.
+  const noReceiptDone = onlyNoReceipt && noReceiptCount === 0 ? (
+    <p className="c-noreceipt-done" role="status" data-testid="no-receipt-none">
+      {ar ? "ما فيه تحويلات بدون إيصال ✓" : "No transfers without a receipt ✓"}{" "}
+      <button type="button" className="btn sm g" onClick={() => setOnlyNoReceipt(false)}>{ar ? "اعرض الكل" : "Show all"}</button>
+    </p>
+  ) : null;
+  const noReceiptToggle = noReceiptCount > 0 || onlyNoReceipt ? (
+    <button type="button" className={onlyNoReceipt ? "c-noreceipt-f on" : "c-noreceipt-f"} aria-pressed={onlyNoReceipt}
+      onClick={() => setOnlyNoReceipt((v) => !v)} data-testid="collection-filter-no-receipt">
+      {ar ? "بدون إيصال" : "No receipt"} <span className="n">{noReceiptCount}</span>
+    </button>
+  ) : null;
   const segments = (
     <div role="group" aria-label={ar ? "الحالة" : "Status"} className={phone ? "segs" : "seg"} data-testid="collection-status-filter">
       {SEGMENTS.map((s) => {
@@ -440,6 +463,7 @@ export default function CollectionsPage() {
             {ar ? WHY_NOT[why].ar : WHY_NOT[why].en}
           </span>
         )}
+        {phone && noReceipt(r) ? noReceiptChip(r) : null}
         {r._count.evidence > 0 && (
           <span className="clip" data-testid={`evidence-count-${r.id}`} title={ar ? "إثباتات مرفقة" : "Evidence attached"}>
             <Paperclip size={13} aria-hidden /> <bdi className="n">{r._count.evidence}</bdi>
@@ -527,12 +551,12 @@ export default function CollectionsPage() {
       );
       case "net": return (
         <td key={k}>
-          <span className="l1"><bdi className="n">{formatMoney(r.amountNet)}</bdi></span>
+          <span className="l1"><bdi className="n">{r.amountNet === null ? "—" : formatMoney(r.amountNet)}</bdi></span>
           <span className="sm">{ar ? "ضريبة " : "tax "}<bdi className="n">{formatMoney(Number(r.amountTax).toFixed(2))}</bdi></span>
         </td>
       );
       case "date": return <td key={k}><bdi className="n">{formatDay(r.collectedAt)}</bdi></td>;
-      case "method": return <td key={k}>{methodText(r.paymentMethod)}</td>;
+      case "method": return <td key={k}>{methodText(r.paymentMethod)}{noReceipt(r) ? <><br />{noReceiptChip(r)}</> : null}</td>;
       case "status": return (
         <td key={k} style={{ whiteSpace: "normal" }}>
           <StatusDot status={r.status} ar={ar} />
@@ -555,7 +579,7 @@ export default function CollectionsPage() {
           </tr>
         </thead>
         <tbody>
-          {(qoyod ? pageRows : rows).map((r) => (
+          {(qoyod ? pageRows : rows.filter((r) => !onlyNoReceipt || noReceipt(r))).map((r) => (
             <tr key={r.id} data-testid={`collection-${r.id}`} className={detail?.id === r.id ? "sel" : undefined}>
               {COLS.map((k) => cell(r, k))}
             </tr>
@@ -662,8 +686,11 @@ export default function CollectionsPage() {
               <dd><bdi className="n">{formatMoney(detail.amountGross)}</bdi> {unit}</dd>
               <dt>{ar ? "منه ضريبة" : "of which tax"}</dt>
               <dd><bdi className="n">{formatMoney(detail.amountTax)}</bdi></dd>
+              {detail.amountNet !== null ? <>
               <dt>{ar ? "الأساس الصافي للعمولة" : "Net basis for commission"}</dt>
               <dd className="net"><bdi className="n">{formatMoney(detail.amountNet)}</bdi></dd>
+              </> : null}
+              {detail.amountNet !== null ? <>
               <dt>
                 {detail.status === "PENDING_VERIFICATION"
                   ? (ar ? "أثر العمولة عند الاعتماد" : "Commission effect if approved")
@@ -690,6 +717,7 @@ export default function CollectionsPage() {
                   ))
                 )}
               </dd>
+              </> : null}
               <dt>{ar ? "الطريقة · المرجع" : "Method · reference"}</dt>
               <dd>
                 {methodText(detail.paymentMethod)}
@@ -887,9 +915,11 @@ export default function CollectionsPage() {
       <div className="pg">
         {notices}
         {segments}
+        {noReceiptToggle}
+        {noReceiptDone}
         {rows.length === 0 ? empty : (
           <div data-testid="collections-table">
-            {rows.map((r) => (
+            {rows.filter((r) => !onlyNoReceipt || noReceipt(r)).map((r) => (
               <div key={r.id} className="c-mrow" data-testid={`collection-${r.id}`}>
                 <b><bdi>{customerOf(r) ?? dealText(r)}</bdi></b>
                 <span className="n" style={{ fontSize: 14.5 }}>{formatMoney(r.amountGross)}</span>
@@ -965,8 +995,10 @@ export default function CollectionsPage() {
         </div>
       </dl>
 
+      {noReceiptDone}
       <div className="c-tool">
         {segments}
+        {noReceiptToggle}
         <span className="sp" />
         <span className="sort-note">{ar ? "الأحدث أولًا · حتى 200 تحصيل" : "Newest first · up to 200"}</span>
       </div>

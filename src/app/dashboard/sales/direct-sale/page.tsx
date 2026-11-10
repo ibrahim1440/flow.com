@@ -13,6 +13,9 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api, useLang } from "../_components/ui";
 import { formatSARText, withRiyal } from "@/lib/money/riyal";
+import { localizeApiError } from "@/lib/i18n/api-errors";
+import { prepareReceipt } from "@/lib/files/receipt-prep";
+import { unitsAr } from "@/lib/i18n/count-ar";
 import { Ico } from "@/components/shell/icons";
 import { useD21Phone, useD21Title } from "@/components/shell/page-context";
 import { NewCustomerDialog, type CreatedCustomer } from "@/components/customers/new-customer-form";
@@ -23,8 +26,8 @@ type Product = { id: string; skuCode: string; name: string; price: string };
 type Can = { approveDiscount: boolean; collect: boolean; threshold: number; max: number; createCustomer: boolean };
 type Options = { customers: Customer[]; products: Product[]; can: Can };
 type Priced = { subtotal: string; discountPercent: string; discount: string; net: string; tax: string; gross: string; needsApproval?: boolean; lines: { productSkuId: string; lineNet: string; lineGross: string; unitPrice: string }[] };
-type Payment = "CASH" | "CARD" | "CREDIT";
-type Done = { order: { id: string; orderNumber: number }; discountApproval: "NONE" | "PENDING" | "APPROVED"; totals: { gross: string; discountPercent: string }; payment: { method: Payment; collectionId: string | null } };
+type Payment = "CASH" | "CARD" | "BANK_TRANSFER" | "CREDIT";
+type Done = { uploaded?: boolean; order: { id: string; orderNumber: number }; opportunityId: string | null; discountApproval: "NONE" | "PENDING" | "APPROVED"; totals: { gross: string; discountPercent: string }; payment: { method: Payment; collectionId: string | null } };
 
 const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `ds-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
 const num2 = (v: string | number) => Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -32,6 +35,9 @@ const num2 = (v: string | number) => Number(v).toLocaleString("en-US", { minimum
 const money = (v: string | number) => withRiyal(num2(v), "ar");
 /** What leaves the system (the WhatsApp message to the customer): «ر.س» / «SAR» in letters (gate M1). */
 const moneyOut = (v: string | number, lang: "ar" | "en") => formatSARText(num2(v), lang);
+const payAr = (m: "CASH" | "CARD" | "BANK_TRANSFER" | "CREDIT") => (m === "CASH" ? "كاش" : m === "CARD" ? "شبكة" : m === "BANK_TRANSFER" ? "تحويل بنكي" : "آجل");
+const payEn = (m: "CASH" | "CARD" | "BANK_TRANSFER" | "CREDIT") => (m === "CASH" ? "Cash" : m === "CARD" ? "Card" : m === "BANK_TRANSFER" ? "Bank transfer" : "On account");
+const kb = (bytes: number) => Math.max(1, Math.round(bytes / 1024)).toLocaleString("en-US");
 
 function daysAgo(iso: string | null, ar: boolean): string {
   if (!iso) return ar ? "ما طلب قبل" : "No order yet";
@@ -68,6 +74,22 @@ function DirectSale() {
   const [priced, setPriced] = useState<Priced | null>(null);
   const [priceError, setPriceError] = useState<{ code?: string; text: string } | null>(null);
   const [payment, setPayment] = useState<Payment | null>(null);
+  // D20 «تحويل بنكي» (owner-approved Figma 1992:303): the receipt and the transfer number are optional.
+  const [receipt, setReceipt] = useState<File | null>(null);
+  const [reference, setReference] = useState("");
+  const [uploadError, setUploadError] = useState("");
+  // Gate L1: the chosen photo is checked (and a HEIC / WebP / large one turned into a JPEG under 5 MB) BEFORE «إرسال».
+  const [receiptError, setReceiptError] = useState("");
+  const [preparing, setPreparing] = useState(false);
+  async function chooseReceipt(picked: File | null) {
+    setReceiptError("");
+    if (!picked) return;
+    setPreparing(true);
+    const r = await prepareReceipt(picked);
+    setPreparing(false);
+    if (r.ok) setReceipt(r.file); else { setReceipt(null); setReceiptError(ar ? r.ar : r.en); }
+  }
+  const receiptInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<Done | null>(null);
   const key = useRef(newKey());
@@ -125,12 +147,30 @@ function DirectSale() {
   async function send() {
     if (!customer || !priced || !payment || busy) return;
     setBusy(true); setError("");
+    const bank = payment === "BANK_TRANSFER";
     const r = await api<Done & { code?: string }>("/api/sales/direct-sale", {
       method: "POST",
-      body: { customerId: customer.id, lines, requestKey: key.current, discountPercent: discountNum || undefined, payment },
+      body: { customerId: customer.id, lines, requestKey: key.current, discountPercent: discountNum || undefined, payment, reference: bank ? reference.trim() || undefined : undefined },
     });
+    if (r.ok) {
+      // The receipt is a second request on purpose (the CollectionsPanel pattern): multipart, and a failed upload never
+      // undoes the sale or its collection — the rep is told and attaches it again from the deal page.
+      setUploadError("");
+      if (bank && receipt && r.data.payment.collectionId) {
+        const form = new FormData();
+        form.append("file", receipt);
+        const up = await fetch(`/api/sales/collections/${r.data.payment.collectionId}/evidence`, { method: "POST", body: form }).catch(() => null);
+        if (!up || !up.ok) {
+          const data = up ? await up.json().catch(() => ({})) : {};
+          setUploadError(localizeApiError(data) ?? L("تعذّر الاتصال.", "Could not connect."));
+        }
+      }
+      setBusy(false);
+      setDone({ ...r.data, uploaded: bank && !!receipt && !!r.data.payment.collectionId } as Done);
+      setStep(4);
+      return;
+    }
     setBusy(false);
-    if (r.ok) { setDone(r.data); setStep(4); return; }
     setError(r.data.error ?? L("ما انرسل — جرّب مرة ثانية.", "Not sent — try again."));
   }
 
@@ -144,6 +184,10 @@ function DirectSale() {
 
   if (step === 4 && done && customer) {
     const waiting = done.discountApproval === "PENDING";
+    const bankDone = done.payment.method === "BANK_TRANSFER" && !waiting;
+    // No receipt with the transfer (none chosen, or its upload failed): say so, and send the rep to the deal page.
+    const noReceipt = bankDone && !done.uploaded && !uploadError;
+    const dealHref = done.opportunityId ? `/dashboard/sales/deals/${done.opportunityId}#collections` : null;
     const msg = [
       L(`طلب #${done.order.orderNumber} · ${nameOf(customer)}`, `Order #${done.order.orderNumber} · ${nameOf(customer)}`),
       ...lines.map((l) => `• ${byId.get(l.productSkuId)?.name ?? ""} × ${l.quantityUnits}`),
@@ -159,14 +203,27 @@ function DirectSale() {
           <dl className="ds-card ds-kv">
             <div><dt>{L("الطلب", "Order")}</dt><dd className={waiting ? "ds-warn" : undefined} data-testid="ds-done-order">{waiting ? L(`بانتظار موافقة الخصم (${Number(done.totals.discountPercent)}٪)`, `Waiting for the discount approval (${Number(done.totals.discountPercent)}%)`) : L("انسوّى · يتجهز ويوصل من المحمصة", "Created · prepared and shipped from the roastery")}</dd></div>
             <div><dt>{L("الصفقة", "Deal")}</dt><dd className={waiting ? undefined : "ds-good"}>{waiting ? L("تنقفل رابحة بعد الموافقة", "Won once approved") : L("رابحة", "Won")}</dd></div>
-            <div><dt>{L("الدفع", "Payment")}</dt><dd>{done.payment.method === "CREDIT" ? L("آجل على حساب العميل", "On account") : waiting ? L(done.payment.method === "CASH" ? "كاش · ينسجل بعد الموافقة" : "شبكة · ينسجل بعد الموافقة", "Recorded once approved") : done.payment.method === "CASH" ? L("كاش · ينتظر اعتماد المحاسب", "Cash · awaiting the accountant") : L("شبكة · ينتظر اعتماد المحاسب", "Card · awaiting the accountant")}</dd></div>
+            <div><dt>{L("الدفع", "Payment")}</dt><dd className={noReceipt || (bankDone && uploadError) ? "ds-warn" : undefined} data-testid="ds-done-payment">{done.payment.method === "CREDIT" ? L("آجل على حساب العميل", "On account") : waiting ? L(`${payAr(done.payment.method)} · ينسجل بعد الموافقة`, "Recorded once approved") : noReceipt ? L("تحويل بنكي · ارفع الإيصال من صفحة الصفقة", "Bank transfer · upload the receipt from the deal page") : bankDone && uploadError ? L("تحويل بنكي · ما انرفع الإيصال", "Bank transfer · the receipt did not upload") : bankDone && done.uploaded ? L("تحويل بنكي · ✓ الإيصال انرفع · ينتظر اعتماد المحاسب", "Bank transfer · ✓ receipt uploaded · awaiting the accountant") : L(`${payAr(done.payment.method)} · ينتظر اعتماد المحاسب`, `${payEn(done.payment.method)} · awaiting the accountant`)}</dd></div>
             <div><dt>{L("الفاتورة", "Invoice")}</dt><dd className="ds-warn">{waiting ? L("تروح للمحاسب بعد الموافقة", "Goes to the accountant once approved") : L("عند المحاسب يصدرها", "With the accountant to issue")}</dd></div>
           </dl>
+          {bankDone && uploadError ? (
+            <div className="ds-card ds-upfail" role="alert" data-testid="ds-upload-failed">
+              <b>{L("انسجل التحصيل، لكن ما انرفع الإيصال", "The collection is recorded, but the receipt did not upload")}</b>
+              <span>{uploadError} {L("ارفعه مرة ثانية من صفحة الصفقة — المبلغ محفوظ وما تحتاج تسجّله من جديد.", "Attach it again from the deal page — the amount is kept, no need to record it again.")}</span>
+            </div>
+          ) : null}
+          {noReceipt ? <p className="ds-note" data-testid="ds-no-receipt-note">{L("بدون إيصال يقدر المحاسب يعتمد بعد ما يشوف كشف البنك — بس الإيصال يسرّع الاعتماد.", "Without a receipt the accountant can still approve from the bank statement — a receipt makes it faster.")}</p> : null}
+          {waiting && done.payment.method === "BANK_TRANSFER" ? <p className="ds-note" data-testid="ds-receipt-after-approval">{L("ما انرفع إيصال التحويل للحين: يتسجّل التحصيل بعد موافقة المشرف، وبعدها ترفع الإيصال من صفحة الصفقة («أرفق الإيصال»).", "No transfer receipt yet: the collection is recorded once your supervisor approves; then upload the receipt from the deal page («Attach the receipt»).")}</p> : null}
+          {(noReceipt || (bankDone && uploadError)) && dealHref ? (
+            <Link className="ds-btn p" href={dealHref} data-testid="ds-receipt-later">{L("ارفع الإيصال من صفحة الصفقة", "Upload the receipt from the deal page")}</Link>
+          ) : null}
           <p className="ds-note">{waiting
-            ? L("لا تسلّم البضاعة ولا تستلم فلوس للحين. يوصلك إشعار لما يوافق المشرف أو يرفض.", "Don't hand over goods or take money yet. You'll be notified when your supervisor decides.")
+            ? (done.payment.method === "BANK_TRANSFER"
+              ? L("لا تسلّم البضاعة لين يوافق المشرف. إذا العميل حوّل، احتفظ بالإيصال وارفعه بعد الموافقة. يوصلك إشعار لما يوافق المشرف أو يرفض.", "Don't hand over the goods until your supervisor approves. If the customer has transferred, keep the receipt and upload it after the approval. You'll be notified when your supervisor decides.")
+              : L("لا تسلّم البضاعة ولا تستلم فلوس للحين. يوصلك إشعار لما يوافق المشرف أو يرفض.", "Don't hand over goods or take money yet. You'll be notified when your supervisor decides."))
             : L("الفاتورة الضريبية الرسمية يصدرها المحاسب ويرسلها للعميل.", "The accountant issues the official tax invoice and sends it to the customer.")}</p>
           {!waiting ? (
-            <a className="ds-btn p" href={`https://wa.me/?text=${encodeURIComponent(msg)}`} target="_blank" rel="noopener noreferrer" data-testid="ds-whatsapp">
+            <a className={(noReceipt || (bankDone && uploadError)) && dealHref ? "ds-btn" : "ds-btn p"} href={`https://wa.me/?text=${encodeURIComponent(msg)}`} target="_blank" rel="noopener noreferrer" data-testid="ds-whatsapp">
               <Ico name="chat" small /> {L("أرسل للعميل (واتساب)", "Send to the customer (WhatsApp)")}
             </a>
           ) : null}
@@ -286,31 +343,65 @@ function DirectSale() {
         <section className="ds-body" aria-label={L("راجع وأرسل", "Review and send")}>
           <div className="ds-card">
             <div className="ds-kvrow"><span>{L("العميل", "Customer")}</span><b><bdi>{nameOf(customer)}</bdi></b></div>
-            <div className="ds-kvrow"><span>{L("الأصناف", "Items")}</span><b>{L(`${lines.length} صنف · ${units} حبة`, `${lines.length} items · ${units} units`)}</b></div>
+            <div className="ds-kvrow"><span>{L("الأصناف", "Items")}</span><b>{L(`${lines.length} صنف · ${unitsAr(units)}`, `${lines.length} items · ${units} units`)}</b></div>
             <Totals priced={priced} ar={ar} flat />
           </div>
-          <fieldset className="ds-choice" data-testid="ds-payment">
+          <fieldset className={can?.collect ? "ds-choice four" : "ds-choice"} data-testid="ds-payment">
             <legend>{L("الدفع", "Payment")}</legend>
-            {(can?.collect ? (["CASH", "CARD", "CREDIT"] as const) : (["CREDIT"] as const)).map((m) => (
-              <label key={m} className={payment === m ? "on" : ""}><input type="radio" name="ds-payment" checked={payment === m} onChange={() => setPayment(m)} data-testid={`ds-payment-${m}`} />{m === "CASH" ? L("كاش", "Cash") : m === "CARD" ? L("شبكة", "Card") : L("آجل", "On account")}</label>
+            {(can?.collect ? (["CASH", "CARD", "BANK_TRANSFER", "CREDIT"] as const) : (["CREDIT"] as const)).map((m) => (
+              <label key={m} className={payment === m ? "on" : ""}><input type="radio" name="ds-payment" checked={payment === m} onChange={() => setPayment(m)} data-testid={`ds-payment-${m}`} />{ar ? payAr(m) : payEn(m)}</label>
             ))}
           </fieldset>
+          {payment === "BANK_TRANSFER" ? (
+            <div className="ds-bank" data-testid="ds-bank">
+              {priced.needsApproval ? (
+                <p className="ds-note" data-testid="ds-receipt-after-approval-hint">{L("الخصم يحتاج موافقة المشرف، فالتحصيل ما يتسجّل الحين — إيصال التحويل ترفعه من صفحة الصفقة بعد الموافقة.", "The discount needs your supervisor's approval, so the collection is not recorded yet — upload the transfer receipt from the deal page after the approval.")}</p>
+              ) : (
+                <div className="ds-field">
+                  <span className="ds-lbl strong">{L("إيصال التحويل", "Transfer receipt")} <small>{L("(اختياري)", "(optional)")}</small></span>
+                  <input ref={receiptInput} type="file" accept="image/*,application/pdf" capture="environment" hidden data-testid="ds-receipt-input"
+                    onChange={(e) => { const f = e.target.files?.[0] ?? null; e.target.value = ""; void chooseReceipt(f); }} />
+                  {receipt ? (
+                    <div className="ds-file" data-testid="ds-receipt-file">
+                      <span className="ds-file-ic" aria-hidden><Ico name="doc" small /></span>
+                      <span className="ds-file-t"><b><bdi>{receipt.name}</bdi></b><small>{L(`${receipt.type === "application/pdf" ? "PDF" : "صورة"} · ${kb(receipt.size)} ك.ب · تنرفع مع «إرسال»`, `${receipt.type === "application/pdf" ? "PDF" : "Image"} · ${kb(receipt.size)} KB · uploaded with «Send»`)}</small></span>
+                      <button type="button" className="ds-file-x" onClick={() => { setReceipt(null); setReceiptError(""); }} data-testid="ds-receipt-remove">{L("حذف", "Remove")}</button>
+                    </div>
+                  ) : (
+                    <button type="button" className="ds-drop" disabled={preparing} onClick={() => receiptInput.current?.click()} data-testid="ds-receipt-pick">
+                      <span className="ds-drop-ic" aria-hidden><Ico name="camera" small /></span>
+                      <span className="ds-drop-t"><b>{preparing ? L("نجهّز الصورة…", "Preparing the photo…") : L("صوّر الإيصال أو اختر ملف", "Photograph the receipt or choose a file")}</b><small>{L("صورة أو PDF · لين 5 ميجا", "Photo or PDF · up to 5 MB")}</small></span>
+                    </button>
+                  )}
+                </div>
+              )}
+              {receiptError ? <p className="ds-hint warn" role="alert" data-testid="ds-receipt-error">{receiptError}</p> : null}
+              <label className="ds-field">
+                <span className="ds-lbl strong">{L("رقم الحوالة", "Transfer number")} <small>{L("(اختياري)", "(optional)")}</small></span>
+                <input className="ds-input" value={reference} maxLength={100} onChange={(e) => setReference(e.target.value)}
+                  onFocus={(e) => { const el = e.currentTarget; window.setTimeout(() => el.scrollIntoView({ block: "center", behavior: "smooth" }), 250); }} placeholder={L("مثال: FT26111045", "e.g. FT26111045")} dir="ltr" data-testid="ds-reference" />
+              </label>
+              {!receipt && !priced.needsApproval ? <p className="ds-hint">{L("ما معك الإيصال الحين؟ أرسل عادي — ترفعه بعدين من صفحة الصفقة.", "No receipt yet? Send anyway — upload it later from the deal page.")}</p> : null}
+            </div>
+          ) : null}
           <p className="ds-lbl strong">{L("لما تضغط «إرسال»:", "When you tap «Send»:")}</p>
           {priced.needsApproval ? (
             <div className="ds-card ds-pending" role="note" data-testid="ds-pending-note">
               <b>{L(`الخصم ${Number(priced.discountPercent)}٪ فوق الحد — ينرسل لمشرفك يوافق`, `The ${Number(priced.discountPercent)}% discount is above the limit — it goes to your supervisor`)}</b>
-              <span>{L("بعد الموافقة: تنقفل الصفقة رابحة، وينسجل الدفع، وتروح الفاتورة للمحاسب. لا تسلّم البضاعة ولا تستلم فلوس قبلها.", "Once approved: the deal is won, the payment recorded and the invoice sent to the accountant. Don't hand over goods or take money before.")}</span>
+              <span data-testid="ds-pending-body">{payment === "BANK_TRANSFER"
+                ? L("بعد الموافقة: تنقفل الصفقة رابحة، وينسجل التحويل، وتروح الفاتورة للمحاسب. لا تسلّم البضاعة لين يوافق المشرف. إذا العميل حوّل، احتفظ بالإيصال وارفعه بعد الموافقة.", "Once approved: the deal is won, the transfer recorded and the invoice sent to the accountant. Don't hand over the goods until your supervisor approves. If the customer has transferred, keep the receipt and upload it after the approval.")
+                : L("بعد الموافقة: تنقفل الصفقة رابحة، وينسجل الدفع، وتروح الفاتورة للمحاسب. لا تسلّم البضاعة ولا تستلم فلوس قبلها.", "Once approved: the deal is won, the payment recorded and the invoice sent to the accountant. Don't hand over goods or take money before.")}</span>
             </div>
           ) : (
             <ul className="ds-card ds-what">
               <li><Ico name="tick" small />{L("ينسوّى الطلب ويتجهز ويوصل من المحمصة", "The order is created, prepared and shipped from the roastery")}</li>
               <li><Ico name="tick" small />{L("تنقفل الصفقة «رابحة» بنفس المبلغ", "The deal is closed «won» for this amount")}</li>
-              {payment === "CASH" || payment === "CARD" ? <li><Ico name="tick" small />{L("ينسجل التحصيل وينتظر اعتماد المحاسب", "The payment is recorded for the accountant to approve")}</li> : null}
+              {payment && payment !== "CREDIT" ? <li><Ico name="tick" small />{L(`ينسجل التحصيل (${payAr(payment)}) وينتظر اعتماد المحاسب`, `The ${payEn(payment).toLowerCase()} payment is recorded for the accountant to approve`)}</li> : null}
               <li><Ico name="tick" small />{L("تروح الفاتورة للمحاسب يصدرها ويرسلها للعميل", "The invoice goes to the accountant, who issues and sends it")}</li>
             </ul>
           )}
           <div className="ds-foot">
-            <button type="button" className="ds-btn p big" disabled={busy || !payment} onClick={send} data-testid="ds-send">{busy ? L("لحظة…", "One moment…") : priced.needsApproval ? L("أرسل لمشرفي يوافق", "Send to my supervisor") : L("إرسال", "Send")}</button>
+            <button type="button" className="ds-btn p big" disabled={busy || !payment || preparing} onClick={send} data-testid="ds-send">{busy ? L("لحظة…", "One moment…") : priced.needsApproval ? L("أرسل لمشرفي يوافق", "Send to my supervisor") : L("إرسال", "Send")}</button>
             {!payment ? <p className="ds-hint">{L("اختر طريقة الدفع.", "Choose how the customer pays.")}</p> : null}
           </div>
         </section>
@@ -340,7 +431,7 @@ function Totals({ priced, ar, flat }: { priced: Priced | null; ar: boolean; flat
  *  threshold (it completes now) — or the order page, to cancel it. */
 function Resubmit({ orderId, ar }: { orderId: string; ar: boolean }) {
   const L = (a: string, e: string) => (ar ? a : e);
-  type View = { orderNumber: number; status: string; discountApproval: string; requestedDiscountPercent: string | null; rejectionNote: string | null; customer: { name: string; nameAr: string | null }; threshold: string };
+  type View = { receiptDue: { collectionId: string; dealId: string } | null; orderNumber: number; status: string; discountApproval: string; requestedDiscountPercent: string | null; rejectionNote: string | null; customer: { name: string; nameAr: string | null }; threshold: string };
   const [v, setV] = useState<View | null>(null);
   const [error, setError] = useState("");
   const [pct, setPct] = useState("");
@@ -376,7 +467,13 @@ function Resubmit({ orderId, ar }: { orderId: string; ar: boolean }) {
             <button type="button" className="ds-btn p big" disabled={busy} onClick={go} data-testid="ds-re-send">{busy ? L("لحظة…", "One moment…") : L("أرسل من جديد", "Send again")}</button>
           </>
         ) : (
-          <p className="ds-mut">{v.discountApproval === "PENDING" ? L("الخصم ينتظر موافقة مشرفك.", "The discount is waiting for your supervisor.") : L("الطلب ما ينتظر شي منك.", "Nothing is waiting on you.")}</p>
+          v.discountApproval !== "PENDING" && v.receiptDue ? (
+            <div className="ds-card ds-due" data-testid="ds-receipt-due">
+              <b>{L("باقي إيصال التحويل", "The transfer receipt is still missing")}</b>
+              <span className="ds-mut">{L("اعتُمد الخصم وانسجل التحصيل — ارفع إيصال التحويل عشان يعتمده المحاسب أسرع.", "The discount is approved and the collection recorded — upload the transfer receipt so the accountant can approve it sooner.")}</span>
+              <Link className="ds-btn p" href={`/dashboard/sales/deals/${v.receiptDue.dealId}#collections`} data-testid="ds-receipt-due-go">{L("أرفق الإيصال", "Attach the receipt")}</Link>
+            </div>
+          ) : <p className="ds-mut">{v.discountApproval === "PENDING" ? L("الخصم ينتظر موافقة مشرفك.", "The discount is waiting for your supervisor.") : L("الطلب ما ينتظر شي منك.", "Nothing is waiting on you.")}</p>
         )}
         {error ? <p className="notice er" role="alert">{error}</p> : null}
         <Link className="ds-btn" href={`/dashboard/orders?order=${v.orderNumber}`}>{L("افتح الطلب", "Open the order")}</Link>

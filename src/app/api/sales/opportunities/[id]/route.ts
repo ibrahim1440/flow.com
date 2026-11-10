@@ -19,6 +19,7 @@ import { dealNextStep } from "@/lib/services/sales/next-step";
 import type { StagePurpose } from "@/lib/services/sales/stages";
 import { scheduleDealFollowUp } from "@/lib/services/sales/follow-through";
 import { approvesMove, isGeneralManager, movesDirectly } from "@/lib/services/sales/stage-move";
+import { redactCollectionRow, seesCollectionNet } from "@/lib/services/sales/collection-visibility";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -228,8 +229,9 @@ export async function GET(_request: Request, { params }: Params) {
       sampledProductIds: sampledProducts,
       stages,
       actors,
-      collections,
-      collectionSummary: serialiseSummary(summary),
+      // R3-L1: a recorder reads no net basis and no commission rows.
+      collections: seesCollectionNet(user.permissions) ? collections : collections.map(redactCollectionRow),
+      collectionSummary: seesCollectionNet(user.permissions) ? serialiseSummary(summary) : { ...serialiseSummary(summary), approvedNet: null },
       // The verdict, not the ingredients. The panel used to be handed a privilege flag and
       // left to work the rest out, which is how a reviewer whose role predated the privilege
       // got a blank space instead of a reason.

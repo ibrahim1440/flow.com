@@ -47,3 +47,10 @@
 .col-more .col-grid { margin-bottom: 12px }
 .col-foot { display: flex; gap: 10px; width: 100% }
 @media (max-width: 639.98px) { .col-foot { flex-direction: column } .col-foot > * { width: 100% } }
+/* D20: a bank transfer with no receipt yet, and the owner's «أرفق الإيصال» while it waits for verification. */
+.col-noreceipt { display: inline-flex; align-items: center; padding: 1px 9px; border-radius: 999px; background: var(--status-warning-tint, #fbf3e5); color: var(--status-warning, #95651e); font-weight: 600 }
+.col-later { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; margin-top: 8px; padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface); color: var(--text-primary); font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer }
+.col-later:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }
+.col-later[disabled] { opacity: .6; cursor: default }
+.col-later-ok { margin: 6px 0 0; font-size: 13px; font-weight: 600; color: var(--status-success) }
+.col-later-err { margin: 6px 0 0; font-size: 13px; color: var(--status-danger) }

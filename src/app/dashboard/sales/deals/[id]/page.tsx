@@ -24,6 +24,7 @@ import {
   autoWhy, humanReason, isAutoReason, type Step,
 } from "../../_components/pv2";
 import { SampleDialog } from "../../_components/SampleDialog";
+import { useUser } from "../../../user-context";
 
 
 /** FOLLOWUPS sales UI bug 4: a product's Arabic name on the Arabic screen (its English name, else its code, otherwise). */
@@ -182,6 +183,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   // Employee names for the history lines whose record names who did it.
   const [actors, setActors] = useState<Record<string, string>>({});
   const [collections, setCollections] = useState<CollectionRow[]>([]);
+  const meId = useUser()?.id ?? null;
   const [collectionSummary, setCollectionSummary] = useState<Summary | null>(null);
   // The server's verdict on whether this person may record a collection here, and if not
   // why. Not derived on the client: see `collectionAction` in services/sales/collections.
@@ -760,6 +762,8 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
     }
     return [base, ...extra].filter(Boolean).join(" ") || null;
   };
+  // D20 (أبو فهد B2): the rep's own bank transfer waiting without its receipt is what is asked for now.
+  const receiptDue = collections.find((c) => c.status === "PENDING_VERIFICATION" && c.paymentMethod === "BANK_TRANSFER" && c._count.evidence === 0 && !!meId && c.submittedBy?.id === meId);
   const lostEvent = deal.outcome === "LOST" ? deal.stageEvents.find((e) => e.toOutcome === "LOST") : undefined;
   const nowCard = !ns ? (
     <div className="pv2-now idle" aria-busy="true"><div className="pv2-skel" style={{ width: 120 }} /><div className="pv2-skel" style={{ width: 260 }} /><div className="pv2-skel" style={{ width: 180 }} /></div>
@@ -773,9 +777,13 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   ) : (
     <div className={`pv2-now${deal.outcome === "WON" ? " won" : ""}`} data-testid="now-card">
       <span className="k">{ar ? "المطلوب منك الآن" : "What you need to do now"}</span>
-      <h2 data-testid="now-title">{ns.requiredNow[0] ? L2(ns.requiredNow[0]) : (ar ? "لا شيء مطلوب منك الآن" : "Nothing for you now")}</h2>
+      <h2 data-testid="now-title">{ns.requiredNow[0] ? L2(ns.requiredNow[0]) : receiptDue ? (ar ? "ارفع إيصال التحويل" : "Upload the transfer receipt") : (ar ? "لا شيء مطلوب منك الآن" : "Nothing for you now")}</h2>
       {nowDetail() ? <p>{nowDetail()}</p> : null}
+      {!ns.requiredNow[0] && receiptDue ? <p data-testid="now-receipt-due">{ar ? "التحويل البنكي مسجّل بدون إيصال — ارفعه عشان يعتمده المحاسب أسرع." : "The bank transfer is recorded without its receipt — upload it so the accountant can approve sooner."}</p> : null}
       {autoLine}
+      {!ns.requiredNow[0] && receiptDue ? (
+        <div className="acts"><a className="btn p" href="#collections" data-testid="now-receipt-go">{ar ? "أرفق الإيصال" : "Attach the receipt"}</a></div>
+      ) : null}
       {(ns.nextAction || ns.secondary.length > 0) && (
         <div className="acts">
           {ns.nextAction ? actionControl(ns.nextAction, true) : null}

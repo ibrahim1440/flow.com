@@ -35,14 +35,22 @@ function Facts({ item }: { item: ApprovalItem }) {
     rows.push([L("خطة الاستقطاع", "Deduction plan"), L(`${f.installmentCount} أقساط × ${f.installment} ⃁ ابتداءً من ${monthOf(String(f.firstInstallmentMonth), "ar")}`, `${f.installmentCount} × ${f.installment} SAR from ${monthOf(String(f.firstInstallmentMonth), "en")}`)]);
     if (f.reason) rows.push([L("السبب", "Reason"), n(f.reason)]);
   } else if (item.type === "DISCOUNT") {
+    // The riyal sign (D19) for SAR; a direct sale names its order and how it is paid instead of a deal / quotation.
+    const cur = f.currency === "SAR" ? L("⃁", "SAR") : n(f.currency);
+    const direct = !f.quoteNumber && f.orderNumber;
     rows.push([L("العميل", "Customer"), n(f.customer)]);
-    rows.push([L("الصفقة", "Deal"), `${n(f.deal)}${f.dealOwner ? ` · ${f.dealOwner}` : ""}`]);
-    rows.push([L("عرض السعر", "Quotation"), `${n(f.quoteNumber)}${Number(f.revision) > 1 ? ` · ${L("مراجعة", "rev.")} ${f.revision}` : ""}`]);
+    if (direct) {
+      rows.push([L("البيع المباشر", "Direct sale"), `${L("طلب", "Order")} #${n(f.orderNumber)}${f.dealOwner ? ` · ${f.dealOwner}` : ""}`]);
+      if (f.payment) rows.push([L("الدفع", "Payment"), <span key="pay" data-testid="approval-payment">{f.payment === "BANK_TRANSFER" ? L("تحويل بنكي (الإيصال بعد الموافقة)", "Bank transfer (receipt after the approval)") : f.payment === "CASH" ? L("كاش", "Cash") : f.payment === "CARD" ? L("شبكة", "Card") : L("آجل", "On account")}</span>]);
+    } else {
+      rows.push([L("الصفقة", "Deal"), `${n(f.deal)}${f.dealOwner ? ` · ${f.dealOwner}` : ""}`]);
+      rows.push([L("عرض السعر", "Quotation"), `${n(f.quoteNumber)}${Number(f.revision) > 1 ? ` · ${L("مراجعة", "rev.")} ${f.revision}` : ""}`]);
+    }
     rows.push([L("الخصم المطلوب", "Requested discount"), <b key="d" className="hr-num">{n(f.discountPercent)}%</b>]);
     rows.push([L("الحد المسموح", "Allowed without approval"), <span key="t" className="hr-num">{n(f.thresholdPercent)}%</span>]);
-    rows.push([L("قبل الخصم", "Before discount"), <span key="s" className="hr-num">{money(f.subtotal)} {n(f.currency)}</span>]);
-    rows.push([L("قيمة الخصم", "Discount"), <span key="x" className="hr-num">{money(f.discountTotal)} {n(f.currency)}</span>]);
-    rows.push([L("الإجمالي مع الضريبة", "Total incl. VAT"), <b key="g" className="hr-num">{money(f.grandTotal)} {n(f.currency)}</b>]);
+    rows.push([L("قبل الخصم", "Before discount"), <span key="s" className="hr-num">{money(f.subtotal)} {cur}</span>]);
+    rows.push([L("قيمة الخصم", "Discount"), <span key="x" className="hr-num">{money(f.discountTotal)} {cur}</span>]);
+    rows.push([L("الإجمالي مع الضريبة", "Total incl. VAT"), <b key="g" className="hr-num" data-testid="approval-total">{money(f.grandTotal)} {cur}</b>]);
   } else if (item.type === "SAMPLE") {
     // A customer's second sample of a coffee product («للعميل من كل محصول عيّنة واحدة»).
     rows.push([L("العميل", "Customer"), n(lang === "ar" ? f.customerAr ?? f.customer : f.customer)]);

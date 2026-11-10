@@ -13,6 +13,7 @@ import { collectionScope, collectionWhere, seesAllSales } from "@/lib/services/s
 import { canViewInvoices } from "@/lib/services/invoicing/access";
 import { branchWhere, parseBranchFilter } from "@/lib/accounting/locations";
 import { receiptAbilities, decisionKey } from "@/lib/services/sales/receipts";
+import { redactCollectionRow, seesCollectionNet } from "@/lib/services/sales/collection-visibility";
 import { receiptSelfConfirmAllowed } from "@/lib/services/sales/receipt-four-eyes";
 import { AMOUNT_PATTERN } from "@/lib/money/amount-input";
 
@@ -226,11 +227,13 @@ export async function GET(request: Request) {
       }
     }
 
+    // R3-L1: a recorder reads no net basis and no commission rows (the server's rule, not the page's).
+    const seesNet = seesCollectionNet(user.permissions);
     return NextResponse.json({
-      rows,
+      rows: seesNet ? rows : rows.map(redactCollectionRow),
       ...(allocations ? { allocations } : {}),
       counts,
-      totals,
+      totals: seesNet ? totals : Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, { gross: v.gross }])),
       decisions,
       projectedCommission: projected,
       eligibleDeals,
@@ -325,14 +328,16 @@ export async function POST(request: Request) {
       TX_OPTS,
     );
 
-    const summary = await collectionSummary(prisma, opportunityId);
+    const summary = serialiseSummary(await collectionSummary(prisma, opportunityId));
+    // D20 R4-L1: the recorder's answer carries the net only for Finance — the same rule as the GET lists.
+    const seesNet = seesCollectionNet(user.permissions);
     return NextResponse.json(
       {
         collectionId: result.collectionId,
         replayed: result.replayed,
         amountTax: result.amountTax.toFixed(2),
-        amountNet: result.amountNet.toFixed(2),
-        summary: serialiseSummary(summary),
+        amountNet: seesNet ? result.amountNet.toFixed(2) : null,
+        summary: seesNet ? summary : { ...summary, approvedNet: null },
       },
       { status: result.replayed ? 200 : 201 },
     );
@@ -356,7 +361,7 @@ export function serialiseSummary(s: Awaited<ReturnType<typeof collectionSummary>
       : null,
     approvedGross: s.approvedGross.toFixed(2),
     approvedTax: s.approvedTax.toFixed(2),
-    approvedNet: s.approvedNet.toFixed(2),
+    approvedNet: s.approvedNet.toFixed(2) as string | null,
     pendingGross: s.pendingGross.toFixed(2),
     reversedGross: s.reversedGross.toFixed(2),
     unpaidGross: s.unpaidGross.toFixed(2),
