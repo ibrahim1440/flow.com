@@ -6,6 +6,7 @@ import { Languages, WifiOff } from "lucide-react";
 
 import { PIN_LENGTH } from "@/lib/pin-policy";
 import { cameForExpiredSession, SESSION_EXPIRED_AR, SESSION_EXPIRED_EN } from "@/lib/session-expired";
+import { IDLE_REASON, SESSION_IDLE_AR, SESSION_IDLE_EN, safeNext } from "@/lib/auth/idle";
 import { DesktopRecommendedNotice } from "@/components/shell/DesktopRecommendedNotice";
 import { SHOW_PIN_SIGN_IN } from "@/lib/simple-mode";
 import { BrandMark } from "@/components/brand/BrandMark";
@@ -110,9 +111,12 @@ export default function LoginClient() {
 
   // Reached because a session ended (idle 4 h, absolute 12 h, logout elsewhere, revocation).
   const [expired, setExpired] = useState(false);
+  // Signed out after 10 minutes without activity (owner, 9 Nov): its own notice, and the sign-in returns to the page.
+  const [idle, setIdle] = useState(false);
   useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("reason") === IDLE_REASON) setIdle(true); // eslint-disable-line react-hooks/set-state-in-effect -- the query string exists only in the browser
     // A station that signed itself out after 5 idle minutes (Workstations W1, D3) shows the same notice.
-    if (cameForExpiredSession(window.location.search) || new URLSearchParams(window.location.search).get("reason") === "station_idle") setExpired(true); // eslint-disable-line react-hooks/set-state-in-effect -- the query string exists only in the browser
+    if (cameForExpiredSession(window.location.search) || new URLSearchParams(window.location.search).get("reason") === "station_idle") setExpired(true);
   }, []);
 
   useEffect(() => {
@@ -153,7 +157,7 @@ export default function LoginClient() {
       const data = await safeJson(res);
       if (!res.ok) { setNote(noteFor(res.status, data, step)); return "refused"; }
       if (data?.mfaRequired && data.challenge) { setChallenge(data.challenge); setCode(""); return "ok"; }
-      router.push(stationReturn(window.location.search) ?? data?.redirectTo ?? "/dashboard");
+      router.push(stationReturn(window.location.search) ?? safeNext(new URLSearchParams(window.location.search).get("next")) ?? data?.redirectTo ?? "/dashboard");
       return "ok";
     } catch {
       // AU-11: nothing reached the server.
@@ -276,6 +280,14 @@ export default function LoginClient() {
       {/* D-P1-7: the sign-in form is the page's main landmark. */}
       <main className="lg-col">
         {/* Both languages at once: whoever is in front of the screen reads it, whatever the toggle. */}
+        {idle ? (
+          <div role="status" data-testid="login-session-idle" className="lg-note tone-warning">
+            <div className="lg-note-txt">
+              <b lang="ar" dir="rtl">{SESSION_IDLE_AR}</b>
+              <span lang="en" dir="ltr">{SESSION_IDLE_EN}</span>
+            </div>
+          </div>
+        ) : null}
         {expired ? (
           <div role="status" data-testid="login-session-expired" className="lg-note tone-warning">
             <div className="lg-note-txt">

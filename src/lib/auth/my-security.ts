@@ -10,6 +10,7 @@
 import { prisma } from "@/lib/db";
 import { asMsgLang } from "@/lib/automation/employee-lang";
 import { SESSION_IDLE_MS } from "./session-policy";
+import { effectivePolicy } from "@/lib/station/device";
 import { describeUserAgent, deviceKey, deviceRef, sessionRef, type DeviceInfo } from "./device";
 import { revokeSession, revokeSessions } from "./session";
 
@@ -22,10 +23,28 @@ export const ACTIVITY_ACTIONS = [
 ] as const;
 
 type Caller = { id: string; sessionId: string };
-type Row = { id: string; method: string; mfa: boolean; createdAt: Date; lastSeenAt: Date; authTime: Date; expiresAt: Date; revokedAt: Date | null; revokedReason: string | null; userAgent: string | null; deviceId: string | null };
+type Row = { id: string; method: string; mfa: boolean; createdAt: Date; lastSeenAt: Date; authTime: Date; expiresAt: Date; revokedAt: Date | null; revokedReason: string | null; userAgent: string | null; deviceId: string | null; scope?: string | null };
 
-export function isLive(s: Pick<Row, "revokedAt" | "expiresAt" | "lastSeenAt">, now = Date.now()): boolean {
-  return !s.revokedAt && s.expiresAt.getTime() > now && now - s.lastSeenAt.getTime() <= SESSION_IDLE_MS;
+/**
+ * Whether a session is live, for the lists (own profile, the administrator's view). An ERP session ends after
+ * SESSION_IDLE_MS unused; a STATION session after the station policy's own idle minutes (`stationIdleMs`, StationPolicy —
+ * gate L3: the list shows what the station guard enforces). Ending sessions uses `notEnded`, never this.
+ */
+export function isLive(s: Pick<Row, "revokedAt" | "expiresAt" | "lastSeenAt"> & { scope?: string | null }, now = Date.now(), stationIdleMs = 5 * 60_000): boolean {
+  if (s.revokedAt || s.expiresAt.getTime() <= now) return false;
+  return now - s.lastSeenAt.getTime() <= (s.scope === "STATION" ? stationIdleMs : SESSION_IDLE_MS);
+}
+
+/**
+ * «End this / end all»: every session not yet revoked and before its deadline — a superset of the live ones, so an
+ * idle-but-not-yet-revoked one (ERP or STATION, whatever the policy) is ended too and never comes back.
+ */
+export const notEnded = (s: Pick<Row, "revokedAt" | "expiresAt">, now = Date.now()) => !s.revokedAt && s.expiresAt.getTime() > now;
+
+/** The station policy's idle limit (StationPolicy, one row; the approved default without one). */
+export async function stationIdleMs(): Promise<number> {
+  const row = await prisma.stationPolicy.findUnique({ where: { id: "singleton" } }).catch(() => null);
+  return effectivePolicy(row).idleMinutes * 60_000;
 }
 /**
  * A session opened by a sign-in has authTime = createdAt (or later, after a step-up). A session that
@@ -44,12 +63,13 @@ export async function mySecurity(caller: Caller, opts: { activityLimit?: number;
     where: { employeeId: caller.id, OR: [{ createdAt: { gte: new Date(now - DEVICE_WINDOW_MS) } }, { revokedAt: null, expiresAt: { gt: new Date(now) } }] },
     orderBy: { createdAt: "desc" },
     take: 500,
-    select: { id: true, method: true, mfa: true, createdAt: true, lastSeenAt: true, authTime: true, expiresAt: true, revokedAt: true, revokedReason: true, userAgent: true, deviceId: true },
+    select: { id: true, method: true, mfa: true, createdAt: true, lastSeenAt: true, authTime: true, expiresAt: true, revokedAt: true, revokedReason: true, userAgent: true, deviceId: true, scope: true },
   });
+  const stIdle = await stationIdleMs();
   const current = rows.find((r) => r.id === caller.sessionId) ?? null;
   const currentKey = current ? deviceKey(current) : null;
 
-  const sessions: MySession[] = rows.filter((r) => isLive(r, now)).map((r) => ({
+  const sessions: MySession[] = rows.filter((r) => isLive(r, now, stIdle)).map((r) => ({
     ref: sessionRef(r.id), current: r.id === caller.sessionId, method: r.method, mfa: r.mfa,
     createdAt: r.createdAt.toISOString(), lastSeenAt: r.lastSeenAt.toISOString(), expiresAt: r.expiresAt.toISOString(), device: describeUserAgent(r.userAgent),
   })).sort((a, b) => Number(b.current) - Number(a.current) || b.lastSeenAt.localeCompare(a.lastSeenAt));
@@ -67,7 +87,7 @@ export async function mySecurity(caller: Caller, opts: { activityLimit?: number;
     return {
       ref: deviceRef(k), current: k === currentKey, device: describeUserAgent(list[0].userAgent),
       firstSeenAt: first.toISOString(), lastSignInAt: lastIn ? lastIn.createdAt.toISOString() : null, lastSignInMethod: lastIn ? lastIn.method : null,
-      lastSeenAt: lastSeen.toISOString(), liveSessions: list.filter((r) => isLive(r, now)).length,
+      lastSeenAt: lastSeen.toISOString(), liveSessions: list.filter((r) => isLive(r, now, stIdle)).length,
     };
   }).sort((a, b) => Number(b.current) - Number(a.current) || b.lastSeenAt.localeCompare(a.lastSeenAt));
 
@@ -131,9 +151,9 @@ export async function endMySession(caller: Caller, ref: string): Promise<"ENDED"
   const now = Date.now();
   const live = await prisma.authSession.findMany({
     where: { employeeId: caller.id, revokedAt: null, expiresAt: { gt: new Date(now) } },
-    select: { id: true, revokedAt: true, expiresAt: true, lastSeenAt: true },
+    select: { id: true, revokedAt: true, expiresAt: true, lastSeenAt: true, scope: true },
   });
-  const hit = live.find((s) => isLive(s, now) && sessionRef(s.id) === ref);
+  const hit = live.find((s) => notEnded(s, now) && sessionRef(s.id) === ref);
   if (!hit) return "NOT_FOUND";
   if (hit.id === caller.sessionId) return "CURRENT";
   // revokeSession matches by id only; the id came from the caller's own rows above.

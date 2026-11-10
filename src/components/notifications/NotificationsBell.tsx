@@ -5,6 +5,7 @@
 // The unread count, and a panel of the latest items — icon, title, time, link — with «تعليم الكل
 // كمقروء» and «عرض كل التنبيهات». Polls every 60 s and when the window regains focus; no websockets.
 // GET /api/notifications answers for the session's own account only. Direction 2.1 tokens only.
+import { BACKGROUND_HEADERS } from "@/lib/auth/session-policy";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -32,7 +33,8 @@ function Bell({ lang, phone }: { lang: "ar" | "en"; phone: boolean }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const load = useCallback(() => {
-    fetch("/api/notifications?limit=8", { cache: "no-store" })
+    // The bell refreshes by itself (timer, focus, return to the tab): a background request — never extends the session.
+    fetch("/api/notifications?limit=8", { cache: "no-store", headers: BACKGROUND_HEADERS })
       .then((r) => (r.ok ? r.json() : null))
       .then((d: ListResponse | null) => { if (d) setData(d); })
       .catch(() => undefined);

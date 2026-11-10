@@ -10,7 +10,8 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { Delete, ShieldCheck } from "lucide-react";
 import { PIN_LENGTH } from "@/lib/pin-policy";
 import { SHOW_PIN_SIGN_IN } from "@/lib/simple-mode";
-import { isEndedSession, SESSION_EXPIRED_LOGIN } from "@/lib/session-expired";
+import { isEndedSession, isIdleEnded, SESSION_EXPIRED_LOGIN } from "@/lib/session-expired";
+import { idleLoginUrl } from "@/lib/auth/idle";
 import { D21Dialog } from "@/components/ui/Dialog";
 
 const T = {
@@ -60,7 +61,7 @@ export function StepUpProvider({ lang, privileged, username = "", children }: { 
       // The session itself ended (idle, absolute deadline, logout, revocation): leave for the
       // sign-in screen, which says so in both languages. Full navigation: no page state survives.
       if (isEndedSession(res.status, url, body, window.location.origin)) {
-        window.location.replace(SESSION_EXPIRED_LOGIN);
+        window.location.replace(isIdleEnded(body) ? idleLoginUrl(window.location.pathname + window.location.search) : SESSION_EXPIRED_LOGIN);
         return res;
       }
       if (url.includes("/api/auth/")) return res;

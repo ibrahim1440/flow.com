@@ -59,8 +59,9 @@ export default function WhatsAppConnectionPage() {
   useD21Phone({ title: ar ? "إعدادات الإرسال" : "Sending settings", sub: ar ? "رسائل العملاء التلقائية" : "Automated customer messages" });
 
   /** Re-read the status. The form fields (mode, test number) are only set on first load. */
-  const load = useCallback(async () => {
-    const r = await api<Status>("/api/automation/whatsapp");
+  // `poll`: the linking loop below re-reads by itself — a background request (it never extends the session).
+  const load = useCallback(async (poll = false) => {
+    const r = await api<Status>("/api/automation/whatsapp", poll ? { background: true } : undefined);
     if (!r.ok) {
       setError(r.data.error ?? (ar ? "تعذر قراءة حالة الواتساب." : "Could not read WhatsApp status."));
       return null;
@@ -92,7 +93,7 @@ export default function WhatsAppConnectionPage() {
   useEffect(() => {
     if (!linking) return;
     const poll = setInterval(async () => {
-      const s = await load();
+      const s = await load(true);
       if (s?.state === "open") {
         setLinkingSince(null);
         setQr(null);
@@ -106,7 +107,7 @@ export default function WhatsAppConnectionPage() {
     }, STATE_POLL_MS);
     const refresh = qr
       ? setInterval(async () => {
-          const r = await api<{ connected: boolean; qr?: string | null }>("/api/automation/whatsapp", { method: "POST", body: { action: "qr" } });
+          const r = await api<{ connected: boolean; qr?: string | null }>("/api/automation/whatsapp", { method: "POST", body: { action: "qr" }, background: true });
           if (r.ok && r.data.qr) setQr(r.data.qr);
         }, QR_REFRESH_MS)
       : null;

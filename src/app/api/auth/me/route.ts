@@ -1,7 +1,8 @@
 import { NextResponse } from "@/lib/api-response";
 import { cookies } from "next/headers";
-import { getUser, getUserWithPermissions } from "@/lib/auth-server";
+import { getUser, getUserWithPermissions, sessionEndReason } from "@/lib/auth-server";
 import { revokeSession } from "@/lib/auth/session";
+import { sessionRef } from "@/lib/auth/device";
 import { authAudit } from "@/lib/auth/sign-in";
 import { refreshSessionCookie } from "@/lib/session-cookie";
 import { prisma } from "@/lib/db";
@@ -12,7 +13,9 @@ export async function GET() {
     // A token cookie that no longer names a live session (idle, absolute deadline, logout,
     // revocation) says SESSION_ENDED, so the page can tell the user; still no data at all.
     const hadToken = !!(await cookies()).get("token")?.value;
-    return NextResponse.json(hadToken ? { error: "Not authenticated", code: "SESSION_ENDED" } : { error: "Not authenticated" }, { status: 401 });
+    // Ended for inactivity (10 min, owner 9 Nov): SESSION_IDLE — the sign-in screen says why and returns to the page.
+    const idle = hadToken && (await sessionEndReason()) === "IDLE";
+    return NextResponse.json(hadToken ? { error: "Not authenticated", code: idle ? "SESSION_IDLE" : "SESSION_ENDED" } : { error: "Not authenticated" }, { status: 401 });
   }
   // The session id stays in the httpOnly cookie; the page only needs what the session allows.
   const { sessionId, cv, sid, home, ...rest } = user as typeof user & { cv?: string; sid?: string };
@@ -34,8 +37,16 @@ export async function GET() {
 /** Logout revokes the session server-side: the same token replayed afterwards gets 401. */
 export async function DELETE(request: Request) {
   const token = await getUser();
+  const q = new URL(request.url).searchParams;
+  // Gate race: an old tab signing itself out for inactivity names the session it knew (`ref`). If the cookie now names
+  // another one (the person signed in again meanwhile), nothing is ended — the tab reloads into the new session.
+  const ref = q.get("ref");
+  if (ref && token?.sid && sessionRef(token.sid) !== ref) {
+    return NextResponse.json({ error: "تغيّرت الجلسة — دخلت من جديد في تبويب ثاني.", errorEn: "The session changed — you signed in again in another tab.", code: "SESSION_CHANGED" }, { status: 409 });
+  }
   if (token?.sid) {
-    await revokeSession(token.sid, "LOGOUT");
+    // ?reason=idle: the dashboard signed itself out after 10 minutes without activity (IdleGuard).
+    await revokeSession(token.sid, q.get("reason") === "idle" ? "IDLE_TIMEOUT" : "LOGOUT");
     await authAudit(request, { userId: token.id, action: "SIGN_OUT", result: "SUCCESS" });
   }
   const response = NextResponse.json({ success: true });

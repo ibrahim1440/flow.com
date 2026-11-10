@@ -2,6 +2,7 @@
 // «مساحة عملي» — the badge, fetched at most once a minute per tab and shared by the sidebar and the
 // workspace tabs (one request, not one per component or per navigation). Fails quietly.
 import { useEffect, useState } from "react";
+import { BACKGROUND_HEADERS } from "@/lib/auth/session-policy";
 
 export type WsBadge = { count: number; tasks: number; approvals: number; hasTeam?: boolean };
 
@@ -13,7 +14,8 @@ let inflight: Promise<WsBadge | null> | null = null;
 export function loadWsBadge(): Promise<WsBadge | null> {
   if (Date.now() - lastAt < MIN_GAP) return Promise.resolve(last);
   if (inflight) return inflight;
-  inflight = fetch("/api/workspace/badge", { cache: "no-store" })
+  // A badge refresh is the browser's own doing: it never extends the session (idle sign-out).
+  inflight = fetch("/api/workspace/badge", { cache: "no-store", headers: BACKGROUND_HEADERS })
     .then((r) => (r.ok ? r.json() : null))
     .then((b: WsBadge | null) => { if (b && typeof b.count === "number") { last = b; lastAt = Date.now(); } return last; })
     .catch(() => last)

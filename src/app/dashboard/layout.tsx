@@ -13,6 +13,8 @@ import { AppShell } from "@/components/shell/AppShell";
 import { StepUpProvider } from "@/components/auth/StepUp";
 import { ShellLoading, MfaRequiredScreen, PasswordChangeRequiredScreen } from "@/components/shell/ShellStates";
 import { SESSION_EXPIRED_LOGIN } from "@/lib/session-expired";
+import { IdleGuard, broadcastLogout } from "@/components/auth/IdleGuard";
+import { idleLoginUrl } from "@/lib/auth/idle";
 import { DesktopRecommendedNotice, showsDesktopNotice } from "@/components/shell/DesktopRecommendedNotice";
 
 /**
@@ -45,6 +47,7 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
 
   async function handleLogout() {
     clearRecent(); // Ctrl K «فتحتها مؤخرًا» never outlives the session (council fix round 1)
+    broadcastLogout(); // the other tabs of this site sign out with it (idle sign-out, owner 9 Nov)
     await fetch("/api/auth/me", { method: "DELETE" });
     router.push("/login");
   }
@@ -62,6 +65,8 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
     >
       {showsDesktopNotice(viewer, pathname) ? <DesktopRecommendedNotice lang={lang} /> : null}
       {children}
+      {/* Sign-out after 10 minutes without activity (owner, 9 Nov): every dashboard page; the stations never mount it. */}
+      <IdleGuard lang={lang === "en" ? "en" : "ar"} onLogoutNow={() => void handleLogout()} />
     </AppShell>
   );
 }
@@ -75,7 +80,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     // The uploaded Settings logo is no longer fetched here: the UI chrome shows the brand mark.
     fetch("/api/auth/me")
       .then(async (r) => {
-        if (!r.ok) throw new Error(r.status === 401 && (await r.json().catch(() => null))?.code === "SESSION_ENDED" ? "ended" : "failed");
+        const code = r.ok ? null : r.status === 401 ? (await r.json().catch(() => null))?.code : null;
+        if (!r.ok) throw new Error(code === "SESSION_IDLE" ? "idle" : code === "SESSION_ENDED" ? "ended" : "failed");
         return r.json();
       })
       .then((meData) => {
@@ -84,7 +90,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       // A cookie that no longer names a live session (idle 4 h, absolute 12 h, logout,
       // revocation — SESSION_ENDED): the sign-in screen says so in both languages. No cookie
       // at all: the plain sign-in screen.
-      .catch((e: Error) => { if (e.message === "ended") window.location.replace(SESSION_EXPIRED_LOGIN); else router.push("/login"); })
+      .catch((e: Error) => {
+        if (e.message === "idle") window.location.replace(idleLoginUrl(window.location.pathname + window.location.search));
+        else if (e.message === "ended") window.location.replace(SESSION_EXPIRED_LOGIN);
+        else router.push("/login");
+      })
       .finally(() => setLoading(false));
   }, [router]);
 

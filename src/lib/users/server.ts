@@ -23,7 +23,7 @@ import { isSimpleMode } from "@/lib/simple-mode";
 import { hashRateLimitKey } from "@/lib/rate-limit";
 import { revokeSession, revokeSessions } from "@/lib/auth/session";
 import { describeUserAgent, sessionRef, deviceKey, deviceRef } from "@/lib/auth/device";
-import { isLive } from "@/lib/auth/my-security";
+import { isLive, notEnded, stationIdleMs } from "@/lib/auth/my-security";
 import { audit as hrAudit } from "@/lib/hr/core";
 import { assertLinkChangeAllowed } from "@/lib/hr/services/people";
 import { isSensitive, moduleLabel, subLabel, SYSTEM_ROLES, NO_ACCESS_ROLE, GROUPS } from "./catalog";
@@ -221,15 +221,16 @@ export async function accountSessions(id: string) {
   const rows = await prisma.authSession.findMany({
     where: { employeeId: id, OR: [{ createdAt: { gte: new Date(now - 90 * 24 * 60 * 60 * 1000) } }, { revokedAt: null, expiresAt: { gt: new Date(now) } }] },
     orderBy: { createdAt: "desc" }, take: 500,
-    select: { id: true, method: true, mfa: true, createdAt: true, lastSeenAt: true, authTime: true, expiresAt: true, revokedAt: true, userAgent: true, deviceId: true },
+    select: { id: true, method: true, mfa: true, createdAt: true, lastSeenAt: true, authTime: true, expiresAt: true, revokedAt: true, userAgent: true, deviceId: true, scope: true },
   });
-  const sessions = rows.filter((r) => isLive(r, now)).map((r) => ({ ref: sessionRef(r.id), method: r.method, mfa: r.mfa, createdAt: r.createdAt.toISOString(), lastSeenAt: r.lastSeenAt.toISOString(), device: describeUserAgent(r.userAgent), deviceRef: deviceRef(deviceKey(r)) }));
+  const stIdle = await stationIdleMs();
+  const sessions = rows.filter((r) => isLive(r, now, stIdle)).map((r) => ({ ref: sessionRef(r.id), method: r.method, mfa: r.mfa, createdAt: r.createdAt.toISOString(), lastSeenAt: r.lastSeenAt.toISOString(), device: describeUserAgent(r.userAgent), deviceRef: deviceRef(deviceKey(r)) }));
   const groups = new Map<string, typeof rows>();
   for (const r of rows) groups.set(deviceKey(r), [...(groups.get(deviceKey(r)) ?? []), r]);
   const devices = [...groups.entries()].map(([k, list]) => {
     const signIns = list.filter((s) => s.authTime.getTime() >= s.createdAt.getTime() - 1000);
     const last = signIns[0] ?? null;
-    return { ref: deviceRef(k), device: describeUserAgent(list[0].userAgent), lastSignInAt: iso(last?.createdAt), lastSignInMethod: last?.method ?? null, lastSeenAt: list.map((s) => s.lastSeenAt).sort((a, b) => b.getTime() - a.getTime())[0].toISOString(), liveSessions: list.filter((s) => isLive(s, now)).length };
+    return { ref: deviceRef(k), device: describeUserAgent(list[0].userAgent), lastSignInAt: iso(last?.createdAt), lastSignInMethod: last?.method ?? null, lastSeenAt: list.map((s) => s.lastSeenAt).sort((a, b) => b.getTime() - a.getTime())[0].toISOString(), liveSessions: list.filter((s) => isLive(s, now, stIdle)).length };
   }).sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt));
   return { sessions: sessions.sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt)), devices };
 }
@@ -239,8 +240,8 @@ export async function endAccountSessions(ctx: AuditContext, id: string, target: 
   const now = Date.now();
   const e = await prisma.employee.findUnique({ where: { id }, select: { name: true } });
   if (!e) throw new UsersError(404, "NOT_FOUND", "المستخدم غير موجود.", "User not found.");
-  const live = await prisma.authSession.findMany({ where: { employeeId: id, revokedAt: null, expiresAt: { gt: new Date(now) } }, select: { id: true, revokedAt: true, expiresAt: true, lastSeenAt: true, deviceId: true, userAgent: true } });
-  const hit = live.filter((s) => isLive(s, now) && (target.session ? sessionRef(s.id) === target.session : target.device ? deviceRef(deviceKey(s)) === target.device : true));
+  const live = await prisma.authSession.findMany({ where: { employeeId: id, revokedAt: null, expiresAt: { gt: new Date(now) } }, select: { id: true, revokedAt: true, expiresAt: true, lastSeenAt: true, deviceId: true, userAgent: true, scope: true } });
+  const hit = live.filter((s) => notEnded(s, now) && (target.session ? sessionRef(s.id) === target.session : target.device ? deviceRef(deviceKey(s)) === target.device : true));
   if ((target.session || target.device) && !hit.length) throw new UsersError(404, "SESSION_NOT_FOUND", "الجلسة غير موجودة أو انتهت.", "That session does not exist or has ended.");
   const reasonCode = target.session ? "SESSION_ENDED_ADMIN" : target.device ? "DEVICE_SESSIONS_ENDED_ADMIN" : "SESSIONS_ENDED_ADMIN";
   await prisma.$transaction(async (tx) => {

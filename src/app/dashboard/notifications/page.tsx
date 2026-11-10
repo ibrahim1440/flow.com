@@ -5,6 +5,7 @@
 // the text, the time and «فتح»; unread rows are marked and «تعليم كمقروء» / «تعليم الكل كمقروء»
 // mark them read (nothing is deleted; rows older than 90 days are removed). Every account reaches it
 // (the bell's «عرض كل التنبيهات»); GET /api/notifications answers for the session's own account only.
+import { BACKGROUND_HEADERS } from "@/lib/auth/session-policy";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/lib/i18n/context";
@@ -22,20 +23,21 @@ export default function NotificationsPage() {
   const [data, setData] = useState<ListResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [more, setMore] = useState(false);
-  const q = useCallback((before?: string | null) => {
+  // `background`: a refresh the page makes by itself (focus, another page's change) — never extends the session.
+  const q = useCallback((before?: string | null, background = false) => {
     const p = new URLSearchParams({ limit: "30" });
     if (cat) p.set("category", cat);
     if (unreadOnly) p.set("unread", "1");
     if (before) p.set("before", before);
-    return fetch(`/api/notifications?${p}`, { cache: "no-store" }).then(async (r) => {
+    return fetch(`/api/notifications?${p}`, { cache: "no-store", headers: background ? BACKGROUND_HEADERS : undefined }).then(async (r) => {
       if (!r.ok) throw new Error((await r.json().catch(() => ({})) as { error?: string }).error ?? String(r.status));
       return (await r.json()) as ListResponse;
     });
   }, [cat, unreadOnly]);
-  const load = useCallback(() => { q().then((d) => { setErr(null); setData(d); }, (e: Error) => setErr(e.message)); }, [q]);
+  const load = useCallback((background = false) => { q(null, background).then((d) => { setErr(null); setData(d); }, (e: Error) => setErr(e.message)); }, [q]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    const on = () => load();
+    const on = () => load(true);
     window.addEventListener("hq-notifications-changed", on);
     window.addEventListener("focus", on);
     return () => { window.removeEventListener("hq-notifications-changed", on); window.removeEventListener("focus", on); };

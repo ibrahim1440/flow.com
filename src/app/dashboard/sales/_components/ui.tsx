@@ -1,5 +1,6 @@
 "use client";
 
+import { BACKGROUND_HEADERS } from "@/lib/auth/session-policy";
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select as HqSelect } from "@/components/ui/Select";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -958,11 +959,12 @@ export const ROW_ACTION =
 /** Fetch JSON and surface the server's own message, never a generic one. */
 export async function api<T = Record<string, unknown>>(
   url: string,
-  init?: { method?: string; body?: unknown },
+  init?: { method?: string; body?: unknown; background?: boolean },
 ): Promise<{ ok: boolean; status: number; data: T & { error?: string } }> {
   const res = await fetch(url, {
     method: init?.method ?? "GET",
-    headers: init?.body === undefined ? undefined : { "Content-Type": "application/json" },
+    // `background`: the page polls by itself — it never extends the session (idle sign-out, owner 9 Nov).
+    headers: { ...(init?.body === undefined ? {} : { "Content-Type": "application/json" }), ...(init?.background ? BACKGROUND_HEADERS : {}) },
     body: init?.body === undefined ? undefined : JSON.stringify(init.body),
   });
   const data = (await res.json().catch(() => ({}))) as T & { error?: string };

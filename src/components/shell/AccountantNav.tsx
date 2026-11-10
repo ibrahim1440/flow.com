@@ -9,6 +9,7 @@
  *   a group          — heading + its items; an item: link, «+» quick-new beside it, or «قريباً» (disabled, no link)
  *   «القائمة الكاملة» — the switch back to the system menu (remembered per user, see AppShell)
  */
+import { BACKGROUND_HEADERS } from "@/lib/auth/session-policy";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { ShownGroup, ShownItem } from "@/lib/nav/accountant";
@@ -64,7 +65,8 @@ function useRequestBadge(enabled: boolean): number {
   useEffect(() => {
     if (!enabled) return;
     let alive = true;
-    const load = () => fetch("/api/sales/invoices/requests?count=1", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((b: { count?: number } | null) => { if (alive && b && typeof b.count === "number") setN(b.count); }).catch(() => undefined);
+    // Background: a badge never extends the session (idle sign-out, owner 9 Nov).
+    const load = () => fetch("/api/sales/invoices/requests?count=1", { cache: "no-store", headers: BACKGROUND_HEADERS }).then((r) => (r.ok ? r.json() : null)).then((b: { count?: number } | null) => { if (alive && b && typeof b.count === "number") setN(b.count); }).catch(() => undefined);
     load();
     const t = setInterval(load, 120_000);
     return () => { alive = false; clearInterval(t); };

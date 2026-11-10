@@ -26,8 +26,11 @@ export function isEndedSession(status: number, url: string, body: unknown, origi
   }
   if (!path.startsWith("/api/") || path.startsWith("/api/auth/login") || path.startsWith("/api/auth/reauth") || path.startsWith("/api/auth/mfa/login")) return false;
   const b = body as { error?: unknown; code?: unknown } | null;
-  return !!b && b.error === "Not authenticated" && (b.code === undefined || b.code === "SESSION_ENDED");
+  return !!b && b.error === "Not authenticated" && (b.code === undefined || b.code === "SESSION_ENDED" || b.code === "SESSION_IDLE");
 }
+
+/** The session ended for inactivity (10 min, owner 9 Nov): the sign-in screen says so and returns to the page. */
+export const isIdleEnded = (body: unknown) => !!body && (body as { code?: unknown }).code === "SESSION_IDLE";
 
 /** Whether the sign-in page was reached because a session ended. */
 export const cameForExpiredSession = (search: string) => new URLSearchParams(search).get("reason") === SESSION_EXPIRED_REASON;

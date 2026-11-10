@@ -3,7 +3,7 @@
 // A token is only a pointer: it names its AuthSession row (sid) and the account's credential
 // digest (cv). A request is authenticated only while that row exists, is not revoked, and
 // neither deadline has passed:
-//   · idle:     SESSION_IDLE_MS since the session was last used (4 h);
+//   · idle:     SESSION_IDLE_MS since the session was last used (10 min; a background request does not count);
 //   · absolute: SESSION_ABSOLUTE_MS since sign-in (12 h), whatever the activity.
 // Logout revokes the row, so a token replayed after logout (or after expiry) is refused (401).
 // authTime is the last STRONG authentication (sign-in or step-up); sensitive actions need it
@@ -87,7 +87,7 @@ export type LiveSession = { id: string; method: SessionMethod; mfa: boolean; aut
  * anything is touched, so a station token never authenticates an ERP API and an ERP request never
  * refreshes a station session's idle clock (getUserWithPermissions is the one caller).
  */
-export async function checkSession(sid: string | undefined, employeeId: string): Promise<LiveSession | null> {
+export async function checkSession(sid: string | undefined, employeeId: string, opts: { touch?: boolean } = {}): Promise<LiveSession | null> {
   if (!sid) return null;
   const s = await prisma.authSession.findUnique({ where: { id: sid } });
   if (!s || s.employeeId !== employeeId || s.revokedAt) return null;
@@ -98,7 +98,8 @@ export async function checkSession(sid: string | undefined, employeeId: string):
     await revokeSession(s.id, "IDLE_TIMEOUT");
     return null;
   }
-  if (now - s.lastSeenAt.getTime() > TOUCH_MS) await prisma.authSession.updateMany({ where: { id: s.id, revokedAt: null }, data: { lastSeenAt: new Date(now) } });
+  // A background request (the bell, a badge, a poller) is checked like any other, but never counts as use.
+  if (opts.touch !== false && now - s.lastSeenAt.getTime() > TOUCH_MS) await prisma.authSession.updateMany({ where: { id: s.id, revokedAt: null }, data: { lastSeenAt: new Date(now) } });
   const authFactor = s.authFactor === "PIN" || s.authFactor === "PASSWORD" ? s.authFactor : null;
   return { id: s.id, method: s.method as SessionMethod, mfa: s.mfa, authTime: s.authTime, authFactor, createdAt: s.createdAt, expiresAt: s.expiresAt };
 }

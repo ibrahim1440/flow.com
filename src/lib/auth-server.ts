@@ -1,4 +1,5 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
+import { BACKGROUND_HEADER } from "./auth/session-policy";
 import { withArabicError } from "@/lib/i18n/api-errors";
 import { credentialVersion } from "./credential-version";
 import { NextResponse } from "@/lib/api-response";
@@ -107,7 +108,7 @@ export async function getUserWithPermissions(): Promise<SessionUser | null> {
   // Owner security decision: the token is a pointer to a server-side session. Logout, expiry
   // (idle 4 h, absolute 12 h) and revocation end it on the next request. Only an ERP-scope
   // session passes: a STATION session (Workstations W2) is refused by every ERP API here.
-  const session = await checkSession(user.sid, user.id);
+  const session = await checkSession(user.sid, user.id, { touch: !(await isBackgroundRequest()) });
   if (!session) return null;
 
   let permissions = parsePermissions(employee.permissions as string);
@@ -136,9 +137,31 @@ export async function getUserWithPermissions(): Promise<SessionUser | null> {
   return { ...identity, authTime: session.authTime, sessionId: session.id, sessionMethod: session.method, sessionMfa: session.mfa, authFactor: session.authFactor, privileged, mfaEnrollmentRequired, passwordChangeRequired: employee.passwordMustChange, home };
 }
 
+/** A request the browser made by itself (BACKGROUND_HEADER): checked, but it does not extend the session. */
+export async function isBackgroundRequest(): Promise<boolean> {
+  try { return (await headers()).get(BACKGROUND_HEADER) === "1"; } catch { return false; }
+}
+
+/**
+ * Why a request carrying a session cookie is not authenticated: "IDLE" — its session was ended for inactivity
+ * (SESSION_IDLE_MS), "ENDED" — any other end (logout, deadline, revocation…), null — no (valid) cookie at all.
+ */
+export async function sessionEndReason(): Promise<"IDLE" | "ENDED" | null> {
+  const t = await getUser().catch(() => null);
+  if (!t) return null;
+  if (!t.sid) return "ENDED";
+  const s = await prisma.authSession.findUnique({ where: { id: t.sid }, select: { revokedReason: true } }).catch(() => null);
+  return s?.revokedReason === "IDLE_TIMEOUT" ? "IDLE" : "ENDED";
+}
+
 // DEF-08/09: the English `error` is unchanged; `errorAr` is added when the message is known.
 export function unauthorized(msg = "Not authenticated") {
   return NextResponse.json(withArabicError({ error: msg }), { status: 401 });
+}
+
+/** 401 for a session ended by inactivity: the same body as `unauthorized()`, with code SESSION_IDLE (owner, 9 Nov). */
+export function idleUnauthorized() {
+  return NextResponse.json({ ...withArabicError({ error: "Not authenticated" }), code: "SESSION_IDLE" }, { status: 401 });
 }
 
 export function forbidden(msg = "Insufficient permissions") {
@@ -147,7 +170,7 @@ export function forbidden(msg = "Insufficient permissions") {
 
 export async function requireAuth(opts: { allowMfaEnrollment?: boolean; allowPasswordChange?: boolean } = {}) {
   const user = await getUserWithPermissions();
-  if (!user) return { user: null as never, error: unauthorized() };
+  if (!user) return { user: null as never, error: (await sessionEndReason()) === "IDLE" ? idleUnauthorized() : unauthorized() };
   if (user.mfaEnrollmentRequired && !opts.allowMfaEnrollment) {
     return { user: null as never, error: NextResponse.json({ error: "يجب تفعيل التحقق بخطوتين لهذا الحساب أولًا.", errorEn: "Two-step verification must be set up for this account first.", code: "MFA_ENROLLMENT_REQUIRED" }, { status: 403 }) };
   }
