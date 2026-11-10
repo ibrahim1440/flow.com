@@ -263,7 +263,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               <dl className="inv-totals" data-testid="doc-totals">
                 <div><dt>{L("الإجمالي قبل الضريبة", "Total before VAT")}</dt><dd>{money(d.totals.taxable)}</dd></div>
                 {(d.taxBreakdown ?? []).map((b) => <div key={`${b.category}${b.rate}`}><dt>{b.category === "S" ? L(`ضريبة القيمة المضافة ${Number(b.rate)}%`, `VAT ${Number(b.rate)}%`) : L(CATEGORY[b.category]?.[0] ?? b.category, CATEGORY[b.category]?.[1] ?? b.category)}</dt><dd>{money(b.tax)}</dd></div>)}
-                <div className="g"><dt>{L("الإجمالي شامل الضريبة · ر.س", "Total incl. VAT · SAR")}</dt><dd data-testid="doc-grand">{money(d.totals.grand)}</dd></div>
+                <div className="g"><dt>{L("الإجمالي شامل الضريبة · ⃁", "Total incl. VAT · SAR")}</dt><dd data-testid="doc-grand">{money(d.totals.grand)}</dd></div>
                 {qoyod && d.status === "ISSUED" ? <>
                   {d.applications.filter((a) => a.status === "APPLIED").map((a) => (
                     <div key={a.id} data-testid="doc-settlement"><dt>{a.collectionId ? L("دفعت بواسطة سند قبض", "Paid by a receipt") : L("دفعت بواسطة إشعار دائن", "Paid by a credit note")} · <span className="hr-num">{a.appliedDate}</span></dt><dd>{money(a.amount)}</dd></div>

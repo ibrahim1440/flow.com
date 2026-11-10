@@ -8,6 +8,7 @@ import { MfaEnrollment } from "@/components/auth/MfaEnrollment";
 import { BrandMark } from "@/components/brand/BrandMark";
 import "./direction-2.1.css";
 import "./shell-states.css";
+import { RiyalFont } from "@/components/fonts/RiyalFont";
 
 /** The document language the root layout set from the session cookie (`<html lang>`). */
 function useDocLang(): "ar" | "en" {
@@ -20,7 +21,7 @@ function useDocLang(): "ar" | "en" {
 
 // Self-hosted IBM Plex, linked as the shell and the guest pages do (hoisted by `precedence`).
 // eslint-disable-next-line @next/next/no-css-tags
-const PLEX = <link rel="stylesheet" precedence="default" href="/fonts/ibm-plex.css" />;
+const PLEX = <><link rel="stylesheet" precedence="default" href="/fonts/ibm-plex.css" /><RiyalFont /></>;
 
 export function ShellLoading() {
   const lang = useDocLang();

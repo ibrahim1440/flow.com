@@ -163,7 +163,7 @@ function DeferralAlert({ b }: { b: NonNullable<Home["deferrals"]> }) {
   const why = b.stoppedAt?.reason === "PERIOD_CLOSED" ? L("الفترة مقفلة", "period closed") : b.stoppedAt?.reason === "PERIOD_SOFT_CLOSED" ? L("الفترة مقفلة مؤقتًا", "period soft-closed") : L("لم يُشغَّل", "not run");
   return (
     <p role="alert" className="hr-err" data-testid="w-deferral-backlog">
-      {L(`قوالب التأجيل: ${b.overdueCount} ${b.overdueCount === 1 ? "شهر مستحق" : "أشهر مستحقة"} (${money(b.overdueAmount)} ر.س)`, `Deferral templates: ${b.overdueCount} month(s) due (SAR ${money(b.overdueAmount)})`)}
+      {L(`قوالب التأجيل: ${b.overdueCount} ${b.overdueCount === 1 ? "شهر مستحق" : "أشهر مستحقة"} (${money(b.overdueAmount)} ⃁)`, `Deferral templates: ${b.overdueCount} month(s) due (SAR ${money(b.overdueAmount)})`)}
       {b.stoppedAt ? L(`، متوقف عند ${b.stoppedAt.month} (${why})`, `, stopped at ${b.stoppedAt.month} (${why})`) : null}
       {b.scheduler === "NOT_AUTHORISED" ? <span data-testid="w-deferral-scheduler">{L(" · لا تعترف الجدولة التلقائية بالمؤجلات (NOT_AUTHORISED): شغّلها من «تشغيل المستحق الآن»", " · The scheduler does not recognise deferrals (NOT_AUTHORISED): run them with «Run due now»")}</span>
         : b.scheduler === "AUTHORISED" ? <span data-testid="w-deferral-scheduler">{L(" · الجدولة التلقائية مفوّضة بالاعتراف (تفويض دائم)", " · The scheduler is authorised to recognise them (standing authorisation)")}</span> : null}
@@ -243,7 +243,7 @@ function Donut({ title, side, tk, href, testId }: { title: string; side: Side; t
       <dl className="qa-legend">
         <div><dt><i style={{ background: tk.a }} />{L("غير مستحقة بعد", "Not yet due")}</dt><dd className="hr-num">{money(side.notDue)}</dd></div>
         <div><dt><i style={{ background: tk.danger }} />{L("متأخرة", "Overdue")}</dt><dd className="hr-num">{money(side.overdue)}</dd></div>
-        <div><dt>{L("إجمالي المعلقة", "Total outstanding")}</dt><dd className="hr-num">{money(side.open)} <small>{L("ر.س", "SAR")}</small></dd></div>
+        <div><dt>{L("إجمالي المعلقة", "Total outstanding")}</dt><dd className="hr-num">{money(side.open)} <small>{L("⃁", "SAR")}</small></dd></div>
       </dl>
       <Link href={href} className="qa-link">{L("التفاصيل ←", "Details →")}</Link>
     </div>

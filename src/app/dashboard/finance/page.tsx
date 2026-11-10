@@ -50,7 +50,7 @@ export default function FinanceOverviewPage() {
   const tone = (s: string): "danger" | "warning" | "neutral" => (s === "high" ? "danger" : s === "medium" ? "warning" : "neutral");
   const rtl = lang === "ar";
   const cats = [...data.categories].sort((a, b) => b.balance - a.balance).slice(0, 6);
-  const unit = L("ر.س", "SAR");
+  const unit = L("⃁", "SAR");
   const neg = (v: number) => (v < 0 ? "is-danger" : "");
   const recon: Tone = "warn";
 

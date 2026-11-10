@@ -56,7 +56,7 @@ export function RepQuotes({
 }) {
   const ar = lang === "ar";
   const c = data.counts;
-  const sar = ar ? "ر.س" : "SAR";
+  const sar = ar ? "⃁" : "SAR";
   // The clock read once per mount (a render must stay pure).
   const [now] = useState(() => Date.now());
   const name = (q: Q) => (q.customer ? (ar ? q.customer.nameAr ?? q.customer.name : q.customer.name) : "—");

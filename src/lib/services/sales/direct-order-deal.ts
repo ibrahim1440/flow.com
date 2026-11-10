@@ -242,11 +242,11 @@ export async function refreshDirectOrderDeal(tx: Tx, input: { orderId: string; a
     if (claims.total.greaterThan(documentGross)) {
       if (input.change === "edit") {
         throw refuse(409, "BELOW_COLLECTED",
-          `لا يمكن تقليل الطلب تحت ما سُجّل تحصيله على صفقته (${claims.total.toFixed(2)} ر.س). اعكس التحصيل أو أصدر إشعارًا دائنًا أولًا.`,
+          `لا يمكن تقليل الطلب تحت ما سُجّل تحصيله على صفقته (${claims.total.toFixed(2)} ⃁). اعكس التحصيل أو أصدر إشعارًا دائنًا أولًا.`,
           `The order cannot be cut below what is already collected on its deal (${claims.total.toFixed(2)} SAR). Reverse the collection or issue a credit note first.`);
       }
       throw refuse(409, "ORDER_HAS_COLLECTIONS",
-        `لا يمكن ${input.remove ? "حذف" : "إلغاء"} الطلب وعلى صفقته تحصيل مسجّل (${claims.total.toFixed(2)} ر.س) أكبر مما يبقى بدونه (${documentGross.toFixed(2)} ر.س) — ارفض التحصيل المعلّق أو اعكس المعتمد أولًا، أو أصدر إشعارًا دائنًا.`,
+        `لا يمكن ${input.remove ? "حذف" : "إلغاء"} الطلب وعلى صفقته تحصيل مسجّل (${claims.total.toFixed(2)} ⃁) أكبر مما يبقى بدونه (${documentGross.toFixed(2)} ⃁) — ارفض التحصيل المعلّق أو اعكس المعتمد أولًا، أو أصدر إشعارًا دائنًا.`,
         `The order cannot be ${input.remove ? "deleted" : "cancelled"}: its deal carries ${claims.total.toFixed(2)} SAR of collections, more than the ${documentGross.toFixed(2)} SAR left without it. Reject the pending collection or reverse the approved one first, or issue a credit note.`);
     }
     if (!(await isAutoDeal(tx, link.opportunityId))) {

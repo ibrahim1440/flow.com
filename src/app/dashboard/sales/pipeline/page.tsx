@@ -588,9 +588,9 @@ export default function PipelinePage() {
   );
 }
 
-/** «آخر عرض مرفوض: 1,150.00 ر.س» — the rejected offer stays on the card while the deal is worth 0.00 (soon batch round 2). */
+/** «آخر عرض مرفوض: 1,150.00 ⃁» — the rejected offer stays on the card while the deal is worth 0.00 (soon batch round 2). */
 function closedLine(q: { status: string; grandTotal: string }, ar: boolean): string {
   const word = q.status === "EXPIRED" ? (ar ? "آخر عرض منتهي" : "Last expired quotation") : (ar ? "آخر عرض مرفوض" : "Last rejected quotation");
   const n = Number(q.grandTotal).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return ar ? `${word}: ${n} ر.س` : `${word}: SAR ${n}`;
+  return ar ? `${word}: ${n} ⃁` : `${word}: SAR ${n}`;
 }

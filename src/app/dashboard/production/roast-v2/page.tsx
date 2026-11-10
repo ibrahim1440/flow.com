@@ -39,7 +39,7 @@ export default function RoastV2Supervisor() {
             <thead><tr><th align="right">التحميصة</th><th align="right">الدلو</th><th align="right">السبب</th><th align="right">القيمة</th><th align="right">المشغّل</th><th /></tr></thead>
             <tbody>{rows.map((r) => (
               <tr key={r.id} style={{ borderTop: "1px solid var(--border-subtle,#efeadf)", background: r.overdue ? "var(--status-warning-tint,#fbf2da)" : undefined }}>
-                <td><bdi dir="ltr">{r.serial}</bdi>{r.overdue ? " · متأخر" : ""}</td><td>{r.bucket.seqNo}</td><td>{r.discardReason}</td><td>{r.discardValue ?? "—"} ر.س</td><td>{r.operatorName}</td>
+                <td><bdi dir="ltr">{r.serial}</bdi>{r.overdue ? " · متأخر" : ""}</td><td>{r.bucket.seqNo}</td><td>{r.discardReason}</td><td>{r.discardValue ?? "—"} ⃁</td><td>{r.operatorName}</td>
                 <td><button onClick={async () => { if (await post(`${V2}/runs/${r.id}/review`, {})) void load(); }} data-testid={`rv2-review-${r.serial}`}>تمّت المراجعة</button></td>
               </tr>
             ))}</tbody>

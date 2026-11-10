@@ -204,7 +204,7 @@ function Manual({ initialQ }: { initialQ?: string }) {
               rows={[
                 { k: L("الاسم", "Name"), v: <bdi>{customer.nameAr || customer.name}</bdi> },
                 { k: L("الرقم الضريبي", "VAT number"), v: customer.vatNumber ? <bdi className="acct-code">{customer.vatNumber}</bdi> : L("غير مسجل — فاتورة مبسطة", "None — a simplified invoice") },
-                ...(arRow ? [{ k: L("الرصيد الحالي", "Current balance"), v: <bdi className="hr-num">{money(arRow.balance)} {L("ر.س", "SAR")}</bdi>, tone: Number(arRow.overdue) > 0 ? ("bad" as const) : ("good" as const), testId: "invoice-party-balance" }] : []),
+                ...(arRow ? [{ k: L("الرصيد الحالي", "Current balance"), v: <bdi className="hr-num">{money(arRow.balance)} {L("⃁", "SAR")}</bdi>, tone: Number(arRow.overdue) > 0 ? ("bad" as const) : ("good" as const), testId: "invoice-party-balance" }] : []),
               ]} />
           ) : null}
           <div className="acct-card" data-testid="invoice-header">

@@ -110,7 +110,7 @@ export default function PerformancePage() {
   const t = data.totals;
   const n = (v: number) => num(v, lang);
   const pct = (raw: string | null) => (raw === null ? "—" : `${raw.replace(/\.0$/, "")}%`);
-  const sar = ar ? "ر.س" : "SAR";
+  const sar = ar ? "⃁" : "SAR";
   const monthLabel = monthOptions(month, lang).find((o) => o.value === month)?.label ?? month;
   const narrowed = data.teamView && !!rep;
   const repName = narrowed ? (data.reps[0]?.name ?? team.find((x) => x.id === rep)?.name ?? "") : null;
@@ -427,7 +427,7 @@ function RepBoard({ ar, data, month, lang, onMonth, can }: { ar: boolean; data: 
     return () => { off = true; };
   }, []);
   const t = data.totals;
-  const sar = ar ? "ر.س" : "SAR";
+  const sar = ar ? "⃁" : "SAR";
   const whole = (v: string | number | null | undefined) => (v === null || v === undefined ? "—" : Math.round(Number(v)).toLocaleString("en-US"));
   const prog = t.target;
   const pctN = prog.percent === null ? 0 : Math.max(0, Math.min(100, Number(prog.percent)));

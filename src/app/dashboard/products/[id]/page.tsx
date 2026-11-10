@@ -139,7 +139,7 @@ export default function ProductPage() {
                   <th>{L("رمز الصنف", "SKU code")}</th>
                   <th>{L("حجم العبوة", "Pack size")}</th>
                   <th className="hr-hide-compact">{L("الباركود", "Barcode")}</th>
-                  <th className="num">{L("سعر البيع · ر.س", "Price · SAR")}</th>
+                  <th className="num">{L("سعر البيع · ⃁", "Price · SAR")}</th>
                   <th className="num">{L("متاح", "Available")}</th>
                   <th className="num">{L("محجوز", "Reserved")}</th>
                   <th className="num">{L("حر", "Free")}</th>
@@ -291,7 +291,7 @@ function SkuDialog({ sku, productId, onClose, onSaved }: { sku?: Sku; productId:
         <Field label={`${L("حجم العبوة · غ", "Pack size · g")} *`} help={sku ? L("لا يتغير بعد الإنشاء: المخزون والطلبات قيست به.", "Fixed once created: stock and orders were measured against it.") : undefined}>
           <input className="hr-input" type="number" min={1} dir="ltr" value={weight} disabled={!!sku} onChange={(e) => setWeight(e.target.value)} data-testid="sku-weight" />
         </Field>
-        <Field label={`${L("سعر البيع · ر.س", "Price · SAR")} *`}><input className="hr-input" type="number" min={0} step="0.01" dir="ltr" value={price} onChange={(e) => setPrice(e.target.value)} data-testid="sku-price" /></Field>
+        <Field label={`${L("سعر البيع · ⃁", "Price · SAR")} *`}><input className="hr-input" type="number" min={0} step="0.01" dir="ltr" value={price} onChange={(e) => setPrice(e.target.value)} data-testid="sku-price" /></Field>
         <Field label={`${L("الباركود", "Barcode")} ${L("(اختياري)", "(optional)")}`} help={L("13 رقمًا تُتحقق كـ EAN-13.", "13 digits are checked as EAN-13.")}>
           <input className="hr-input hr-id" dir="ltr" value={barcode} onChange={(e) => setBarcode(e.target.value.trim())} data-testid="sku-barcode" />
         </Field>

@@ -62,7 +62,7 @@ export default function RecurringDetailPage({ params }: { params: Promise<{ id: 
             <dl className="acct-kv-grid">
               <div><dt>{L("الحالة", "Status")}</dt><dd><span className={`hr-dot tone-${TONE[s.status as RecurringStatus]}`}><span data-testid="rec-status-text">{L(STATUS_LABEL[s.status as RecurringStatus][0], STATUS_LABEL[s.status as RecurringStatus][1])}</span></span></dd></div>
               <div><dt>{L("النوع", "Type")}</dt><dd>{L(KIND_LABEL[s.kind][0], KIND_LABEL[s.kind][1])}{s.template ? <> · <Link href="/dashboard/accounting/journal-templates">{s.template.name}</Link></> : s.payload.kind === "JOURNAL" && s.payload.sourceLabel ? ` · ${s.payload.sourceLabel}` : s.payload.kind === "SALES_INVOICE" ? ` · ${s.payload.sourceNumber ?? ""} ${s.payload.customerName}` : ""}</dd></div>
-              <div><dt>{L("المبلغ في كل مرة", "Amount each time")}</dt><dd className="hr-num">{money(s.amount)} {L("ر.س", "SAR")}</dd></div>
+              <div><dt>{L("المبلغ في كل مرة", "Amount each time")}</dt><dd className="hr-num">{money(s.amount)} {L("⃁", "SAR")}</dd></div>
               <div><dt>{L("التكرار", "Frequency")}</dt><dd>{L(FREQ_LABEL[s.frequency][0], FREQ_LABEL[s.frequency][1])}{s.interval > 1 ? L(` · كل ${s.interval}`, ` · every ${s.interval}`) : ""}</dd></div>
               <div><dt>{L("البدء", "Starts")}</dt><dd className="hr-num">{s.startDate}</dd></div>
               <div><dt>{L("الانتهاء", "Ends")}</dt><dd className="hr-num">{s.endDate ?? (s.maxOccurrences ? L(`بعد ${s.maxOccurrences} مرة`, `after ${s.maxOccurrences}`) : L("بلا نهاية", "Never"))}</dd></div>

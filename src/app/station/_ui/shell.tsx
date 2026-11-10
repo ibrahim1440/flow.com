@@ -24,6 +24,7 @@ import { isSessionlessStation } from "@/lib/station/board";
 import { st } from "@/lib/i18n/station";
 import { ActivationScreen, DeviceBar, NoScreen, PinScreen, RevokedScreen, SwitchScreen, TilesScreen, UnauthScreen, clock, type HandoverTask, type RosterEntry } from "./device";
 import { StationBar } from "./blocks";
+import { RiyalFont } from "@/components/fonts/RiyalFont";
 
 type DeviceEmployee = { id: string; name: string; initials: string; supervisor: boolean; preferredLanguage: Lang };
 type DeviceAnswer =
@@ -295,6 +296,7 @@ export function StationShell({ children }: { children: ReactNode }) {
     <div className="d21 ws" lang={lang} dir={lang === "ar" ? "rtl" : "ltr"} data-shell="station" data-station-mode={phase.p}>
       {/* IBM Plex, self-hosted (public/fonts), as the Direction 2.1 shell loads it. */}
       <link rel="stylesheet" precedence="default" href="/fonts/ibm-plex.css" />
+      <RiyalFont />
       {body}
     </div>
   );

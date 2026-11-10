@@ -157,7 +157,7 @@ function Reports() {
                     </tr>
                   ))}
                   <tr className="is-total">
-                    <td /><td>{L("المجموع (ر.س)", "Total (SAR)")}</td>
+                    <td /><td>{L("المجموع (⃁)", "Total (SAR)")}</td>
                     <td className="num hr-num acct-hide-m">{money(tb.data.totals.openingDebit)}</td><td className="num hr-num acct-hide-m">{money(tb.data.totals.openingCredit)}</td>
                     <td className="num hr-num acct-hide-m">{money(tb.data.totals.periodDebit)}</td><td className="num hr-num acct-hide-m">{money(tb.data.totals.periodCredit)}</td>
                     <td className="num hr-num" data-testid="tb-closing-debit">{money(tb.data.totals.closingDebit)}</td><td className="num hr-num" data-testid="tb-closing-credit">{money(tb.data.totals.closingCredit)}</td>

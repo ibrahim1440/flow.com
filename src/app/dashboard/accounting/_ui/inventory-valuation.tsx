@@ -142,7 +142,7 @@ export function InventoryValuationScreen() {
 
 function Metric({ k, v, s, bad, testId }: { k: ReactNode; v: string; s?: string; bad?: boolean; testId?: string }) {
   const { L } = useLang();
-  return <div className="acct-metric"><span className="k">{k}</span><span className={`v${bad ? " is-bad" : ""}`} data-testid={testId}>{money(v)} <small className="acct-hint">{L("ر.س", "SAR")}</small></span>{s ? <span className="s">{s}</span> : null}</div>;
+  return <div className="acct-metric"><span className="k">{k}</span><span className={`v${bad ? " is-bad" : ""}`} data-testid={testId}>{money(v)} <small className="acct-hint">{L("⃁", "SAR")}</small></span>{s ? <span className="s">{s}</span> : null}</div>;
 }
 
 const pct = (part: string, whole: string) => (Number(whole) ? `${((Number(part) * 100) / Number(whole)).toFixed(1)}%` : "—");
@@ -377,7 +377,7 @@ function DrillView({ id, back }: { id: string; back: () => void }) {
       </div>
       <div className="acct-metrics">
         <div className="acct-metric"><span className="k">{L("الكمية في سجل التكلفة", "Cost-ledger quantity")}</span><span className="v" data-testid="drill-qty">{h.qty} <small className="acct-hint">{L(UNIT[h.unit]?.[0] ?? h.unit, UNIT[h.unit]?.[1] ?? h.unit)}</small></span>{h.opsQty !== null && h.opsQty !== h.qty ? <span className="s acct-warn">{L(`في المخزون ${h.opsQty}`, `In Inventory ${h.opsQty}`)}</span> : null}</div>
-        <div className="acct-metric"><span className="k">{L("متوسط التكلفة المرجّح", "Moving average cost")}</span><span className="v">{Number(h.avgCost).toFixed(4)}</span><span className="s">{L("ر.س لكل وحدة", "SAR per unit")}</span></div>
+        <div className="acct-metric"><span className="k">{L("متوسط التكلفة المرجّح", "Moving average cost")}</span><span className="v">{Number(h.avgCost).toFixed(4)}</span><span className="s">{L("⃁ لكل وحدة", "SAR per unit")}</span></div>
         <Metric k={L("القيمة", "Value")} v={h.value} testId="drill-value" />
       </div>
       <section className="acct-card">
@@ -477,7 +477,7 @@ function GrniView() {
   const sum = (xs: Receipt[]) => xs.reduce((s, x) => s + Number(x.value), 0);
   return (
     <section className="acct-card">
-      <h2><Term tech="GRNI — goods received not invoiced">{L("بضاعة مستلمة لم تُرحَّل فاتورتها", "Received, not yet billed in the books")}</Term> <span className="acct-hint hr-num">{r.data.length} · {money(total)} {L("ر.س", "SAR")}</span></h2>
+      <h2><Term tech="GRNI — goods received not invoiced">{L("بضاعة مستلمة لم تُرحَّل فاتورتها", "Received, not yet billed in the books")}</Term> <span className="acct-hint hr-num">{r.data.length} · {money(total)} {L("⃁", "SAR")}</span></h2>
       <div className="acct-metrics" data-testid="grni-split">
         <div className="acct-metric"><span className="k">{L("بلا فاتورة", "No invoice")}</span><span className="v">{money(sum(none))}</span><span className="s">{L(`${none.length} استلامًا — تحتاج فاتورة مشتريات`, `${none.length} receipts — need a purchase invoice`)}</span></div>
         <div className="acct-metric"><span className="k">{L("فاتورة بانتظار الاعتماد", "Invoice awaiting approval")}</span><span className="v">{money(sum(waiting))}</span><span className="s">{L(`${waiting.length} استلامًا — فاتورتها مسودة أو مقدّمة ولم تُرحَّل`, `${waiting.length} receipts — the invoice is a draft or submitted, not posted`)}</span></div>
@@ -572,7 +572,7 @@ function OpeningView({ role, canEdit }: { role: (r: string) => string; canEdit: 
       )}
       <Dialog open={confirm} title={L("تطبيق المخزون الافتتاحي", "Apply the opening inventory")} onClose={() => setConfirm(false)}
         actions={<><Btn onClick={() => setConfirm(false)}>{L("إلغاء", "Cancel")}</Btn><Btn variant="primary" busy={w.busy === "apply"} onClick={apply} data-testid="opening-inv-confirm">{L("تطبيق", "Apply")}</Btn></>}>
-        <p>{L(`يضبط سجل التكلفة على ${money(o.total)} ر.س، ويستبدل أسطر المخزون في جدول الأرصدة الافتتاحية. أسطر الجدول الأخرى تبقى كما هي.`, `Sets the cost ledger to SAR ${money(o.total)} and replaces the inventory lines of the opening grid. The other lines stay as they are.`)}</p>
+        <p>{L(`يضبط سجل التكلفة على ${money(o.total)} ⃁، ويستبدل أسطر المخزون في جدول الأرصدة الافتتاحية. أسطر الجدول الأخرى تبقى كما هي.`, `Sets the cost ledger to SAR ${money(o.total)} and replaces the inventory lines of the opening grid. The other lines stay as they are.`)}</p>
         {o.missing ? <p className="acct-warn">{L(`${o.missing} صنفًا بلا تكلفة سيُقيَّم بصفر.`, `${o.missing} items without a cost will be valued at zero.`)}</p> : null}
       </Dialog>
     </>

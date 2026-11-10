@@ -227,8 +227,8 @@ function PaymentsView({ prefill }: { prefill: { supplierId: string; invoiceId: s
       ) : table(pays.data)}
       <Dialog open={open} title={qoyod ? L("إنشاء سند مورد", "Create a supplier voucher") : L("تسجيل سداد لمورد", "Record a supplier payment")} onClose={() => setOpen(false)} className={qoyod ? "is-wide" : undefined}
         actions={qoyod
-          ? <><Btn onClick={() => setOpen(false)}>{L("إلغاء", "Cancel")}</Btn><Btn variant="primary" busy={w.busy === "pay"} disabled={!f.supplierId || total <= 0} onClick={record} data-testid="pay-confirm">{L("حفظ", "Save")} <bdi className="hr-num">· {money(total)} {L("ر.س", "SAR")}</bdi></Btn></>
-          : <><Btn onClick={() => setOpen(false)}>{L("إلغاء", "Cancel")}</Btn><Btn variant="primary" busy={w.busy === "pay"} disabled={!f.supplierId || total <= 0} onClick={record} data-testid="pay-confirm">{L(`سداد ${money(total)} ر.س`, `Pay SAR ${money(total)}`)}</Btn></>}>
+          ? <><Btn onClick={() => setOpen(false)}>{L("إلغاء", "Cancel")}</Btn><Btn variant="primary" busy={w.busy === "pay"} disabled={!f.supplierId || total <= 0} onClick={record} data-testid="pay-confirm">{L("حفظ", "Save")} <bdi className="hr-num">· {money(total)} {L("⃁", "SAR")}</bdi></Btn></>
+          : <><Btn onClick={() => setOpen(false)}>{L("إلغاء", "Cancel")}</Btn><Btn variant="primary" busy={w.busy === "pay"} disabled={!f.supplierId || total <= 0} onClick={record} data-testid="pay-confirm">{L(`سداد ${money(total)} ⃁`, `Pay SAR ${money(total)}`)}</Btn></>}>
         {qoyod ? (
           <div className="hr-stack" data-testid="pay-voucher">
             <FormField label={L("الجهة", "Party")} required>
@@ -265,7 +265,7 @@ function PaymentsView({ prefill }: { prefill: { supplierId: string; invoiceId: s
             {f.supplierId ? <PartyCard title={L("تفاصيل الجهة", "Party details")} empty="—" testId="pay-party" rows={[
               { k: L("الاسم", "Name"), v: supplierRow?.name ?? "—" },
               { k: L("الرقم الضريبي", "VAT number"), v: supplierRow?.vatNumber ? <bdi className="acct-code">{supplierRow.vatNumber}</bdi> : "—" },
-              { k: L("الرصيد المستحق", "Amount owed"), v: <bdi className="hr-num">{money(owed)} {L("ر.س", "SAR")}</bdi>, tone: owed > 0 ? "bad" : "good", testId: "pay-party-owed" },
+              { k: L("الرصيد المستحق", "Amount owed"), v: <bdi className="hr-num">{money(owed)} {L("⃁", "SAR")}</bdi>, tone: owed > 0 ? "bad" : "good", testId: "pay-party-owed" },
             ]} /> : null}
             {amount && auto && Number(amount) > owed + 0.004 ? <Notice tone="warning">{L(`المبلغ أكبر من المستحق (${money(owed)}): الزيادة لا تُخصص — خفّضه.`, `The amount is above what is owed (${money(owed)}): the excess has nowhere to go — lower it.`)}</Notice> : null}
           </div>
@@ -292,7 +292,7 @@ function PaymentsView({ prefill }: { prefill: { supplierId: string; invoiceId: s
                 <option value={UNASSIGNED_LOCATION}>{L("غير محدد", "Unassigned")}</option>
               </Select></label>
           ) : null}
-          {f.supplierId && Number(claims.data?.openGross ?? 0) > 0 ? <Notice tone="warning"><span data-testid="pay-claim-warning">{L(`لدى هذا المورد مطالبات مفتوحة بقيمة ${money(claims.data?.openGross)} ر.س (نقص فوترَه ولم يصل). انتظر إشعاره الدائن أو اخصمها قبل سداد كامل الفاتورة.`, `This supplier has open claims of SAR ${money(claims.data?.openGross)} (billed, not delivered). Wait for its credit note or hold it back before paying the invoice in full.`)}</span></Notice> : null}
+          {f.supplierId && Number(claims.data?.openGross ?? 0) > 0 ? <Notice tone="warning"><span data-testid="pay-claim-warning">{L(`لدى هذا المورد مطالبات مفتوحة بقيمة ${money(claims.data?.openGross)} ⃁ (نقص فوترَه ولم يصل). انتظر إشعاره الدائن أو اخصمها قبل سداد كامل الفاتورة.`, `This supplier has open claims of SAR ${money(claims.data?.openGross)} (billed, not delivered). Wait for its credit note or hold it back before paying the invoice in full.`)}</span></Notice> : null}
           {f.supplierId ? (openInv.length ? (
             <table className="hr-table is-dense"><thead><tr><th>{L("الفاتورة", "Invoice")}</th><th className="num">{L("المتبقي", "Open")}</th><th className="num">{L("المسدَّد", "Apply")}</th></tr></thead>
               <tbody>{openInv.map((r) => <tr key={r.id}><td className="acct-code">{r.number} · {r.supplierRef}{claimOn(r.id) ? <span className="hr-caption"> · {L(`مطالبة ${money(claimOn(r.id))}`, `claim ${money(claimOn(r.id))}`)}</span> : null}</td><td className="num hr-num">{money(r.outstanding)}</td><td className="num"><input className="hr-input acct-amount" style={{ width: 110 }} inputMode="decimal" value={f.alloc[r.id] ?? ""} placeholder={r.outstanding} onChange={(e) => setF({ ...f, alloc: { ...f.alloc, [r.id]: e.target.value } })} data-testid={`pay-alloc-${r.number}`} /></td></tr>)}</tbody></table>
@@ -305,7 +305,7 @@ function PaymentsView({ prefill }: { prefill: { supplierId: string; invoiceId: s
         </div> : null}
         {qoyod && f.supplierId ? (
           <div className="hr-stack" style={{ marginTop: 12 }}>
-            {Number(claims.data?.openGross ?? 0) > 0 ? <Notice tone="warning"><span data-testid="pay-claim-warning">{L(`لدى هذا المورد مطالبات مفتوحة بقيمة ${money(claims.data?.openGross)} ر.س (نقص فوترَه ولم يصل). انتظر إشعاره الدائن أو اخصمها قبل سداد كامل الفاتورة.`, `This supplier has open claims of SAR ${money(claims.data?.openGross)} (billed, not delivered). Wait for its credit note or hold it back before paying the invoice in full.`)}</span></Notice> : null}
+            {Number(claims.data?.openGross ?? 0) > 0 ? <Notice tone="warning"><span data-testid="pay-claim-warning">{L(`لدى هذا المورد مطالبات مفتوحة بقيمة ${money(claims.data?.openGross)} ⃁ (نقص فوترَه ولم يصل). انتظر إشعاره الدائن أو اخصمها قبل سداد كامل الفاتورة.`, `This supplier has open claims of SAR ${money(claims.data?.openGross)} (billed, not delivered). Wait for its credit note or hold it back before paying the invoice in full.`)}</span></Notice> : null}
             {openInv.length ? (
               <table className="hr-table is-dense" data-testid="pay-alloc"><thead><tr><th>{L("الفاتورة", "Invoice")}</th><th className="hr-num">{L("التاريخ", "Date")}</th><th className="num">{L("المتبقي", "Open")}</th><th className="num">{L("المخصص", "Allocated")}</th></tr></thead>
                 <tbody>{[...openInv].sort((a, b) => a.invoiceDate.localeCompare(b.invoiceDate)).map((r) => <tr key={r.id}><td className="acct-code">{r.number} · {r.supplierRef}{claimOn(r.id) ? <span className="hr-caption"> · {L(`مطالبة ${money(claimOn(r.id))}`, `claim ${money(claimOn(r.id))}`)}</span> : null}</td><td className="hr-num">{r.invoiceDate}</td><td className="num hr-num">{money(r.outstanding)}</td><td className="num"><input className="hr-input acct-amount" style={{ width: 110 }} inputMode="decimal" value={f.alloc[r.id] ?? ""} placeholder="0.00" onChange={(e) => { setAuto(false); setF({ ...f, alloc: { ...f.alloc, [r.id]: e.target.value } }); }} aria-label={L(`المخصص للفاتورة ${r.number}`, `Allocated to ${r.number}`)} data-testid={`pay-alloc-${r.number}`} /></td></tr>)}</tbody></table>

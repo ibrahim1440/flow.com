@@ -14,6 +14,7 @@ import { canViewInvoices } from "@/lib/services/invoicing/access";
 import { branchWhere, parseBranchFilter } from "@/lib/accounting/locations";
 import { receiptAbilities, decisionKey } from "@/lib/services/sales/receipts";
 import { receiptSelfConfirmAllowed } from "@/lib/services/sales/receipt-four-eyes";
+import { AMOUNT_PATTERN } from "@/lib/money/amount-input";
 
 /**
  * Sales collections — the list, and recording a new one.
@@ -272,7 +273,7 @@ export async function POST(request: Request) {
   const rawAmount = typeof b.amountGross === "string" || typeof b.amountGross === "number"
     ? String(b.amountGross).trim()
     : "";
-  if (!/^\d+(\.\d{1,2})?$/.test(rawAmount)) {
+  if (!AMOUNT_PATTERN.test(rawAmount)) {
     return NextResponse.json(
       { error: "amountGross must be a positive amount with at most two decimal places." },
       { status: 400 },

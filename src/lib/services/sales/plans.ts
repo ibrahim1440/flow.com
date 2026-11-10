@@ -26,7 +26,7 @@ export const METRIC_LABEL: Record<Metric, { ar: string; en: string; unitAr?: str
   VISITS: { ar: "زيارات عملاء", en: "Customer visits" },
   CALLS: { ar: "مكالمات", en: "Calls" },
   QUOTES: { ar: "عروض أسعار", en: "Quotations" },
-  COLLECTION: { ar: "تحصيل", en: "Collections", unitAr: "ر.س" },
+  COLLECTION: { ar: "تحصيل", en: "Collections", unitAr: "⃁" },
   NEW_CUSTOMERS: { ar: "عملاء جدد", en: "New customers" },
   SAMPLES: { ar: "عيّنات مرسلة", en: "Samples sent" },
   CUSTOM: { ar: "هدف خاص", en: "Custom goal" },

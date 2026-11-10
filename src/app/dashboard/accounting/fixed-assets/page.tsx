@@ -63,7 +63,7 @@ function Register() {
         <div className="acct-metrics" data-testid="fa-summary">
           <div className="acct-metric"><span className="k">{L("التكلفة (أصول قائمة)", "Cost (assets held)")}</span><span className="v">{money(d.summary.cost)}</span></div>
           <div className="acct-metric"><span className="k">{L("مجمع الإهلاك", "Accumulated depreciation")}</span><span className="v">{money(d.summary.accumulated)}</span></div>
-          <div className="acct-metric"><span className="k">{L("صافي القيمة الدفترية", "Net book value")}</span><span className="v">{money(d.summary.netBookValue)}</span><span className="s">{L("ر.س", "SAR")}</span></div>
+          <div className="acct-metric"><span className="k">{L("صافي القيمة الدفترية", "Net book value")}</span><span className="v">{money(d.summary.netBookValue)}</span><span className="s">{L("⃁", "SAR")}</span></div>
           <div className="acct-metric"><span className="k">{L("الأصول", "Assets")}</span><span className="v">{Object.values(d.summary.byStatus).reduce((a, b) => a + b, 0)}</span><span className="s">{L(`${d.summary.byStatus.DRAFT ?? 0} مسودة · ${d.summary.byStatus.DISPOSED ?? 0} مستبعد`, `${d.summary.byStatus.DRAFT ?? 0} draft · ${d.summary.byStatus.DISPOSED ?? 0} disposed`)}</span></div>
         </div>
       ) : null}

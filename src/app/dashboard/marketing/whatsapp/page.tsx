@@ -137,7 +137,7 @@ function CartJourney({ j, templates, onClose, onDone }: { j: { kind: string; act
         {steps.length > 1 ? <Button variant="secondary" onClick={() => setSteps((x) => x.slice(0, -1))}>{L("حذف الأخيرة", "Remove the last")}</Button> : null}
       </div>
       <div className="mkt-grid-2">
-        <Field id="minv" label={L("أقل قيمة سلة تُستهدف (ر.س)", "Minimum cart value targeted (SAR)")}><TextInput id="minv" value={minValue} onChange={setMinValue} inputMode="decimal" /></Field>
+        <Field id="minv" label={L("أقل قيمة سلة تُستهدف (⃁)", "Minimum cart value targeted (SAR)")}><TextInput id="minv" value={minValue} onChange={setMinValue} inputMode="decimal" /></Field>
         <Field id="exp" label={L("صلاحية السلة (ساعات، حتى 168)", "Cart validity (hours, up to 168)")}><TextInput id="exp" value={expire} onChange={setExpire} inputMode="numeric" /></Field>
       </div>
     </Modal>

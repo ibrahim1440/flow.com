@@ -22,6 +22,7 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { riyalAsText } from "@/lib/money/riyal";
 
 export type EmailAttachment = { filename: string; contentBase64: string; contentType?: string };
 export type EmailMessage = {
@@ -191,6 +192,8 @@ export async function sendEmail(m: EmailMessage): Promise<EmailResult> {
 
 /** Send one message and say exactly what happened (batch 25). Never throws; never logs an address. */
 export async function deliverEmail(m: EmailMessage): Promise<EmailDelivery> {
+  // E-mail is outbound: the official riyal sign «⃁» shown in the app goes out as «ر.س» / «SAR» (gate L3).
+  m = { ...m, subject: riyalAsText(m.subject), html: riyalAsText(m.html), text: riyalAsText(m.text) };
   const none = { providerMessageId: null, httpStatus: null, transient: false };
   const adapter = testAdapter !== undefined ? testAdapter : emailAdapterFromEnv();
   if (!adapter) return { ...none, status: "NOT_CONFIGURED", error: "No e-mail provider is configured." };

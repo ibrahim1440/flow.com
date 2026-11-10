@@ -72,7 +72,7 @@ export function IncomeStatement({ query }: { query: string }) {
     <div className="acct-split">
       <div className="hr-tablewrap">
         <table className="hr-table is-dense acct-statement" data-testid="pl-table">
-          <thead><tr><th>{L("الحساب", "Account")}</th>{c.map((x, i) => <th key={i} className={`num${i > 0 ? " acct-hide-m" : ""}`}>{i === 0 ? L("المبلغ · ر.س", "Amount · SAR") : L("المقارنة", "Comparative")}<span className="acct-th-sub hr-num">{x.from} – {x.to}</span></th>)}</tr></thead>
+          <thead><tr><th>{L("الحساب", "Account")}</th>{c.map((x, i) => <th key={i} className={`num${i > 0 ? " acct-hide-m" : ""}`}>{i === 0 ? L("المبلغ · ⃁", "Amount · SAR") : L("المقارنة", "Comparative")}<span className="acct-th-sub hr-num">{x.from} – {x.to}</span></th>)}</tr></thead>
           <tbody>
             <Rows s={sec("REVENUE")} cols={cols} from={from} to={to} testId="pl-revenue" />
             <Rows s={sec("COST_OF_SALES")} cols={cols} from={from} to={to} />
@@ -219,7 +219,7 @@ export function CashFlow({ query }: { query: string }) {
           {L("صافي التغير", "Net change")} <span className="hr-num">{money(d.netChange)}</span> = {L("تغير النقد الفعلي", "actual change in cash")} <span className="hr-num">{money(d.actualChange)}</span> · {d.reconciled ? L("● مطابق", "● Reconciled") : L(`● فرق ${d.difference}`, `● Difference ${d.difference}`)}
         </p>
         <table className="hr-table is-dense acct-statement" data-testid="cf-table">
-          <thead><tr><th>{L("البند", "Item")}</th><th className="num">{L("المبلغ · ر.س", "Amount · SAR")}</th></tr></thead>
+          <thead><tr><th>{L("البند", "Item")}</th><th className="num">{L("المبلغ · ⃁", "Amount · SAR")}</th></tr></thead>
           <tbody>
             <tr className="is-header"><td colSpan={2}>{L("الأنشطة التشغيلية", "Operating activities")}</td></tr>
             <tr><td>{L("صافي الربح", "Net profit")}</td><td className="num hr-num">{money(d.netProfit)}</td></tr>

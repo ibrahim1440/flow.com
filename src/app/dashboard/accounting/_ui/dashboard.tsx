@@ -48,7 +48,7 @@ export function AccountingDashboard() {
       <section className="acct-card" data-testid="acct-dashboard">
         <div className="acct-foot" style={{ borderTop: 0, paddingTop: 0 }}>
           <h2>{L("المركز حتى اليوم", "Position today")}</h2>
-          <span className="acct-hint">{L(`من القيود المرحّلة فقط · ر.س · ${d.asOf}`, `Posted entries only · SAR · ${d.asOf}`)}</span>
+          <span className="acct-hint">{L(`من القيود المرحّلة فقط · ⃁ · ${d.asOf}`, `Posted entries only · SAR · ${d.asOf}`)}</span>
         </div>
         <div className="acct-metrics">
           <Kpi testId="kpi-cash" k={L("النقد والبنوك", "Cash and bank")} v={money(k.cash)} bad={Number(k.cash) < 0} />

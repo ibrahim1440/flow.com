@@ -11,6 +11,7 @@ import { taglineLines } from "@/lib/login-tagline";
 import "@/components/shell/direction-2.1.css";
 import "../login.css";
 import { LoginLangContext, LoginTaglineContext } from "../lang-context";
+import { RiyalFont } from "@/components/fonts/RiyalFont";
 
 type Info = { name: string; username: string; expiresAt: string };
 
@@ -60,6 +61,7 @@ export default function ActivatePage() {
   return (
     <div dir={lang === "ar" ? "rtl" : "ltr"} lang={lang} className="d21 d21-login" data-testid="activate-root">
       <link rel="stylesheet" precedence="default" href="/fonts/ibm-plex.css" />
+      <RiyalFont />
       <link rel="stylesheet" precedence="default" href="/fonts/amiri.css" />
       <aside className="lg-brand" aria-label={L("حِقبة", "Hiqbah")}>
         <div className="lg-panel">

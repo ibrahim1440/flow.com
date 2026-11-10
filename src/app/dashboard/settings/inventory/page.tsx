@@ -68,17 +68,17 @@ export default function InventorySettingsPage() {
                 url="/api/settings/inventory" field="shortfallValueSar" testId="shortfall-value"
                 stored={s.shortfall.stored.valueSar} effective={String(s.shortfall.effective.valueSar)} isDefault={s.shortfall.stored.valueSar === null} canEdit={s.can.edit}
                 label={L("قيمة النقص بمتوسط التكلفة", "Shortfall value at the moving average")}
-                help={L(`صفر فأكثر · فارغ = الافتراضي ${s.shortfall.defaults.valueSar} ر.س`, `0 or more · empty = the default SAR ${s.shortfall.defaults.valueSar}`)}
-                unit={L("ر.س", "SAR")}
+                help={L(`صفر فأكثر · فارغ = الافتراضي ${s.shortfall.defaults.valueSar} ⃁`, `0 or more · empty = the default SAR ${s.shortfall.defaults.valueSar}`)}
+                unit={L("⃁", "SAR")}
                 onSaved={(j) => setS((x) => (x ? { ...x, ...(j as Partial<Inv>) } : x))}
-                savedText={(j) => L(`حُفظ. النقص بقيمة أكثر من ${String((j as Inv).shortfall.effective.valueSar)} ر.س يحتاج مشرفًا.`, `Saved. A shortfall worth more than SAR ${String((j as Inv).shortfall.effective.valueSar)} needs a supervisor.`)}
+                savedText={(j) => L(`حُفظ. النقص بقيمة أكثر من ${String((j as Inv).shortfall.effective.valueSar)} ⃁ يحتاج مشرفًا.`, `Saved. A shortfall worth more than SAR ${String((j as Inv).shortfall.effective.valueSar)} needs a supervisor.`)}
               />
               <ZeroToggle s={s} onSaved={(j) => setS((x) => (x ? { ...x, ...(j as Partial<Inv>) } : x))} />
               <SingleSetting
                 url="/api/settings/inventory" field="shortfallRollingMultiple" testId="shortfall-rolling"
                 stored={s.shortfall.stored.rollingMultiple} effective={String(s.shortfall.effective.rollingMultiple)} isDefault={s.shortfall.stored.rollingMultiple === null} canEdit={s.can.edit}
                 label={L("مجموع نقص المستلم خلال 30 يومًا (مضاعف حد القيمة)", "A receiver's shortfalls over 30 days (times the value limit)")}
-                help={L(`فارغ = الافتراضي ${s.shortfall.defaults.rollingMultiple} × · الآن ${s.shortfall.effective.rollingMultiple * s.shortfall.effective.valueSar} ر.س`, `Empty = the default ${s.shortfall.defaults.rollingMultiple} × · now SAR ${s.shortfall.effective.rollingMultiple * s.shortfall.effective.valueSar}`)}
+                help={L(`فارغ = الافتراضي ${s.shortfall.defaults.rollingMultiple} × · الآن ${s.shortfall.effective.rollingMultiple * s.shortfall.effective.valueSar} ⃁`, `Empty = the default ${s.shortfall.defaults.rollingMultiple} × · now SAR ${s.shortfall.effective.rollingMultiple * s.shortfall.effective.valueSar}`)}
                 unit="×"
                 onSaved={(j) => setS((x) => (x ? { ...x, ...(j as Partial<Inv>) } : x))}
                 savedText={(j) => L(`حُفظ. من تجاوز نقصُه خلال 30 يومًا ${String((j as Inv).shortfall.effective.rollingMultiple)} × حد القيمة يحتاج مشرفًا.`, `Saved. A receiver past ${String((j as Inv).shortfall.effective.rollingMultiple)} × the value limit in 30 days needs a supervisor.`)}
@@ -86,7 +86,7 @@ export default function InventorySettingsPage() {
               {s.shortfall.high.length ? (
                 <div className="hr-notice tone-warning" role="status" data-testid="shortfall-high">
                   <strong>{L("تحذير: الحد مرتفع، النقص الكبير سيمر بدون مشرف", "Warning: the limit is high — a large shortfall will pass without a supervisor")}</strong>
-                  {" · "}{s.shortfall.high.map((h) => h === "PERCENT" ? L(`النسبة ${s.shortfall.effective.percent}٪ (50٪ فأكثر)`, `percent ${s.shortfall.effective.percent} % (50 % or more)`) : h === "VALUE" ? L(`القيمة ${s.shortfall.effective.valueSar} ر.س (10,000 فأكثر)`, `value SAR ${s.shortfall.effective.valueSar} (10,000 or more)`) : L("الاستلام بصفر لا يحتاج مشرفًا", "a line received at zero needs no supervisor")).join(L("، ", ", "))}
+                  {" · "}{s.shortfall.high.map((h) => h === "PERCENT" ? L(`النسبة ${s.shortfall.effective.percent}٪ (50٪ فأكثر)`, `percent ${s.shortfall.effective.percent} % (50 % or more)`) : h === "VALUE" ? L(`القيمة ${s.shortfall.effective.valueSar} ⃁ (10,000 فأكثر)`, `value SAR ${s.shortfall.effective.valueSar} (10,000 or more)`) : L("الاستلام بصفر لا يحتاج مشرفًا", "a line received at zero needs no supervisor")).join(L("، ", ", "))}
                 </div>
               ) : null}
             </Sec>

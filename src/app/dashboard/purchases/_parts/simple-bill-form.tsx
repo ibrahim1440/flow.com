@@ -168,7 +168,7 @@ export function SimpleBillForm({ draft = null }: { draft?: SimpleDraft | null })
                 );
               })}
             </tbody>
-            <tfoot><tr className="is-total"><td colSpan={3}>{L("الإجمالي (ر.س)", "Total (SAR)")}</td><td className="num hr-num" data-testid="sb-total">{money(totals.gross)}</td><td className="num hr-num">{money(totals.net)}</td><td className="num hr-num">{money(totals.vat)}</td><td /></tr></tfoot>
+            <tfoot><tr className="is-total"><td colSpan={3}>{L("الإجمالي (⃁)", "Total (SAR)")}</td><td className="num hr-num" data-testid="sb-total">{money(totals.gross)}</td><td className="num hr-num">{money(totals.net)}</td><td className="num hr-num">{money(totals.vat)}</td><td /></tr></tfoot>
           </table>
         </div>
         {lines.length < maxLines ? <Btn size="sm" variant="ghost" onClick={() => setLines((ls) => [...ls, blank(hasVat ? "P-S15" : "P-S15-NR")])} data-testid="sb-add-line">+ {L("إضافة سطر", "Add a line")}</Btn> : <p className="acct-hint">{L(`حتى ${maxLines} أسطر في الفاتورة البسيطة.`, `Up to ${maxLines} lines on a simple invoice.`)}</p>}

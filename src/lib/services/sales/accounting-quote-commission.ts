@@ -40,7 +40,7 @@ export function canDecideCommission(p: Permissions | Record<string, unknown>): b
     || (hasModuleAccess(perms, "accounting") && hasSubPrivilege(perms, "accounting", "supervise"));
 }
 
-const money = (v: { toString(): string }) => `${Number(v.toString()).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`;
+const money = (v: { toString(): string }) => `${Number(v.toString()).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ⃁`;
 
 /**
  * Notify one event, split by where each person can open the quotation: holders of the sales module get the Sales

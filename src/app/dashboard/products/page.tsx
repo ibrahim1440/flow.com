@@ -308,7 +308,7 @@ function ProductsTab({ categories, canEdit, onChanged, onToast }: {
                 <th>{L("المنتج", "Product")}</th>
                 <th className="hr-hide-compact">{L("المنشأ والمعالجة", "Origin and process")}</th>
                 <th>{L("أصناف البيع", "SKUs")}</th>
-                <th className="num hr-hide-compact">{L("السعر · ر.س", "Price · SAR")}</th>
+                <th className="num hr-hide-compact">{L("السعر · ⃁", "Price · SAR")}</th>
                 <th className="num">{L("حر للبيع · وحدة", "Free · units")}</th>
                 <th>{L("الحالة", "Status")}</th>
               </tr>

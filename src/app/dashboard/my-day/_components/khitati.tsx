@@ -847,7 +847,7 @@ function GoalBar({ g, ar, onEdit }: { g: Goal; ar: boolean; onEdit?: () => void 
     <div className="kp-goal" data-testid={`plan-goal-${g.metric}`}>
       <span className="kp-goal-h">
         <b>{ar ? GOAL_T[g.metric][0] : GOAL_T[g.metric][1]}{g.admin ? <span className="kp-lock"><Ico name="lock" small />{ar ? "من المشرف" : "Supervisor"}</span> : null}</b>
-        <span className="num"><b>{fmt(g.done)}</b>{g.target ? ` ${ar ? "من" : "of"} ${fmt(g.target)}` : ""}{g.metric === "COLLECTION" && g.target ? (ar ? " ر.س" : " SAR") : ""}
+        <span className="num"><b>{fmt(g.done)}</b>{g.target ? ` ${ar ? "من" : "of"} ${fmt(g.target)}` : ""}{g.metric === "COLLECTION" && g.target ? (ar ? " ⃁" : " SAR") : ""}
           {onEdit ? <button type="button" className="pl-edit" onClick={onEdit} aria-label={ar ? "حدّد هدفك" : "Set your target"} data-testid={`plan-goal-edit-${g.metric}`}><Ico name="edit" small /></button> : null}</span>
       </span>
       {g.target ? <span className="kp-bar"><i style={{ width: `${pct}%` }} /></span> : null}

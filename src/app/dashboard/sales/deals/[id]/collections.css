@@ -1,0 +1,49 @@
+/* D19 «التحصيل» (owner-approved Figma 1988:2, 10 Nov 2026): what is still owed, big, one clear button, and a tidy form. */
+.col-top { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 14px }
+.col-owed { display: grid; gap: 2px; padding: 14px 16px; border-radius: 12px; background: var(--surface-subtle, #f6f5f0) }
+.col-owed .k { font-size: 13px; color: var(--text-muted) }
+.col-owed .v { font-size: 26px; line-height: 1.25 }
+.col-owed .v .font-semibold { font-weight: 700 }
+.col-owed .s { font-size: 12.5px; color: var(--text-muted) }
+.col-record { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 50px; padding: 0 22px; border: 0; border-radius: 12px;
+  background: var(--action-primary); color: #fff; font: inherit; font-size: 16px; font-weight: 700; cursor: pointer }
+.col-record:hover { filter: brightness(1.06) }
+.col-record:focus-visible { outline: 3px solid var(--focus-ring, #9db0a3); outline-offset: 2px }
+@media (min-width: 768px) {
+  .col-top { flex-direction: row; align-items: center }
+  .col-owed { flex: 1 }
+  .col-record { min-height: 46px; font-size: 15px }
+}
+
+.col-sum { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; margin-bottom: 14px; padding: 12px 14px;
+  border-radius: 12px; background: var(--surface-subtle, #f6f5f0); font-size: 15px }
+.col-sum small { font-size: 12px; color: var(--text-muted); font-weight: 400 }
+.col-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px }
+@media (min-width: 640px) { .col-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start } }
+.col-field { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; margin-bottom: 14px }
+.col-grid > .col-field { margin-bottom: 0 }
+.col-grid + .col-field, .col-grid + .col-more { margin-top: 14px }
+.col-l { font-size: 13px; font-weight: 700; color: var(--text-primary) }
+.col-l .req { color: var(--status-danger) }
+/* The amount: the riyal sign on the LEFT (SAMA's rule; the box is laid out left-to-right). */
+.col-amount { display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 0 14px; border: 1.5px solid var(--border-strong, #7e8b82); border-radius: 10px; background: var(--surface) }
+.col-amount:focus-within { border-color: var(--action-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--action-primary) 18%, transparent) }
+.col-amount.bad { border-color: var(--status-danger) }
+.col-amount input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font: inherit; font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-primary); text-align: left }
+.col-cur { font-size: 20px; color: var(--text-muted); line-height: 1 }
+.col-quick { display: flex; flex-wrap: wrap; gap: 6px }
+.col-quick button, .col-chips > button { display: inline-flex; align-items: center; gap: 4px; min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border-subtle);
+  background: var(--surface); font: inherit; font-size: 13.5px; color: var(--text-primary); cursor: pointer }
+.col-chips { display: flex; flex-wrap: wrap; gap: 6px }
+.col-chips > button[aria-pressed="true"] { background: var(--action-primary); border-color: var(--action-primary); color: #fff; font-weight: 700 }
+.col-hint { margin: 0; font-size: 12px; color: var(--text-muted) }
+.col-err { margin: 0; font-size: 12.5px; color: var(--status-danger) }
+/* iOS draws a date field wider than its box unless told otherwise (the owner's screenshot). */
+.col-input { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; min-height: 44px; padding: 0 12px; border: 1px solid var(--border-strong, #7e8b82); border-radius: 10px;
+  background: var(--surface); font: inherit; font-size: 14px; color: var(--text-primary); -webkit-appearance: none; appearance: none }
+.col-more { margin-top: 2px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border-subtle) }
+.col-more > summary { cursor: pointer; font-size: 14px; font-weight: 700; list-style-position: inside }
+.col-more[open] > summary { margin-bottom: 12px }
+.col-more .col-grid { margin-bottom: 12px }
+.col-foot { display: flex; gap: 10px; width: 100% }
+@media (max-width: 639.98px) { .col-foot { flex-direction: column } .col-foot > * { width: 100% } }

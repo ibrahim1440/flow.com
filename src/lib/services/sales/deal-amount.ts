@@ -5,7 +5,7 @@
 //
 // Soon batch round 2 (owner decision, B): a deal whose quotations were all REJECTED or EXPIRED (none ACCEPTED or
 // ISSUED) is worth 0.00 plus its live direct orders — the rejected offer is not pipeline value. Nothing is lost: the
-// deal page and card read «آخر عرض مرفوض: X ر.س» from the Quote table (lastClosedQuote), the deal's activity log gets
+// deal page and card read «آخر عرض مرفوض: X ⃁» from the Quote table (lastClosedQuote), the deal's activity log gets
 // an entry (decideQuote → noteQuoteClosed), and a new ISSUED revision refills the amount on its own. A deal with no
 // quotation at all and no direct order keeps the amount typed by hand.
 //
@@ -100,8 +100,8 @@ export async function noteQuoteClosed(tx: Tx, input: { quoteId: string; actorId:
   await tx.activity.create({
     data: {
       type: "NOTE", opportunityId: q.opportunityId, ownerId: input.actorId, completedAt: input.at ?? new Date(), sourceKey: key,
-      subject: `${word} عرض السعر ${q.quoteNumber} (${q.grandTotal.toFixed(2)} ر.س)`,
-      body: `قيمة الصفقة صارت ${deal?.amount?.toFixed(2) ?? "0.00"} ر.س — لا عرض سعر قائم.${q.rejectionNote ? `\nسبب الرفض: ${q.rejectionNote}` : ""}`,
+      subject: `${word} عرض السعر ${q.quoteNumber} (${q.grandTotal.toFixed(2)} ⃁)`,
+      body: `قيمة الصفقة صارت ${deal?.amount?.toFixed(2) ?? "0.00"} ⃁ — لا عرض سعر قائم.${q.rejectionNote ? `\nسبب الرفض: ${q.rejectionNote}` : ""}`,
     },
   });
 }

@@ -1,0 +1,11 @@
+/*
+ * The Saudi riyal sign (U+20C1 SAUDI RIYAL SIGN, Unicode 17.0 — the symbol the Saudi Central Bank (SAMA) approved on
+ * 20 Feb 2025). Most system fonts and IBM Plex do not carry it yet, so this file defines «Saudi Riyal», a face for U+20C1
+ * only (unicode-range). It stands FIRST in the app's font stacks (globals.css, direction-2.1.css --f-ui/--f-num/--f-mono):
+ * the browser uses it for «⃁» and nothing else. (Joining the IBM Plex families instead does not work: Chrome keeps
+ * Plex's own latin-ext face, whose range U+20AD-20C4 covers U+20C1 without a glyph, and draws an empty box.)
+ * Glyph: @emran-alhaddad/saudi-riyal-font 1.1.0 (SIL Open Font License 1.1 — saudi-riyal/OFL.txt), self-hosted.
+ * Owner, 10 Nov 2026: the official symbol everywhere in the system, to the left of the amount (SAMA's rule).
+ */
+@font-face { font-family: 'Saudi Riyal'; font-style: normal; font-weight: 100 550; font-display: swap; src: url(/fonts/saudi-riyal/saudi_riyal-regular.woff2) format('woff2'); unicode-range: U+20C1; }
+@font-face { font-family: 'Saudi Riyal'; font-style: normal; font-weight: 551 900; font-display: swap; src: url(/fonts/saudi-riyal/saudi_riyal-bold.woff2) format('woff2'); unicode-range: U+20C1; }

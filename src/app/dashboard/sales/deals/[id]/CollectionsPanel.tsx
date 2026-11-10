@@ -3,11 +3,14 @@
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useState } from "react";
 import Link from "next/link";
-import { Paperclip, Upload } from "lucide-react";
+import { Paperclip, Plus, Upload } from "lucide-react";
 import {
-  Field, TextInput, TextArea, Select, Button, Modal,
+  Field, TextInput, TextArea, Button, Modal,
   Money, Num, ROW_ACTION, api, formatDay, num, moneyText,
 } from "../../_components/ui";
+import { RIYAL } from "@/lib/money/riyal";
+import { amountForServer, amountValue, cleanAmount, parsePastedAmount } from "@/lib/money/amount-input";
+import "./collections.css";
 
 /**
  * The money against one deal.
@@ -122,10 +125,13 @@ export function CollectionsPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [amount, setAmount] = useState("");
+  const [pasteBad, setPasteBad] = useState(false);
   const [method, setMethod] = useState<string>("BANK_TRANSFER");
   const [reference, setReference] = useState("");
   const [note, setNote] = useState("");
   const [collectedAt, setCollectedAt] = useState(() => new Date().toISOString().slice(0, 10));
+  // D19 (owner-approved Figma 1988:2): «متى استلمته؟» — اليوم / أمس / تاريخ ثاني (a date field only for the last).
+  const [dateChoice, setDateChoice] = useState<"today" | "yesterday" | "other">("today");
   const [file, setFile] = useState<File | null>(null);
   /**
    * One key per opened form, not per click.
@@ -141,11 +147,14 @@ export function CollectionsPanel({
 
   function start() {
     setAmount("");
+    setPasteBad(false);
     setReference("");
     setNote("");
     setFile(null);
     setError("");
     setCollectedAt(new Date().toISOString().slice(0, 10));
+    setDateChoice("today");
+    setMethod("BANK_TRANSFER");
     setKey(`col-${dealId}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
     setOpen(true);
   }
@@ -158,7 +167,7 @@ export function CollectionsPanel({
       method: "POST",
       body: {
         opportunityId: dealId,
-        amountGross: amount.trim(),
+        amountGross: amountForServer(amount.trim()),
         currency: summary.document?.currency ?? "SAR",
         collectedAt: new Date(collectedAt).toISOString(),
         paymentMethod: method,
@@ -220,12 +229,23 @@ export function CollectionsPanel({
             {" · "}{ar ? "مقابل " : "against "}<bdi className="id" dir="ltr">{doc.quoteNumber}</bdi>
           </span>
         )}
-        {action.available && (
-          <button type="button" className="lk" onClick={start} data-testid="record-collection">
-            + {ar ? "تسجيل تحصيل" : "Record a collection"}
-          </button>
-        )}
       </div>
+      {/* D19 (owner, 10 Nov 2026: «خل زر تسجيل تحصيل اوضح للموظف عشان ما يتوه»): what is still owed, big, and one
+          clear button — full width on a phone, beside the heading on a desktop (collections.css). */}
+      {doc && (
+        <div className="col-top">
+          <div className="col-owed" data-testid="collection-owed">
+            <span className="k">{ar ? "المتبقي على العميل" : "Still owed by the customer"}</span>
+            <b className="v"><Money value={summary.unpaidGross} currency={doc.currency} strong /></b>
+            {Number(summary.pendingGross) > 0 ? <span className="s">{ar ? "منها " : "of which "}<Money value={summary.pendingGross} currency={doc.currency} />{ar ? " بانتظار التحقق" : " awaiting verification"}</span> : null}
+          </div>
+          {action.available && (
+            <button type="button" className="col-record" onClick={start} data-testid="record-collection">
+              <Plus size={18} aria-hidden />{ar ? "سجّل تحصيل من العميل" : "Record a payment from the customer"}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Why the button is not there, whenever the person can act on the reason (NOTHING_OUTSTANDING
           is excluded: the state already says the deal is fully collected). */}
@@ -250,9 +270,7 @@ export function CollectionsPanel({
               [ar ? "قيمة العرض المقبول" : "Accepted quotation", doc.gross, null],
               [ar ? "محصَّل ومعتمَد" : "Approved", summary.approvedGross, ar ? `الأساس الصافي ${moneyText(summary.approvedNet, doc.currency, lang)}` : `net basis ${moneyText(summary.approvedNet, doc.currency, lang)}`],
               [ar ? "بانتظار التحقق" : "Awaiting verification", summary.pendingGross, ar ? "لم يُنشئ عمولة" : "no commission yet"],
-              // Two figures, not one. The debt ignores pending claims; the capacity does not.
-              [ar ? "المتبقي غير المسدد" : "Unpaid balance", summary.unpaidGross, ar ? "قيمة العرض ناقص المعتمَد" : "quotation less approved"],
-              [ar ? "المتاح لتسجيل تحصيل إضافي" : "Available to submit", summary.availableToSubmitGross, ar ? "غير المسدد ناقص ما هو بانتظار التحقق" : "unpaid less what is pending"],
+              // D19: the unpaid balance is the big figure above; the capacity («المتاح») is the form's ceiling.
             ].map(([k, v, hint]) => (
               <div key={k as string} style={{ display: "contents" }}>
                 <dt>{k as string}</dt>
@@ -324,18 +342,33 @@ export function CollectionsPanel({
         </>
       )}
 
-      {open && doc && (
+      {open && doc && (() => {
+        // D19 (owner-approved Figma 1988:2, D/E): the amount first and largest («كم استلمت؟», digits and commas only,
+        // the riyal sign on its left), «المبلغ كامل»; the date and the method as buttons; the reference, the receipt
+        // and the notes under «تفاصيل إضافية». The server's rules are unchanged (the same request, the same limits).
+        const cap = Number(summary.availableToSubmitGross);
+        const value = amountValue(amount);
+        const over = value !== null && value > cap + 0.0001;
+        const okAmount = value !== null && value > 0 && !over;
+        const today = new Date().toISOString().slice(0, 10);
+        const pickDate = (c: "today" | "yesterday" | "other") => {
+          setDateChoice(c);
+          if (c === "today") setCollectedAt(today);
+          if (c === "yesterday") { const d = new Date(); d.setDate(d.getDate() - 1); setCollectedAt(d.toISOString().slice(0, 10)); }
+        };
+        return (
         <Modal
           title={ar ? "تسجيل تحصيل" : "Record a collection"}
           onClose={() => setOpen(false)}
           testId="collection-dialog"
+          wide
           footer={
-            <>
-              <Button variant="secondary" onClick={() => setOpen(false)}>{ar ? "إلغاء" : "Cancel"}</Button>
-              <Button disabled={busy || !amount.trim()} onClick={submit} testId="confirm-collection">
-                {busy ? "…" : (ar ? "تسجيل" : "Record")}
+            <div className="col-foot">
+              <Button disabled={busy || !okAmount || !collectedAt} onClick={submit} testId="confirm-collection">
+                {busy ? "…" : (ar ? "سجّل التحصيل" : "Record the collection")}
               </Button>
-            </>
+              <Button variant="secondary" onClick={() => setOpen(false)}>{ar ? "إلغاء" : "Cancel"}</Button>
+            </div>
           }
         >
           {error && (
@@ -343,80 +376,96 @@ export function CollectionsPanel({
               {error}
             </p>
           )}
-          {/* Which document this is against, named rather than implied. There is exactly one
-              eligible quotation per deal — the latest accepted revision — so it is shown as a
-              fact, not offered as a choice: a picker here would be a way to pick the wrong
-              one, and the server would refuse it anyway. */}
-          <div
-            className="mb-3 rounded-xl bg-oo-bg-subtle px-3.5 py-2.5"
-            data-testid="collection-against"
-          >
-            <p className="text-[12px] leading-[18px] text-oo-text-secondary">
-              {ar ? "مقابل عرض السعر المقبول " : "Against the accepted quotation "}
-              <span className="font-medium text-oo-text-primary">
-                <Num>{doc.quoteNumber}</Num>
-              </span>
-              {" · "}
-              {ar ? "إجمالي " : "total "}
-              <Money value={doc.gross} currency={doc.currency} />
-            </p>
-            {/* Inside the submission form this is the ceiling, so it is named as one. */}
-            <p className="mt-0.5 text-[12px] leading-[18px] text-oo-text-secondary">
-              {ar ? "المتاح لتسجيل تحصيل إضافي " : "Available to submit "}
-              <span className="font-medium text-oo-text-primary">
-                <Money value={summary.availableToSubmitGross} currency={doc.currency} />
-              </span>
-              {" · "}
-              {ar ? "غير المسدد " : "unpaid "}
-              <Money value={summary.unpaidGross} currency={doc.currency} />
-            </p>
+          {/* Which document this is against, named rather than implied: the one eligible quotation of the deal (the
+              latest accepted revision) — a fact, not a choice. The ceiling is what may still be submitted. */}
+          <div className="col-sum" data-testid="collection-against">
+            <span><b>{ar ? "المتبقي " : "Remaining "}<Money value={summary.availableToSubmitGross} currency={doc.currency} strong /></b>
+              {Number(summary.pendingGross) > 0 ? <small>{ar ? " · بعد خصم ما ينتظر التحقق" : " · after what awaits verification"}</small> : null}</span>
+            <small>{ar ? "مقابل عرض " : "Against quotation "}<bdi dir="ltr"><Num>{doc.quoteNumber}</Num></bdi></small>
           </div>
-          <p className="mb-3 text-[12px] leading-[18px] text-oo-text-muted">
-            {ar
-              ? "الضريبة والأساس الصافي يحسبهما النظام من عرض السعر المقبول — لا تُدخلهما."
-              : "The tax and the net basis are derived by the server from the accepted quotation; you do not enter them."}
-          </p>
 
-          <div className="space-y-2">
-            <Field id="col-amount" label={ar ? "المبلغ المستلم (شامل الضريبة)" : "Amount received (including tax)"} required>
-              <TextInput id="col-amount" value={amount} onChange={setAmount} inputMode="decimal" />
-            </Field>
-            <Field id="col-date" label={ar ? "تاريخ التحصيل" : "Collection date"} required>
-              <TextInput id="col-date" type="date" value={collectedAt} onChange={setCollectedAt} />
-            </Field>
-            <Field id="col-method" label={ar ? "طريقة الدفع" : "Payment method"}>
-              <Select id="col-method" value={method} onChange={setMethod}>
-                {METHODS.map((m) => (
-                  <option key={m} value={m}>{label(METHOD_LABEL, m)}</option>
+          <div className="col-grid">
+            <div className="col-field">
+              <label htmlFor="col-amount" className="col-l">{ar ? "كم استلمت؟ (شامل الضريبة)" : "How much did you receive? (incl. tax)"} <span className="req">*</span></label>
+              <div className={`col-amount${over ? " bad" : ""}`} dir="ltr">
+                <span className="col-cur" aria-hidden>{RIYAL}</span>
+                <input id="col-amount" value={amount} onChange={(e) => { setPasteBad(false); setAmount(cleanAmount(e.target.value)); }} inputMode="decimal" autoComplete="off"
+                  onPaste={(e) => {
+                    // A paste is taken only when it is one clean figure; otherwise it is refused and the field kept (gate L2).
+                    e.preventDefault();
+                    const got = parsePastedAmount(e.clipboardData.getData("text"));
+                    if (got === null) { setPasteBad(true); return; }
+                    const el = e.currentTarget;
+                    const a = el.selectionStart ?? amount.length, z = el.selectionEnd ?? amount.length;
+                    setPasteBad(false);
+                    setAmount(cleanAmount(amount.slice(0, a) + got + amount.slice(z)));
+                  }}
+                  placeholder="0.00" aria-describedby="col-amount-hint" aria-invalid={over || undefined} />
+              </div>
+              <div className="col-quick">
+                <button type="button" onClick={() => { setPasteBad(false); setAmount(Number(summary.availableToSubmitGross).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })); }} data-testid="collection-full">
+                  {ar ? "المبلغ كامل · " : "Full amount · "}<Money value={summary.availableToSubmitGross} currency={doc.currency} />
+                </button>
+              </div>
+              {pasteBad
+                ? <p className="col-err" role="alert" data-testid="collection-paste-bad">{ar ? "الصيغة غير صحيحة — الصق رقم فقط، مثل 1,500.50" : "Not a valid amount — paste a number only, e.g. 1,500.50"}</p>
+                : over
+                ? <p className="col-err" role="alert" data-testid="collection-over">{ar ? "أكثر من المتبقي (" : "More than what remains ("}<Money value={summary.availableToSubmitGross} currency={doc.currency} />{ar ? "). عدّل المبلغ." : "). Change the amount."}</p>
+                : <p className="col-hint" id="col-amount-hint">{ar ? "أرقام وفواصل فقط — مثال 1,500.50. النظام يحسب الضريبة." : "Digits and commas only — e.g. 1,500.50. The tax is worked out by the system."}</p>}
+            </div>
+            <div className="col-field">
+              <span className="col-l">{ar ? "متى استلمته؟" : "When did you receive it?"} <span className="req">*</span></span>
+              <div className="col-chips" role="group" aria-label={ar ? "تاريخ التحصيل" : "Collection date"}>
+                {(["today", "yesterday", "other"] as const).map((c) => (
+                  <button key={c} type="button" aria-pressed={dateChoice === c} onClick={() => pickDate(c)} data-testid={`collection-date-${c}`}>
+                    {c === "today" ? (ar ? "اليوم" : "Today") : c === "yesterday" ? (ar ? "أمس" : "Yesterday") : (ar ? "تاريخ ثاني" : "Another date")}
+                  </button>
                 ))}
-              </Select>
-            </Field>
-            <Field id="col-ref" label={ar ? "رقم المرجع" : "Reference number"}>
-              <TextInput id="col-ref" value={reference} onChange={setReference} />
-            </Field>
-            <Field
-              id="col-file"
-              label={ar ? "المرفق" : "Evidence"}
-              hint={ar ? "PDF أو JPEG أو PNG، حتى 5 ميجابايت." : "PDF, JPEG or PNG, up to 5 MB."}
-            >
-              <label className={`${ROW_ACTION} w-full cursor-pointer justify-center gap-2 text-oo-text-secondary`}>
-                <Upload size={14} aria-hidden />
-                {file ? file.name : (ar ? "اختر ملفاً" : "Choose a file")}
-                <input
-                  id="col-file"
-                  type="file"
-                  accept="application/pdf,image/jpeg,image/png"
-                  className="sr-only"
-                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                />
-              </label>
-            </Field>
+              </div>
+              {dateChoice === "other" ? <input id="col-date" type="date" className="col-input" value={collectedAt} max={today} onChange={(e) => setCollectedAt(e.target.value)} aria-label={ar ? "تاريخ التحصيل" : "Collection date"} /> : null}
+            </div>
+          </div>
+
+          <div className="col-field">
+            <span className="col-l">{ar ? "كيف دفع؟" : "How did they pay?"}</span>
+            <div className="col-chips" role="radiogroup" aria-label={ar ? "طريقة الدفع" : "Payment method"}>
+              {METHODS.map((m) => (
+                <button key={m} type="button" role="radio" aria-checked={method === m} aria-pressed={method === m} onClick={() => setMethod(m)} data-testid={`collection-method-${m}`}>{label(METHOD_LABEL, m)}</button>
+              ))}
+            </div>
+          </div>
+
+          <details className="col-more">
+            <summary>{ar ? "تفاصيل إضافية (اختياري)" : "More details (optional)"}</summary>
+            <div className="col-grid">
+              <Field id="col-ref" label={ar ? "رقم المرجع" : "Reference number"}>
+                <TextInput id="col-ref" value={reference} onChange={setReference} placeholder={ar ? "مثال: رقم الحوالة" : "e.g. the transfer number"} />
+              </Field>
+              <Field
+                id="col-file"
+                label={ar ? "المرفق" : "Evidence"}
+                hint={ar ? "PDF أو صورة، حتى 5 ميجابايت." : "PDF or an image, up to 5 MB."}
+              >
+                <label className={`${ROW_ACTION} w-full cursor-pointer justify-center gap-2 text-oo-text-secondary`}>
+                  <Upload size={14} aria-hidden />
+                  {file ? file.name : (ar ? "أرفق صورة الإيصال" : "Attach the receipt")}
+                  <input
+                    id="col-file"
+                    type="file"
+                    accept="application/pdf,image/jpeg,image/png"
+                    className="sr-only"
+                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+              </Field>
+            </div>
             <Field id="col-note" label={ar ? "ملاحظات" : "Notes"}>
               <TextArea id="col-note" value={note} onChange={setNote} rows={2} />
             </Field>
-          </div>
+          </details>
         </Modal>
-      )}
+        );
+      })()}
     </section>
   );
 }

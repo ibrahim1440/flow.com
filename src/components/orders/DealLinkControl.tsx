@@ -73,7 +73,7 @@ export function DealLinkControl({ orderId, orderNumber, deal, canLink, lang, onS
           <button type="button" className="hr-btn" disabled={busy} onClick={() => setOpen(false)}>{L("رجوع", "Back")}</button>
         </>}>
         {error ? <div className="hr-notice tone-danger" role="alert">{error}</div> : null}
-        {opts && Number(opts.receipts ?? 0) > 0 ? <div className="hr-notice tone-warning" role="status" data-testid="order-deal-receipts">{L(`على فواتير هذا الطلب سندات قبض بمبلغ ${opts.receipts} ر.س؛ تُخصم مما يُحصَّل على الصفقة.`, `This order's invoices already carry receipts of ${opts.receipts} SAR; they are subtracted from what the deal can collect.`)}</div> : null}
+        {opts && Number(opts.receipts ?? 0) > 0 ? <div className="hr-notice tone-warning" role="status" data-testid="order-deal-receipts">{L(`على فواتير هذا الطلب سندات قبض بمبلغ ${opts.receipts} ⃁؛ تُخصم مما يُحصَّل على الصفقة.`, `This order's invoices already carry receipts of ${opts.receipts} SAR; they are subtracted from what the deal can collect.`)}</div> : null}
                 {opts && !opts.can.link ? <div className="hr-notice" role="status">{L("ربط الطلب لصاحب الطلب أو المشرف أو المدير.", "Only the order's owner, a supervisor or the admin links an order.")}</div> : null}
         <p className="hr-caption" style={{ margin: 0 }}>
           {L("اختر صفقة للعميل نفسه، أو «صفقة جديدة تلقائية»: تُفتح رابحة باسم «طلب مباشر» وقيمتها قيمة الطلب شاملة الضريبة (سعر الكتالوج). بعدها يُسجَّل التحصيل وتُحتسب العمولة كأي طلب من عرض سعر.",

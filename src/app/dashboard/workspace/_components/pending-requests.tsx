@@ -33,7 +33,7 @@ export function PendingRequestsCard({ now }: { now: Date }) {
   const day = (iso: string) => dayOf(`${iso}T09:00:00Z`, lang, now);
   const what = (i: Pending) =>
     i.type === "LEAVE" ? `${leaveTypeName({ code: i.leaveTypeCode, nameAr: i.title }, lang)} · ${day(i.startDate!)}${i.endDate && i.endDate !== i.startDate ? ` — ${day(i.endDate)}` : ""}`
-      : i.type === "ADVANCE" ? `${money(i.amount)} ${L("ر.س", "SAR")}`
+      : i.type === "ADVANCE" ? `${money(i.amount)} ${L("⃁", "SAR")}`
         : `${L("الحضور", "Attendance")} · ${day(i.workDate!)}`;
   return (
     <section className="ws-mine" aria-labelledby="ws-mine" data-testid="ws-pending-requests">

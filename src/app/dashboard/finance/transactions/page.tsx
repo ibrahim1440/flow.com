@@ -227,7 +227,7 @@ function ReviewForm({ id, finCats, canEnter, onChanged, data, reload }: PanelPro
       <p className="fin-cap"><span className="fin-num">{t.txnDate.slice(0, 10)}</span> · {d.data.transaction.cashAccount.code}{t.bankReference ? ` · ${L("المرجع", "Ref")} ${t.bankReference}` : ""}</p>
       <div className="fin-stack" style={{ gap: 4 }}>
         <div className="fin-row"><span className="fin-t2" style={{ fontSize: 13 }}>{amount > 0 ? L("وارد", "Money in") : L("صادر", "Money out")} · {L(t.status === "CONFIRMED" ? "مؤكد" : t.status === "PENDING" ? "معلّق" : "ملغى", t.status === "CONFIRMED" ? "confirmed" : t.status === "PENDING" ? "pending" : "void")}</span><span data-testid="review-status"><Status tone={rtone}>{L(rar, ren)}</Status></span></div>
-        <span className={`fin-amt ${amount > 0 ? "is-in" : ""}`}><span className="fin-num">{money(amount, { sign: amount > 0 })}</span><span className="stk-unit">{L("ر.س", "SAR")}</span></span>
+        <span className={`fin-amt ${amount > 0 ? "is-in" : ""}`}><span className="fin-num">{money(amount, { sign: amount > 0 })}</span><span className="stk-unit">{L("⃁", "SAR")}</span></span>
         {t.grossAmount && <p className="fin-cap">{L("الإجمالي", "Gross")} {money(toMinor(t.grossAmount))} − {L("الرسوم", "fees")} {money(toMinor(t.feeAmount ?? 0))} = {L("صافي الإيداع", "net deposit")} {money(amount)}</p>}
         <p className="fin-t1" style={{ margin: 0, fontSize: 13.5 }}>{t.description}</p>
       </div>

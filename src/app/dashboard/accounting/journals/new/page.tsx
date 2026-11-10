@@ -67,7 +67,7 @@ function FromTemplate({ id }: { id: string }) {
         <p><strong>{L("من القالب:", "From the template:")}</strong> {t.name} <span className="acct-hint">· {t.amountMode === "PERCENT" ? L("نسب من الإجمالي", "Percentages of the total") : L(`مبالغ ثابتة · ${money(t.fixedTotal)}`, `Fixed amounts · ${money(t.fixedTotal)}`)}</span></p>
         {t.amountMode === "PERCENT" ? (
           <div className="acct-row">
-            <Field label={L("الإجمالي · ر.س", "Total · SAR")} help={L("يُقرَّب كل سطر لأقرب هللة؛ آخر سطر في كل جانب يأخذ الباقي.", "Each line is rounded to the halala; the last line of each side takes the remainder.")}>
+            <Field label={L("الإجمالي · ⃁", "Total · SAR")} help={L("يُقرَّب كل سطر لأقرب هللة؛ آخر سطر في كل جانب يأخذ الباقي.", "Each line is rounded to the halala; the last line of each side takes the remainder.")}>
               <input className="hr-input acct-amount" inputMode="decimal" dir="ltr" value={total} aria-invalid={!!total && !TOTAL.test(total)} onChange={(e) => setTotal(e.target.value.replace(/[^\d.]/g, ""))} data-testid="tpl-total" />
             </Field>
             <Btn variant="primary" busy={busy} disabled={!total || !TOTAL.test(total) || busy} onClick={() => apply(t, total)} data-testid="tpl-apply-total">{value ? L("إعادة التوزيع", "Split again") : L("توزيع على السطور", "Split across the lines")}</Btn>

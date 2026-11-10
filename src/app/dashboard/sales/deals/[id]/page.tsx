@@ -673,7 +673,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   const { top: headTitle, sub: headSub } = splitTitle(deal.title, customerName);
   const phase = ns?.phase ?? (open ? "QUALIFIED" : "CLOSED");
   const liveSamples = deal.samples.filter((x) => x.status !== "CANCELLED");
-  const money = (v: string | number) => ar ? <><span className="n">{whole(v)}</span> ر.س</> : <>SAR <span className="n">{whole(v)}</span></>;
+  const money = (v: string | number) => ar ? <><span className="n">{whole(v)}</span> ⃁</> : <>SAR <span className="n">{whole(v)}</span></>;
   const pad2 = (n: number) => String(n).padStart(2, "0");
   const timeOf = (v: string) => { const d = new Date(v); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
 
@@ -755,7 +755,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       base = ar ? `${n === 0 ? "أُرسلت اليوم" : `أُرسلت قبل ${dayCount(n, lang)}`} ولم يصل رد بعد.${currentQuote.validUntil ? ` العرض صالح حتى ${shortDate(currentQuote.validUntil, lang)}.` : ""}`
         : `${n === 0 ? "Sent today" : `Sent ${dayCount(n, lang)} ago`} with no reply yet.${currentQuote.validUntil ? ` Valid until ${shortDate(currentQuote.validUntil, lang)}.` : ""}`;
     } else if (k === "CREATE_ORDER" && acceptedQuote) {
-      base = ar ? `قبل العميل النسخة ${acceptedQuote.revision} بقيمة ${whole(acceptedQuote.grandTotal)} ر.س. إنشاء الطلب يبدأ التجهيز والتوصيل، ولا يحتاج إعادة إدخال الأصناف.`
+      base = ar ? `قبل العميل النسخة ${acceptedQuote.revision} بقيمة ${whole(acceptedQuote.grandTotal)} ⃁. إنشاء الطلب يبدأ التجهيز والتوصيل، ولا يحتاج إعادة إدخال الأصناف.`
         : `The customer accepted version ${acceptedQuote.revision} (SAR ${whole(acceptedQuote.grandTotal)}). The order starts preparation and delivery; nothing is typed again.`;
     }
     return [base, ...extra].filter(Boolean).join(" ") || null;
@@ -1107,7 +1107,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   ) : null;
 
   const quoteStage = stages.find((x) => x.isActive && x.purpose === "QUOTATION");
-  const dealLine = `${headTitle} · ${whole(deal.amount)} ${ar ? "ر.س" : "SAR"} · ${ar ? deal.stage.nameAr : deal.stage.nameEn}`;
+  const dealLine = `${headTitle} · ${whole(deal.amount)} ${ar ? "⃁" : "SAR"} · ${ar ? deal.stage.nameAr : deal.stage.nameEn}`;
   const dialogs = (
     <>
       {dialog === "close" && (
@@ -1617,9 +1617,9 @@ function SplitDialog({
   );
 }
 
-/** «آخر عرض مرفوض: 1,150.00 ر.س» (soon batch round 2): the offer stays visible while the deal is worth 0.00. */
+/** «آخر عرض مرفوض: 1,150.00 ⃁» (soon batch round 2): the offer stays visible while the deal is worth 0.00. */
 function lastClosedLine(q: { status: string; quoteNumber: string; grandTotal: string }, ar: boolean): string {
   const word = q.status === "EXPIRED" ? (ar ? "آخر عرض منتهي" : "Last expired quotation") : (ar ? "آخر عرض مرفوض" : "Last rejected quotation");
   const n = Number(q.grandTotal).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return ar ? `${word}: ${n} ر.س` : `${word}: SAR ${n}`;
+  return ar ? `${word}: ${n} ⃁` : `${word}: SAR ${n}`;
 }

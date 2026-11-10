@@ -94,8 +94,8 @@ function BudgetForm({ period, existing, onClose, onSaved }: { period: string; ex
       {f.scope === "PLATFORM" ? <Field id="b-r" label={L("المنصة", "Platform")}><Select id="b-r" value={f.scopeRef} onChange={set("scopeRef")}><option value="">—</option>{PLATFORMS.filter((p) => p.kind === "ads" || p.kind === "messaging").map((p) => <option key={p.key} value={p.key}>{L(p.ar, p.en)}</option>)}</Select></Field> : null}
       {f.scope === "PRODUCT" ? <Field id="b-pr" label={L("المنتج", "Product")}><Select id="b-pr" value={f.scopeRef} onChange={set("scopeRef")}><option value="">—</option>{products.data?.rows.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field> : null}
       {f.scope === "CAMPAIGN" ? <Field id="b-c" label={L("الحملة", "Campaign")}><Select id="b-c" value={f.campaignId} onChange={set("campaignId")}><option value="">—</option>{campaigns.data?.rows.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></Field> : null}
-      <Field id="b-pl" label={L("المبلغ المخطط (ر.س)", "Planned amount (SAR)")} required><TextInput id="b-pl" value={f.planned} onChange={set("planned")} inputMode="decimal" /></Field>
-      <Field id="b-d" label={L("الحد اليومي (ر.س)", "Daily cap (SAR)")}><TextInput id="b-d" value={f.dailyCap} onChange={set("dailyCap")} inputMode="decimal" /></Field>
+      <Field id="b-pl" label={L("المبلغ المخطط (⃁)", "Planned amount (SAR)")} required><TextInput id="b-pl" value={f.planned} onChange={set("planned")} inputMode="decimal" /></Field>
+      <Field id="b-d" label={L("الحد اليومي (⃁)", "Daily cap (SAR)")}><TextInput id="b-d" value={f.dailyCap} onChange={set("dailyCap")} inputMode="decimal" /></Field>
       <Field id="b-m" label={L("أقصى زيادة تلقائية في الخطوة الواحدة %", "Max automatic increase per step %")} hint={L("فارغ = لا زيادة تلقائية أبداً.", "Empty = never increase automatically.")}><TextInput id="b-m" value={f.maxAutoIncreasePct} onChange={set("maxAutoIncreasePct")} inputMode="decimal" /></Field>
       <Field id="b-n" label={L("ملاحظة", "Note")}><TextInput id="b-n" value={f.note} onChange={set("note")} /></Field>
     </Modal>

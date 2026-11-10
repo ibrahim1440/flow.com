@@ -144,7 +144,7 @@ function Economics() {
     setEdit((e) => { const x = { ...e }; delete x[id]; return x; });
     reload();
   }
-  const fields: [string, string][] = [["avgOrderValue", L("متوسط الطلب ر.س", "Average order SAR")], ["grossMarginPct", L("هامش الربح %", "Gross margin %")], ["variableCostPerOrder", L("تكلفة متغيرة/طلب", "Variable cost / order")], ["targetCac", L("هدف تكلفة الاكتساب", "Target acquisition cost")], ["repurchaseCycleDays", L("دورة إعادة الشراء (يوم)", "Repurchase cycle (days)")]];
+  const fields: [string, string][] = [["avgOrderValue", L("متوسط الطلب ⃁", "Average order SAR")], ["grossMarginPct", L("هامش الربح %", "Gross margin %")], ["variableCostPerOrder", L("تكلفة متغيرة/طلب", "Variable cost / order")], ["targetCac", L("هدف تكلفة الاكتساب", "Target acquisition cost")], ["repurchaseCycleDays", L("دورة إعادة الشراء (يوم)", "Repurchase cycle (days)")]];
   return (
     <Sec title={L("اقتصاديات المنتجات", "Product economics")} caption={L("أساس نقطة التعادل وأهداف تكلفة الاكتساب في محرك القرار. لا تُفترض أرقام عامة؛ الحقل الفارغ يعني «غير مدخل».", "The basis of the break-even point and acquisition-cost targets in the decision engine. No generic figures are assumed; an empty field means “not entered”.")}>
       <Banner onClose={() => setErr("")}>{err}</Banner>

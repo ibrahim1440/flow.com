@@ -113,7 +113,7 @@ function Receipts() {
                     <td>{r.receiptNumber ? <bdi dir="ltr" className="acct-code">{r.receiptNumber}</bdi> : <span className="hr-caption">{L("يُعطى الرقم عند التأكيد", "Numbered at confirmation")}</span>}</td>
                     <td>{cust(r.customer)}</td>
                     <td className="acct-hide-m">{r.source === "ACCOUNTANT" ? <>{L("فاتورة", "Invoice")} <bdi dir="ltr" className="acct-code">{r.invoice?.number}</bdi></> : <>{r.opportunity?.title}{r.quote ? <span className="hr-caption"> · <bdi dir="ltr">{r.quote.quoteNumber}</bdi></span> : null}</>}</td>
-                    <td className="num hr-num">{money(r.amountGross)} <span className="hr-caption">{L("ر.س", "SAR")}</span></td>
+                    <td className="num hr-num">{money(r.amountGross)} <span className="hr-caption">{L("⃁", "SAR")}</span></td>
                     <td className="acct-hide-m">{L(METHOD[r.paymentMethod]?.[0] ?? r.paymentMethod, METHOD[r.paymentMethod]?.[1] ?? r.paymentMethod)}</td>
                     <td className="acct-hide-m hr-num">{day(r.collectedAt)}</td>
                     <td className="acct-hide-m">{r.submittedBy.name}</td>
@@ -187,7 +187,7 @@ function ReceiptDrawer({ id, onClose }: { id: string; onClose: () => void }) {
             <div><dt>{L("الحالة", "Status")}</dt><dd><StatusChip r={r} /></dd></div>
             <div><dt>{L("رقم السند", "Receipt no.")}</dt><dd data-testid="rct-number">{r.receiptNumber ? <bdi dir="ltr">{r.receiptNumber}</bdi> : L("يُعطى الرقم عند التأكيد", "Numbered at confirmation")}</dd></div>
             <div><dt>{L("العميل", "Customer")}</dt><dd>{cust}</dd></div>
-            <div><dt>{L("المبلغ", "Amount")}</dt><dd className="hr-num">{money(r.amountGross)} {L("ر.س", "SAR")} <span className="hr-caption">{L("شامل الضريبة", "incl. VAT")}</span></dd></div>
+            <div><dt>{L("المبلغ", "Amount")}</dt><dd className="hr-num">{money(r.amountGross)} {L("⃁", "SAR")} <span className="hr-caption">{L("شامل الضريبة", "incl. VAT")}</span></dd></div>
             <div><dt>{L("تاريخ التحصيل", "Collected on")}</dt><dd className="hr-num">{day(r.collectedAt)}</dd></div>
             <div><dt>{L("الطريقة", "Method")}</dt><dd>{L(METHOD[r.paymentMethod]?.[0] ?? r.paymentMethod, METHOD[r.paymentMethod]?.[1] ?? r.paymentMethod)}{r.referenceNumber ? <> · <bdi dir="ltr">{r.referenceNumber}</bdi></> : null}</dd></div>
             <div><dt>{L("مقابل", "Against")}</dt><dd>{r.source === "ACCOUNTANT" ? <>{L("فاتورة بلا صفقة", "Invoice with no deal")} <bdi dir="ltr">{r.invoice?.number}</bdi> · {L("بلا عمولة", "no commission")}</> : <>{r.opportunity?.title}{r.quote ? <> · <bdi dir="ltr">{r.quote.quoteNumber}</bdi></> : null}</>}</dd></div>
@@ -238,7 +238,7 @@ function ReceiptDrawer({ id, onClose }: { id: string; onClose: () => void }) {
                     ))}</tbody>
                   </table>
                 ) : <p className="hr-caption">{L("لا فواتير مفتوحة للعميل — يبقى المبلغ رصيدًا دائنًا له (دفعة مقدمة).", "No open invoice — the amount stays the customer's credit (an advance).")}</p>}
-                <p className={over ? "hr-caption tone-danger" : "hr-caption"} data-testid="rct-alloc-total">{L(`المخصص ${money(allocated)} من ${money(amount)} ر.س؛ الباقي ${money(Math.max(amount - allocated, 0))} رصيد دائن للعميل.`, `Applied ${money(allocated)} of SAR ${money(amount)}; the rest ${money(Math.max(amount - allocated, 0))} stays the customer's credit.`)}{over ? ` ${L("المخصص أكبر من المبلغ.", "More than the amount.")}` : ""}</p>
+                <p className={over ? "hr-caption tone-danger" : "hr-caption"} data-testid="rct-alloc-total">{L(`المخصص ${money(allocated)} من ${money(amount)} ⃁؛ الباقي ${money(Math.max(amount - allocated, 0))} رصيد دائن للعميل.`, `Applied ${money(allocated)} of SAR ${money(amount)}; the rest ${money(Math.max(amount - allocated, 0))} stays the customer's credit.`)}{over ? ` ${L("المخصص أكبر من المبلغ.", "More than the amount.")}` : ""}</p>
               </div>
             </>
           ) : r.arApplications.length ? (
@@ -289,7 +289,7 @@ function NewReceipt({ onClose, onCreated }: { onClose: () => void; onCreated: (i
         {pickedOpening ? <Notice tone="info"><span data-testid="rct-new-opening">{L("سداد من الرصيد المرحَّل من النظام السابق: يخفّض ذمة العميل مباشرة، ولا ضريبة عليه (احتُسبت في النظام السابق).", "A payment against the balance carried in from the old books: it reduces the customer's receivable directly, with no VAT (accounted in the old books).")}</span></Notice> : null}
         {picked?.openDeal ? <Notice tone="warning"><span data-testid="rct-new-open-deal">{L(`للعميل صفقة مفتوحة («${picked.openDeal.title}») — يسجّل المندوب التحصيل على الصفقة.`, `The customer has an open deal ("${picked.openDeal.title}") — the rep records the collection on the deal.`)}</span></Notice> : null}
         <div className="acct-row">
-          <label className="hr-field"><span className="hr-label">{L("المبلغ (شامل الضريبة) ر.س", "Amount (incl. VAT) SAR")}</span><input className="hr-input" inputMode="decimal" dir="ltr" value={form.amountGross} onChange={(e) => setForm({ ...form, amountGross: e.target.value })} data-testid="rct-new-amount" /></label>
+          <label className="hr-field"><span className="hr-label">{L("المبلغ (شامل الضريبة) ⃁", "Amount (incl. VAT) SAR")}</span><input className="hr-input" inputMode="decimal" dir="ltr" value={form.amountGross} onChange={(e) => setForm({ ...form, amountGross: e.target.value })} data-testid="rct-new-amount" /></label>
           <label className="hr-field"><span className="hr-label">{L("تاريخ التحصيل", "Collected on")}</span><input type="date" className="hr-input" value={form.collectedAt} max={todayRiyadh()} onChange={(e) => setForm({ ...form, collectedAt: e.target.value })} /></label>
           <label className="hr-field"><span className="hr-label">{L("الطريقة", "Method")}</span><Select value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })}>{Object.entries(METHOD).map(([k, [a, e]]) => <option key={k} value={k}>{L(a, e)}</option>)}</Select></label>
         </div>

@@ -97,7 +97,7 @@ export function RecurringForm({ initial, id, expectedUpdatedAt, canSales }: { in
                 </Select>
               </Field></div>
               {tpl?.amountMode === "PERCENT" ? (
-                <Field label={L("الإجمالي في كل مرة · ر.س", "Total each time · SAR")}>
+                <Field label={L("الإجمالي في كل مرة · ⃁", "Total each time · SAR")}>
                   <input className="hr-input acct-amount" inputMode="decimal" dir="ltr" value={v.totalAmount} aria-invalid={!!v.totalAmount && !TOTAL.test(v.totalAmount)} onChange={(e) => set({ totalAmount: e.target.value.replace(/[^\d.]/g, "") })} data-testid="rec-total" />
                 </Field>
               ) : null}

@@ -119,7 +119,7 @@ export default function ReportsPage() {
         <Card className="is-ruled">
           <CardTitle title={L("إعدادات المالية", "Finance settings")} sub={L("تغييرها يُسجّل في سجل التدقيق", "Changes are recorded in the audit log")} />
           <fieldset disabled={!canSettings} className="fin-grid" style={{ ["--fin-cols" as string]: 3, border: 0, padding: 0, margin: 0, minWidth: 0 }}>
-            <Field label={L("حد التنبيه بالمبلغ (ر.س)", "Alert amount threshold (SAR)")}><input className={`${INPUT} is-num`} value={s.alertAmountThreshold} onChange={(e) => setS({ ...s, alertAmountThreshold: e.target.value })} /></Field>
+            <Field label={L("حد التنبيه بالمبلغ (⃁)", "Alert amount threshold (SAR)")}><input className={`${INPUT} is-num`} value={s.alertAmountThreshold} onChange={(e) => setS({ ...s, alertAmountThreshold: e.target.value })} /></Field>
             <Field label={L("حد التنبيه بالنسبة (%)", "Alert percent threshold (%)")}><input className={`${INPUT} is-num`} value={s.alertPercentThreshold} onChange={(e) => setS({ ...s, alertPercentThreshold: e.target.value })} /></Field>
             <Field label={L("منطق الحدين", "Threshold logic")}><Select className={INPUT} value={s.alertThresholdMode} onChange={(e) => setS({ ...s, alertThresholdMode: e.target.value })}><option value="EITHER">{L("أيهما تجاوز", "Either is crossed")}</option><option value="BOTH">{L("كلاهما معاً", "Both are crossed")}</option></Select></Field>
             <Field label={L("التسوية متأخرة بعد (يوم)", "Reconciliation overdue after (days)")}><input className={`${INPUT} is-num`} value={s.reconciliationDueDays} onChange={(e) => setS({ ...s, reconciliationDueDays: Number(e.target.value) })} /></Field>

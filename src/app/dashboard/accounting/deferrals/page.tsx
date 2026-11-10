@@ -79,7 +79,7 @@ function DeferralsPageScreen() {
       {d && d.backlog.overdueCount > 0 ? (
         <div role="alert" className="acct-banner-note" data-testid="def-backlog">
           <b>{L(`${d.backlog.overdueCount} ${d.backlog.overdueCount === 1 ? "شهر مستحق" : "أشهر مستحقة"} لم يُعترف بها`, `${d.backlog.overdueCount} month(s) due, not recognised`)}</b>
-          {" · "}<span className="hr-num">{money(d.backlog.overdueAmount)}</span> {L("ر.س", "SAR")}
+          {" · "}<span className="hr-num">{money(d.backlog.overdueAmount)}</span> {L("⃁", "SAR")}
           {d.backlog.stoppedAt ? <>{" · "}{L("متوقف عند", "stopped at")} <span className="hr-num">{d.backlog.stoppedAt.month}</span> ({L(STOP_AR[d.backlog.stoppedAt.reason]?.[0] ?? d.backlog.stoppedAt.reason, STOP_AR[d.backlog.stoppedAt.reason]?.[1] ?? d.backlog.stoppedAt.reason)})</> : null}
         </div>
       ) : null}
@@ -89,7 +89,7 @@ function DeferralsPageScreen() {
             <h2>{L("أشهر مستحقة للاعتراف", "Months due")}</h2>
             {d.due.length === 0 ? <p className="acct-hint">{L("لا أشهر مستحقة حتى هذا الشهر.", "Nothing due up to this month.")}</p> : (
               <ul className="acct-issues">{d.due.map((m) => (
-                <li key={m.month}><span className="hr-num">{m.month}</span><span>{L(`${m.lines} سطر · `, `${m.lines} line(s) · `)}<span className="hr-num">{money(m.amount)}</span> {L("ر.س", "SAR")}</span>
+                <li key={m.month}><span className="hr-num">{m.month}</span><span>{L(`${m.lines} سطر · `, `${m.lines} line(s) · `)}<span className="hr-num">{money(m.amount)}</span> {L("⃁", "SAR")}</span>
                   {d.can.run ? <Btn size="sm" busy={w.busy === "run"} onClick={() => run(m.month)} data-testid={`def-run-${m.month}`}>{L("تشغيل", "Run")}</Btn> : <span />}</li>
               ))}</ul>
             )}
@@ -203,7 +203,7 @@ function SchedulesView({ ov, onChange }: { ov: Overview | null; onChange: () => 
         </Select></Field>
         <Field label={L("الوصف", "Description")}><input className="hr-input" maxLength={300} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} data-testid="def-description" /></Field>
         <div className="acct-row">
-          <Field label={L("المبلغ (ر.س، دون الضريبة)", "Amount (SAR, excl. VAT)")}><input className="hr-input acct-amount" dir="ltr" inputMode="decimal" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value.replace(/[^\d.]/g, "") })} data-testid="def-amount" /></Field>
+          <Field label={L("المبلغ (⃁، دون الضريبة)", "Amount (SAR, excl. VAT)")}><input className="hr-input acct-amount" dir="ltr" inputMode="decimal" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value.replace(/[^\d.]/g, "") })} data-testid="def-amount" /></Field>
           <Field label={L("تاريخ البدء", "Start date")}><input type="date" className="hr-input" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} data-testid="def-start" /></Field>
         </div>
         {ov && (ov.branches.length || ov.costCenters.length) ? <div className="acct-row">
@@ -254,7 +254,7 @@ function SchedulesView({ ov, onChange }: { ov: Overview | null; onChange: () => 
             <tbody>{detail.lines.map((l) => <tr key={l.id}><td className="hr-num">{l.seq}</td><td className="hr-num">{l.month}</td><td className="num hr-num">{money(l.amount)}</td><td><StatusTag map={LINE_STATUS} value={l.status} />{l.journalEntryId ? <> · <Link href={`/dashboard/accounting/journals/${l.journalEntryId}`}>{L("القيد", "Entry")}</Link></> : null}</td></tr>)}</tbody>
           </table></div>
           {detail.status !== "CANCELLED" && ov?.can.manage ? <fieldset className="acct-kv" style={{ border: 0, padding: 0, margin: 0 }} data-testid="def-cancel-mode">
-            <legend className="hr-label">{L(`إلغاء الجدول — الباقي ${money(detail.remaining)} ر.س`, `Cancel the schedule — remainder ${money(detail.remaining)} SAR`)}</legend>
+            <legend className="hr-label">{L(`إلغاء الجدول — الباقي ${money(detail.remaining)} ⃁`, `Cancel the schedule — remainder ${money(detail.remaining)} SAR`)}</legend>
             {canPost ? <>
             <label className="acct-toggle"><input type="radio" name="def-cancel" checked={cancelMode === "RECOGNIZE_NOW"} onChange={() => setCancelMode("RECOGNIZE_NOW")} data-testid="def-cancel-now" /><span><b>{L("إثبات الباقي الآن", "Recognise the remainder now")}</b><span className="acct-hint">{L("قيد واحد اليوم إلى حساب الدخل أو حساب تختاره (حساب إعادة التصنيف لعكسها).", "One entry today into the P&L account or one you choose (the reclass account to undo it).")}</span></span></label>
             {cancelMode === "RECOGNIZE_NOW" ? <Field label={L("الحساب (فارغ = حساب الدخل)", "Account (empty = the P&L account)")}><Select value={cancelAccountId} onChange={(e) => setCancelAccountId(e.target.value)} data-testid="def-cancel-account">

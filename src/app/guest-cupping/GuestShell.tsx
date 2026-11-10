@@ -7,6 +7,7 @@ import "@/components/shell/direction-2.1.css";
 import "@/components/hr/hr.css";
 import { BrandMark } from "@/components/brand/BrandMark";
 import "./guest.css";
+import { RiyalFont } from "@/components/fonts/RiyalFont";
 
 export type GuestLang = "ar" | "en";
 export type GuestStep = "name" | "cups" | "done";
@@ -41,6 +42,7 @@ export function GuestShell({ lang, onLang, title, step, foot, children, kicker, 
       <div className="d21 gc" lang={lang} dir={lang === "ar" ? "rtl" : "ltr"} data-hr-root="" data-testid={testId}>
         {/* IBM Plex, self-hosted (public/fonts); no third-party font host. */}
         <link rel="stylesheet" precedence="default" href="/fonts/ibm-plex.css" />
+        <RiyalFont />
         <header className="gc-top">
           <div className="gc-brand">
             <span className="gc-mark" aria-hidden="true"><BrandMark /></span>

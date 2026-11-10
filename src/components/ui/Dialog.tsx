@@ -13,6 +13,7 @@
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import "@/components/shell/direction-2.1.css";
 import "./dialog.css";
+import { RiyalFont } from "@/components/fonts/RiyalFont";
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -64,6 +65,7 @@ export function D21Dialog({ lang, title, sub, icon, onClose, children, actions, 
       {/* IBM Plex, self-hosted (public/fonts), as AppShell / ShellStates load it; React dedupes it. */}
       {/* eslint-disable-next-line @next/next/no-css-tags */}
       <link rel="stylesheet" precedence="default" href="/fonts/ibm-plex.css" />
+      <RiyalFont />
       <div className="d21-dlg-scrim" aria-hidden onClick={() => onClose?.()} />
       <div ref={panel} className="d21-dlg" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={sub ? subId : undefined}
         tabIndex={-1} data-testid={testId} style={{ ["--d21-dlg-w" as string]: `${width}px` }}>

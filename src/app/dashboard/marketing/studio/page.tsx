@@ -118,7 +118,7 @@ function PlanTab() {
       <Sec title={L("مدير التسويق الذكي", "Smart marketing manager")} caption={L("يبني الخطة من أرقام النظام الفعلية لآخر 30 يوماً ومنتجاتكم وهويتكم؛ يفصل الحقائق عن الافتراضات. لا تحليل منافسين دون مصادر تزوّدونه بها.", "Builds the plan from the system's real figures for the last 30 days, your products and your brand; it keeps facts apart from assumptions. No competitor analysis without sources you provide.")}>
         <div className="mkt-grid-2">
           <Field id="h" label={L("المدى", "Horizon")}><Select id="h" value={f.horizon} onChange={(v) => setF({ ...f, horizon: v })}><option value="MONTH">{L("شهري", "Monthly")}</option><option value="QUARTER">{L("ربع سنوي", "Quarterly")}</option><option value="YEAR">{L("سنوي", "Yearly")}</option></Select></Field>
-          <Field id="b" label={L("الميزانية (ر.س)", "Budget (SAR)")}><TextInput id="b" value={f.budget} onChange={(v) => setF({ ...f, budget: v })} inputMode="decimal" /></Field>
+          <Field id="b" label={L("الميزانية (⃁)", "Budget (SAR)")}><TextInput id="b" value={f.budget} onChange={(v) => setF({ ...f, budget: v })} inputMode="decimal" /></Field>
         </div>
         <Field id="g" label={L("الهدف التجاري", "Business goal")} required><TextArea id="g" value={f.goal} onChange={(v) => setF({ ...f, goal: v })} rows={2} /></Field>
         <Field id="cs" label={L("مواسم وقيود (رمضان، مخزون محدود، إطلاق…)", "Seasons and constraints (Ramadan, limited stock, a launch…)")}><TextArea id="cs" value={f.constraints} onChange={(v) => setF({ ...f, constraints: v })} rows={2} /></Field>

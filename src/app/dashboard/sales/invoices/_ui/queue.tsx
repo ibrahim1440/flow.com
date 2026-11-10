@@ -31,7 +31,7 @@ export function RequestQueue() {
           {rows.map((r) => (
             <li key={r.id} data-testid={`request-row-${r.id}`} data-tone={r.tone}>
               <Link href={`/dashboard/sales/invoices/${r.id}`} className="inv-req-card" data-testid="request-open">
-                <span className="inv-req-top"><b><bdi>{r.customerName}</bdi></b><span className="hr-num inv-req-amt"><bdi>{money(r.grandTotal)}</bdi> {L("ر.س", "SAR")}</span></span>
+                <span className="inv-req-top"><b><bdi>{r.customerName}</bdi></b><span className="hr-num inv-req-amt"><bdi>{money(r.grandTotal)}</bdi> {L("⃁", "SAR")}</span></span>
                 <span className="inv-sub">{L(KIND[r.kind]?.[r.family]?.[0] ?? r.kind, KIND[r.kind]?.[r.family]?.[1] ?? r.kind)}{r.orderNumber ? <> · {L("من الطلب", "from order")} <bdi dir="ltr" className="hr-num">#{r.orderNumber}</bdi></> : null}</span>
                 {r.requestNote ? <span className="inv-sub"><bdi>{r.requestNote}</bdi></span> : null}
                 <span className="inv-req-meta">
@@ -48,7 +48,7 @@ export function RequestQueue() {
           <table className="hr-table is-dense" data-testid="requests-table">
             <thead><tr>
               <th>{L("المرجع", "Reference")}</th><th>{L("العميل", "Customer")}</th><th>{L("من الطلب #", "From order #")}</th><th>{L("أنشأه", "Prepared by")}</th>
-              <th className="num">{L("القيمة · ر.س", "Amount · SAR")}</th><th>{L("عمر الطلب", "Waiting")}</th><th>{L("آخر موعد نظامي", "Legal limit")}</th>
+              <th className="num">{L("القيمة · ⃁", "Amount · SAR")}</th><th>{L("عمر الطلب", "Waiting")}</th><th>{L("آخر موعد نظامي", "Legal limit")}</th>
             </tr></thead>
             <tbody>{rows.map((r) => (
               <tr key={r.id} data-testid={`request-row-${r.id}`} data-tone={r.tone}>

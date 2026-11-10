@@ -62,7 +62,7 @@ export function Totals({ lines, qoyod = false }: { lines: EditLine[]; qoyod?: bo
       {p.breakdown.map((b) => (
         <div key={`${b.category}${b.rate}`}><dt>{b.category === "S" ? L(`ضريبة القيمة المضافة ${Number(b.rate)}%`, `VAT ${Number(b.rate)}%`) : L(`${CATEGORY[b.category][0]} (0%)`, `${CATEGORY[b.category][1]} (0%)`)}</dt><dd>{money(b.tax)}</dd></div>
       ))}
-      <div className="g"><dt>{L("الإجمالي شامل الضريبة · ر.س", "Total incl. VAT · SAR")}</dt><dd data-testid="draft-grand">{money(p.grandTotal.toFixed(2))}</dd></div>
+      <div className="g"><dt>{L("الإجمالي شامل الضريبة · ⃁", "Total incl. VAT · SAR")}</dt><dd data-testid="draft-grand">{money(p.grandTotal.toFixed(2))}</dd></div>
       {!p.lineVatDifference.isZero() ? <p className="acct-hint">{L(`ضريبة المستند تُحسب على الإجمالي لكل فئة (قاعدة E-10)؛ مجموع ضريبة البنود يختلف بـ ${p.lineVatDifference.toFixed(2)}.`, `Document VAT is computed on the total per category (E-10); the sum of line VAT differs by ${p.lineVatDifference.toFixed(2)}.`)}</p> : null}
     </dl>
     {/* «ملخص الضريبة» S / Z / E / O (the accountant workspace): the document breakdown, as stored at issue. */}

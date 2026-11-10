@@ -57,7 +57,7 @@ export function suggestionsOf(src: WeekSource, ar: boolean): Sug[] {
   }
   for (const o of [...src.owed].sort((a, b) => b.oldestDays - a.oldestDays).slice(0, 6)) {
     push({ id: o.customerId, name: nm(o), group: "owed", kind: "COLLECTION", pick: o.oldestDays >= 30,
-      why: ar ? `${Number(o.net).toLocaleString("en-US", { maximumFractionDigits: 0 })} ر.س · أقدم فاتورة قبل ${o.oldestDays} يوم` : `SAR ${Number(o.net).toLocaleString("en-US", { maximumFractionDigits: 0 })} · oldest ${o.oldestDays}d` });
+      why: ar ? `${Number(o.net).toLocaleString("en-US", { maximumFractionDigits: 0 })} ⃁ · أقدم فاتورة قبل ${o.oldestDays} يوم` : `SAR ${Number(o.net).toLocaleString("en-US", { maximumFractionDigits: 0 })} · oldest ${o.oldestDays}d` });
   }
   for (const c of src.contracts.slice(0, 6)) {
     push({ id: c.customerId, name: c.customerName, group: "contract", kind: "VISITS", pick: false, why: ar ? `العقد يخلص بعد ${c.daysLeft} يوم` : `Contract ends in ${c.daysLeft}d` });

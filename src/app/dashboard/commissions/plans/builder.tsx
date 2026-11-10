@@ -93,7 +93,7 @@ const EN: Record<string, string> = {
 "حفظ كإصدار جديد": "Save as a new version",
 "حُفظت التعديلات على النسخة.": "The version was saved.",
 "خطة عمولة جديدة بالمكوّنات": "New component-based commission plan",
-"ر.س": "SAR",
+"⃁": "SAR",
 "راتب ثابت للمحاكاة (اختياري)": "Fixed pay for the simulation (optional)",
 "ريال سعودي (SAR)": "Saudi riyal (SAR)",
 "سارية من": "Effective from",
@@ -124,7 +124,7 @@ const EN: Record<string, string> = {
 "مبلغ ثابت حسب نسبة تحقيق المستهدف الشهري من المبيعات المحصّلة المؤهلة.": "A fixed amount by the month's achievement of qualified collected sales.",
 "مبيعات العملاء الجدد المحصّلة (المؤهلة)": "Collected new-client sales (qualified)",
 "متوقف": "Off",
-"مثال: عند 130% من مستهدف 50,000: ‏10,000 × 0.5% + 5,000 × 1% = 100 ر.س — لا 65,000 × 1%.": "Example: at 130% of a 50,000 target: 10,000 × 0.5% + 5,000 × 1% = SAR 100 — not 65,000 × 1%.",
+"مثال: عند 130% من مستهدف 50,000: ‏10,000 × 0.5% + 5,000 × 1% = 100 ⃁ — لا 65,000 × 1%.": "Example: at 130% of a 50,000 target: 10,000 × 0.5% + 5,000 × 1% = SAR 100 — not 65,000 × 1%.",
 "محاكاة": "Simulation",
 "مدة الأهلية بعد الاكتساب": "Eligibility after acquisition",
 "مفعّل": "On",
@@ -381,7 +381,7 @@ export function PlanBuilder({ ar, mode, canSeePay, employees, onClose, onSaved }
                       <option value="DISCRETIONARY">{t("تقديري بقرار الإدارة")}</option>
                     </select>
                   </td>
-                  <td className="num">{b.kind === "FIXED" ? <Num id={`br-amt-${i}`} value={b.amount ?? ""} suffix={t(t("ر.س"))} onChange={(v) => setBracket(i, { amount: v })} /> : <span className="cb-hint">{b.kind === "DISCRETIONARY" ? t("يُقرَّر في مراجعة العمولات") : "—"}</span>}</td>
+                  <td className="num">{b.kind === "FIXED" ? <Num id={`br-amt-${i}`} value={b.amount ?? ""} suffix={t(t("⃁"))} onChange={(v) => setBracket(i, { amount: v })} /> : <span className="cb-hint">{b.kind === "DISCRETIONARY" ? t("يُقرَّر في مراجعة العمولات") : "—"}</span>}</td>
                   <td>{b.kind === "FIXED" && <label className="cb-check"><input type="checkbox" checked={b.overridable} onChange={(e) => setBracket(i, { overridable: e.target.checked })} data-testid={`br-ovr-${i}`} /> {t("للإدارة مبلغ بديل")}</label>}</td>
                   <td style={{ textAlign: "end" }}><button type="button" className="btn g sm" aria-label={t(t("حذف الشريحة"))} onClick={() => set({ targetBonus: { ...tb, brackets: tb.brackets.filter((_, j) => j !== i) } })}>×</button></td>
                 </tr>
@@ -417,7 +417,7 @@ export function PlanBuilder({ ar, mode, canSeePay, employees, onClose, onSaved }
           const last = ot.bands[ot.bands.length - 1];
           set({ overTarget: { ...ot, bands: [...ot.bands, { fromPercent: last?.toPercent ?? "100", toPercent: null, ratePercent: "0" }] } });
         }}>{t("+ شريحة حافز")}</button>
-        <p className="cb-hint">{t("مثال: عند 130% من مستهدف 50,000: ‏10,000 × 0.5% + 5,000 × 1% = 100 ر.س — لا 65,000 × 1%.")}</p>
+        <p className="cb-hint">{t("مثال: عند 130% من مستهدف 50,000: ‏10,000 × 0.5% + 5,000 × 1% = 100 ⃁ — لا 65,000 × 1%.")}</p>
       </Section>
 
       <Simulation components={c} canSeePay={canSeePay} employees={employees} />
@@ -503,7 +503,7 @@ function Simulation({ components, canSeePay, employees }: { components: Componen
   return (
     <Section title={t(t("محاكاة"))} testId="sec-sim" sub={t(t("سيناريوهات بنسبة من المستهدف ومبالغ مخصصة، بتوزيع الطلبات الأول / الثاني / الثالث فأكثر — كجدول المحاكاة في ملف العمولات."))}>
       <div className="cb-grid">
-        <div className="cb-f"><span>{t("المستهدف الشهري")}</span><Num id="sim-target" value={target} suffix={t(t("ر.س"))} width={130} onChange={setTarget} /></div>
+        <div className="cb-f"><span>{t("المستهدف الشهري")}</span><Num id="sim-target" value={target} suffix={t(t("⃁"))} width={130} onChange={setTarget} /></div>
         <div className="cb-f"><span>{t("توزيع الطلبات")}</span>
           <div className="seg">
             <button type="button" className={mixMode === "AMOUNTS" ? "on" : ""} onClick={() => setMixMode("AMOUNTS")} data-testid="sim-mix-amounts">{t("مبالغ")}</button>
@@ -512,7 +512,7 @@ function Simulation({ components, canSeePay, employees }: { components: Componen
         {Array.from({ length: n }, (_, i) => (
           <div className="cb-f" key={i}><span>{ar ? (i === n - 1 ? `الطلب ${i + 1} وما بعده` : `الطلب ${i + 1}`) : i === n - 1 ? `Order ${i + 1} and after` : `Order ${i + 1}`}</span>
             {mixMode === "AMOUNTS"
-              ? <Num id={`sim-amt-${i}`} value={amounts[i] ?? "0"} width={130} suffix={t(t("ر.س"))} onChange={(v) => setAmounts(pad(amounts).map((x, j) => (j === i ? v : x)))} />
+              ? <Num id={`sim-amt-${i}`} value={amounts[i] ?? "0"} width={130} suffix={t(t("⃁"))} onChange={(v) => setAmounts(pad(amounts).map((x, j) => (j === i ? v : x)))} />
               : <Num id={`sim-pct-${i}`} value={percents[i] ?? "0"} width={80} suffix="%" onChange={(v) => setPercents(pad(percents).map((x, j) => (j === i ? v : x)))} />}
           </div>
         ))}
@@ -520,8 +520,8 @@ function Simulation({ components, canSeePay, employees }: { components: Componen
       <div className="cb-grid">
         <label className="cb-f"><span>{t("السيناريوهات (% من المستهدف)")}</span><input value={scenarios} dir="ltr" onChange={(e) => setScenarios(e.target.value)} data-testid="sim-scenarios" /></label>
         <label className="cb-f"><span>{t("مبالغ مخصصة")}</span><input value={custom} dir="ltr" onChange={(e) => setCustom(e.target.value)} data-testid="sim-custom" /></label>
-        <div className="cb-f"><span>{t("مكافأة تقديرية (80–99%)")}</span><Num id="sim-disc" value={disc} suffix={t(t("ر.س"))} onChange={setDisc} /></div>
-        <div className="cb-f"><span>{t("مبلغ بديل للشريحة العليا")}</span><Num id="sim-override" value={override} suffix={t(t("ر.س"))} placeholder={t(t("فارغ = مبلغ الخطة"))} onChange={setOverride} /></div>
+        <div className="cb-f"><span>{t("مكافأة تقديرية (80–99%)")}</span><Num id="sim-disc" value={disc} suffix={t(t("⃁"))} onChange={setDisc} /></div>
+        <div className="cb-f"><span>{t("مبلغ بديل للشريحة العليا")}</span><Num id="sim-override" value={override} suffix={t(t("⃁"))} placeholder={t(t("فارغ = مبلغ الخطة"))} onChange={setOverride} /></div>
         {canSeePay && employees.length > 0 && (
           <label className="cb-f"><span>{t("الراتب الثابت من الموارد البشرية لـ")}</span>
             <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} data-testid="sim-employee">
@@ -529,7 +529,7 @@ function Simulation({ components, canSeePay, employees }: { components: Componen
               {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
             </select></label>
         )}
-        <div className="cb-f"><span>{t("راتب ثابت للمحاكاة (اختياري)")}</span><Num id="sim-fixed" value={fixedPay} suffix={t(t("ر.س"))} placeholder="—" onChange={setFixedPay} /></div>
+        <div className="cb-f"><span>{t("راتب ثابت للمحاكاة (اختياري)")}</span><Num id="sim-fixed" value={fixedPay} suffix={t(t("⃁"))} placeholder="—" onChange={setFixedPay} /></div>
       </div>
       <div><button type="button" className="btn p sm" onClick={run} data-testid="sim-run">{t("احسب المحاكاة")}</button></div>
       {err && <p className="notice er" role="alert">{err}</p>}

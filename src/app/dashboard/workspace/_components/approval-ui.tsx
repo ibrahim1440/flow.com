@@ -31,8 +31,8 @@ function Facts({ item }: { item: ApprovalItem }) {
     if (f.reason) rows.push([L("السبب", "Reason"), n(f.reason)]);
   } else if (item.type === "ADVANCE") {
     rows.push([L("الموظف", "Employee"), `${n(item.subject)} · ${n(f.employeeNo)}`]);
-    rows.push([L("المبلغ", "Amount"), <span key="m" className="hr-num">{money(f.amount)} {L("ر.س", "SAR")}</span>]);
-    rows.push([L("خطة الاستقطاع", "Deduction plan"), L(`${f.installmentCount} أقساط × ${f.installment} ر.س ابتداءً من ${monthOf(String(f.firstInstallmentMonth), "ar")}`, `${f.installmentCount} × ${f.installment} SAR from ${monthOf(String(f.firstInstallmentMonth), "en")}`)]);
+    rows.push([L("المبلغ", "Amount"), <span key="m" className="hr-num">{money(f.amount)} {L("⃁", "SAR")}</span>]);
+    rows.push([L("خطة الاستقطاع", "Deduction plan"), L(`${f.installmentCount} أقساط × ${f.installment} ⃁ ابتداءً من ${monthOf(String(f.firstInstallmentMonth), "ar")}`, `${f.installmentCount} × ${f.installment} SAR from ${monthOf(String(f.firstInstallmentMonth), "en")}`)]);
     if (f.reason) rows.push([L("السبب", "Reason"), n(f.reason)]);
   } else if (item.type === "DISCOUNT") {
     rows.push([L("العميل", "Customer"), n(f.customer)]);

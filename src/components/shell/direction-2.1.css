@@ -61,9 +61,9 @@
   --shadow-sheet: 0 0 0 1px rgb(40 36 26 / 0.06), 0 1px 2px rgb(40 36 26 / 0.04);
   --shadow-pop: 0 0 0 1px rgb(40 36 26 / 0.07), 0 14px 34px -10px rgb(40 36 26 / 0.22);
   /* Type: IBM Plex superfamily */
-  --f-ui: "IBM Plex Sans Arabic", "IBM Plex Sans", "Noto Sans Arabic", system-ui, sans-serif;
-  --f-num: "IBM Plex Sans", "IBM Plex Sans Arabic", system-ui, sans-serif;
-  --f-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --f-ui: "Saudi Riyal", "IBM Plex Sans Arabic", "IBM Plex Sans", "Noto Sans Arabic", system-ui, sans-serif;
+  --f-num: "Saudi Riyal", "IBM Plex Sans", "IBM Plex Sans Arabic", system-ui, sans-serif;
+  --f-mono: "Saudi Riyal", "IBM Plex Mono", ui-monospace, monospace;
   --ease: cubic-bezier(0.23, 1, 0.32, 1);
   /* Shell geometry (direction.css .app / .side / .top; rc.css .app.rail, .ph-top, .tabbar) */
   --d21-side: 244px;
@@ -82,7 +82,7 @@
 /* English UI reads in IBM Plex Sans first; the Arabic face stays as the fallback for mixed text
    (CRM English corrections, ed00ebf). The shell root and pages both read --f-ui from here. */
 .d21[lang="en"] {
-  --f-ui: "IBM Plex Sans", "IBM Plex Sans Arabic", "Noto Sans Arabic", system-ui, sans-serif;
+  --f-ui: "Saudi Riyal", "IBM Plex Sans", "IBM Plex Sans Arabic", "Noto Sans Arabic", system-ui, sans-serif;
 }
 .d21 *, .d21 *::before, .d21 *::after { box-sizing: border-box; }
 .d21 :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 4px; }

@@ -86,7 +86,7 @@ export default function TargetsPage() {
 
   // "سبتمبر 2026" — the period the table is showing, in the reader's own calendar names.
   const monthLabel = monthOptions(month, lang).find((o) => o.value === month)?.label ?? month;
-  const sar = (v: string, ccy: string) => `${formatMoney(v, 0)} ${ar ? (ccy === "SAR" ? "ر.س" : ccy) : ccy}`;
+  const sar = (v: string, ccy: string) => `${formatMoney(v, 0)} ${ar ? (ccy === "SAR" ? "⃁" : ccy) : ccy}`;
   const pctText = (r: Row) => `${num(Math.round(Number(r.achievedPercent)), lang)}%`;
   const caption = (r: Row) => (
     <>

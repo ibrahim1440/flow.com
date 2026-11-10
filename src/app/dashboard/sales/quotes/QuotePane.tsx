@@ -203,7 +203,7 @@ export function QuotePane({
             ) : null}
 
             <table className="q-pane-lines">
-              <thead><tr><th scope="col">{ar ? "البند" : "Item"}</th><th scope="col" className="num">{ar ? "قبل الخصم · ر.س" : "Before discount · SAR"}</th></tr></thead>
+              <thead><tr><th scope="col">{ar ? "البند" : "Item"}</th><th scope="col" className="num">{ar ? "قبل الخصم · ⃁" : "Before discount · SAR"}</th></tr></thead>
               <tbody>
                 {q.lines.map((l) => {
                   const name = l.productSku ? ((ar ? l.productSku.nameAr : null) ?? l.productSku.name ?? l.productSku.skuCode) : (l.description ?? "—");
@@ -231,7 +231,7 @@ export function QuotePane({
               <dt>{ar ? "المبلغ قبل الضريبة" : "Before VAT"}</dt>
               <dd><bdi className="n">{formatMoney((Number(q.subtotal) - Number(q.discountTotal)).toFixed(2))}</bdi></dd>
               <dt>{ar ? "ضريبة القيمة المضافة" : "VAT"}{rates.length === 1 && <> {pct(rates[0])}</>}</dt><dd><bdi className="n">{formatMoney(q.taxTotal)}</bdi></dd>
-              <dt className="g">{ar ? "الإجمالي · ر.س" : "Total · SAR"}</dt><dd className="g"><bdi className="n">{formatMoney(q.grandTotal)}</bdi></dd>
+              <dt className="g">{ar ? "الإجمالي · ⃁" : "Total · SAR"}</dt><dd className="g"><bdi className="n">{formatMoney(q.grandTotal)}</bdi></dd>
             </dl>
             <p className="sm" style={{ marginTop: 14, color: "var(--text-muted)", fontSize: 12.5 }}>
               {q.validUntil && <>{ar ? "صالح حتى " : "Valid until "}{shortDate(q.validUntil, lang)} · </>}

@@ -64,7 +64,7 @@ function LotTracePage() {
 
   const ar = lang === "ar";
   const kgU = ar ? "كغ" : "kg";
-  const sar = ar ? "ر.س" : "SAR";
+  const sar = ar ? "⃁" : "SAR";
   const disp = (en: string | null | undefined, a: string | null | undefined) => (ar && a ? a : en ?? "—");
   const size = (g: number) => (g >= 1000 ? `${g / 1000} ${kgU}` : `${g} ${ar ? "غ" : "g"}`);
   const when = (d: string) => `${opsDate(d, lang)} ${timeOf(d)}`;

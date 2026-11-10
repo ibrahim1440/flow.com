@@ -526,7 +526,7 @@ export function PurchaseInvoiceForm({ id, expense = false }: { id: string | null
             {ro ? <span>{l.shortReason || server?.shortfallReason || "—"}</span> : <input className="hr-input" value={l.shortReason} onChange={(e) => setLine(l.key, { shortReason: e.target.value })} placeholder={L("مثال: تلف أثناء الشحن ولا يعوّض المورد", "e.g. damaged in transit, not covered by the supplier")} data-testid={`pi-short-reason-${i}`} />}
           </label> : null}
           <span className="hr-caption pi-short-hint" data-testid={`pi-short-hint-${i}`}>{x
-            ? <>{L("النقص", "Short")} <bdi className="hr-num">{x.qty} {unit}</bdi> · <bdi className="hr-num">{money(x.value)}</bdi> {L("ر.س", "SAR")} · <bdi className="hr-num">{x.pct.toFixed(2)}%</bdi> {L(`(حد التسامح ${tolerance}%)`, `(tolerance ${tolerance}%)`)} · {tName(x.treatment)}{x.treatment === "LOSS" ? L(" — يحتاج «المخزون › تسوية»", " — needs Inventory › Adjust") : ""}</>
+            ? <>{L("النقص", "Short")} <bdi className="hr-num">{x.qty} {unit}</bdi> · <bdi className="hr-num">{money(x.value)}</bdi> {L("⃁", "SAR")} · <bdi className="hr-num">{x.pct.toFixed(2)}%</bdi> {L(`(حد التسامح ${tolerance}%)`, `(tolerance ${tolerance}%)`)} · {tName(x.treatment)}{x.treatment === "LOSS" ? L(" — يحتاج «المخزون › تسوية»", " — needs Inventory › Adjust") : ""}</>
             : L("أدخل كمية أكبر من المستلمة.", "Enter more than the quantity received.")}</span>
         </div> : null}
       </div>
@@ -568,7 +568,7 @@ export function PurchaseInvoiceForm({ id, expense = false }: { id: string | null
               { k: L("الاسم", "Name"), v: supplier.name },
               { k: L("الرقم الضريبي", "VAT number"), v: supplier.vatNumber ? <bdi className="acct-code">{supplier.vatNumber}</bdi> : L("غير مسجل", "Not on file") },
               { k: L("شروط الدفع", "Payment terms"), v: L(`${supplier.paymentTermsDays ?? 30} يومًا`, `${supplier.paymentTermsDays ?? 30} days`) },
-              ...(supRow?.openBalance !== undefined && supRow?.openBalance !== null ? [{ k: L("الرصيد الحالي", "Current balance"), v: <bdi className="hr-num">{money(supRow.openBalance)} {L("ر.س", "SAR")}</bdi>, tone: Number(supRow.openBalance) > 0 ? ("bad" as const) : ("good" as const), testId: "pi-party-balance" }] : []),
+              ...(supRow?.openBalance !== undefined && supRow?.openBalance !== null ? [{ k: L("الرصيد الحالي", "Current balance"), v: <bdi className="hr-num">{money(supRow.openBalance)} {L("⃁", "SAR")}</bdi>, tone: Number(supRow.openBalance) > 0 ? ("bad" as const) : ("good" as const), testId: "pi-party-balance" }] : []),
             ] : null} />
         ) : null}
         <section className="pi-head" aria-label={L("بيانات الفاتورة", "Invoice details")}>
@@ -664,7 +664,7 @@ export function PurchaseInvoiceForm({ id, expense = false }: { id: string | null
           <div><span>{L("ضريبة القيمة المضافة", "VAT")}</span><strong className="hr-num" data-testid="inv-vat-total">{money(tot.vat)}</strong></div>
           {claimable !== tot.vat ? <div><span>{L("منها لا تُسترد", "Of which not claimable")}</span><strong className="hr-num" data-testid="inv-vat-nr">{money(notClaimable)}</strong></div> : null}
           {Number(selfTotal) ? <div><span>{L("احتساب عكسي (مدخلات = مخرجات)", "Reverse charge (input = output)")}</span><strong className="hr-num" data-testid="inv-vat-rc">{money(selfTotal)}</strong></div> : null}
-          <div className="is-grand"><span>{L("الإجمالي (ر.س)", "Total (SAR)")}</span><strong className="hr-num" data-testid="inv-gross-total">{money(tot.gross)}</strong></div>
+          <div className="is-grand"><span>{L("الإجمالي (⃁)", "Total (SAR)")}</span><strong className="hr-num" data-testid="inv-gross-total">{money(tot.gross)}</strong></div>
           {data?.status === "POSTED" ? <>
             <div><span>{L("المدفوع", "Paid")}</span><strong className="hr-num">{money(data.paidTotal)}</strong></div>
             {Number(data.creditedTotal ?? 0) ? <div><span>{L("إشعارات دائنة من المورد", "Supplier credit notes")}</span><strong className="hr-num" data-testid="pi-credited">{money(data.creditedTotal)}</strong></div> : null}
@@ -763,7 +763,7 @@ export function PurchaseInvoiceForm({ id, expense = false }: { id: string | null
       <Dialog open={!!dialog} onClose={() => setDialog(null)} testId="pi-dialog"
         title={dialog === "post" ? L("اعتماد الفاتورة وترحيلها", "Approve and post") : dialog === "return" ? L("إعادة الفاتورة للمسودة", "Return to draft") : dialog === "cancel" ? L("إلغاء الفاتورة والاستلام", "Cancel the invoice and the receipt") : L("إلغاء الفاتورة المعتمدة", "Cancel the approved invoice")}
         actions={<><Btn onClick={() => setDialog(null)}>{L("رجوع", "Back")}</Btn><Btn variant={dialog === "post" ? "primary" : "danger"} busy={!!w.busy} disabled={dialog !== "post" && reason.trim().length < 3} onClick={() => dialog && act(dialog)} data-testid="inv-confirm">{L("تأكيد", "Confirm")}</Btn></>}>
-        {dialog === "post" ? <p>{L(`يُرحَّل قيد بإجمالي ${money(data?.grossTotal)} ر.س على حساب المورد ${data?.supplier.name ?? ""}. لا يُعدَّل بعد ذلك؛ التصحيح بالإلغاء.`, `An entry of SAR ${money(data?.grossTotal)} posts to ${data?.supplier.name ?? ""}. It is not edited afterwards; a correction is a cancellation.`)}</p> : <>
+        {dialog === "post" ? <p>{L(`يُرحَّل قيد بإجمالي ${money(data?.grossTotal)} ⃁ على حساب المورد ${data?.supplier.name ?? ""}. لا يُعدَّل بعد ذلك؛ التصحيح بالإلغاء.`, `An entry of SAR ${money(data?.grossTotal)} posts to ${data?.supplier.name ?? ""}. It is not edited afterwards; a correction is a cancellation.`)}</p> : <>
           {dialog === "cancel" ? <p>{L("تُعكس استلامات هذه الفاتورة (يرجع المخزون وتكلفته وقيد الاستلام) وتبقى الفاتورة «ملغاة» برقمها وسببها، في عملية واحدة. يُرفض إن استُخدمت البضاعة بعد استلامها.", "This invoice's receipts are reversed (stock, its cost and the receipt entry come back) and the invoice stays, «Cancelled», with its number and reason — in one step. Refused if the goods were used since.")}</p> : null}
           {dialog === "cancelPosted" ? <p>{L("يُعكس قيد الفاتورة وتبقى البضاعة المستلمة في المخزون (تعود «بضاعة مستلمة لم تصل فاتورتها»). مرتجع المورد في مرحلة لاحقة.", "The invoice's entry is reversed and the received goods stay in stock (back to «goods received not invoiced»). Supplier returns come later.")}</p> : null}
           <label className="hr-field"><span className="hr-label">{L("السبب", "Reason")}</span><input className="hr-input" value={reason} onChange={(e) => setReason(e.target.value)} data-testid="inv-reason" /></label>

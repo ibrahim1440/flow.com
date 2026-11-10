@@ -104,12 +104,12 @@ const sar = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2,
 /** «تجاوز الحد» in words, per limit (Arabic, English). `showValues`: the shortfall's amount in SAR (cost readers only). */
 export function breachWords(b: Breach | TransferBreach, lim: ShortfallLimits, l?: LineCheck | null, j?: Judgement | null, showValues = true): [string, string] {
   if (b === "PERCENT") return [`النقص أكثر من ${fmt(lim.percent)}٪ من الكمية${l ? ` (${fmt((l.qtyShort / l.qty) * 100)}٪)` : ""}`, `the shortfall is more than ${fmt(lim.percent)} % of the quantity${l ? ` (${fmt((l.qtyShort / l.qty) * 100)} %)` : ""}`];
-  if (b === "VALUE") return [`قيمة النقص أكثر من ${fmt(lim.valueSar)} ر.س${l && showValues && l.valueSar !== null ? ` (${sar(l.valueSar)} ر.س)` : ""}`, `the shortfall's value is more than SAR ${fmt(lim.valueSar)}${l && showValues && l.valueSar !== null ? ` (SAR ${sar(l.valueSar)})` : ""}`];
+  if (b === "VALUE") return [`قيمة النقص أكثر من ${fmt(lim.valueSar)} ⃁${l && showValues && l.valueSar !== null ? ` (${sar(l.valueSar)} ⃁)` : ""}`, `the shortfall's value is more than SAR ${fmt(lim.valueSar)}${l && showValues && l.valueSar !== null ? ` (SAR ${sar(l.valueSar)})` : ""}`];
   if (b === "UNKNOWN") return ["قيمة غير معروفة: لا تكلفة معروفة للصنف", "value unknown: no cost is known for the item"];
   if (b === "ZERO") return ["السطر استُلم بصفر", "the line was received at zero"];
-  if (b === "TRANSFER_VALUE") return [`مجموع قيمة النقص في التحويل أكثر من ${fmt(lim.valueSar)} ر.س${j && showValues ? ` (${sar(j.totalValue)} ر.س)` : ""}`, `the transfer's total shortfall value is more than SAR ${fmt(lim.valueSar)}${j && showValues ? ` (SAR ${sar(j.totalValue)})` : ""}`];
+  if (b === "TRANSFER_VALUE") return [`مجموع قيمة النقص في التحويل أكثر من ${fmt(lim.valueSar)} ⃁${j && showValues ? ` (${sar(j.totalValue)} ⃁)` : ""}`, `the transfer's total shortfall value is more than SAR ${fmt(lim.valueSar)}${j && showValues ? ` (SAR ${sar(j.totalValue)})` : ""}`];
   const lim2 = round2(lim.rollingMultiple * lim.valueSar);
-  return [`مجموع النقص الذي سجّلته خلال ${SHORTFALL_ROLLING_DAYS} يومًا أكثر من ${fmt(lim2)} ر.س${j && showValues ? ` (${sar(j.rollingValue)} ر.س)` : ""}`, `the shortfall you recorded in ${SHORTFALL_ROLLING_DAYS} days is more than SAR ${fmt(lim2)}${j && showValues ? ` (SAR ${sar(j.rollingValue)})` : ""}`];
+  return [`مجموع النقص الذي سجّلته خلال ${SHORTFALL_ROLLING_DAYS} يومًا أكثر من ${fmt(lim2)} ⃁${j && showValues ? ` (${sar(j.rollingValue)} ⃁)` : ""}`, `the shortfall you recorded in ${SHORTFALL_ROLLING_DAYS} days is more than SAR ${fmt(lim2)}${j && showValues ? ` (SAR ${sar(j.rollingValue)})` : ""}`];
 }
 
 /** The judgement in words (Arabic, English): each line's limits, then the transfer's and the receiver's. */

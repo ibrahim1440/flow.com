@@ -58,8 +58,8 @@ export function Reports() {
             </table></div>
           </Section>
           <div className="fa-zakat" data-testid="farep-zakat">
-            <div><span>{L("صافي القيمة الدفترية المحسومة من وعاء الزكاة (تقدير)", "Net book value deducted from the Zakat base (indicative)")}</span> <strong className="hr-num"><bdi>{money(d.zakat.deductibleNetBookValue)}</bdi></strong> {L("ر.س", "SAR")}</div>
-            {d.zakat.notDeductibleCount ? <div><span>{L(`غير مخصوم من وعاء الزكاة (${d.zakat.notDeductibleCount} أصل)`, `Not deducted from the Zakat base (${d.zakat.notDeductibleCount} assets)`)}</span> <strong className="hr-num"><bdi>{money(d.zakat.notDeductibleNetBookValue)}</bdi></strong> {L("ر.س", "SAR")}</div> : null}
+            <div><span>{L("صافي القيمة الدفترية المحسومة من وعاء الزكاة (تقدير)", "Net book value deducted from the Zakat base (indicative)")}</span> <strong className="hr-num"><bdi>{money(d.zakat.deductibleNetBookValue)}</bdi></strong> {L("⃁", "SAR")}</div>
+            {d.zakat.notDeductibleCount ? <div><span>{L(`غير مخصوم من وعاء الزكاة (${d.zakat.notDeductibleCount} أصل)`, `Not deducted from the Zakat base (${d.zakat.notDeductibleCount} assets)`)}</span> <strong className="hr-num"><bdi>{money(d.zakat.notDeductibleNetBookValue)}</bdi></strong> {L("⃁", "SAR")}</div> : null}
             <div className="acct-warn" data-testid="farep-zakat-label">{L(d.zakat.label.ar, d.zakat.label.en)}</div>
           </div>
         </>

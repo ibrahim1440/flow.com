@@ -81,7 +81,7 @@ export function TemplateEditor({ initial, id, expectedUpdatedAt, onSaved, onCanc
       </Field>
       <div className="hr-tablewrap">
         <table className="hr-table acct-lines" data-testid="tpl-lines">
-          <thead><tr><th>#</th><th>{L("الحساب", "Account")}</th><th>{L("الجانب", "Side")}</th><th className="num">{pct ? L("النسبة ٪", "Percent %") : L("المبلغ · ر.س", "Amount · SAR")}</th><th>{L("البيان", "Memo")}</th><th className="acct-hide-m">{L("الفرع", "Branch")}</th><th className="acct-hide-m">{L("مركز التكلفة", "Cost centre")}</th><th className="acct-hide-m">{L("الطرف", "Party")}</th><th><span className="hr-sr">{L("حذف", "Remove")}</span></th></tr></thead>
+          <thead><tr><th>#</th><th>{L("الحساب", "Account")}</th><th>{L("الجانب", "Side")}</th><th className="num">{pct ? L("النسبة ٪", "Percent %") : L("المبلغ · ⃁", "Amount · SAR")}</th><th>{L("البيان", "Memo")}</th><th className="acct-hide-m">{L("الفرع", "Branch")}</th><th className="acct-hide-m">{L("مركز التكلفة", "Cost centre")}</th><th className="acct-hide-m">{L("الطرف", "Party")}</th><th><span className="hr-sr">{L("حذف", "Remove")}</span></th></tr></thead>
           <tbody>
             {v.lines.map((l, i) => (
               <tr key={i}>

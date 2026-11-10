@@ -142,7 +142,7 @@ function PlanVersion({
       {example && (
         <p className="sm" style={{ margin: 0, fontSize: 12.5, color: "var(--text-secondary)" }} data-testid={`tier-example-${plan.code}-${v.version}`}>
           {ar ? "مثال: أساس" : "Example: a base of"} <span className="n">{amount(example.at)}</span> → {example.parts.join(" · ")} ·{" "}
-          {ar ? "المجموع" : "total"} <span className="n">{amount(example.total.toFixed(2))}</span> {ar ? "ر.س، بنسبة فعّالة" : "SAR, an effective"}{" "}
+          {ar ? "المجموع" : "total"} <span className="n">{amount(example.total.toFixed(2))}</span> {ar ? "⃁، بنسبة فعّالة" : "SAR, an effective"}{" "}
           <span className="n">{exact(example.effective)}</span> — {ar ? "لا" : "not"} <span className="n">{exact(base + Number(v.tiers[1].ratePercent))}</span>.
         </p>
       )}

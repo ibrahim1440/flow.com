@@ -83,8 +83,8 @@ export function CreditCallout({ ar, c, phone, onHold, onLift }: { ar: boolean; c
   }
   if (c.warning.any) {
     const parts: string[] = [];
-    if (c.warning.overLimit) parts.push(c.amounts?.limit ? (ar ? `الرصيد المستحق ${money(c.amounts.outstanding)} ر.س يتجاوز حد الائتمان ${money(c.amounts.limit)} ر.س بمبلغ ${money(c.amounts.over)} ر.س` : `The balance SAR ${money(c.amounts.outstanding)} is SAR ${money(c.amounts.over)} over the SAR ${money(c.amounts.limit)} limit`) : t("الرصيد المستحق يتجاوز حد الائتمان", "The balance is over the credit limit"));
-    if (c.warning.overdueDays > 0) parts.push(ar ? `أقدم مستحق متأخر ${dayCount(c.warning.overdueDays, "ar")}${c.amounts ? ` (${money(c.amounts.overdue)} ر.س متأخرة)` : ""}` : `the oldest debt is ${dayCount(c.warning.overdueDays, "en")} overdue${c.amounts ? ` (SAR ${money(c.amounts.overdue)} overdue)` : ""}`);
+    if (c.warning.overLimit) parts.push(c.amounts?.limit ? (ar ? `الرصيد المستحق ${money(c.amounts.outstanding)} ⃁ يتجاوز حد الائتمان ${money(c.amounts.limit)} ⃁ بمبلغ ${money(c.amounts.over)} ⃁` : `The balance SAR ${money(c.amounts.outstanding)} is SAR ${money(c.amounts.over)} over the SAR ${money(c.amounts.limit)} limit`) : t("الرصيد المستحق يتجاوز حد الائتمان", "The balance is over the credit limit"));
+    if (c.warning.overdueDays > 0) parts.push(ar ? `أقدم مستحق متأخر ${dayCount(c.warning.overdueDays, "ar")}${c.amounts ? ` (${money(c.amounts.overdue)} ⃁ متأخرة)` : ""}` : `the oldest debt is ${dayCount(c.warning.overdueDays, "en")} overdue${c.amounts ? ` (SAR ${money(c.amounts.overdue)} overdue)` : ""}`);
     return (
       <div className={`callout er cr-callout${phone ? " ph" : ""}`} role="status" data-testid="credit-warning">
         <CreditBadges ar={ar} s={badgesOf(c)} compact />
@@ -329,7 +329,7 @@ export function CreditNoticeBody({ c, ar, testId = "credit-notice" }: { c: Credi
     <div className="callout er cr-callout cr-inline" role="note" data-testid={`${testId}-warning`}>
       <CreditBadges ar={ar} s={badgesOf(c)} compact />
       <span>
-        {c.warning.overLimit && c.amounts?.limit ? (ar ? `الرصيد ${money(c.amounts.outstanding)} ر.س يتجاوز الحد ${money(c.amounts.limit)} ر.س بمبلغ ${money(c.amounts.over)} ر.س. ` : `Balance SAR ${money(c.amounts.outstanding)} is SAR ${money(c.amounts.over)} over the SAR ${money(c.amounts.limit)} limit. `) : ""}
+        {c.warning.overLimit && c.amounts?.limit ? (ar ? `الرصيد ${money(c.amounts.outstanding)} ⃁ يتجاوز الحد ${money(c.amounts.limit)} ⃁ بمبلغ ${money(c.amounts.over)} ⃁. ` : `Balance SAR ${money(c.amounts.outstanding)} is SAR ${money(c.amounts.over)} over the SAR ${money(c.amounts.limit)} limit. `) : ""}
         {t("تنبيه فقط؛ يمكنك المتابعة.", "A warning only; you may continue.")}
       </span>
     </div>

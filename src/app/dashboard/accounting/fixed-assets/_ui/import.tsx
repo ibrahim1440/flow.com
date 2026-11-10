@@ -102,7 +102,7 @@ export function Import() {
             <div className="acct-metrics">
               <div className="acct-metric"><span className="k">{L("التكلفة", "Cost")}</span><span className="v">{money(p.totals.cost)}</span></div>
               <div className="acct-metric"><span className="k">{L("مجمع الإهلاك", "Accumulated depreciation")}</span><span className="v">{money(p.totals.accumulated)}</span></div>
-              <div className="acct-metric"><span className="k">{L("صافي القيمة الدفترية", "Net book value")}</span><span className="v">{money(p.totals.netBookValue)}</span><span className="s">{L(`ر.س · في ${p.valuedAt ?? "—"}`, `SAR · at ${p.valuedAt ?? "—"}`)}</span></div>
+              <div className="acct-metric"><span className="k">{L("صافي القيمة الدفترية", "Net book value")}</span><span className="v">{money(p.totals.netBookValue)}</span><span className="s">{L(`⃁ · في ${p.valuedAt ?? "—"}`, `SAR · at ${p.valuedAt ?? "—"}`)}</span></div>
             </div>
             {p.rows.length ? (
               <div className="hr-tablewrap"><table className="hr-table is-dense" data-testid="faimp-rows">

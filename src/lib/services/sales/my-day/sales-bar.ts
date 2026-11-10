@@ -58,7 +58,7 @@ export type BarState = {
   salesWidth: number;
   /** Where the month says you should be today, as a fraction of the stage — null when it falls outside the stage. */
   pace: number | null;
-  /** The next stage's start: «باقي تحصّل X ر.س وتاخذ مكافأة Y»; null above 150 %. */
+  /** The next stage's start: «باقي تحصّل X ⃁ وتاخذ مكافأة Y»; null above 150 %. */
   next: { percent: number; remaining: string; perDay: string | null; bonus: StageBonus } | null;
   /** The bonus of the highest stage reached (stage ≥ 1), for «فيها مكافأة الهدف …». */
   reachedBonus: StageBonus;

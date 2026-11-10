@@ -87,7 +87,7 @@ export function fromMinor(minor: Minor): string {
 }
 
 /**
- * Display: "SAR 1,234.50" / "1,234.50 ر.س" — formatting only, never re-parsed.
+ * Display: "⃁ 1,234.50" / "1,234.50 ⃁" — the riyal sign on the left of the amount (owner, 10 Nov 2026); formatting only, never re-parsed.
  *
  * Digits are Latin 0–9 in both languages (the ERP-wide convention for the Arabic UI;
  * Intl with "ar-SA" would emit Arabic-Indic digits on some platforms and not others).
@@ -101,7 +101,7 @@ export function formatSAR(minor: Minor, lang: "ar" | "en" = "en", opts: { sign?:
   const sign = minor < 0 ? "−" : opts.sign && minor > 0 ? "+" : "";
   const num = `${sign}${n}.${f}`;
   if (opts.plain) return lang === "ar" && sign ? `⁦${num}⁩` : num;
-  return lang === "ar" ? `⁦${num}⁩ ر.س` : `SAR ${num}`;
+  return lang === "ar" ? `⁦${num}⁩ ⃁` : `⃁ ${num}`;
 }
 
 export function sumMinor(values: Minor[]): Minor {

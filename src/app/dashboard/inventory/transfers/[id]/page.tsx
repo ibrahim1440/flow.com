@@ -197,7 +197,7 @@ export default function TransferPage() {
         <SecHead title={L("الأصناف", "Items")} />
         <div className="hr-tablewrap">
           <table className="hr-table is-mrow" aria-label={L("أصناف التحويل", "Transfer lines")} data-testid="transfer-lines">
-            <thead><tr><th>{L("الصنف", "Item")}</th><th className="num">{L("المرسَل", "Sent")}</th>{t.status === "RECEIVED" ? <th className="num">{L("المستلَم", "Received")}</th> : null}{t.costsVisible ? <th className="num hr-hide-mobile">{L("القيمة بالتكلفة (ر.س)", "Value at cost (SAR)")}</th> : null}</tr></thead>
+            <thead><tr><th>{L("الصنف", "Item")}</th><th className="num">{L("المرسَل", "Sent")}</th>{t.status === "RECEIVED" ? <th className="num">{L("المستلَم", "Received")}</th> : null}{t.costsVisible ? <th className="num hr-hide-mobile">{L("القيمة بالتكلفة (⃁)", "Value at cost (SAR)")}</th> : null}</tr></thead>
             <tbody>
               {t.lines.map((l) => (
                 <tr key={l.id} data-testid={`transfer-line-row-${l.lineNo}`}>
@@ -206,7 +206,7 @@ export default function TransferPage() {
                     <span className="hr-id hr-caption">{l.item?.code}</span>
                     {l.fgLot ? <span className="hr-caption" data-testid={`transfer-split-${l.lineNo}`}> · {L("لوت جديد من اللوت نفسه", "a new lot split from it")}</span> : null}
                     {(l.qtyShort ?? 0) > 0 ? <span className="stk-sub tr-short" data-testid={`transfer-short-${l.lineNo}`}>{L("ناقص", "Short")} <span className="hr-num">{q4(l.qtyShort!)}</span> — {l.varianceReason}</span> : null}
-                    {t.costsVisible && l.value !== null ? <span className="hr-msub">{L("القيمة بالتكلفة", "Value at cost")} <span className="hr-num">{money(l.value)}</span> {L("ر.س", "SAR")}</span> : null}
+                    {t.costsVisible && l.value !== null ? <span className="hr-msub">{L("القيمة بالتكلفة", "Value at cost")} <span className="hr-num">{money(l.value)}</span> {L("⃁", "SAR")}</span> : null}
                   </td>
                   <td className="num"><span className="hr-num">{q4(l.qty)}</span> <span className="hr-caption">{unitOf(l, l.qty)}</span></td>
                   {t.status === "RECEIVED" ? <td className="num"><span className="hr-num">{q4(l.qtyReceived ?? l.qty)}</span></td> : null}

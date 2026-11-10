@@ -224,7 +224,7 @@ export default function QuotesPage() {
   // The header's facts — the server's, over the caller's whole scope — each its own element so
   // the bidi algorithm cannot move a separator between two numerals.
   const sm = data.summary;
-  const money = (v: string) => `${formatMoney(v, 0)} ${ar ? "ر.س" : "SAR"}`;
+  const money = (v: string) => `${formatMoney(v, 0)} ${ar ? "⃁" : "SAR"}`;
   const facts = [
     <span key="issued" data-testid="quotes-issued"><span className="n">{num(sm.issued, lang)}</span> {ar ? "صادرة بانتظار رد العميل" : "issued, awaiting the customer"}</span>,
     ...(sm.pendingApproval > 0
@@ -519,7 +519,7 @@ export default function QuotesPage() {
               <thead><tr>
                 <th scope="col">{ar ? "العرض" : "Quotation"}</th>
                 <th scope="col">{ar ? "العميل والصفقة" : "Customer and deal"}</th>
-                <th scope="col" className="num">{ar ? "الإجمالي · ر.س" : "Total · SAR"}</th>
+                <th scope="col" className="num">{ar ? "الإجمالي · ⃁" : "Total · SAR"}</th>
                 <th scope="col">{ar ? "صالح حتى" : "Valid until"}</th>
                 <th scope="col">{ar ? "الحالة" : "Status"}</th>
                 <th scope="col">{ar ? "المالك" : "Owner"}</th>

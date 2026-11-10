@@ -32,7 +32,7 @@ export type BandTarget = {
 };
 export type LogTarget = { customerId: string; name: string; nameAr: string | null; phone: string | null };
 
-const sar = (ar: boolean) => (ar ? "ر.س" : "SAR");
+const sar = (ar: boolean) => (ar ? "⃁" : "SAR");
 /** D13's «متأخر X / ماشي صح» line under the bar — hidden for now by the owner (8 Nov 2026); flip to show it again. */
 const SHOW_PACE: boolean = false;
 /** «120%» inside an Arabic sentence: an LRM keeps the sign after the number (as the Figma text does). */
@@ -124,7 +124,7 @@ export function SalesBand({ t, lang, who, phone, ro, viewerId, onLog, weekGoals 
             : ar ? "ما فيه هدف مسجّل لك هذا الشهر — اطلب من مديرك يحدد هدفك." : "No target is set for you this month — ask your manager to set one."}</p>
           )}
           {quiet ? <p className="md-sb-sub">{ar ? "ولا فيه مبيعات أو تحصيل بعد. أول فاتورة تصدر لك وأول تحصيل ينعتمد يطلعون هنا." : "No sales or collections yet. Your first issued invoice and first approved collection will show here."}</p>
-            : <p className="md-sb-sub">{ar ? <>المحصّل <bdi className="num">{n(t.achieved)}</bdi> ر.س · مبيعات {month} <bdi className="num">{n(t.sales)}</bdi> ر.س</> : <>Collected SAR <bdi className="num">{n(t.achieved)}</bdi> · {month} sales SAR <bdi className="num">{n(t.sales)}</bdi></>}</p>}
+            : <p className="md-sb-sub">{ar ? <>المحصّل <bdi className="num">{n(t.achieved)}</bdi> ⃁ · مبيعات {month} <bdi className="num">{n(t.sales)}</bdi> ⃁</> : <>Collected SAR <bdi className="num">{n(t.achieved)}</bdi> · {month} sales SAR <bdi className="num">{n(t.sales)}</bdi></>}</p>}
           <Link className="md-sb-link" href="/dashboard/sales/my-commissions">{ar ? "هدفي وعمولتي ←" : "My target and commission →"}</Link>
         </div>
         <div className="md-sb-side">{cards}</div>
@@ -154,7 +154,7 @@ export function SalesBand({ t, lang, who, phone, ro, viewerId, onLog, weekGoals 
     <>
     <section className="md-sb" data-testid="md-target" data-stage={stage.index} aria-label={ar ? `هدف ${month}` : `${month} target`}>
       <div className="md-sb-main">
-        <span className="md-sb-lbl">{ar ? <>هدف {month} · <bdi className="num">{n(target)}</bdi> ر.س{phone ? null : " قبل الضريبة"}</> : <>{month} target · SAR <bdi className="num">{n(target)}</bdi>{phone ? null : " before VAT"}</>}</span>
+        <span className="md-sb-lbl">{ar ? <>هدف {month} · <bdi className="num">{n(target)}</bdi> ⃁{phone ? null : " قبل الضريبة"}</> : <>{month} target · SAR <bdi className="num">{n(target)}</bdi>{phone ? null : " before VAT"}</>}</span>
         <div className="md-sb-figs">
           <button type="button" className="md-sb-col" onClick={() => setOpen("breakdown")} data-testid="md-collected" aria-haspopup="dialog"
             aria-label={ar ? "تفصيل المحصّل" : "Collected breakdown"}>
@@ -198,16 +198,16 @@ export function SalesBand({ t, lang, who, phone, ro, viewerId, onLog, weekGoals 
         {/* D13: where the month says the rep should be today, as a sentence (the bar's tick replaced). */}
         {/* The owner (8 Nov, later): the pace sentence is hidden for now (SHOW_PACE). */}
         {SHOW_PACE && gap !== null ? (gap > 0
-          ? <p className="md-sb-paceline is-late" data-testid="md-pace">⚠️ {ar ? <>متأخر <bdi className="num">{n(gap)}</bdi> ر.س عن المفروض لليوم</> : <>SAR <bdi className="num">{n(gap)}</bdi> behind today&apos;s pace</>}</p>
-          : <p className="md-sb-paceline is-ok" data-testid="md-pace">✓ {ar ? <>ماشي صح{gap < 0 ? <> · متقدم <bdi className="num">{n(-gap)}</bdi> ر.س</> : null}</> : <>On pace{gap < 0 ? <> · SAR <bdi className="num">{n(-gap)}</bdi> ahead</> : null}</>}</p>) : null}
+          ? <p className="md-sb-paceline is-late" data-testid="md-pace">⚠️ {ar ? <>متأخر <bdi className="num">{n(gap)}</bdi> ⃁ عن المفروض لليوم</> : <>SAR <bdi className="num">{n(gap)}</bdi> behind today&apos;s pace</>}</p>
+          : <p className="md-sb-paceline is-ok" data-testid="md-pace">✓ {ar ? <>ماشي صح{gap < 0 ? <> · متقدم <bdi className="num">{n(-gap)}</bdi> ⃁</> : null}</> : <>On pace{gap < 0 ? <> · SAR <bdi className="num">{n(-gap)}</bdi> ahead</> : null}</>}</p>) : null}
 
         {bar.next ? (
           <>
             <p className="md-sb-next" data-testid="md-next">{ar
-              ? <>باقي {third ? "يحصّل" : "تحصّل"} <bdi className="num">{n(bar.next.remaining)}</bdi> ر.س {nextBonus ? <>و{third ? "ياخذ" : "تاخذ"} {nextBonus}</> : <>{third ? "يوصل" : "توصل"} {pc(bar.next.percent)}</>}</>
+              ? <>باقي {third ? "يحصّل" : "تحصّل"} <bdi className="num">{n(bar.next.remaining)}</bdi> ⃁ {nextBonus ? <>و{third ? "ياخذ" : "تاخذ"} {nextBonus}</> : <>{third ? "يوصل" : "توصل"} {pc(bar.next.percent)}</>}</>
               : <>SAR <bdi className="num">{n(bar.next.remaining)}</bdi> to collect {nextBonus ? <>for a {nextBonus}</> : <>to reach {bar.next.percent}%</>}</>}</p>
             <p className="md-sb-sub">{ar
-              ? <>باقي {days(t.daysLeft, lang)}{bar.next.perDay !== null ? <> · {third ? "يحتاج يحصّل" : "تحتاج تحصّل"} <bdi className="num">{n(bar.next.perDay)}</bdi> ر.س باليوم</> : null}</>
+              ? <>باقي {days(t.daysLeft, lang)}{bar.next.perDay !== null ? <> · {third ? "يحتاج يحصّل" : "تحتاج تحصّل"} <bdi className="num">{n(bar.next.perDay)}</bdi> ⃁ باليوم</> : null}</>
               : <>{days(t.daysLeft, lang)} left{bar.next.perDay !== null ? <> · SAR <bdi className="num">{n(bar.next.perDay)}</bdi> a day</> : null}</>}</p>
           </>
         ) : (
@@ -257,12 +257,12 @@ function OwedSheet({ t, lang, phone, ro, onLog, onClose }: { t: BandTarget; lang
         {phone ? <span className="md-sheet-amt"><b className="num">{n(o.net)}</b> {sar(ar)}</span> : null}
       </div>
       <p className="md-sheet-sub">{ar
-        ? <><bdi className="num">{n(o.invoices)}</bdi> فواتير صادرة ما انحصّلت · قبل الضريبة{phone ? <> (العملاء يدفعون <bdi className="num">{n(o.gross)}</bdi> ر.س مع الضريبة)</> : null} · الأقدم أول</>
+        ? <><bdi className="num">{n(o.invoices)}</bdi> فواتير صادرة ما انحصّلت · قبل الضريبة{phone ? <> (العملاء يدفعون <bdi className="num">{n(o.gross)}</bdi> ⃁ مع الضريبة)</> : null} · الأقدم أول</>
         : <><bdi className="num">{n(o.invoices)}</bdi> issued invoices not collected · before VAT{phone ? <> (customers pay SAR <bdi className="num">{n(o.gross)}</bdi> with VAT)</> : null} · oldest first</>}</p>
       {!phone ? (
         <>
           <div className="md-sp-total"><span>{ar ? "المجموع قبل الضريبة" : "Total before VAT"}</span><span><b className="num">{n(o.net)}</b> {sar(ar)}</span></div>
-          <p className="md-sheet-sub">{ar ? <>العملاء يدفعون <bdi className="num">{n(o.gross)}</bdi> ر.س مع الضريبة</> : <>Customers pay SAR <bdi className="num">{n(o.gross)}</bdi> with VAT</>}</p>
+          <p className="md-sheet-sub">{ar ? <>العملاء يدفعون <bdi className="num">{n(o.gross)}</bdi> ⃁ مع الضريبة</> : <>Customers pay SAR <bdi className="num">{n(o.gross)}</bdi> with VAT</>}</p>
         </>
       ) : null}
       <ul className="md-owed-list">

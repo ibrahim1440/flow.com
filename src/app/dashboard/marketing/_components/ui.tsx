@@ -42,7 +42,7 @@ export function fmt(v: number | null | undefined, opts: { digits?: number; unit?
   if (v === null || v === undefined || Number.isNaN(v)) return en ? "Not available" : NA_AR;
   const digits = opts.digits ?? (opts.unit === "count" ? 0 : 2);
   const s = v.toLocaleString("en-US", { maximumFractionDigits: digits, minimumFractionDigits: opts.unit === "SAR" ? Math.min(2, digits) : 0 });
-  if (opts.unit === "SAR") return `${s} ${en ? "SAR" : "ر.س"}`;
+  if (opts.unit === "SAR") return en ? `⃁ ${s}` : `${s} ⃁`;
   if (opts.unit === "pct") return `${s}%`;
   if (opts.unit === "x") return `${s}×`;
   return s;

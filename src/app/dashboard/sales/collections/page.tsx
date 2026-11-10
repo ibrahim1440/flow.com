@@ -321,7 +321,7 @@ export default function CollectionsPage() {
     return c ? (sub ? `${c} · ${sub}` : c) : r.opportunity.title;
   };
   const methodText = (m: string) => (ar ? (METHODS[m]?.ar ?? m) : (METHODS[m]?.en ?? m));
-  const unit = ar ? "ر.س" : "SAR";
+  const unit = ar ? "⃁" : "SAR";
 
   // Per-segment counts: the server's, exact on every segment (not limited to the rows loaded).
   const counts: Record<string, number> = data.counts ?? {};
@@ -1020,7 +1020,7 @@ function CorrectCollection({ row, ar, onDone, onError }: { row: Collection; ar: 
   return (
     <section data-testid="detail-correct" style={{ margin: "12px 0", display: "grid", gap: 8 }}>
       <p className="c-ev-h">{ar ? "أُعيد إليك للتصحيح" : "Returned to you for correction"}</p>
-      <label className="lbl" style={{ fontWeight: 400 }}>{ar ? "المبلغ (ر.س)" : "Amount (SAR)"}<input className="q-input" dir="ltr" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} data-testid="correct-amount" /></label>
+      <label className="lbl" style={{ fontWeight: 400 }}>{ar ? "المبلغ (⃁)" : "Amount (SAR)"}<input className="q-input" dir="ltr" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} data-testid="correct-amount" /></label>
       <label className="lbl" style={{ fontWeight: 400 }}>{ar ? "تاريخ التحصيل" : "Collected on"}<input className="q-input" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
       <label className="lbl" style={{ fontWeight: 400 }}>{ar ? "المرجع" : "Reference"}<input className="q-input" dir="ltr" value={ref} onChange={(e) => setRef(e.target.value)} /></label>
       <button type="button" className="btn p" disabled={busy} onClick={go} data-testid="correct-submit">{ar ? "نسخ وتصحيح" : "Copy and correct"}</button>

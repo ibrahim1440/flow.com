@@ -12,6 +12,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api, useLang } from "../_components/ui";
+import { formatSARText, withRiyal } from "@/lib/money/riyal";
 import { Ico } from "@/components/shell/icons";
 import { useD21Phone, useD21Title } from "@/components/shell/page-context";
 import { NewCustomerDialog, type CreatedCustomer } from "@/components/customers/new-customer-form";
@@ -26,7 +27,11 @@ type Payment = "CASH" | "CARD" | "CREDIT";
 type Done = { order: { id: string; orderNumber: number }; discountApproval: "NONE" | "PENDING" | "APPROVED"; totals: { gross: string; discountPercent: string }; payment: { method: Payment; collectionId: string | null } };
 
 const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `ds-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
-const money = (v: string | number) => `${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`;
+const num2 = (v: string | number) => Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/** On screen: the official sign «⃁» (Arabic «N ⃁», English «⃁ N» — on the left either way). */
+const money = (v: string | number) => withRiyal(num2(v), "ar");
+/** What leaves the system (the WhatsApp message to the customer): «ر.س» / «SAR» in letters (gate M1). */
+const moneyOut = (v: string | number, lang: "ar" | "en") => formatSARText(num2(v), lang);
 
 function daysAgo(iso: string | null, ar: boolean): string {
   if (!iso) return ar ? "ما طلب قبل" : "No order yet";
@@ -142,7 +147,7 @@ function DirectSale() {
     const msg = [
       L(`طلب #${done.order.orderNumber} · ${nameOf(customer)}`, `Order #${done.order.orderNumber} · ${nameOf(customer)}`),
       ...lines.map((l) => `• ${byId.get(l.productSkuId)?.name ?? ""} × ${l.quantityUnits}`),
-      L(`الإجمالي شامل الضريبة: ${money(done.totals.gross)}`, `Total incl. VAT: ${money(done.totals.gross)}`),
+      L(`الإجمالي شامل الضريبة: ${moneyOut(done.totals.gross, "ar")}`, `Total incl. VAT: ${moneyOut(done.totals.gross, "en")}`),
       L("الفاتورة الضريبية الرسمية توصلك بعد ما يصدرها المحاسب.", "The official tax invoice follows once the accountant issues it."),
     ].join("\n");
     return (

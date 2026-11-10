@@ -218,7 +218,7 @@ export function AddPurchasePane({
             {previewTotal > 0 ? (
               <div>
                 <dt>{t("totalCost")}</dt>
-                <dd><strong className="hr-num">{money(previewTotal)}</strong> {lang === "ar" ? "ر.س" : "SAR"}</dd>
+                <dd><strong className="hr-num">{money(previewTotal)}</strong> {lang === "ar" ? "⃁" : "SAR"}</dd>
               </div>
             ) : null}
             {/* 221:748 «رصيد اللوت الآن» / «الرصيد بعد التسجيل»: the lot's balance, then + the quantity. */}
@@ -306,7 +306,7 @@ export function ReceiptsTab({ canReceive, canDraft, initialBean }: { canReceive:
   const notInvoiced = live.filter((p) => !p.invoice && !p.replacesClaim);
   const notInvoicedValue = notInvoiced.reduce((s, p) => s + (Number(p.value ?? p.totalCost) || 0), 0);
   const shown = purchaseTotals(filtered.filter((p) => !p.reversed));
-  const sar = lang === "ar" ? "ر.س" : "SAR";
+  const sar = lang === "ar" ? "⃁" : "SAR";
   const kgU = lang === "ar" ? "كغ" : "kg";
   const open = canReceive && showForm;
   const periodLabel = (p: PurchasePeriod) => (p === "all" ? L("كل الفترات", "All time") : p === "365" ? L("آخر سنة", "Last year") : lang === "ar" ? `آخر ${p} يومًا` : `Last ${p} days`);
@@ -344,7 +344,7 @@ export function ReceiptsTab({ canReceive, canDraft, initialBean }: { canReceive:
             <div>
               <span className="stk-lbl">{L("بن أخضر مستلم · آخر 30 يومًا", "Green coffee received · last 30 days")}</span>
               <span className="stk-mid">{fmtQty(green30.kg, 2)}<span className="stk-unit">{kgU}</span></span>
-              <span className="stk-d">{green30.avgPerKg === null ? "—" : lang === "ar" ? `متوسط ${money(green30.avgPerKg)} ر.س للكيلو` : `Average ${money(green30.avgPerKg)} SAR per kg`}</span>
+              <span className="stk-d">{green30.avgPerKg === null ? "—" : lang === "ar" ? `متوسط ${money(green30.avgPerKg)} ⃁ للكيلو` : `Average ${money(green30.avgPerKg)} SAR per kg`}</span>
             </div>
             <div>
               <span className="stk-lbl">{L("لم تُفوتر بعد", "Not invoiced yet")}</span>
@@ -380,7 +380,7 @@ export function ReceiptsTab({ canReceive, canDraft, initialBean }: { canReceive:
                     <th>{L("الصنف", "Item")}</th>
                     <th className="num">{L("الكمية", "Qty")}</th>
                     <th className="num hr-hide-compact">{L("سعر الوحدة", "Unit price")}</th>
-                    <th className="num">{L("التكلفة · ر.س", "Cost · SAR")}</th>
+                    <th className="num">{L("التكلفة · ⃁", "Cost · SAR")}</th>
                     <th>{L("الفاتورة", "Invoice")}</th>
                   </tr>
                 </thead>

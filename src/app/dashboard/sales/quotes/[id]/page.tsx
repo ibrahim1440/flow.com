@@ -1158,7 +1158,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
             <div><dt>{ar ? "قبل الضريبة" : "Before VAT"}</dt><dd><bdi className="n">{formatMoney(taxableBase)}</bdi></dd></div>
           )}
           <div><dt>{vatLabel}</dt><dd><bdi className="n">{formatMoney(fig.tax)}</bdi></dd></div>
-          <div className="grand"><dt>{ar ? "الإجمالي · ر.س" : "Total · SAR"}</dt><dd>{formatMoney(fig.grand)}</dd></div>
+          <div className="grand"><dt>{ar ? "الإجمالي · ⃁" : "Total · SAR"}</dt><dd>{formatMoney(fig.grand)}</dd></div>
         </dl>
         {previewNote}
         {issuedNote}

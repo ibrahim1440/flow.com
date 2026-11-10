@@ -116,7 +116,7 @@ export function ProductCombo({ skus, value, ar, label, onPick, testId, freeText,
               className={i === active ? "is-active" : undefined}
               onMouseDown={(e) => { e.preventDefault(); pick(s.id); }} onMouseEnter={() => setActive(i)}>
               <span className="q-combo-main"><b><bdi>{nameOf(s)}</bdi></b><span className="q-combo-sub"><bdi dir="ltr">{s.skuCode}</bdi>{typeof s.availableUnits === "number" ? <> · {L("في المخزون", "in stock")} <bdi className="n">{s.availableUnits}</bdi></> : null}</span></span>
-              <span className="q-combo-price"><bdi className="n">{formatMoney(String(s.price ?? 0))}</bdi> {L("ر.س", "SAR")}</span>
+              <span className="q-combo-price"><bdi className="n">{formatMoney(String(s.price ?? 0))}</bdi> {L("⃁", "SAR")}</span>
             </li>
           ))}
           {matches.length === 0 ? <li className="q-combo-none" role="presentation">{L("ما فيه منتج بهذا الاسم.", "No product by that name.")}</li> : null}

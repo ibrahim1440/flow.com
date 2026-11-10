@@ -598,13 +598,13 @@ function DecisionDialog({ ar, result, month, onClose, onDone }: { ar: boolean; r
       {err && <Alert kind="error">{err}</Alert>}
       <p className="text-sm text-oo-text-secondary">
         {ar
-          ? `التحقيق ${result.achievementPercent ? Number(result.achievementPercent).toFixed(2) : "—"}% — شريحة ${br.fromPercent}%${br.toPercent ? ` إلى أقل من ${br.toPercent}%` : " فأكثر"}: ${br.kind === "DISCRETIONARY" ? "مكافأة تقديرية بقرار الإدارة أو لا مكافأة." : `${formatMoney(br.planAmount)} ر.س أو مبلغ بديل بقرار الإدارة.`}`
+          ? `التحقيق ${result.achievementPercent ? Number(result.achievementPercent).toFixed(2) : "—"}% — شريحة ${br.fromPercent}%${br.toPercent ? ` إلى أقل من ${br.toPercent}%` : " فأكثر"}: ${br.kind === "DISCRETIONARY" ? "مكافأة تقديرية بقرار الإدارة أو لا مكافأة." : `${formatMoney(br.planAmount)} ⃁ أو مبلغ بديل بقرار الإدارة.`}`
           : `Achievement ${result.achievementPercent ? Number(result.achievementPercent).toFixed(2) : "—"}% — bracket ${br.fromPercent}%${br.toPercent ? ` to below ${br.toPercent}%` : " and above"}: ${br.kind === "DISCRETIONARY" ? "a discretionary bonus or none." : `${formatMoney(br.planAmount)} SAR or an override.`}`}
       </p>
       {result.breakdown.decision && (
         <p className="text-xs text-oo-text-muted">{ar ? "القرار الحالي:" : "Current decision:"} {formatMoney(result.breakdown.decision.amount)} — {result.breakdown.decision.reason}</p>
       )}
-      <Field id="dec-amount" label={ar ? "المبلغ (ر.س) — صفر = لا مكافأة" : "Amount (SAR) — zero = no bonus"} required>
+      <Field id="dec-amount" label={ar ? "المبلغ (⃁) — صفر = لا مكافأة" : "Amount (SAR) — zero = no bonus"} required>
         <TextInput id="dec-amount" value={amount} onChange={setAmount} inputMode="decimal" />
       </Field>
       <Field id="dec-reason" label={ar ? "السبب" : "Reason"} required hint={ar ? "مطلوب، ويُحفظ مع القرار ومن اتخذه." : "Required; kept with the decision and who took it."}>

@@ -24,6 +24,7 @@ import "./direction-2.1.css";
 import { accountantEligible, accountantModeFor, accountantTree, activeAccountantItem, quickCreates, workspaceKey } from "@/lib/nav/accountant";
 import { AccountantMore, AccountantNav, WorkspaceSwitch } from "./AccountantNav";
 import { ACCOUNTANT_HOME, FULL_HOME, WorkspaceModeContext, homeFor } from "./workspace-mode";
+import { RiyalFont } from "@/components/fonts/RiyalFont";
 
 /**
  * The Direction 2.1 application shell — one shell for every migrated route.
@@ -557,6 +558,7 @@ export function AppShell({
       {/* IBM Plex, self-hosted (public/fonts): the same faces, files and unicode-range subsets
           Google Fonts served, so nothing is fetched from a third party. */}
       <link rel="stylesheet" precedence="default" href="/fonts/ibm-plex.css" />
+      <RiyalFont />
       <a className="d21-skip" href="#d21-content">{ar ? "تجاوز إلى المحتوى" : "Skip to content"}</a>
       <div className="d21-app" inert={palette || more || !!pickFor || keysOpen || !!orderSheet}>
         <aside className="d21-side" aria-label={ar ? "القائمة الجانبية" : "Sidebar"}>

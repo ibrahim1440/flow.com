@@ -74,7 +74,7 @@ export function MyPlan({ ar, data }: { ar: boolean; data: MyPlanPayload }) {
             <div className="cb-kpi"><span>{ar ? "المبيعات المؤهلة / المستهدف" : "Qualified / target"}</span><b className="n">{m(b.qualifiedBase)}</b><span>{ar ? "من" : "of"} {m(b.target)}</span></div>
             <div className="cb-kpi"><span>{ar ? "العتبة التالية" : "Next threshold"}</span>
               <b data-testid="my-next">{b.next ? `${b.next.percent}%` : "—"}</b>
-              <span>{b.next ? (ar ? `يبقى ${formatMoney(b.next.amountToGo)} ر.س` : `${formatMoney(b.next.amountToGo)} SAR to go`) : (ar ? "لا عتبة أعلى" : "none higher")}</span></div>
+              <span>{b.next ? (ar ? `يبقى ${formatMoney(b.next.amountToGo)} ⃁` : `${formatMoney(b.next.amountToGo)} SAR to go`) : (ar ? "لا عتبة أعلى" : "none higher")}</span></div>
             <div className="cb-kpi"><span>{ar ? "أ. عمولة العملاء (تقديري)" : "A. Client commission (est.)"}</span><b className="n" data-testid="my-a">{m(b.clientCommission)}</b></div>
             <div className="cb-kpi"><span>{ar ? "ب. مكافأة المستهدف (تقديري)" : "B. Target bonus (est.)"}</span><b className="n" data-testid="my-b">{m(b.targetBonus)}</b>
               {b.decisionStatus === "PENDING" && <span>{ar ? "بانتظار قرار الإدارة" : "awaiting management's decision"}</span>}</div>

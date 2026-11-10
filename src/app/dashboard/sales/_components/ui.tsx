@@ -1,5 +1,6 @@
 "use client";
 
+import { RIYAL, withRiyal } from "@/lib/money/riyal";
 import { BACKGROUND_HEADERS } from "@/lib/auth/session-policy";
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select as HqSelect } from "@/components/ui/Select";
@@ -447,7 +448,7 @@ export { formatMoney };
  * `tabular-nums` because these sit in columns and proportional digits make a column of
  * figures impossible to scan.
  */
-const CURRENCY_AR: Record<string, string> = { SAR: "ر.س", USD: "$", EUR: "€", AED: "د.إ" };
+const CURRENCY_AR: Record<string, string> = { SAR: "⃁", USD: "$", EUR: "€", AED: "د.إ" };
 
 /**
  * The same money, as a plain string.
@@ -463,6 +464,8 @@ export function moneyText(
   places = 2,
 ): string {
   const formatted = formatMoney(String(value), places);
+  // The riyal: the official sign «⃁», on the left of the amount in both languages (owner, 10 Nov 2026).
+  if (currency === "SAR") return withRiyal(formatted, lang);
   const unit = lang === "ar" ? (CURRENCY_AR[currency] ?? currency) : currency;
   return `${formatted} ${unit}`;
 }
@@ -485,7 +488,7 @@ export function Money({
   const raw = String(value);
   const negative = raw.trim().startsWith("-");
   const formatted = formatMoney(raw);
-  const unit = lang === "ar" ? (CURRENCY_AR[currency] ?? currency) : currency;
+  const unit = currency === "SAR" ? RIYAL : lang === "ar" ? (CURRENCY_AR[currency] ?? currency) : currency;
   // The figure is wrapped in <bdi>. A Latin-digit amount sitting in Arabic text is a
   // direction-neutral run, and the bidi algorithm will happily reorder it against whatever
   // is beside it — "12,450.00" after a full stop can come out as "00.450,12", and a minus
@@ -497,7 +500,9 @@ export function Money({
         negative ? "text-oo-status-rejected" : "text-oo-text-primary"
       }`}
     >
-      <bdi className="tabular-nums">{formatted}</bdi> {unit}
+      {/* SAR in English: «⃁ 7,245.00» — the sign stays on the left of the amount (in Arabic it follows the number,
+          which in a right-to-left line is its left). */}
+      {currency === "SAR" && lang !== "ar" ? <>{unit} <bdi className="tabular-nums">{formatted}</bdi></> : <><bdi className="tabular-nums">{formatted}</bdi> {unit}</>}
     </span>
   );
 }

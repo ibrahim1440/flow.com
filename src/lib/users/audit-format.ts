@@ -226,7 +226,7 @@ export function describe(r: Row, names: Map<string, string>, lang: "ar" | "en" =
       target = m.number ? T(`فاتورة ${m.number}`, `invoice ${m.number}`) : T("فاتورة مشتريات", "purchase invoice");
       const a = (m.after ?? null) as { supplierName?: string; grossTotal?: string; lines?: { quantity: string | null; net: string; description: string }[] } | null;
       const b = (m.before ?? null) as { grossTotal?: string; lines?: unknown[] } | null;
-      const sar = T("ر.س", "SAR");
+      const sar = T("⃁", "SAR");
       const parts: string[] = [];
       if (r.action === "PURCHASE_ACTION_DENIED") {
         const what: Record<string, [string, string]> = { save: ["الحفظ", "save"], edit: ["تعديل فاتورة مستلمة", "editing a received invoice"], cancel: ["الإلغاء", "cancel"], post: ["الاعتماد والترحيل", "approve and post"] };

@@ -7,6 +7,7 @@ import { Decimal } from "@/lib/services/commissions/engine";
 import { PAYMENT_METHODS, type PaymentMethodValue } from "@/lib/services/sales/collections";
 import { copyAndCorrect, receiptAbilities, type CorrectionEdits } from "@/lib/services/sales/receipts";
 import { auditFromRequest, setAuditContext } from "@/lib/accounting/audit";
+import { AMOUNT_PATTERN } from "@/lib/money/amount-input";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -45,7 +46,7 @@ export async function POST(request: Request, { params }: Params) {
   const edits: CorrectionEdits = {};
   if (b.amountGross !== undefined) {
     const raw = String(b.amountGross).trim();
-    if (!/^\d+(\.\d{1,2})?$/.test(raw)) return NextResponse.json({ error: "amountGross must be a positive amount with at most two decimal places." }, { status: 400 });
+    if (!AMOUNT_PATTERN.test(raw)) return NextResponse.json({ error: "amountGross must be a positive amount with at most two decimal places." }, { status: 400 });
     edits.amountGross = new Decimal(raw);
   }
   if (typeof b.collectedAt === "string" && b.collectedAt) {

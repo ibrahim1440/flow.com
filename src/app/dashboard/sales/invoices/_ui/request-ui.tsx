@@ -83,7 +83,7 @@ export function IssueConfirm({ facts, onConfirm, onClose, busy, title }: { facts
         {facts.breakdown.map((b) => (
           <div key={`${b.category}${b.rate}`}><dt>{b.category === "S" ? L(`ضريبة ${Number(b.rate)}%`, `VAT ${Number(b.rate)}%`) : L(CATEGORY[b.category]?.[0] ?? b.category, CATEGORY[b.category]?.[1] ?? b.category)}</dt><dd className="hr-num">{money(b.tax)}</dd></div>
         ))}
-        <div><dt>{L("الإجمالي شامل الضريبة · ر.س", "Total incl. VAT · SAR")}</dt><dd className="hr-num" data-testid="issue-confirm-grand"><b>{money(facts.grand)}</b></dd></div>
+        <div><dt>{L("الإجمالي شامل الضريبة · ⃁", "Total incl. VAT · SAR")}</dt><dd className="hr-num" data-testid="issue-confirm-grand"><b>{money(facts.grand)}</b></dd></div>
       </dl>
       {facts.credit ? (
         <p className="inv-chip is-warn" data-testid="issue-confirm-credit">

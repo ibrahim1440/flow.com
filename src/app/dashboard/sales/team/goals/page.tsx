@@ -116,7 +116,7 @@ export default function TeamGoalsPage() {
       {!data ? <PerfLoading ar={ar} /> : data.reps.length === 0 ? <p>{ar ? "ما فيه مندوبين." : "No reps."}</p> : (
         <div className="tg-scroll">
           <table className="t tg-table">
-            <thead><tr><th>{ar ? "المندوب" : "Rep"}</th>{COLS.map((m) => <th key={m}>{ar ? METRIC_AR[m] : m}{m === "COLLECTION" ? (ar ? " (ر.س)" : " (SAR)") : ""}</th>)}<th>{ar ? "أرقام خاصة" : "Custom numbers"}</th><th>{ar ? "الخطة" : "Plan"}</th><th>{ar ? "خارج الخطة" : "Unplanned"}</th></tr></thead>
+            <thead><tr><th>{ar ? "المندوب" : "Rep"}</th>{COLS.map((m) => <th key={m}>{ar ? METRIC_AR[m] : m}{m === "COLLECTION" ? (ar ? " (⃁)" : " (SAR)") : ""}</th>)}<th>{ar ? "أرقام خاصة" : "Custom numbers"}</th><th>{ar ? "الخطة" : "Plan"}</th><th>{ar ? "خارج الخطة" : "Unplanned"}</th></tr></thead>
             <tbody>
               {data.reps.map((r) => (
                 <Fragment key={r.id}>

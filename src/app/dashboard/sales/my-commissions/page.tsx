@@ -455,7 +455,7 @@ const ACCRUAL_WORD: Record<string, [string, string, string]> = {
  * are the statement and the accruals of GET /api/commissions/me, unchanged; nothing is recomputed but the sums shown.
  */
 function TargetAndCommission({ ar, data, day }: { ar: boolean; data: Payload; day: DayTarget | null }) {
-  const sar = ar ? "ر.س" : "SAR";
+  const sar = ar ? "⃁" : "SAR";
   const whole = (v: string | number | null | undefined) => (v === null || v === undefined ? "—" : Math.round(Number(v)).toLocaleString("en-US"));
   const p = data.progress;
   const pct = p?.percent ? Math.max(0, Math.min(100, Number(p.percent))) : 0;

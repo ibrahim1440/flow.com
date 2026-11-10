@@ -204,7 +204,7 @@ export default function AddProductPage() {
                   <tr>
                     <th>{lbl("رمز الصنف", "SKU code", true)}</th>
                     <th>{lbl("حجم العبوة", "Pack size", true)}</th>
-                    <th>{lbl("سعر البيع · ر.س", "Price · SAR", true)}</th>
+                    <th>{lbl("سعر البيع · ⃁", "Price · SAR", true)}</th>
                     <th>{L("الباركود", "Barcode")}</th>
                     <th className="cat-ck">{L("نشط", "Active")}</th>
                     <th aria-label={L("حذف", "Remove")} />

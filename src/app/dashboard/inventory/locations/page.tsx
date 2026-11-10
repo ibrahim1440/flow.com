@@ -50,7 +50,7 @@ export default function LocationsPage() {
   const rows = [...active, ...transit, ...(showInactive ? all.filter((l) => !l.isActive) : [])];
   const withValue = all.some((l) => typeof l.valueEstimate === "number");
   const cols = withValue ? 7 : 6;
-  const value = (l: Loc) => (typeof l.valueEstimate === "number" ? <span className="hr-num">{L(`${formatMoney(l.valueEstimate.toFixed(2))} ر.س`, `SAR ${formatMoney(l.valueEstimate.toFixed(2))}`)}</span> : null);
+  const value = (l: Loc) => (typeof l.valueEstimate === "number" ? <span className="hr-num">{L(`${formatMoney(l.valueEstimate.toFixed(2))} ⃁`, `SAR ${formatMoney(l.valueEstimate.toFixed(2))}`)}</span> : null);
 
   async function call(url: string, method: string, body?: unknown): Promise<{ ok: true } | { ok: false; refusal: Refusal }> {
     setBusy(true);

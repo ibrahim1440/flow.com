@@ -99,7 +99,9 @@ export function money2(v: string | number): string {
   return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+/** The riyal is the official sign «⃁» in both languages (owner, 10 Nov 2026); other currencies by code. */
 export function currencyLabel(code: string, lang: "ar" | "en"): string {
-  if (lang === "en") return code;
-  return code === "SAR" ? "ر.س" : code;
+  if (code === "SAR") return "⃁";
+  void lang;
+  return code;
 }

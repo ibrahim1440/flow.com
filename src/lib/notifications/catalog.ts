@@ -685,7 +685,7 @@ export const EVENTS: NotificationEventDef[] = [
     recipients: [{ perm: [{ module: "production", sub: "manage_schedule" }] }], requires: [MOD("production")],
     trigger: "discardRun (lib/services/station/roast-v2.ts): a V2 roast discarded — once per roast",
     render: (f) => ({
-      titleAr: `${f.alert ? "تنبيه · " : ""}تحميصة تالفة ${s(f.serial)}: ${s(f.kg)} كغ أخضر بقيمة ${s(f.value)} ر.س`,
+      titleAr: `${f.alert ? "تنبيه · " : ""}تحميصة تالفة ${s(f.serial)}: ${s(f.kg)} كغ أخضر بقيمة ${s(f.value)} ⃁`,
       titleEn: `${f.alert ? "Alert · " : ""}Roast ${s(f.serial)} discarded: ${s(f.kg)} kg of green worth ${s(f.value)} SAR`,
       bodyAr: [`سجّلها ${s(f.byName)}`, `السبب: ${s(f.reason)}`, `تالف الوردية: ${s(f.shiftCount)}`, "راجعها خلال 24 ساعة (مشرف غير من سجّلها)."].join(" · "),
       bodyEn: [`Recorded by \u2068${sEn(f, "byName")}\u2069`, `reason: \u2068${sEn(f, "reason")}\u2069`, `discards this shift: ${s(f.shiftCount)}`, "Review it within 24 hours (a supervisor other than the one who recorded it)."].join(" · "),

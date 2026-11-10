@@ -15,6 +15,7 @@ import "./login.css";
 import { LoginLangContext, LoginTaglineContext } from "./lang-context";
 import { taglineLines } from "@/lib/login-tagline";
 import { applyDocumentLang, toggleAriaLabel, writeLangCookie } from "@/lib/i18n/language-switch";
+import { RiyalFont } from "@/components/fonts/RiyalFont";
 
 // Owner security decision (16 Oct, Option A). Three ways in:
 //   · "pin"           — PIN alone: operational accounts only (a privileged account is refused
@@ -253,6 +254,7 @@ export default function LoginClient() {
     <div dir={lang === "ar" ? "rtl" : "ltr"} lang={lang} className="d21 d21-login" data-testid="login-root">
       {/* IBM Plex and the Amiri brand face, self-hosted (public/fonts); no third-party font host. */}
       <link rel="stylesheet" precedence="default" href="/fonts/ibm-plex.css" />
+      <RiyalFont />
       <link rel="stylesheet" precedence="default" href="/fonts/amiri.css" />
 
       <aside className="lg-brand" aria-label={t.system}>
