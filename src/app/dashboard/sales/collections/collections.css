@@ -78,7 +78,7 @@
   .d21 .c-drawer { top: auto; bottom: 0; inset-inline: 0; width: 100%; max-width: none; max-height: calc(100dvh - 56px); border-radius: 20px 20px 0 0 }
   .d21 .c-drawer > .hd { padding: 14px 16px 12px }
   .d21 .c-drawer > .bd { padding: 16px }
-  .d21 .c-drawer > .ft { padding: 12px 16px 26px }
+  .d21 .c-drawer > .ft { padding: 12px 16px max(26px, calc(12px + env(safe-area-inset-bottom))) } /* D20.1: clear of the home indicator */
   .d21 .c-drawer > .ft .btn { height: 44px; flex: 1; justify-content: center }
   .d21 .c-figs { grid-template-columns: 130px minmax(0, 1fr) }
 }

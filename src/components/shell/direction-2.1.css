@@ -270,7 +270,8 @@
   .d21-main { padding: 0; flex: 1; min-height: 0; }
   .d21-sheet { border-radius: 20px 20px 0 0; }
   .d21-top { display: none; }
-  .d21-body { padding-bottom: var(--d21-tabbar); }
+  /* scroll-padding: a field scrolled into view (focus, scrollIntoView) clears the fixed tab bar too (D20.1). */
+  .d21-body { padding-bottom: var(--d21-tabbar); scroll-padding-bottom: var(--d21-tabbar); }
   .d21-tabbar { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); position: fixed; bottom: 0; inset-inline: 0; z-index: 40; height: var(--d21-tabbar); background: var(--surface); border-top: 1px solid var(--border-subtle); padding: 8px 6px max(22px, env(safe-area-inset-bottom)); }
   .d21-tabbar > a, .d21-tabbar > button { appearance: none; border: 0; background: none; font: inherit; cursor: pointer; display: grid; justify-items: center; align-content: start; gap: 2px; font-size: 11px; line-height: 22px; color: var(--text-muted); text-decoration: none; padding: 0; }
   .d21-tabbar svg { width: 18px; height: 18px; stroke-width: 1.5; }
@@ -358,7 +359,10 @@
 /* The sales rep's bar (batch 24 council fix round 1): it stays on every sales page; a page's own sticky action bar sits just above it. */
 @media (max-width: 767.98px) {
   .d21[data-repbar] .d21 .sticky-act, .d21[data-repbar] .sticky-act { bottom: var(--d21-tabbar); padding-bottom: 12px; }
-  .d21[data-repbar] .d21-body { padding-bottom: calc(var(--d21-tabbar) + 76px); }
+  /* D20.1: the extra room is for a page's FIXED .sticky-act only. On any other page it inflated every in-flow
+     `position: sticky; bottom: 0` bar by 76 px (a scroller's padding insets its sticky bars), so «إرسال» of the direct
+     sale floated mid-screen with the fields showing below it, and an empty band sat above the tab bar. */
+  .d21[data-repbar] .d21-body:has(.sticky-act) { padding-bottom: calc(var(--d21-tabbar) + 76px); }
 }
 
 /* «تسجيل الخروج؟» (owner-approved Figma D9-A, 6 Nov 2026): a bottom sheet in the shell's own look. */

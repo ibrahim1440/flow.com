@@ -6,7 +6,7 @@ import { Languages, WifiOff } from "lucide-react";
 
 import { PIN_LENGTH } from "@/lib/pin-policy";
 import { cameForExpiredSession, SESSION_EXPIRED_AR, SESSION_EXPIRED_EN } from "@/lib/session-expired";
-import { IDLE_REASON, SESSION_IDLE_AR, SESSION_IDLE_EN, safeNext } from "@/lib/auth/idle";
+import { IDLE_OUT_KEY, IDLE_REASON, SESSION_IDLE_AR, SESSION_IDLE_EN, safeNext } from "@/lib/auth/idle";
 import { DesktopRecommendedNotice } from "@/components/shell/DesktopRecommendedNotice";
 import { SHOW_PIN_SIGN_IN } from "@/lib/simple-mode";
 import { BrandMark } from "@/components/brand/BrandMark";
@@ -158,6 +158,8 @@ export default function LoginClient() {
       const data = await safeJson(res);
       if (!res.ok) { setNote(noteFor(res.status, data, step)); return "refused"; }
       if (data?.mfaRequired && data.challenge) { setChallenge(data.challenge); setCode(""); return "ok"; }
+      // A new session: the last one's «signed out for inactivity» no longer speaks for anything (D20.1 R2-L1).
+      try { window.localStorage.removeItem(IDLE_OUT_KEY); } catch { /* storage unavailable */ }
       router.push(stationReturn(window.location.search) ?? safeNext(new URLSearchParams(window.location.search).get("next")) ?? data?.redirectTo ?? "/dashboard");
       return "ok";
     } catch {

@@ -209,6 +209,17 @@
 .d21 [data-ui="dialog"] > div:first-child { border-bottom-color: var(--d-border-subtle); padding: 18px 24px 14px; }
 .d21 [data-ui="dialog"] > div:not(:first-child) { padding-inline: 24px; }
 .d21 [data-ui="dialog"] > div:last-child { border-top-color: var(--d-border-subtle); }
+/* D20.1 (owner, iPhone): on a phone the sales Modal is the shell's bottom sheet (as components/ui/dialog.css) — anchored
+   to the screen's bottom over its scrim, the title fixed, the form scrolling inside, the actions always in view and clear
+   of the home indicator. It was a top-anchored card the whole scrim scrolled, «سجّل التحصيل» below the fold. */
+@media (max-width: 767.98px) {
+  .d21 [data-ui="dialog-scrim"] { align-items: flex-end; padding: 0; overflow: hidden; }
+  .d21 [data-ui="dialog"] { margin: 0; max-width: none; max-height: calc(100dvh - 24px); display: flex; flex-direction: column; border-radius: 20px 20px 0 0; }
+  .d21 [data-ui="dialog"] > div:first-child { flex: none; }
+  .d21 [data-ui="dialog-body"] { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .d21 [data-ui="dialog-body"]:last-child { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+  .d21 [data-ui="dialog-foot"] { flex: none; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+}
 
 /* ── Spinner ───────────────────────────────────────────────────────────── */
 .d21 [data-ui="spinner"] > div { border-width: 2px; border-color: var(--d-border-subtle); border-top-color: var(--d-signature); width: 22px; height: 22px; }

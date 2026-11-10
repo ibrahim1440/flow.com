@@ -61,6 +61,8 @@ export function AddMenu({ ar, links, onDone, onPlan }: { ar: boolean; links: Qui
       <button type="button" className="btn p md-add-btn" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)} data-testid="md-add">
         <Ico name="plus" small />{ar ? "أضف" : "Add"}
       </button>
+      {/* D20.1: on a phone the menu is a bottom sheet over a scrim (tap it to close); the scrim is hidden on a desktop. */}
+      {open ? <div className="md-add-scrim" aria-hidden onClick={() => setOpen(false)} data-testid="md-add-scrim" /> : null}
       {open ? (
         <div className="md-add-menu" role="menu" data-testid="md-add-menu">
           {opts.map((o) => (

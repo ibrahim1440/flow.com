@@ -12,6 +12,7 @@ import { PIN_LENGTH } from "@/lib/pin-policy";
 import { SHOW_PIN_SIGN_IN } from "@/lib/simple-mode";
 import { isEndedSession, isIdleEnded, SESSION_EXPIRED_LOGIN } from "@/lib/session-expired";
 import { idleLoginUrl } from "@/lib/auth/idle";
+import { recentIdleSignOut } from "./IdleGuard";
 import { D21Dialog } from "@/components/ui/Dialog";
 
 const T = {
@@ -61,7 +62,8 @@ export function StepUpProvider({ lang, privileged, username = "", children }: { 
       // The session itself ended (idle, absolute deadline, logout, revocation): leave for the
       // sign-in screen, which says so in both languages. Full navigation: no page state survives.
       if (isEndedSession(res.status, url, body, window.location.origin)) {
-        window.location.replace(isIdleEnded(body) ? idleLoginUrl(window.location.pathname + window.location.search) : SESSION_EXPIRED_LOGIN);
+        // A bare 401 right after another tab of this session signed out for inactivity is that sign-out (D20.1 gate P1).
+        window.location.replace(isIdleEnded(body) || recentIdleSignOut() ? idleLoginUrl(window.location.pathname + window.location.search) : SESSION_EXPIRED_LOGIN);
         return res;
       }
       if (url.includes("/api/auth/")) return res;

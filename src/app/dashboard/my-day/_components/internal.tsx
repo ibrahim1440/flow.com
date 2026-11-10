@@ -11,6 +11,7 @@
 //                          of the leads API, sales › lead_write), then «خلصت الجولة».
 //   · RepeatingCard      — «خطتي ← المتكرر»: each weekly rule with «عدّل» (from next week) and «وقّفه».
 //   · InvitesCard        — a colleague's meeting this rep was invited to, with «حطها في خطتي» (owner decision b: by hand).
+import { roundFailedCount, roundLastSent, roundOpenValue, roundPending, trackRoundSave, type SaveEnd } from "./round-cache";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { D21Dialog } from "@/components/ui/Dialog";
@@ -204,7 +205,12 @@ type Dup = { leadId: string; companyName: string; contactName: string | null };
 type CustDup = { id: string | null; name: string | null };
 export function RoundSheet({ ar, it, today, canAddLeads, onClose, onSaved }: { ar: boolean; it: PItem; today: string; canAddLeads: boolean; onClose: () => void; onSaved: (msg: string) => void }) {
   useBackLayer(1, onClose);
-  const [shops, setShops] = useState(it.shopsVisited ?? 0);
+  // What the plan list shows for this round now; the sheet opens on a confirmed save from this tab while the list still
+  // shows it (round-cache.ts), else on the server's value.
+  const base = it.shopsVisited ?? 0;
+  const [shops, setShops] = useState(() => roundOpenValue(it.id, it.shopsVisited));
+  const shopsErrText = (n: number) => (ar ? `ما انحفظ العدد (${n}) — تأكد من الاتصال، ويُعاد الحفظ مع أي تعديل.` : `The count (${n}) was not saved — check the connection; it is sent again with your next change.`);
+  const [shopsErr, setShopsErr] = useState(() => { const f = roundFailedCount(it.id); return f === null ? "" : shopsErrText(f); });
   const [leads, setLeads] = useState(it.roundLeads ?? []);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -212,13 +218,39 @@ export function RoundSheet({ ar, it, today, canAddLeads, onClose, onSaved }: { a
   const [custDup, setCustDup] = useState<CustDup[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  // Abu Fahd: «كم محل زرت؟» is saved as the rep counts (a closed sheet or a reload keeps it).
-  const savedShops = useRef(it.shopsVisited ?? 0);
+  // Abu Fahd: «كم محل زرت؟» is saved as the rep counts (a closed sheet or a reload keeps it). Only a 2xx confirms a
+  // count (round-cache.ts); a failure says so here, and the next change sends again (D20.1 gate L1).
+  const savedShops = useRef(shops);
+  const latest = useRef(shops);
+  useEffect(() => { latest.current = shops; }, [shops]);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const ended = (e: SaveEnd) => {
+    if (!e.latest) return; // an older save answering late changes nothing (R2-L2)
+    if (e.ok) { savedShops.current = e.count; if (mounted.current) setShopsErr(""); return; }
+    if (!mounted.current) return;
+    setShopsErr(shopsErrText(e.count));
+    // Not saved. Taps made since are kept (they are sent with the next save); with none, back to what the server holds.
+    if (latest.current !== e.count) return;
+    const back = roundOpenValue(it.id, it.shopsVisited); // the last confirmed count, or the server's
+    savedShops.current = back; setShops(back);
+  };
+  const saveShops = (n: number) => {
+    void trackRoundSave(it.id, n, base, async () => (await send(`/api/sales/plan/items/${it.id}`, "PATCH", { shopsVisited: n })).ok).then(ended);
+  };
+  // Opened on a save still on its way (closed and opened again at once): its answer decides.
+  useEffect(() => {
+    const p = roundPending(it.id);
+    if (p && p.count === shops) void p.done.then(ended);
+  }, [it.id]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (shops === savedShops.current) return;
-    const t = setTimeout(() => { void send(`/api/sales/plan/items/${it.id}`, "PATCH", { shopsVisited: shops }).then((r) => { if (r.ok) savedShops.current = shops; }); }, 600);
+    const t = setTimeout(() => saveShops(shops), 600);
     return () => clearTimeout(t);
-  }, [shops, it.id]);
+  }, [shops, it.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Closed within the 600 ms wait: the count is still sent (it was dropped with the pending timer).
+  // Not when that very count is already the last one sent (R2-L2: closing never resends a stale value).
+  useEffect(() => () => { if (latest.current !== savedShops.current && latest.current !== roundLastSent(it.id)) saveShops(latest.current); }, [it.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const addLead = async (anyway = false) => {
     if (name.trim().length < 2 || busy) return;
     setBusy(true); setErr("");
@@ -246,6 +278,7 @@ export function RoundSheet({ ar, it, today, canAddLeads, onClose, onSaved }: { a
       <div className="pl-sheet kp-sheet">
         <b className="pl-q">{ar ? "كم محل زرت؟" : "Shops visited?"}</b>
         <Stepper ar={ar} value={shops} max={999} onChange={setShops} testId="plan-round-shops" />
+        {shopsErr ? <p className="pl-err" role="alert" data-testid="plan-round-shops-err">{shopsErr}</p> : null}
         <b className="pl-q">{ar ? "عملاء محتملين من الجولة" : "Leads from the round"}</b>
         {leads.length ? <ul className="kp-leads" data-testid="plan-round-leads">{leads.map((l) => <li key={l.id}><b>{l.name}</b><span><Ico name="tick" small />{ar ? "انضاف" : "Added"}</span></li>)}</ul> : null}
         {canAddLeads ? (

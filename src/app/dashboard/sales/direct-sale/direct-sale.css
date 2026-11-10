@@ -132,7 +132,14 @@
    field scrolls clear of it. */
 .ds-bank { scroll-margin-bottom: 140px }
 .ds-bank .ds-input, .ds-bank .ds-drop, .ds-bank .ds-file { scroll-margin-bottom: 140px }
-.ds-body:has(.ds-bank) { padding-bottom: 24px }
+/* D20.1 (owner, iPhone): the «إرسال» bar ends the page on a phone — no padding below it (a sticky bar cannot pass its
+   parents' end, so 24 + 24 px under it left an empty band over the tab bar); the shell's tab bar carries the safe area. */
+@media (max-width: 767px) {
+  .ds { padding-bottom: 0 }
+  .ds-foot { padding-bottom: 12px }
+}
+/* D20.1 gate L2: on a desktop the bank step keeps its 24 px under the transfer fields, as before. */
+@media (min-width: 768px) { .ds-body:has(.ds-bank) { padding-bottom: 24px } }
 /* أبو فهد B3: the product list with an EMPTY basket ran 12 px off the left edge at 390 — a card's grid track sized to
    its widest row. Cards, lists and rows shrink to the screen; a long product name wraps inside its row. */
 .ds-card, .ds-list { grid-template-columns: minmax(0, 1fr) }

@@ -1,5 +1,6 @@
 "use client";
 
+import { clearRoundCounts } from "./my-day/_components/round-cache";
 import { clearRecent } from "@/components/shell/recent";
 import { useState, useEffect, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
@@ -47,6 +48,7 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
 
   async function handleLogout() {
     clearRecent(); // Ctrl K «فتحتها مؤخرًا» never outlives the session (council fix round 1)
+    clearRoundCounts(); // «كم محل زرت؟» counts this tab remembered are not the next person's (D20.1 gate L1)
     broadcastLogout(); // the other tabs of this site sign out with it (idle sign-out, owner 9 Nov)
     await fetch("/api/auth/me", { method: "DELETE" });
     router.push("/login");

@@ -10,6 +10,8 @@ export { IDLE_WARN_MS, SESSION_IDLE_MS };
  */
 export const KEEPALIVE_EVERY_MS = 60 * 1000;
 export const IDLE_REASON = "idle";
+/** localStorage: «a tab of this session signed out for inactivity» (IdleGuard); removed by a successful sign-in. */
+export const IDLE_OUT_KEY = "bf-idle-out";
 export const SESSION_IDLE_AR = "انتهت الجلسة لعدم النشاط — سجّل دخولك من جديد.";
 export const SESSION_IDLE_EN = "You were signed out after 10 minutes without activity — please sign in again.";
 const WARN_BEFORE_MS = SESSION_IDLE_MS - IDLE_WARN_MS;

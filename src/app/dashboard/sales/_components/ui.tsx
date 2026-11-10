@@ -66,6 +66,7 @@ const locale = (lang: "ar" | "en") => (lang === "ar" ? AR_LATN : EN);
  * digits it separates — ١٢٬٤٥٠ with Latin digits reads as a typo.
  */
 export function num(n: number, _lang: "ar" | "en" = "ar"): string {
+  void _lang; // kept for callers: Latin digits in either language (see above)
   return n.toLocaleString("en-US");
 }
 
@@ -105,6 +106,7 @@ export function monthOptions(current: string, lang: "ar" | "en"): { value: strin
 
 /** `25/09/2026`. Zero-padded so a column of dates lines up. */
 export function formatDay(value: string | Date | null | undefined, _lang?: "ar" | "en"): string {
+  void _lang; // the same dd/mm/yyyy in either language
   if (!value) return "—";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "—";
@@ -798,9 +800,9 @@ export function Modal({
             ×
           </button>
         </div>
-        <div className="px-5 py-4 space-y-4">{children}</div>
+        <div className="px-5 py-4 space-y-4" data-ui="dialog-body">{children}</div>
         {footer && (
-          <div className="px-5 py-4 border-t border-oo-border-default flex items-center justify-end gap-2 flex-wrap">
+          <div className="px-5 py-4 border-t border-oo-border-default flex items-center justify-end gap-2 flex-wrap" data-ui="dialog-foot">
             {footer}
           </div>
         )}

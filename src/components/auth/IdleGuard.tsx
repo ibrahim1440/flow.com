@@ -15,12 +15,12 @@
 //   · Back from the background or sleep: a re-check only — past the deadline it leaves at once, no dialog.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { D21Dialog } from "@/components/ui/Dialog";
-import { deadlineOf, idleLoginUrl, serverDeadlineLocal, shouldPing, stateAt } from "@/lib/auth/idle";
+import { IDLE_OUT_KEY, deadlineOf, idleLoginUrl, serverDeadlineLocal, shouldPing, stateAt } from "@/lib/auth/idle";
 
 const CHANNEL = "bf-idle";
 const LAST_KEY = "bf-idle-last";
 const SERVER_KEY = "bf-idle-server";
-const OUT_KEY = "bf-idle-out";
+const OUT_KEY = IDLE_OUT_KEY;
 type Msg =
   | { type: "activity"; at: number }
   | { type: "server"; deadline: number; ref: string }
@@ -41,6 +41,20 @@ function send(msg: Msg) {
 
 /** The session this tab belongs to (its ref, from its keep-alive) — shared with the shell's «تسجيل خروج». */
 let myRef: string | null = null;
+/**
+ * Did a tab of this session just sign out for inactivity? (D20.1 gate P1.) The tab that reaches the deadline writes it
+ * here BEFORE ending the session; another tab whose request lands after the session (and its cookie) is gone — but
+ * before the broadcast reached it, as under load — gets a bare 401, and reads this to say «idle», not «session expired».
+ */
+export function recentIdleSignOut(now = Date.now()): boolean {
+  try {
+    const v = JSON.parse(window.localStorage.getItem(OUT_KEY) ?? "null") as { kind?: string; ref?: string | null; at?: number } | null;
+    if (!v || v.kind !== "idle" || typeof v.at !== "number" || now - v.at > 60_000 || v.at > now + 5_000) return false;
+    // This very session only: both refs known and equal (R2-L1 — a marker of another sign-in never speaks for this one).
+    return !!v.ref && !!myRef && v.ref === myRef;
+  } catch { return false; }
+}
+
 /** The shell's «تسجيل خروج»: the other tabs of this session sign out with it. */
 export const broadcastLogout = () => send({ type: "logout", kind: "user", ref: myRef });
 
