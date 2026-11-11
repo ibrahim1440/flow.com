@@ -56,6 +56,7 @@ function Facts({ item }: { item: ApprovalItem }) {
     rows.push([L("العميل", "Customer"), n(lang === "ar" ? f.customerAr ?? f.customer : f.customer)]);
     rows.push([L("الصفقة", "Deal"), `${n(f.deal)}${f.dealOwner ? ` · ${f.dealOwner}` : ""}`]);
     rows.push([L("المحصول", "Product"), <span key="p"><bdi>{n(lang === "ar" ? f.productAr ?? f.product : f.product)}</bdi> · <span className="hr-num">{n(f.units)}</span> {L("عبوة", "unit")}</span>]);
+    if (f.note) rows.push([L("ملاحظة المندوب", "The rep's note"), <bdi key="n">{n(f.note)}</bdi>]);
   } else if (item.type === "STAGE_MOVE") {
     // Pipeline v2: a rep's manual stage move waiting for the supervisor.
     rows.push([L("الصفقة", "Deal"), `${n(f.deal)}${f.dealOwner ? ` · ${f.dealOwner}` : ""}`]);
@@ -134,6 +135,10 @@ export function DecisionPane({ item, onClose, onDecided }: { item: ApprovalItem;
         ) : null}
         {item.notice ? <Notice tone="info">{lang === "ar" ? item.notice.ar : item.notice.en}</Notice> : null}
         {item.decide.stepUp ? <p className="hr-caption">{L("قد يُطلب منك تأكيد هويتك قبل تنفيذ هذا القرار.", "You may be asked to confirm your identity first.")}</p> : null}
+        {/* D22 (أبو فهد B3): a second sample's approval carries the manager's note here too (kept on the request, sent to the rep). */}
+        {mode === "view" && !done && item.type === "SAMPLE" ? (
+          <Field label={L("ملاحظة للمندوب (اختياري)", "Note to the rep (optional)")}><textarea className="hr-input" rows={2} value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} data-testid="decision-approve-note" /></Field>
+        ) : null}
         {mode === "reject" && !done ? (
           <Field label={L("سبب الرفض (يصل لمقدم الطلب)", "Reason (sent to the requester)")}><textarea className="hr-input" rows={3} value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} autoFocus data-testid="decision-note" /></Field>
         ) : null}

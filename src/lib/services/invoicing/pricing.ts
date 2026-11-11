@@ -284,10 +284,15 @@ export function parseBuyer(raw: unknown, fallback?: Partial<BuyerParticulars>): 
   };
 }
 
+/** D22 «إرسال عيّنة»: the SalesInvoice.channel of a sample's invoice (externalOrderRef = the first SampleShipment id). */
+export const SAMPLE_CHANNEL = "SAMPLE";
+
 /** What a document needs before it can be issued (the database checks the same; this answers in words). */
 export function issueProblems(input: {
   kind: InvoiceKind; family: InvoiceFamily; buyer: BuyerParticulars; seller: { name: string | null; vatNumber: string | null };
   supplyDate: string | null; lines: CleanLine[]; reasonCode: string | null; reason: string | null; grandTotal: Decimal;
+  /** The document's external channel: «SAMPLE» (D22 «إرسال عيّنة») may total zero — a free sample's tax invoice. */
+  channel?: string | null;
 }): { code: string; ar: string; en: string }[] {
   const out: { code: string; ar: string; en: string }[] = [];
   const add = (code: string, ar: string, en: string) => out.push({ code, ar, en });
@@ -305,7 +310,10 @@ export function issueProblems(input: {
     if (!input.reasonCode || !(NOTE_REASONS as readonly string[]).includes(input.reasonCode)) add("REASON_CODE", "اختر سبب الإصدار.", "Choose the reason code.");
     if (!input.reason || input.reason.trim().length < 3) add("REASON", "اكتب سبب إصدار الإشعار.", "State the reason for the note.");
   }
-  if (input.grandTotal.lessThanOrEqualTo(0)) add("ZERO_TOTAL", "إجمالي المستند يجب أن يكون أكبر من صفر.", "The document total must be above zero.");
+  // D22 (owner, 11 Nov 2026): a free sample's invoice (channel SAMPLE, the 100 % discount) issues at zero — only an
+  // INVOICE of that channel, never a note, never another channel; a negative total is refused as before.
+  const freeSample = input.kind === "INVOICE" && input.channel === SAMPLE_CHANNEL && input.grandTotal.isZero();
+  if (input.grandTotal.lessThanOrEqualTo(0) && !freeSample) add("ZERO_TOTAL", "إجمالي المستند يجب أن يكون أكبر من صفر.", "The document total must be above zero.");
   return out;
 }
 

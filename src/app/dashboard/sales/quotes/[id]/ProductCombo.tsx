@@ -15,9 +15,11 @@ const FREE = "__free__";
  * `freeText` is the line's description when it has no SKU; typing and leaving the box (or picking «— وصف حر —»)
  * keeps what was typed as the description.
  */
-export function ProductCombo({ skus, value, ar, label, onPick, testId, freeText, onFreeText }: {
+export function ProductCombo({ skus, value, ar, label, onPick, testId, freeText, onFreeText, noFree }: {
   skus: ComboSku[]; value: string; ar: boolean; label: string; onPick: (skuId: string) => void; testId?: string;
   freeText?: string; onFreeText?: (text: string) => void;
+  /** D22: a catalogue SKU only — no «— وصف حر —» (the invoice page's direct sale and sample). */
+  noFree?: boolean;
 }) {
   const L = (a: string, e: string) => (ar ? a : e);
   const nameOf = (s: ComboSku) => (ar ? s.nameAr : null) ?? s.name ?? s.skuCode;
@@ -53,7 +55,7 @@ export function ProductCombo({ skus, value, ar, label, onPick, testId, freeText,
     return list.slice(0, 50);
   }, [q, skus]);
   // The options in order: the matching SKUs, then «— وصف حر —».
-  const options = useMemo(() => [...matches.map((s) => s.id), FREE], [matches]);
+  const options = useMemo(() => (noFree ? matches.map((s) => s.id) : [...matches.map((s) => s.id), FREE]), [matches, noFree]);
 
   // The latest «close» for the outside-click listener (it reads the typed text).
   const closeLatest = useRef<() => void>(() => undefined);
@@ -82,7 +84,7 @@ export function ProductCombo({ skus, value, ar, label, onPick, testId, freeText,
   function onKey(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "ArrowDown") { e.preventDefault(); if (!open) setOpen(true); setActive((a) => Math.min(a + 1, options.length - 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
-    else if (e.key === "Enter") { if (open) { e.preventDefault(); pick(options[active] ?? FREE); } }
+    else if (e.key === "Enter") { if (open) { e.preventDefault(); const o = options[active] ?? (noFree ? null : FREE); if (o) pick(o); } }
     else if (e.key === "Escape") { if (open) { e.preventDefault(); setOpen(false); setQ(""); } }
     else if (e.key === "Tab") { if (open) closeKeepingText(); }
   }
@@ -100,7 +102,7 @@ export function ProductCombo({ skus, value, ar, label, onPick, testId, freeText,
         aria-activedescendant={open ? `${listId}-${active}` : undefined}
         className="qi prodsel"
         value={shown}
-        placeholder={chosen ? nameOf(chosen) : value ? L("اكتب اسم المنتج…", "Type a product…") : L("— وصف حر — (اكتب لتختار منتج)", "— free text — (type to pick a product)")}
+        placeholder={chosen ? nameOf(chosen) : value ? L("اكتب اسم المنتج…", "Type a product…") : noFree ? L("اكتب اسم الصنف أو رمزه…", "Type a product name or code…") : L("— وصف حر — (اكتب لتختار منتج)", "— free text — (type to pick a product)")}
         onFocus={() => { if (!chosen && freeText) setQ(freeText); setOpen(true); setActive(0); }}
         onClick={() => setOpen(true)}
         onChange={(e) => { setQ(e.target.value); setOpen(true); setActive(0); }}
@@ -120,11 +122,13 @@ export function ProductCombo({ skus, value, ar, label, onPick, testId, freeText,
             </li>
           ))}
           {matches.length === 0 ? <li className="q-combo-none" role="presentation">{L("ما فيه منتج بهذا الاسم.", "No product by that name.")}</li> : null}
+          {noFree ? null : (
           <li id={`${listId}-${matches.length}`} role="option" aria-selected={!value}
             className={`q-combo-free${active === matches.length ? " is-active" : ""}`}
             onMouseDown={(e) => { e.preventDefault(); pick(FREE); }} onMouseEnter={() => setActive(matches.length)}>
             {q.trim() ? L(`— وصف حر: «${q.trim()}»`, `— free text: «${q.trim()}»`) : L("— وصف حر — (منتج غير موجود في الكتالوج)", "— free text — (not in the catalogue)")}
           </li>
+          )}
         </ul>
       ) : null}
     </div>

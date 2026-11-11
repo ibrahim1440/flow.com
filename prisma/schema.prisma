@@ -1142,6 +1142,10 @@ model SystemConfig {
   /// inventory screen. NULL = not set by the owner: the built-in 20 kg applies, exactly as
   /// before this column existed. CHECK > 0 and ≤ 100000.
   inventoryLowStockGreenKg          Decimal? @db.Decimal(10, 3)
+  /// D22 «حد تنبيه ضريبة العيّنات» (20261229090000_d22_sample_invoice): the list value of one customer's free samples in a
+  /// calendar year above which a holder of sales › samples_vat_alert sees the deemed-supply alert. NULL = 200 SAR.
+  /// CHECK 0–1,000,000. An alert only: nothing is computed or posted from it.
+  salesSampleVatAlertSar            Decimal? @db.Decimal(12, 2)
   /// Settings › Invoicing & tax: the VAT percent a NEW quotation line starts with. NULL = the
   /// built-in 15%. Issued documents keep the rate each line carries. CHECK 0–100.
   invoiceDefaultVatPercent          Decimal? @db.Decimal(5, 2)

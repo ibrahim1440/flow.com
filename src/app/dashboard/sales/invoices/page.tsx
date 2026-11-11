@@ -19,6 +19,7 @@ type Row = {
   id: string; kind: string; family: string; status: string; number: string | null; customerId: string; customerName: string; orderId: string | null; orderNumber: number | null;
   issueDate: string | null; dueDate: string | null; grandTotal: string; taxTotal: string; createdAt: string; original: { id: string; number: string | null } | null;
   open: string | null; payment: "PAID" | "PARTIAL" | "UNPAID" | null; overdue: boolean; source: string; qoyodNumber?: string | null;
+  sample?: { dealId: string | null; dealTitle: string | null; awaitingApproval: boolean; cancelled: boolean } | null;
 };
 type List = { items: Row[]; total: number; take: number; skip: number; byStatus: Record<string, number>; can: { create: boolean; view: boolean } };
 type Search = { tab?: string; orderId?: string; customerId?: string; view?: string; status?: string; family?: string; from?: string; to?: string; q?: string; loc?: string; page?: string; size?: string; skip?: string };
@@ -196,7 +197,7 @@ function InvoiceList({ sp }: { sp: Search }) {
                   <td className="m-title"><Link href={`/dashboard/sales/invoices/${r.id}`}><DocNo n={r.number} draftLabel={L("مسودة", "Draft")} /></Link>{r.qoyodNumber ? <a className="inv-sub" href={`/api/sales/invoices/${r.id}/qoyod/pdf`} target="_blank" rel="noopener" data-testid={`qoyod-chip-${r.id}`} title={L("فاتورة قيود (PDF)", "Qoyod invoice (PDF)")}>{L("قيود", "Qoyod")} <bdi className="acct-code">{r.qoyodNumber}</bdi></a> : null}
                     <span className="inv-sub">{L(KIND[r.kind]?.[r.family]?.[0] ?? r.kind, KIND[r.kind]?.[r.family]?.[1] ?? r.kind)}</span>
                     <span className="hr-msub">{r.customerName} · {money(r.grandTotal)}</span></td>
-                  <td><bdi>{r.customerName}</bdi>{r.orderNumber ? <span className="inv-sub">{L("طلب", "Order")} <bdi className="hr-num">#{r.orderNumber}</bdi></span> : null}</td>
+                  <td><bdi>{r.customerName}</bdi>{r.orderNumber ? <span className="inv-sub">{L("طلب", "Order")} <bdi className="hr-num">#{r.orderNumber}</bdi></span> : null}{r.sample ? <span className="inv-sub" data-testid={`invoice-sample-${r.id}`}><span className="inv-badge is-sample">{L("عيّنة", "Sample")}</span> {L("عيّنة لـ", "Sample for ")}<bdi>{r.customerName}</bdi>{r.sample.dealId ? <> · <Link href={`/dashboard/sales/deals/${r.sample.dealId}`}>{L("صفقة ", "deal ")}<bdi>{r.sample.dealTitle ?? ""}</bdi></Link></> : null}{r.status === "DRAFT" && r.sample.awaitingApproval ? <> · <span className="inv-age is-amber">{L("تنتظر موافقة المدير", "Waiting for the manager's approval")}</span></> : null}</span> : null}</td>
                   <td className="hr-num inv-hide-m">{r.issueDate ?? "—"}</td>
                   <td className={`hr-num inv-hide-m${r.overdue ? " inv-late" : ""}`}>{r.dueDate ?? "—"}</td>
                   <td className="num hr-num m-end">{money(r.grandTotal)}</td>
@@ -227,7 +228,7 @@ function InvoiceList({ sp }: { sp: Search }) {
                 <tr key={r.id} data-testid={`invoice-row-${r.number ?? r.id}`}>
                   <td className="m-title"><Link href={`/dashboard/sales/invoices/${r.id}`}><DocNo n={r.number} draftLabel={L("مسودة", "Draft")} /></Link>{r.qoyodNumber ? <a className="inv-sub" href={`/api/sales/invoices/${r.id}/qoyod/pdf`} target="_blank" rel="noopener" data-testid={`qoyod-chip-${r.id}`} title={L("فاتورة قيود (PDF)", "Qoyod invoice (PDF)")}>{L("قيود", "Qoyod")} <bdi className="acct-code">{r.qoyodNumber}</bdi></a> : null}
                     <span className="hr-msub">{r.customerName} · {money(r.grandTotal)}</span></td>
-                  <td><bdi>{r.customerName}</bdi>{r.orderNumber ? <span className="inv-sub">{L("طلب", "Order")} <bdi className="hr-num">#{r.orderNumber}</bdi></span> : null}</td>
+                  <td><bdi>{r.customerName}</bdi>{r.orderNumber ? <span className="inv-sub">{L("طلب", "Order")} <bdi className="hr-num">#{r.orderNumber}</bdi></span> : null}{r.sample ? <span className="inv-sub" data-testid={`invoice-sample-${r.id}`}><span className="inv-badge is-sample">{L("عيّنة", "Sample")}</span> {L("عيّنة لـ", "Sample for ")}<bdi>{r.customerName}</bdi>{r.sample.dealId ? <> · <Link href={`/dashboard/sales/deals/${r.sample.dealId}`}>{L("صفقة ", "deal ")}<bdi>{r.sample.dealTitle ?? ""}</bdi></Link></> : null}{r.status === "DRAFT" && r.sample.awaitingApproval ? <> · <span className="inv-age is-amber">{L("تنتظر موافقة المدير", "Waiting for the manager's approval")}</span></> : null}</span> : null}</td>
                   <td className="inv-hide-m">{L(KIND[r.kind]?.[r.family]?.[0] ?? r.kind, KIND[r.kind]?.[r.family]?.[1] ?? r.kind)}<span className="inv-sub">{L(FAMILY[r.family][0], FAMILY[r.family][1])}</span></td>
                   <td className="hr-num">{r.issueDate ?? "—"}</td>
                   <td className="num hr-num m-end">{money(r.grandTotal)}</td>

@@ -462,6 +462,8 @@ export async function GET(_request: Request, { params }: Params) {
         // «صلاحية العقد» (batch 24 WP-C): the contract dates — the account owner or a sales manager (contracts.ts).
         editFileDates: mayEditValidity(user, { accountOwnerId: customer.accountOwner?.id ?? null }),
         logActivity: hasSubPrivilege(p, "sales", "lead_write"),
+        // D22: «عيّنة» opens the tax invoice page's sample mode — it prepares the zero invoice (sample-send.ts maySendSample).
+        sendSample: hasSubPrivilege(p, "sales", "lead_write") && hasSubPrivilege(p, "sales", "invoices_create"),
         quote: hasSubPrivilege(p, "sales", "quote_write"),
         createDeal: hasSubPrivilege(p, "sales", "lead_convert"),
         // Council gate B2: the account owner and the credit terms have their own duties (account-guard.ts).

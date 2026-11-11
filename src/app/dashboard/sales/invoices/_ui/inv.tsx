@@ -22,7 +22,9 @@ export const INV_TABS = [
   { href: "/dashboard/sales/receivables", ar: "أعمار الذمم وكشوف العملاء", en: "AR aging & statements", match: (p: string) => p.startsWith("/dashboard/sales/receivables") },
 ];
 
-export function InvShell({ title, meta, actions, children, testId, tab = null }: { title?: string; meta?: ReactNode; actions?: ReactNode; children: ReactNode; testId?: string; tab?: string | null }) {
+export function InvShell({ title, meta, actions, children, testId, tab = null, bare = false }: { title?: string; meta?: ReactNode; actions?: ReactNode; children: ReactNode; testId?: string; tab?: string | null;
+  /** أبو فهد (clutter): a rep's direct sale / sample — no invoicing hub tabs (they are the accountant's). */
+  bare?: boolean }) {
   const { L } = useLang();
   const path = usePathname() ?? "";
   // The hub tabs read the glossary (Qoyod's words in the accountant workspace, ours elsewhere).
@@ -35,12 +37,12 @@ export function InvShell({ title, meta, actions, children, testId, tab = null }:
         <PageHeader title={title ?? L("الفواتير والتحصيل", "Invoices & collections")} actions={actions}>
           {meta ?? <span className="acct-meta"><span>{L("ريال سعودي", "SAR")}</span><span aria-hidden="true">·</span><span>{L("الأسعار قبل الضريبة", "Prices before VAT")}</span></span>}
         </PageHeader>
-        <nav className="hr-tabs is-underline acct-tabs" aria-label={L("أقسام الفواتير", "Invoicing sections")}>
+        {bare ? null : <nav className="hr-tabs is-underline acct-tabs" aria-label={L("أقسام الفواتير", "Invoicing sections")}>
           {INV_TABS.map((t) => {
             const on = t.match(path, tab);
             return <Link key={t.href} href={t.href} className="hr-tab" aria-selected={on} aria-current={on ? "page" : undefined}>{word(t.href, t.ar, t.en)}</Link>;
           })}
-        </nav>
+        </nav>}
         <div className="acct-body">{children}</div>
       </div>
     </OpsRoot>

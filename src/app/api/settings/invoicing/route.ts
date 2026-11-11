@@ -12,6 +12,8 @@ import { readQuoteSettings } from "@/lib/services/sales/quote-settings";
  * singleton. Settings only: nothing here issues, signs or submits an invoice (ZATCA is a later batch).
  *   · «نسبة الضريبة الافتراضية» — defaultVatPercent, 0–100; "" / null = the built-in 15%. Read by
  *     the quotation editor for each NEW line; a line keeps its own rate, an issued document its own.
+ *   · D22 «حد تنبيه ضريبة العيّنات» — sampleVatAlertSar, SAR per customer per calendar year, 0–1,000,000; "" / null = the
+ *     built-in 200. Read by «إرسال عيّنة» for holders of sales › samples_vat_alert (an alert only).
  *   · The VAT and CR numbers are shown (read-only) from the organisation's seller block, where they
  *     are edited (/api/settings/quotation), so they are not stored twice.
  *
@@ -60,7 +62,7 @@ export async function PUT(request: Request) {
       await tx.$queryRaw`SELECT "id" FROM "SystemConfig" WHERE "id" = 'singleton' FOR UPDATE`;
       const before = invoicingFromRow(await tx.systemConfig.findUnique({ where: { id: "singleton" } }));
       const after = invoicingFromRow(await tx.systemConfig.update({ where: { id: "singleton" }, data: parsed.data }));
-      const b = { defaultVatPercent: before.defaultVatPercent }, a = { defaultVatPercent: after.defaultVatPercent };
+      const b = { defaultVatPercent: before.defaultVatPercent, sampleVatAlertSar: before.sampleVatAlertSar }, a = { defaultVatPercent: after.defaultVatPercent, sampleVatAlertSar: after.sampleVatAlertSar };
       const changed = changedKeys(b, a);
       if (changed.length) {
         await writeSettingsAudit(tx, { section: "invoicing", action: "SETTINGS_UPDATED", entityType: "SystemConfig", entityId: "singleton", changed, before: b, after: a, actor: { id: user.id, name: user.name } });

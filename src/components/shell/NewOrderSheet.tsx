@@ -23,14 +23,15 @@ export function newOrderChoices(viewer: Viewer, customerId: string | null): NewO
   const c = customerId ? encodeURIComponent(customerId) : null;
   const out: NewOrderChoice[] = [];
   if (hasSubPrivilege(p, "sales", "quote_write")) out.push({ key: "quote", href: c ? `/dashboard/customers/${c}?new=quote` : "/dashboard/sales/quotes/new" });
-  if (hasSubPrivilege(p, "orders", "create") && hasSubPrivilege(p, "sales", "invoices_create")) out.push({ key: "direct", href: `/dashboard/sales/direct-sale${c ? `?customerId=${c}` : ""}` });
+  // D22 (owner, 11 Nov 2026): «بيع مباشر» is the tax invoice page in its direct-sale mode; the 3-step wizard is unlinked.
+  if (hasSubPrivilege(p, "orders", "create") && hasSubPrivilege(p, "sales", "invoices_create")) out.push({ key: "direct", href: `/dashboard/sales/invoices/new?mode=direct-sale${c ? `&customerId=${c}` : ""}` });
   if (hasSubPrivilege(p, "orders", "create") && !customersScopedToOwner(viewer)) out.push({ key: "internal", href: `/dashboard/orders?new=internal${c ? `&customerId=${c}` : ""}` });
   return out;
 }
 
 const TEXT = {
   quote: { ar: ["عرض سعر", "العميل يبي يشوف الأسعار قبل"], en: ["Quotation", "The customer wants to see prices first"] },
-  direct: { ar: ["بيع مباشر", "العميل بيشتري الحين"], en: ["Direct sale", "The customer is buying now"] },
+  direct: { ar: ["بيع مباشر (فاتورة ضريبية بدون عرض سعر)", "العميل بيشتري الحين"], en: ["Direct sale (tax invoice without a quotation)", "The customer is buying now"] },
 } as const;
 
 export function NewOrderSheet({ ar, viewer, customerId, onClose }: { ar: boolean; viewer: Viewer; customerId: string | null; onClose: () => void }) {

@@ -117,6 +117,14 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "invoices_issue", label: "Issue a tax invoice (numbered, final)" },
     { key: "invoices_cancel", label: "Cancel an invoice draft (before issue)" },
     { key: "invoices_credit_note", label: "Prepare and issue credit / debit notes" },
+    // D22 (owner-approved, 11 Nov 2026): «عيّنة ثانية لنفس الصنف» — approve a customer's second sample of the same product
+    // in the calendar year (a sales manager — lead_assign — keeps approving too); and «تنبيه ضريبة العيّنات» — see the
+    // deemed-supply alert when a customer's free samples in the year pass the configured amount. New, adminOnly backfill.
+    { key: "sample_approve_repeat", label: "Approve a customer's second sample of the same product in the year" },
+    { key: "samples_vat_alert", label: "See the samples VAT (deemed supply) alert" },
+    // D22 (owner, option 1): a direct sale / sample from the invoice page is S at the default rate; only this changes the
+    // category (Z / E / O) or the rate there. The accountant keeps full control on the draft.
+    { key: "invoice_tax_override", label: "Change the VAT category or rate of a direct sale / sample line" },
   ],
   // Fine-grained on purpose: every key below decides either what somebody is paid or who
   // gets to see it, and "manage_plans" in particular must never fall to the person the

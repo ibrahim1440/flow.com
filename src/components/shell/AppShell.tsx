@@ -382,7 +382,7 @@ export function AppShell({
   const runCreate = useCallback((a: CreateAction) => {
     setCreate(null);
     if (a.id === "orders.order.new") { askOrder(pageCustomer); return; }
-    if (pageCustomer && a.onCustomer) { router.push(customerActionHref(a, pageCustomer)); return; }
+    if (pageCustomer && (a.onCustomer || a.withCustomer)) { router.push(customerActionHref(a, pageCustomer)); return; }
     if (a.onCustomer) { returnTo.current = document.activeElement as HTMLElement | null; setPickFor(a); return; }
     router.push(a.href);
   }, [pageCustomer, router, askOrder]);
@@ -524,26 +524,38 @@ export function AppShell({
   const lastCrumb = sectionCrumbs?.length ? crumbText(sectionCrumbs[sectionCrumbs.length - 1], lang) : trail.length ? trail[trail.length - 1].text : "";
   const phoneTitle = phoneHeader?.title ?? title ?? lastCrumb;
 
-  const createMenu = (dir: "down" | "up") => (
-    <div className={`d21-menu ${dir}`} role="menu" data-testid="d21-new-menu">
-      {creates.map((c, i) => (
-        <span key={c.id} style={{ display: "contents" }}>
-          {/* The sales menu's people («عميل جديد», «عميل محتمل») sit apart from the work (mockup «+ جديد»). */}
-          {i > 0 && c.id === "customers.customer.new" ? <div className="d21-menu-sep" role="separator" /> : null}
-          {c.onCustomer || c.id === "orders.order.new" ? (
-            <button type="button" role="menuitem" className="d21-menu-item" data-testid={`d21-new-${c.id}`} onClick={() => runCreate(c)}>
-              <span>{ar ? c.labelAr : c.labelEn}</span>{c.key ? <span className="d21-kbd" aria-hidden>{c.key}</span> : null}
-            </button>
-          ) : (
-            <Link role="menuitem" className="d21-menu-item" href={c.href} data-testid={`d21-new-${c.id}`} onClick={() => setCreate(null)}>
-              <span>{ar ? c.labelAr : c.labelEn}</span>{c.key ? <span className="d21-kbd" aria-hidden>{c.key}</span> : null}
-            </Link>
-          )}
-        </span>
-      ))}
-      {pageCustomer && creates.some((c) => c.onCustomer) ? <p className="d21-menu-note">{ar ? "على هذا العميل" : "For this customer"}</p> : null}
-    </div>
-  );
+  // D22 (owner-approved Figma 2024:2): the tab bar's «＋» on a phone is a bottom sheet (the D20.1 pattern) — a title, each
+  // item with its icon and a line under it; on a wider screen the same menu stays a popover.
+  const createMenu = (dir: "down" | "up") => {
+    const sheet = dir === "up";
+    const label = (c: CreateAction) => (
+      <>
+        {sheet && c.icon ? <span className="d21-menu-ico" aria-hidden><Ico name={c.icon as D21IconName} small /></span> : null}
+        <span className="d21-menu-txt"><span>{ar ? c.labelAr : c.labelEn}</span>{sheet && c.subAr ? <small>{ar ? c.subAr : c.subEn}</small> : null}</span>
+        {c.key ? <span className="d21-kbd" aria-hidden>{c.key}</span> : null}
+      </>
+    );
+    return (
+      <>
+        {sheet ? <div className="d21-menu-scrim" aria-hidden onClick={() => setCreate(null)} data-testid="d21-new-scrim" /> : null}
+        <div className={`d21-menu ${dir}${sheet ? " is-sheet" : ""}`} role="menu" aria-label={ar ? "أضف" : "Add"} data-testid="d21-new-menu">
+          {sheet ? <div className="d21-menu-head"><b>{ar ? "أضف" : "Add"}</b><button type="button" className="d21-menu-x" aria-label={ar ? "إغلاق" : "Close"} onClick={() => setCreate(null)} data-testid="d21-new-close"><Ico name="close" small /></button></div> : null}
+          {creates.map((c, i) => (
+            <span key={c.id} style={{ display: "contents" }}>
+              {/* The sales menu's people («عميل جديد», «عميل محتمل») sit apart from the work (mockup «+ جديد»). */}
+              {i > 0 && c.id === "customers.customer.new" ? <div className="d21-menu-sep" role="separator" /> : null}
+              {c.onCustomer || c.id === "orders.order.new" ? (
+                <button type="button" role="menuitem" className="d21-menu-item" data-testid={`d21-new-${c.id}`} onClick={() => runCreate(c)}>{label(c)}</button>
+              ) : (
+                <Link role="menuitem" className="d21-menu-item" href={pageCustomer && c.withCustomer ? customerActionHref(c, pageCustomer) : c.href} data-testid={`d21-new-${c.id}`} onClick={() => setCreate(null)}>{label(c)}</Link>
+              )}
+            </span>
+          ))}
+          {pageCustomer && creates.some((c) => c.onCustomer || c.withCustomer) ? <p className="d21-menu-note">{ar ? "على هذا العميل" : "For this customer"}</p> : null}
+        </div>
+      </>
+    );
+  };
 
   return (
     <TitleContext value={setTitleStable}>

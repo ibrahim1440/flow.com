@@ -73,6 +73,8 @@ export const SUB_AR: Record<string, Record<string, string>> = {
     collection_submit: "تسجيل تحصيل على صفقة يملكها", collection_view_team: "عرض تحصيلات الفريق",
     invoices_view: "عرض فواتير المبيعات والإشعارات", invoices_create: "إنشاء مسودات الفواتير وتعديلها", invoices_issue: "إصدار الفاتورة الضريبية",
     invoices_cancel: "إلغاء مسودة فاتورة", invoices_credit_note: "إعداد الإشعارات الدائنة والمدينة وإصدارها",
+    sample_approve_repeat: "الموافقة على عيّنة ثانية لنفس الصنف", samples_vat_alert: "تنبيه ضريبة العيّنات",
+    invoice_tax_override: "تغيير نوع الضريبة أو نسبتها في البيع المباشر والعيّنة",
   },
   customers: { manage: "إدارة تفضيلات تحميص العملاء", sales_hold: "إيقاف البيع للعملاء" },
   commissions: {

@@ -32,7 +32,12 @@ export type InvoicingSettings = {
   defaultVatPercent: string | null;
   effectiveDefaultVatPercent: string;
   isDefault: boolean;
+  /** D22 «حد تنبيه ضريبة العيّنات»: what the owner stored (SAR per customer per year), or null (= the built-in 200). */
+  sampleVatAlertSar: string | null;
+  effectiveSampleVatAlertSar: string;
 };
+/** D22: the built-in samples VAT alert, SAR per customer per calendar year (sample-send.ts SAMPLE_VAT_ALERT_DEFAULT). */
+export const DEFAULT_SAMPLE_VAT_ALERT_SAR = 200;
 
 const plain = (v: Num): string | null => (v === null || v === undefined ? null : new Decimal(v.toString()).toString());
 
@@ -41,9 +46,11 @@ export function inventoryFromRow(row: { inventoryLowStockGreenKg?: Num } | null 
   return { lowStockGreenKg: stored, effectiveLowStockGreenKg: stored ?? String(LOW_STOCK_GREEN_KG_DEFAULT), isDefault: stored === null };
 }
 
-export function invoicingFromRow(row: { invoiceDefaultVatPercent?: Num } | null | undefined): InvoicingSettings {
+export function invoicingFromRow(row: { invoiceDefaultVatPercent?: Num; salesSampleVatAlertSar?: Num } | null | undefined): InvoicingSettings {
   const stored = plain(row?.invoiceDefaultVatPercent);
-  return { defaultVatPercent: stored, effectiveDefaultVatPercent: stored ?? String(DEFAULT_VAT_PERCENT), isDefault: stored === null };
+  const alert = plain(row?.salesSampleVatAlertSar);
+  return { defaultVatPercent: stored, effectiveDefaultVatPercent: stored ?? String(DEFAULT_VAT_PERCENT), isDefault: stored === null,
+    sampleVatAlertSar: alert, effectiveSampleVatAlertSar: alert ?? String(DEFAULT_SAMPLE_VAT_ALERT_SAR) };
 }
 
 export async function readInventorySettings(db: Db): Promise<InventorySettings> {
@@ -51,7 +58,7 @@ export async function readInventorySettings(db: Db): Promise<InventorySettings> 
 }
 
 export async function readInvoicingSettings(db: Db): Promise<InvoicingSettings> {
-  return invoicingFromRow((await db.systemConfig.findUnique({ where: { id: "singleton" } })) as { invoiceDefaultVatPercent?: Num } | null);
+  return invoicingFromRow((await db.systemConfig.findUnique({ where: { id: "singleton" } })) as { invoiceDefaultVatPercent?: Num; salesSampleVatAlertSar?: Num } | null);
 }
 
 /** Arabic-Indic and Persian digits, the Arabic decimal separator and stray spaces → a plain number. */
@@ -164,8 +171,23 @@ export function parseInventoryPatch(b: Record<string, unknown>): { ok: true; dat
 }
 
 /** PUT /api/settings/invoicing body → the column to write. */
-export function parseInvoicingPatch(b: Record<string, unknown>): { ok: true; data: { invoiceDefaultVatPercent?: Decimal | null } } | Problem {
-  const data: { invoiceDefaultVatPercent?: Decimal | null } = {};
+export function parseInvoicingPatch(b: Record<string, unknown>): { ok: true; data: { invoiceDefaultVatPercent?: Decimal | null; salesSampleVatAlertSar?: Decimal | null } } | Problem {
+  const data: { invoiceDefaultVatPercent?: Decimal | null; salesSampleVatAlertSar?: Decimal | null } = {};
+  if ("sampleVatAlertSar" in b) {
+    const v = b.sampleVatAlertSar;
+    if (v === null || v === "") data.salesSampleVatAlertSar = null;
+    else {
+      const d = decimalOf(v);
+      if (!d || d.isNegative() || d.greaterThan(1000000) || d.decimalPlaces() > 2) {
+        return {
+          ok: false, field: "sampleVatAlertSar",
+          error: "The samples alert is an amount from 0 to 1,000,000 SAR, with at most two decimals.",
+          errorAr: "حد تنبيه العيّنات مبلغ من 0 إلى 1,000,000 ريال، بمنزلتين عشريتين على الأكثر.",
+        };
+      }
+      data.salesSampleVatAlertSar = d;
+    }
+  }
   if ("defaultVatPercent" in b) {
     const v = b.defaultVatPercent;
     if (v === null || v === "") data.invoiceDefaultVatPercent = null;

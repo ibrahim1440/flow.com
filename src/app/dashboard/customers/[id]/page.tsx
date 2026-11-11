@@ -209,7 +209,10 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   const salesOn = !!data?.sections.sales;
   useCreateRequest("activity", () => setDialog({ activity: "CALL" }), salesOn && !!data?.can.logActivity);
   useCreateRequest("quote", () => { void startQuick("quote"); }, salesOn && !!data?.can.quote);
-  useCreateRequest("sample", () => { void startQuick("sample"); }, salesOn && !!data?.can.logActivity);
+  // D22 gate (owner's workflow «إرسال عيّنة ← صفحة الفاتورة الضريبية»): every sample entry opens the tax invoice page in its
+  // sample mode on this customer. The old request dialog (SampleDialog) stays in the code, linked from nowhere.
+  const sampleHref = `/dashboard/sales/invoices/new?mode=sample&customerId=${encodeURIComponent(id)}`;
+  useCreateRequest("sample", () => { router.push(sampleHref); }, salesOn && !!data?.can.sendSample);
 
   // «N» (and Q, S) are the shell's now (batch 24 WP-A): on this page they open the dialogs below through ?new=.
   useEffect(() => {
@@ -317,8 +320,8 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
       <Ico name="note" small />{L("سجّل نشاط", "Log activity")}
     </button>
   ) : null;
-  const sampleBtn = mayLog ? (
-    <button type="button" className="btn" data-testid="act-sample" disabled={quickBusy} onClick={() => startQuick("sample")}>
+  const sampleBtn = mayLog && can.sendSample ? (
+    <button type="button" className="btn" data-testid="act-sample" disabled={quickBusy} onClick={() => router.push(sampleHref)}>
       <Ico name="flask" small />{L("عيّنة", "Sample")}
     </button>
   ) : null;
@@ -1060,9 +1063,9 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
                 : <button type="button" className="btn" disabled aria-label={L("لا يوجد رقم واتساب", "No WhatsApp number")}><Ico name="chat" /></button>) : <span />}
               {mayLog ? <button type="button" className="btn" aria-label={L("سجّل نشاط", "Log activity")} data-testid="log-activity" onClick={() => setDialog({ activity: "CALL" })}><Ico name="note" /></button> : <span />}
               {/* «عيّنة» on the one bar too (seat 5 r2): a quotation keeps the wide primary slot. */}
-              {quoteBtn && mayLog ? <button type="button" className="btn" aria-label={L("عيّنة", "Sample")} data-testid="act-sample" disabled={quickBusy} onClick={() => startQuick("sample")}><Ico name="flask" /></button> : <span />}
+              {quoteBtn && mayLog && can.sendSample ? <button type="button" className="btn" aria-label={L("عيّنة", "Sample")} data-testid="act-sample" disabled={quickBusy} onClick={() => router.push(sampleHref)}><Ico name="flask" /></button> : <span />}
               {quoteBtn ? <button type="button" className="btn p" data-testid="new-quote" disabled={quickBusy} onClick={() => startQuick("quote")}><Ico name="quote" small />{L("عرض سعر", "Quotation")}</button>
-                : mayLog ? <button type="button" className="btn p" data-testid="act-sample" disabled={quickBusy} onClick={() => startQuick("sample")}><Ico name="flask" small />{L("عيّنة", "Sample")}</button> : <span />}
+                : mayLog && can.sendSample ? <button type="button" className="btn p" data-testid="act-sample" disabled={quickBusy} onClick={() => router.push(sampleHref)}><Ico name="flask" small />{L("عيّنة", "Sample")}</button> : <span />}
             </div>
           ) : null}
           {dialogs}

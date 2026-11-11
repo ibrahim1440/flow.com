@@ -9,6 +9,7 @@ import { priceInvoice, parseLines, inclusiveDifference, EXEMPTION_REASONS, type 
 import { CATEGORY, money, useLang } from "./inv";
 import { AssetSalePicker } from "./asset-sale";
 import { AddMore, TaxSummary, useShiftA } from "@/components/forms/QoyodForm";
+import { ProductCombo, type ComboSku } from "../../quotes/[id]/ProductCombo";
 
 export type EditLine = {
   description: string; descriptionEn?: string | null; quantity: string; unit: "UNIT" | "KG"; unitPrice: string; discountPercent: string;
@@ -81,8 +82,20 @@ export function Totals({ lines, qoyod = false }: { lines: EditLine[]; qoyod?: bo
  * الضريبة · القيمة» and «إضافة المزيد» with its Shift+A shortcut. Display only: the same lines and totals engine.
  * `inclusive` (WP-K, default = `qoyod`): the «شامل؟» column — the price typed VAT-inclusive, the net derived on the server.
  */
-export function LinesEditor({ lines, onChange, lockItems, lockCommercial, sellAssets, testId = "draft-lines", qoyod = false, inclusive = qoyod }: { lines: EditLine[]; onChange: (lines: EditLine[]) => void; lockItems?: boolean; lockCommercial?: boolean; sellAssets?: boolean; testId?: string; qoyod?: boolean; inclusive?: boolean }) {
+export function LinesEditor({ lines, onChange, lockItems, lockCommercial, sellAssets, testId = "draft-lines", qoyod = false, inclusive = qoyod, sku, newLine = emptyLine }: { lines: EditLine[]; onChange: (lines: EditLine[]) => void; lockItems?: boolean; lockCommercial?: boolean; sellAssets?: boolean; testId?: string; qoyod?: boolean; inclusive?: boolean;
+  /** D22 «بيع مباشر» / «إرسال عيّنة» (owner-approved 2010:2): each line is a SKU picked from the list (ProductCombo), in units;
+   *  `oneUnit`: a sample (one unit of each, the quantity fixed); the lines become cards on a phone (`.inv-lines.is-cards`).
+   *  Absent (every other invoice): the editor as it always was. */
+  sku?: { skus: ComboSku[]; ar: boolean; onPick: (i: number, s: ComboSku | null) => void; oneUnit?: boolean;
+    /** D22 (owner, option 1): VAT fixed to «أساسية 15٪» for whoever lacks sales › invoice_tax_override. */
+    lockTax?: boolean;
+    /** أبو فهد (clutter): the line checks wait for the rep's first «أرسل» (no red before typing). */
+    quietProblems?: boolean };
+  newLine?: () => EditLine }) {
   const { L } = useLang();
+  const emptyLine = newLine;
+  // D22: the card labels (a phone shows each line as a card; the table header is hidden there).
+  const lab = (ar: string, en: string) => (sku ? L(ar, en) : undefined);
   const fixedSet = lockItems || lockCommercial;
   const [picking, setPicking] = useState(false);
   const set = (i: number, patch: Partial<EditLine>) => onChange(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
@@ -90,7 +103,7 @@ export function LinesEditor({ lines, onChange, lockItems, lockCommercial, sellAs
   useShiftA(() => onChange([...lines, emptyLine()]), qoyod && !fixedSet);
   return (
     <div className="hr-tablewrap">
-      <table className="hr-table is-dense inv-lines" data-testid={testId}>
+      <table className={`hr-table is-dense inv-lines${sku ? " is-cards" : ""}`} data-testid={testId}>
         <thead><tr>
           <th>#</th><th>{L("الوصف", "Description")}</th><th className="num">{L("الكمية", "Qty")}</th><th>{L("الوحدة", "Unit")}</th>
           <th className="num">{L("سعر الوحدة", "Unit price")}</th>{inclusive ? <th>{L("شامل؟", "Incl. VAT?")}</th> : null}<th className="num">{L("الخصم %", "Disc. %")}</th><th>{L("الضريبة", "VAT")}</th>
@@ -100,9 +113,14 @@ export function LinesEditor({ lines, onChange, lockItems, lockCommercial, sellAs
         <tbody>
           {lines.map((l, i) => (
             <tr key={i} data-testid={`line-${i}`}>
-              <td className="hr-num">{i + 1}</td>
-              <td className="w-desc">
+              <td className="hr-num" data-label={lab("البند", "Line")}>{i + 1}</td>
+              <td className="w-desc" data-label={lab("الصنف", "Product")}>
+                {sku ? (
+                  <ProductCombo skus={sku.skus} value={l.productSkuId ?? ""} ar={sku.ar} label={L(`الصنف للبند ${i + 1}`, `Product for line ${i + 1}`)} noFree
+                    onPick={(id) => sku.onPick(i, sku.skus.find((x) => x.id === id) ?? null)} testId={`line-sku-${i}`} />
+                ) : (
                 <input className="hr-input" value={l.description} disabled={lockItems} onChange={(e) => set(i, { description: e.target.value })} aria-label={L("الوصف", "Description")} data-testid={`line-desc-${i}`} />
+                )}
                 {l.skuCode ? <span className="inv-sub acct-code">{l.skuCode}</span> : null}
                 {l.max ? <span className="inv-sub">{L("المتبقي", "Left")} <bdi className="hr-num">{l.max}</bdi></span> : null}
                 {l.kind === "FIXED_ASSET_SALE" ? (
@@ -115,12 +133,12 @@ export function LinesEditor({ lines, onChange, lockItems, lockCommercial, sellAs
                   </span>
                 ) : null}
               </td>
-              <td><input className="hr-input acct-amount" inputMode="decimal" value={l.quantity} disabled={lockCommercial || l.kind === "FIXED_ASSET_SALE"} onChange={(e) => set(i, { quantity: e.target.value })} aria-label={L("الكمية", "Quantity")} data-testid={`line-qty-${i}`} /></td>
-              <td>{fixedSet ? (l.unit === "KG" ? L("كغ", "kg") : L("عبوة", "unit")) : (
+              <td data-label={lab("الكمية", "Qty")}><input className="hr-input acct-amount" inputMode={sku ? "numeric" : "decimal"} value={l.quantity} disabled={lockCommercial || l.kind === "FIXED_ASSET_SALE" || !!sku?.oneUnit} onChange={(e) => set(i, { quantity: e.target.value })} aria-label={L("الكمية", "Quantity")} data-testid={`line-qty-${i}`} /></td>
+              <td data-label={lab("الوحدة", "Unit")}>{fixedSet || sku ? (l.unit === "KG" ? L("كغ", "kg") : L("عبوة", "unit")) : (
                 <Select value={l.unit} onChange={(e) => set(i, { unit: e.target.value === "KG" ? "KG" : "UNIT" })} aria-label={L("الوحدة", "Unit")}>
                   <option value="UNIT">{L("عبوة", "unit")}</option><option value="KG">{L("كغ", "kg")}</option>
                 </Select>)}</td>
-              <td>{l.priceIncludesVat
+              <td data-label={lab("سعر الوحدة", "Unit price")}>{l.priceIncludesVat
                 ? <input className="hr-input acct-amount" inputMode="decimal" value={l.unitPriceGross ?? ""} disabled={lockCommercial} onChange={(e) => set(i, { unitPriceGross: e.target.value })} aria-label={L("سعر الوحدة شامل الضريبة", "Unit price incl. VAT")} data-testid={`line-price-${i}`} />
                 : <input className="hr-input acct-amount" inputMode="decimal" value={l.unitPrice} disabled={lockCommercial} onChange={(e) => set(i, { unitPrice: e.target.value })} aria-label={L("سعر الوحدة", "Unit price")} data-testid={`line-price-${i}`} />}
                 {l.priceIncludesVat && t.priced?.lines[i] ? <span className="inv-sub">{L("الصافي", "Net")} <bdi className="hr-num" data-testid={`line-net-unit-${i}`}>{netUnit(l)}</bdi>{(() => { const d = roundingDiff(t, i, l); return d ? <> · {L("فرق التقريب", "Rounding")} <bdi className="hr-num" data-testid={`line-rounding-${i}`}>{d}</bdi></> : null; })()}</span> : null}
@@ -128,8 +146,9 @@ export function LinesEditor({ lines, onChange, lockItems, lockCommercial, sellAs
               {inclusive ? <td><label className="pur-check" style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={!!l.priceIncludesVat} disabled={lockCommercial}
                 onChange={(e) => set(i, e.target.checked ? { priceIncludesVat: true, unitPriceGross: l.unitPrice || l.unitPriceGross || "" } : { priceIncludesVat: false, unitPrice: l.unitPriceGross || l.unitPrice, unitPriceGross: null })}
                 aria-label={L("السعر شامل الضريبة؟", "Price includes VAT?")} data-testid={`line-incl-${i}`} /></label></td> : null}
-              <td><input className="hr-input acct-amount" inputMode="decimal" value={l.discountPercent} disabled={lockCommercial} onChange={(e) => set(i, { discountPercent: e.target.value })} aria-label={L("الخصم", "Discount")} data-testid={`line-disc-${i}`} /></td>
-              <td>
+              <td data-label={lab("الخصم %", "Disc. %")}><input className="hr-input acct-amount" inputMode="decimal" value={l.discountPercent} disabled={lockCommercial} onChange={(e) => set(i, { discountPercent: e.target.value })} aria-label={L("الخصم", "Discount")} data-testid={`line-disc-${i}`} /></td>
+              <td data-label={lab("الضريبة", "VAT")}>
+                {sku?.lockTax ? <span className="hr-input" aria-readonly="true" data-testid={`line-tax-locked-${i}`} title={L("يغيّرها المحاسب", "The accountant changes it")} style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap", color: "var(--hr-muted)" }}><span aria-hidden="true">🔒</span>{L(`${Number(l.taxRatePercent) || 15}٪ (ثابتة)`, `${Number(l.taxRatePercent) || 15}% (fixed)`)}</span> : <>
                 <Select value={l.taxCategory} onChange={(e) => { const c = e.target.value as EditLine["taxCategory"]; set(i, { taxCategory: c, taxRatePercent: c === "S" ? "15" : "0", exemptionReasonCode: c === "S" ? null : EXEMPTION_REASONS.find((x) => x.category === c)?.code ?? null }); }} aria-label={L("فئة الضريبة", "VAT category")}>
                   {Object.entries(CATEGORY).map(([k, v]) => <option key={k} value={k}>{L(v[0], v[1])}</option>)}
                 </Select>
@@ -138,23 +157,24 @@ export function LinesEditor({ lines, onChange, lockItems, lockCommercial, sellAs
                     {EXEMPTION_REASONS.filter((x) => x.category === l.taxCategory).map((x) => <option key={x.code} value={x.code}>{L(x.ar, x.en)}</option>)}
                   </Select>
                 ) : null}
+                </>}
               </td>
-              <td className="num hr-num">{t.priced ? money(t.priced.lines[i]?.lineNet.toFixed(2)) : ""}</td>
+              <td className="num hr-num" data-label={lab("قبل الضريبة", "Before VAT")}>{t.priced ? money(t.priced.lines[i]?.lineNet.toFixed(2)) : ""}</td>
               {qoyod ? <>
                 <td className="num hr-num" data-testid={`line-vat-${i}`}>{t.priced ? money(t.priced.lines[i]?.lineTax.toFixed(2)) : ""}</td>
                 <td className="num hr-num" data-testid={`line-total-${i}`}>{t.priced ? money(t.priced.lines[i]?.lineTotal.toFixed(2)) : ""}</td>
               </> : null}
-              <td>{!fixedSet ? <button type="button" className="hr-btn is-ghost is-sm" onClick={() => onChange(lines.filter((_, j) => j !== i))} aria-label={L("حذف البند", "Remove line")}>×</button> : null}</td>
+              <td className={sku ? "inv-x" : undefined}>{!fixedSet ? <button type="button" className="hr-btn is-ghost is-sm" onClick={() => onChange(lines.filter((_, j) => j !== i))} aria-label={L("حذف البند", "Remove line")} data-testid={sku ? `line-remove-${i}` : undefined}>×</button> : null}</td>
             </tr>
           ))}
         </tbody>
       </table>
       {!fixedSet ? (qoyod
         ? <div style={{ padding: "8px 0" }}><AddMore onClick={() => onChange([...lines, emptyLine()])} label={L("إضافة المزيد", "Add more")} testId="add-line" /></div>
-        : <button type="button" className="hr-btn is-sm" onClick={() => onChange([...lines, emptyLine()])} data-testid="add-line">{L("إضافة بند", "Add line")}</button>) : null}
+        : <button type="button" className="hr-btn is-sm" onClick={() => onChange([...lines, emptyLine()])} data-testid="add-line">{sku ? `＋ ${L("أضف صنف", "Add an item")}` : L("إضافة بند", "Add line")}</button>) : null}
       {!fixedSet && sellAssets ? <button type="button" className="hr-btn is-sm" onClick={() => setPicking(true)} data-testid="add-asset-sale">+ {L("بيع أصل ثابت", "Sell a fixed asset")}</button> : null}
       {picking ? <AssetSalePicker onClose={() => setPicking(false)} onPick={(l) => { setPicking(false); onChange([...lines.filter((x) => x.description || x.unitPrice), l]); }} /> : null}
-      {t.problems.length ? <ul className="inv-check" role="status">{t.problems.slice(0, 6).map((p, k) => <li key={k}>{p.index >= 0 ? L(`البند ${p.index + 1}: `, `Line ${p.index + 1}: `) : ""}{L(p.ar, p.en)}</li>)}</ul> : null}
+      {t.problems.length && !sku?.quietProblems ? <ul className="inv-check" role="status">{t.problems.slice(0, 6).map((p, k) => <li key={k}>{p.index >= 0 ? L(`البند ${p.index + 1}: `, `Line ${p.index + 1}: `) : ""}{L(p.ar, p.en)}</li>)}</ul> : null}
     </div>
   );
 }

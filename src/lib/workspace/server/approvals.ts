@@ -19,7 +19,7 @@ import { discountThreshold } from "@/lib/services/sales/quote-settings";
 import { discountApprovalState, priceQuote } from "@/lib/services/sales/quotes";
 import { ownedCustomerWhere, seesAllSales } from "@/lib/services/sales/scope";
 import { Prisma } from "@/generated/prisma/client";
-import { priceDirectSale } from "@/lib/services/sales/direct-sale";
+import { pricePendingSale } from "@/lib/services/sales/direct-sale";
 import { approvesSamples } from "@/lib/services/sales/sample-rules";
 import { approvalQueue } from "@/lib/finance/server/approvals";
 import { leaveTypeName } from "@/lib/i18n/hr";
@@ -184,9 +184,10 @@ async function directSaleDiscountItems(actor: WsActor): Promise<ApprovalItem[]> 
     const pct = new Prisma.Decimal((o.requestedDiscountPercent ?? 0).toString());
     // Gate L4: a sale whose price cannot be computed now (a SKU deactivated or unpriced since) stays in the inbox with a
     // warning — never silently dropped; approving it is refused by the service until the price is fixed.
-    let priced: Awaited<ReturnType<typeof priceDirectSale>> | null = null;
+    // D22: a sale made on the tax invoice page is priced on its own terms (pricePendingSale), the wizard's on the catalogue.
+    let priced: { subtotal: string; discount?: string; gross: string } | null = null;
     let priceProblem: string | null = null;
-    try { priced = await priceDirectSale(prisma, o.items.filter((i) => i.productSkuId && i.quantityUnits).map((i) => ({ productSkuId: i.productSkuId!, quantityUnits: i.quantityUnits! })), pct); }
+    try { const q = await pricePendingSale(prisma, o.id, pct); priced = { subtotal: q.subtotal, discount: q.discount, gross: q.gross }; }
     catch (e) { priceProblem = (e as { errorAr?: string })?.errorAr ?? "تعذّر حساب السعر."; }
     const p = pct.toDecimalPlaces(2).toString();
     out.push({
@@ -217,7 +218,7 @@ async function sampleItems(actor: WsActor): Promise<ApprovalItem[]> {
     where: { approvalRequired: true, approvedAt: null, declinedAt: null, status: "REQUESTED" },
     orderBy: { createdAt: "asc" }, take: 200,
     select: {
-      id: true, quantity: true, createdAt: true, createdById: true,
+      id: true, quantity: true, createdAt: true, createdById: true, description: true,
       productSku: { select: { skuCode: true, name: true, nameAr: true } },
       opportunity: { select: { id: true, title: true, customer: { select: { name: true, nameAr: true } }, owner: { select: { name: true } } } },
     },
@@ -234,8 +235,8 @@ async function sampleItems(actor: WsActor): Promise<ApprovalItem[]> {
       subject: r.opportunity.customer?.nameAr ?? r.opportunity.customer?.name ?? r.opportunity.title,
       subjectEn: r.opportunity.customer?.name ?? r.opportunity.title,
       createdAt: iso(r.createdAt),
-      facts: { customer: r.opportunity.customer?.name ?? null, customerAr: r.opportunity.customer?.nameAr ?? null, deal: r.opportunity.title, dealOwner: r.opportunity.owner?.name ?? null, product, productAr, units: Number(r.quantity) },
-      warnings: [{ ar: "سبق إرسال عيّنة من هذا المحصول لهذا العميل.", en: "This customer has already had a sample of this product." }],
+      facts: { customer: r.opportunity.customer?.name ?? null, customerAr: r.opportunity.customer?.nameAr ?? null, deal: r.opportunity.title, dealOwner: r.opportunity.owner?.name ?? null, product, productAr, units: Number(r.quantity), note: r.description?.trim() || null },
+      warnings: [{ ar: "سبق إرسال عيّنة من هذا المحصول لهذا العميل هالسنة.", en: "This customer has already had a sample of this product this year." }],
       decide: { url: `/api/sales/samples/${encodeURIComponent(r.id)}/approval`, rejectNeedsReason: true as const },
       openUrl: `/dashboard/sales/deals/${encodeURIComponent(r.opportunity.id)}`,
       notice: { ar: "الموافقة تُرسل الطلب إلى قسم الشحن ولا تُخرج المخزون؛ يُصرف عند صرف الشحن له. الرفض يلغي الطلب.", en: "Approving sends the request to dispatch; stock leaves only when dispatch issues it. Declining cancels the request." },

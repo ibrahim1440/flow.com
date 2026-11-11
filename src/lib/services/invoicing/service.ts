@@ -12,6 +12,7 @@ import { MoneyError, ZERO } from "@/lib/accounting/money";
 import {
   Decimal, addDays, defaultInvoiceFamily, issueProblems, parseBuyer, parseLines, priceInvoice, riyadhStamp, seriesFor,
   type BuyerParticulars, type CleanLine, type InvoiceFamily, type InvoiceKind, type NoteReason, NOTE_REASONS,
+  SAMPLE_CHANNEL,
 } from "./pricing";
 import { readInvoiceSettings, sellerSnapshot } from "./settings";
 import { postDocumentIssued } from "./postings";
@@ -236,6 +237,8 @@ export async function createDraft(input: DraftInput, ctx: AuditContext) {
     if (hit) return { id: hit.id, replayed: true };
   }
   const ext = externalSource(input.channel, input.externalOrderRef);
+  // Gate B2: channel SAMPLE is «إرسال عيّنة»'s alone (createSampleDraftIn, with its sample) — never a manual draft's.
+  if (ext?.channel === SAMPLE_CHANNEL) throw refuseInv("BAD_INPUT", "(channel SAMPLE is reserved for a sample sent from the invoice page)", "(القناة SAMPLE خاصة بإرسال العيّنة من صفحة الفاتورة)");
   if (ext) {
     const hit = await prisma.salesInvoice.findFirst({ where: { channel: ext.channel, externalOrderRef: ext.externalOrderRef }, select: { id: true } });
     if (hit) return { id: hit.id, replayed: true };
@@ -377,21 +380,58 @@ export async function draftFromOrder(orderId: string, opts: { basis?: "REMAINING
  * its request key — the same key twice returns the first draft. Every ordered quantity at the SKU's catalogue price, so the
  * draft equals what the order and its deal were priced at (priceDirectOrder). STANDARD family; the accountant may change it.
  */
-export async function draftFromOrderIn(tx: Tx, orderId: string, requestKey: string, ctx: AuditContext, discountPercent = "0.00") {
+export async function draftFromOrderIn(tx: Tx, orderId: string, requestKey: string, ctx: AuditContext, discountPercent = "0.00", page?: DirectSalePage) {
   const hit = await tx.salesInvoice.findUnique({ where: { requestKey }, select: { id: true } });
   if (hit) return { id: hit.id, replayed: true };
   const facts = await orderInvoicing(tx, orderId);
   if (!facts) throw refuseInv("ORDER_NOT_FOUND");
-  const raw = facts.lines.filter((l) => new Decimal(l.remaining).greaterThan(0)).map((l) => ({
-    description: l.description, descriptionEn: l.descriptionEn, skuCode: l.skuCode, productSkuId: l.productSkuId, orderItemId: l.orderItemId, deliveryId: null,
-    quantity: l.remaining, unit: l.unit, unitPrice: l.price.unitPrice, discountPercent: l.price.source === "SKU" ? discountPercent : l.price.discountPercent,
-    taxCategory: "S", taxRatePercent: l.price.taxRatePercent ?? undefined,
-  }));
+  // D22: the invoice page's own terms per SKU (price, discount, VAT) replace the catalogue's — the draft is what the rep saw.
+  const byId = new Map((page?.lines ?? []).map((t) => [t.productSkuId, t]));
+  const raw = facts.lines.filter((l) => new Decimal(l.remaining).greaterThan(0)).map((l) => {
+    const t = l.productSkuId ? byId.get(l.productSkuId) : undefined;
+    return {
+      description: l.description, descriptionEn: l.descriptionEn, skuCode: l.skuCode, productSkuId: l.productSkuId, orderItemId: l.orderItemId, deliveryId: null,
+      quantity: l.remaining, unit: l.unit,
+      ...(t ? { unitPrice: t.unitPrice, discountPercent: t.discountPercent, taxCategory: t.taxCategory, taxRatePercent: t.taxRatePercent, exemptionReasonCode: t.exemptionReasonCode }
+        : { unitPrice: l.price.unitPrice, discountPercent: l.price.source === "SKU" ? discountPercent : l.price.discountPercent, taxCategory: "S", taxRatePercent: l.price.taxRatePercent ?? undefined }),
+    };
+  });
   if (!raw.length) throw refuseInv("NOTHING_TO_INVOICE");
   const { lines, problems } = parseLines(raw);
   if (problems.length) throw refuseWith("LINES_INVALID", { problems });
   const today = riyadhStamp(new Date()).day;
-  return insertDraft(tx, { customerId: facts.order.customerId, orderId, lines: raw, supplyDate: today, source: "ORDER", requestKey }, lines, null, ctx);
+  const h = page?.header;
+  return insertDraft(tx, {
+    customerId: facts.order.customerId, orderId, lines: raw, supplyDate: h?.supplyDate ?? today, source: "ORDER", requestKey,
+    ...(h ? { family: h.family ?? undefined, buyer: h.buyer ?? undefined, paymentTermsDays: h.paymentTermsDays ?? undefined, notes: h.notes ?? undefined, ...(h.branchId !== undefined ? { branchId: h.branchId } : {}) } : {}),
+  }, lines, null, ctx);
+}
+
+/** D22: what the tax invoice page carries into a direct sale's draft (direct-sale-terms.ts). */
+export type DirectSalePage = {
+  lines: { productSkuId: string; unitPrice: string; discountPercent: string; taxCategory: string; taxRatePercent: string; exemptionReasonCode: string | null }[];
+  header: { family: InvoiceFamily | null; buyer: Record<string, unknown> | null; supplyDate: string | null; paymentTermsDays: string | null; notes: string | null; branchId: string | null | undefined } | null;
+};
+
+/**
+ * D22 «إرسال عيّنة»: the free sample's tax invoice DRAFT, inside the CALLER'S transaction, under its request key (the same
+ * key twice returns the first draft). Channel SAMPLE, externalOrderRef = the first SampleShipment of the send (the unique
+ * (tenant, channel, externalOrderRef) index makes it one invoice per send). No order: the samples leave stock through the
+ * dispatch issue, which records their cost (Dr SAMPLES_EXPENSE / Cr INVENTORY_PACKED); the invoice posts nothing at zero.
+ */
+export async function createSampleDraftIn(tx: Tx, input: { customerId: string; lines: unknown; requestKey: string; externalOrderRef: string; header: DirectSalePage["header"] }, ctx: AuditContext) {
+  const hit = await tx.salesInvoice.findUnique({ where: { requestKey: input.requestKey }, select: { id: true } });
+  if (hit) return { id: hit.id, replayed: true };
+  const ext = externalSource(SAMPLE_CHANNEL, input.externalOrderRef)!;
+  const { lines, problems } = parseLines(input.lines);
+  if (problems.length) throw refuseWith("LINES_INVALID", { problems });
+  assertAssetLinesAllowed(lines, false);
+  const h = input.header;
+  return insertDraft(tx, {
+    customerId: input.customerId, lines: input.lines, source: "MANUAL", requestKey: input.requestKey,
+    supplyDate: h?.supplyDate ?? riyadhStamp(new Date()).day,
+    ...(h ? { family: h.family ?? undefined, buyer: h.buyer ?? undefined, paymentTermsDays: h.paymentTermsDays ?? undefined, notes: h.notes ?? undefined, ...(h.branchId !== undefined ? { branchId: h.branchId } : {}) } : {}),
+  }, lines, ext, ctx);
 }
 
 /**
@@ -555,14 +595,43 @@ export async function cancelDraft(id: string, reason: string, ctx: AuditContext)
   if (r.length < 3) throw refuseInv("REASON_REQUIRED");
   return prisma.$transaction(async (tx) => {
     await setAuditContext(tx, { ...ctx, reason: r });
-    const row = await lockDocument(tx, id);
-    if (row.status === "CANCELLED") throw refuseInv("ALREADY_CANCELLED");
-    if (row.status !== "DRAFT") throw refuseInv("DRAFT_ONLY");
-    const was = await tx.salesInvoice.findUniqueOrThrow({ where: { id }, select: { requestedAt: true } });
-    await tx.salesInvoice.update({ where: { id }, data: { status: "CANCELLED", cancelledAt: new Date(), cancelledById: ctx.actorId, cancelReason: r.slice(0, 500), requestedAt: null } });
-    if (was.requestedAt) await writeRequestEvent(tx, { invoiceId: id, kind: "CANCELLED", actorId: ctx.actorId, reason: r.slice(0, 1000) });
-    return { id, status: "CANCELLED" };
+    return cancelDraftIn(tx, id, r, ctx.actorId);
   }, TX_OPTS);
+}
+
+/** The cancel inside the CALLER'S transaction (the caller sets the audit context): the same checks, record and request event. */
+export async function cancelDraftIn(tx: Tx, id: string, reason: string, actorId: string) {
+  const r = (reason ?? "").trim();
+  if (r.length < 3) throw refuseInv("REASON_REQUIRED");
+  const row = await lockDocument(tx, id);
+  if (row.status === "CANCELLED") throw refuseInv("ALREADY_CANCELLED");
+  if (row.status !== "DRAFT") throw refuseInv("DRAFT_ONLY");
+  const was = await tx.salesInvoice.findUniqueOrThrow({ where: { id }, select: { requestedAt: true } });
+  await tx.salesInvoice.update({ where: { id }, data: { status: "CANCELLED", cancelledAt: new Date(), cancelledById: actorId, cancelReason: r.slice(0, 500), requestedAt: null } });
+  if (was.requestedAt) await writeRequestEvent(tx, { invoiceId: id, kind: "CANCELLED", actorId, reason: r.slice(0, 1000) });
+  return { id, status: "CANCELLED" as const };
+}
+
+/**
+ * D22: a DRAFT loses the lines of one SKU (a declined sample of a «إرسال عيّنة» that sent several), inside the CALLER'S
+ * transaction: the rest re-numbered and re-priced by the same engine (E-10), the totals re-derived. The draft keeps its
+ * request; the ledger audit trigger records the change. Refuses on anything but a DRAFT, or if no line would remain.
+ */
+export async function removeDraftSkuLinesIn(tx: Tx, id: string, productSkuId: string) {
+  const row = await lockDocument(tx, id);
+  if (row.status !== "DRAFT") throw refuseInv("DRAFT_ONLY");
+  const doc = (await loadDocument(tx, id))!;
+  const keep = doc.lines.filter((l) => l.productSkuId !== productSkuId);
+  if (keep.length === doc.lines.length) return { id, removed: 0 };
+  if (!keep.length) throw refuseInv("LINES_INVALID", "(no line would remain)", "(لن يبقى أي بند)");
+  await tx.salesInvoiceLine.deleteMany({ where: { invoiceId: id, productSkuId } });
+  const { priced, rows } = lineRows(keep.map(toClean));
+  for (let i = 0; i < keep.length; i++) {
+    const r = rows[i];
+    await tx.salesInvoiceLine.update({ where: { id: keep[i].id }, data: { position: r.position, discountAmount: r.discountAmount, lineNet: r.lineNet, lineTax: r.lineTax, lineTotal: r.lineTotal } });
+  }
+  await tx.salesInvoice.update({ where: { id }, data: totalsData(priced) });
+  return { id, removed: doc.lines.length - keep.length };
 }
 
 /**
@@ -694,7 +763,8 @@ export async function issueDocument(id: string, ctx: AuditContext, now: Date = n
     const stamp = riyadhStamp(now);
     const supplyDay = dayOf(doc.supplyDate) ?? stamp.day;
     const problems = [
-      ...issueProblems({ kind: doc.kind as InvoiceKind, family: doc.family as InvoiceFamily, buyer: doc.buyer as BuyerParticulars, seller, supplyDate: supplyDay, lines, reasonCode: doc.reasonCode, reason: doc.reason, grandTotal: priced.grandTotal }),
+      ...issueProblems({ kind: doc.kind as InvoiceKind, family: doc.family as InvoiceFamily, buyer: doc.buyer as BuyerParticulars, seller, supplyDate: supplyDay, lines, reasonCode: doc.reasonCode, reason: doc.reason, grandTotal: priced.grandTotal, channel: doc.channel }),
+      ...(await sampleRefProblems(tx, doc)),
       ...reparsed.problems.map((p) => ({ code: p.code, ar: `البند ${p.index + 1}: ${p.ar}`, en: `Line ${p.index + 1}: ${p.en}` })),
     ];
     if (problems.length) throw refuseWith("NOT_READY", { problems });
@@ -726,7 +796,11 @@ export async function issueDocument(id: string, ctx: AuditContext, now: Date = n
       },
       select: { id: true, number: true, customerId: true, kind: true, grandTotal: true, taxTotal: true, issueDate: true },
     });
-    const posting = await postDocumentIssued(tx, {
+    // D22: a free sample's invoice (total zero) has nothing to post — no revenue, no VAT, no receivable; its cost was
+    // recorded when the warehouse issued the sample (Dr SAMPLES_EXPENSE / Cr INVENTORY_PACKED, onSampleIssue).
+    const posting = D(issued.grandTotal).isZero() && doc.channel === SAMPLE_CHANNEL
+      ? { status: "skipped" as const, reason: "ZERO_TOTAL_SAMPLE" }
+      : await postDocumentIssued(tx, {
       id, kind: doc.kind as InvoiceKind, number: issued.number!, customerId: issued.customerId, issueDate: dayOf(issued.issueDate)!, branchId,
       grandTotal: D(issued.grandTotal), taxTotal: D(issued.taxTotal),
       lines: lines.map((l, i) => ({ lineNet: new Decimal(rows[i].lineNet), productSkuId: l.productSkuId, description: l.description, clearing: clearing[i] })),
@@ -762,6 +836,26 @@ export async function issueDocument(id: string, ctx: AuditContext, now: Date = n
 }
 
 /**
+ * D22 gate R2-L1 / أبو فهد B1: a sample's invoice (channel SAMPLE, at any total) issues only while every sample of its send
+ * is decided and the one it names is not CANCELLED — the database trigger (sinv_invoice_guard) holds the named one; this
+ * says it in words the accountant can act on, and looks at the whole send.
+ */
+async function sampleRefProblems(db: Tx | typeof prisma, doc: { id: string; kind: string; channel: string | null; externalOrderRef: string | null }) {
+  if (doc.kind !== "INVOICE" || doc.channel !== SAMPLE_CHANNEL) return [];
+  const send = await db.hrAuditLog.findFirst({ where: { action: "SAMPLE_SEND_CREATED", entityId: doc.id }, select: { after: true } });
+  const ids = [...new Set([doc.externalOrderRef, ...((send?.after as { samples?: { id: string }[] } | null)?.samples ?? []).map((x) => x.id)].filter((x): x is string => !!x))];
+  const rows = await db.sampleShipment.findMany({ where: { id: { in: ids } }, select: { id: true, status: true, approvalRequired: true, approvedAt: true } });
+  const named = rows.find((r) => r.id === doc.externalOrderRef);
+  if (!named || named.status === "CANCELLED") {
+    return [{ code: "SAMPLE_CANCELLED", ar: "العيّنة ملغاة أو غير موجودة — فاتورة العيّنة لا تُصدر؛ ألغِ المسودة.", en: "The sample is cancelled or missing — a sample's invoice does not issue; cancel the draft." }];
+  }
+  if (rows.some((r) => r.status !== "CANCELLED" && r.approvalRequired && !r.approvedAt)) {
+    return [{ code: "SAMPLE_AWAITING_APPROVAL", ar: "تنتظر موافقة المدير — ما تُصدر فاتورة العيّنة قبل ما يقرر.", en: "Waiting for the manager's approval — a sample's invoice does not issue before the decision." }];
+  }
+  return [];
+}
+
+/**
  * What would stop a draft from issuing now, without issuing it («soft» mode: the request answers these as warnings;
  * the issue refuses them, NOT_READY). The same checks issueDocument runs before numbering.
  */
@@ -773,7 +867,8 @@ export async function draftProblems(db: Tx | typeof prisma, doc: LoadedDocument,
   const seller = await sellerSnapshot(db as Tx);
   const supplyDay = dayOf(doc.supplyDate) ?? riyadhStamp(now).day;
   return [
-    ...issueProblems({ kind: doc.kind as InvoiceKind, family: doc.family as InvoiceFamily, buyer: doc.buyer as BuyerParticulars, seller, supplyDate: supplyDay, lines, reasonCode: doc.reasonCode, reason: doc.reason, grandTotal: grand }),
+    ...issueProblems({ kind: doc.kind as InvoiceKind, family: doc.family as InvoiceFamily, buyer: doc.buyer as BuyerParticulars, seller, supplyDate: supplyDay, lines, reasonCode: doc.reasonCode, reason: doc.reason, grandTotal: grand, channel: doc.channel }),
+    ...(await sampleRefProblems(db, doc)),
     ...reparsed.problems.map((p) => ({ code: p.code, ar: `البند ${p.index + 1}: ${p.ar}`, en: `Line ${p.index + 1}: ${p.en}` })),
     ...(lines.length ? [] : [{ code: "NO_LINES", ar: "أضف بندًا واحدًا على الأقل.", en: "Add at least one line." }]),
   ];

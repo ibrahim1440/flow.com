@@ -69,7 +69,7 @@ export type LinkResult = { opportunityId: string; created: boolean; linked: bool
  *   mode "create": at order creation (`chosen` from the order form when the customer has several open deals);
  *   mode "link":   «اربط بصفقة» — `chosen` = an OPEN or WON deal of the same customer in scope, or null for «صفقة جديدة تلقائية».
  */
-export async function linkDirectOrderDeal(tx: Tx, input: { orderId: string; actor: Actor; chosenOpportunityId?: string | null; mode: "create" | "link" }): Promise<LinkResult> {
+export async function linkDirectOrderDeal(tx: Tx, input: { orderId: string; actor: Actor; chosenOpportunityId?: string | null; mode: "create" | "link"; noAutoPick?: boolean }): Promise<LinkResult> {
   const { orderId, actor } = input;
   await tx.$queryRaw`SELECT "id" FROM "Order" WHERE "id" = ${orderId} FOR UPDATE`;
   const order = await tx.order.findUnique({
@@ -98,7 +98,8 @@ export async function linkDirectOrderDeal(tx: Tx, input: { orderId: string; acto
     if (d.customerId !== order.customerId) throw refuse(409, "DEAL_OTHER_CUSTOMER", "الصفقة لعميل آخر غير عميل الطلب.", "The deal belongs to another customer.");
     if (!(linkStatuses as readonly string[]).includes(d.outcome)) throw refuse(409, "DEAL_CLOSED", "الصفقة خاسرة — اختر صفقة مفتوحة أو رابحة.", "The deal is lost; choose an open or won deal.");
     opportunityId = d.id;
-  } else if (input.mode === "create") {
+  } else if (input.mode === "create" && !input.noAutoPick) {
+    // noAutoPick (D22, أبو فهد B2): the rep answered «تربطه بصفقة؟» with «لا — صفقة جديدة» — never a deal chosen for him.
     const newest = await tx.opportunity.findFirst({ where: { customerId: order.customerId, outcome: "OPEN", ...scope }, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], select: { id: true } });
     opportunityId = newest?.id ?? null;
   }

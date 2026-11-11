@@ -41,6 +41,7 @@ type Doc = {
   history: HistoryRow[]; problems: { code: string; ar: string; en: string }[];
   credit: { overLimit: boolean; overdueDays: number; hold: unknown } | null;
   zatca?: { qr: string | null; ref: string | null; status: string | null } | null;
+  sample?: { dealId: string | null; dealTitle: string | null; awaitingApproval: boolean; cancelled: boolean } | null;
 };
 
 const toEdit = (l: Line): EditLine => ({ description: l.description, quantity: l.quantity, unit: l.unit, unitPrice: l.unitPrice, discountPercent: l.discountPercent, taxCategory: l.taxCategory, taxRatePercent: l.taxRatePercent, exemptionReasonCode: l.exemptionReasonCode, orderItemId: l.orderItemId, productSkuId: l.productSkuId, skuCode: l.skuCode, originalLineId: l.originalLineId, deliveryId: l.deliveryId, kind: l.kind, fixedAssetId: l.fixedAssetId, disposalKind: l.disposalKind, ...(l.priceIncludesVat ? { priceIncludesVat: true, unitPriceGross: l.unitPriceGross ?? null } : {}) });
@@ -158,10 +159,19 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             <SplitButton testId="request-split" disabled={!!w.busy} label={L("إرسال الطلب للمحاسب", "Send the request to the accountant")} onPrimary={sendRequest}
               items={canEditDraft ? [{ id: "draft", label: L("حفظ كمسودة", "Save as draft"), onSelect: () => { void save(); } }] : []} />
           ) : null}
-          {d.status === "DRAFT" && canIssue ? <button type="button" className="hr-btn is-primary" onClick={() => setDialog("issue")} data-testid="issue">{requested ? L("مراجعة وإصدار", "Review and issue") : isNote ? L("إصدار الإشعار", "Issue the note") : L("إصدار الفاتورة", "Issue the invoice")}</button> : null}
+          {d.status === "DRAFT" && canIssue ? <button type="button" className="hr-btn is-primary" onClick={() => setDialog("issue")} data-testid="issue"
+            disabled={!!d.sample?.awaitingApproval} title={d.sample?.awaitingApproval ? L("تنتظر موافقة المدير", "Waiting for the manager's approval") : undefined}>{requested ? L("مراجعة وإصدار", "Review and issue") : isNote ? L("إصدار الإشعار", "Issue the note") : L("إصدار الفاتورة", "Issue the invoice")}</button> : null}
         </span>
       }>
       <Msg error={w.error} done={w.done} onClose={() => { w.setError(null); w.setDone(null); }} />
+      {d.sample ? (
+        <Banner tone={d.sample.awaitingApproval ? "warning" : "info"} testId="sample-banner">
+          <b><span className="inv-badge is-sample" data-testid="sample-badge">{L("عيّنة", "Sample")}</span>{" "}
+            {L("عيّنة لـ", "Sample for ")}<bdi>{d.customer?.nameAr || d.customer?.name || ""}</bdi>
+            {d.sample.dealId ? <> · <Link href={`/dashboard/sales/deals/${d.sample.dealId}`} data-testid="sample-deal-link">{L("صفقة ", "deal ")}<bdi>{d.sample.dealTitle ?? ""}</bdi></Link></> : null}</b>
+          {d.status === "DRAFT" && d.sample.awaitingApproval ? <span data-testid="sample-awaiting">{L("تنتظر موافقة المدير — ما تُصدر قبل ما يقرر.", "Waiting for the manager's approval — it is not issued before the decision.")}</span> : null}
+        </Banner>
+      ) : null}
       {requested ? (
         <Banner tone="info" testId="request-banner">
           <b>{L("الطلب لدى المحاسب", "With the accountant")} · <bdi>{person(d.request.requestedById)}</bdi> · <span className="hr-num">{fmtAt(d.request.requestedAt!)}</span></b>

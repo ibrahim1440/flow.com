@@ -9,6 +9,7 @@
 //   return    POST /api/sales/invoices/[id]/return    invoices_issue (a note: invoices_credit_note); reason code + ≥ 10 chars
 //   queue     GET  /api/sales/invoices/requests        invoices_issue: oldest first, aged in Riyadh business days
 //   «حفظ وإصدار»  POST /api/sales/invoices {issue: true, requestKey}  invoices_issue: create under the key, then issue
+import { sampleInvoiceInfo } from "./sample-hold";
 import { prisma, TX_OPTS } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
 import { setAuditContext, type AuditContext } from "@/lib/accounting/audit";
@@ -103,8 +104,9 @@ export async function requestQueue(opts: { customerIds?: string[] | null; now?: 
   const rows = await prisma.salesInvoice.findMany({
     where: { status: "DRAFT", requestedAt: { not: null }, ...(opts.customerIds ? { customerId: { in: opts.customerIds } } : {}) },
     orderBy: [{ requestedAt: "asc" }, { id: "asc" }], take: Math.min(Math.max(opts.take ?? 200, 1), 500),
-    select: { id: true, kind: true, family: true, customerId: true, orderId: true, buyer: true, grandTotal: true, taxTotal: true, supplyDate: true, requestedAt: true, requestedById: true, requestNote: true, createdById: true, source: true },
+    select: { id: true, kind: true, family: true, customerId: true, orderId: true, buyer: true, grandTotal: true, taxTotal: true, supplyDate: true, requestedAt: true, requestedById: true, requestNote: true, createdById: true, source: true, channel: true, externalOrderRef: true },
   });
+  const samples = await sampleInvoiceInfo(prisma, rows);
   const [orders, people] = await Promise.all([
     prisma.order.findMany({ where: { id: { in: rows.map((r) => r.orderId).filter((x): x is string => !!x) } }, select: { id: true, orderNumber: true } }),
     prisma.employee.findMany({ where: { id: { in: [...new Set(rows.flatMap((r) => [r.requestedById, r.createdById]).filter((x): x is string => !!x))] } }, select: { id: true, name: true } }),
@@ -118,6 +120,7 @@ export async function requestQueue(opts: { customerIds?: string[] | null; now?: 
       createdById: r.createdById, createdByName: name(r.createdById), requestedById: r.requestedById, requestedByName: name(r.requestedById), requestNote: r.requestNote,
       grandTotal: r.grandTotal.toFixed(2), taxTotal: r.taxTotal.toFixed(2), supplyDate: r.supplyDate ? r.supplyDate.toISOString().slice(0, 10) : null,
       requestedAt: r.requestedAt!.toISOString(), ...aging,
+      sample: samples.get(r.id) ?? null,
     };
   });
 }

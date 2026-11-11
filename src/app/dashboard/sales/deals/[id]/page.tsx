@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, use } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import {
   useLang, pick, Alert, Spinner, Button, Field, TextInput, Select, TextArea, Modal, api,
@@ -24,6 +25,7 @@ import {
   autoWhy, humanReason, isAutoReason, type Step,
 } from "../../_components/pv2";
 import { SampleDialog } from "../../_components/SampleDialog";
+import { NewCustomerDialog, type CreatedCustomer } from "@/components/customers/new-customer-form";
 import { useUser } from "../../../user-context";
 
 
@@ -121,6 +123,8 @@ type Can = {
   approveDiscount: boolean; assign: boolean; createOrder: boolean;
   /** Approves a customer's second sample of a product (sales manager / admin). */
   approveSample?: boolean;
+  /** D22: «إرسال عيّنة» (the invoice page's sample mode) and turning a customer-less deal into a customer first. */
+  sendSample?: boolean; makeCustomer?: boolean;
   submitCollection?: boolean; verifyCollection?: boolean;
   rejectCollection?: boolean; reverseCollection?: boolean;
 };
@@ -209,6 +213,9 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   // and the second sample a manager is declining (the reason is asked for).
   const [sampledProducts, setSampledProducts] = useState<string[]>([]);
   const [declineFor, setDeclineFor] = useState<Deal["samples"][number] | null>(null);
+  // D22 gate (owner 1أ / 4أ): the manager's approval note; a customer-less deal made a customer before its sample.
+  const [approveFor, setApproveFor] = useState<Deal["samples"][number] | null>(null);
+  const [toCustomer, setToCustomer] = useState<null | "ask" | "form">(null);
   // The stage a refused move was headed for (409 SAMPLE_SKIP_REASON_REQUIRED), set with the skip dialog.
   const [skipTarget, setSkipTarget] = useState<{ id: string; nameAr: string; nameEn: string } | null>(null);
   // The timeline used to stop at twenty with no sign that there were more (IMD-04).
@@ -280,7 +287,21 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   });
   // Batch 24 WP-A: «عيّنة» from the customer page lands here with ?new=sample — the existing request form
   // (one sample per product, the manager's approval for a second) opens on arrival.
-  useCreateRequest("sample", () => setDialog("sample"), !!deal && !!can?.write && deal.outcome === "OPEN");
+  // D22 gate (owner's workflow «إرسال عيّنة ← صفحة الفاتورة الضريبية»): a sample is sent from the tax invoice page in its sample
+  // mode, on this deal's customer and on this deal. The old request dialog (SampleDialog) stays in the code, linked from nowhere.
+  const router = useRouter();
+  const sampleFor = (customerId: string) => `/dashboard/sales/invoices/new?mode=sample&customerId=${encodeURIComponent(customerId)}&opportunityId=${encodeURIComponent(deal!.id)}`;
+  const sampleHref = deal?.customer?.id ? sampleFor(deal.customer.id) : null;
+  // A deal with no customer (a prospect's): «حوّله لعميل» first (owner 1أ), then the sample on the new customer and this deal.
+  const openSample = () => { if (sampleHref) router.push(sampleHref); else setToCustomer("ask"); };
+  const maySample = !!can?.write && !!can?.sendSample;
+  useCreateRequest("sample", openSample, !!deal && maySample && deal.outcome === "OPEN");
+  const madeCustomer = async (c: CreatedCustomer) => {
+    const res = await api<{ error?: string; errorEn?: string }>(`/api/sales/opportunities/${encodeURIComponent(id)}`, { method: "PATCH", body: { customerId: c.id } });
+    if (!res.ok) { setToCustomer(null); setError((ar ? res.data.error : res.data.errorEn ?? res.data.error) ?? ""); return; }
+    setToCustomer(null);
+    router.push(sampleFor(c.id));
+  };
   useEffect(() => {
     if (!more) return;
     const close = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest("[data-deal-more]")) setMore(false); };
@@ -404,6 +425,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       case "CREATE_QUOTE": case "ISSUE_QUOTE": case "EDIT_QUOTE": case "REVISE_QUOTE": case "RECORD_REPLY":
         return can.quote ? null : (ar ? "يحتاج صلاحية عروض الأسعار" : "Needs the quotation permission");
       case "REQUEST_APPROVAL": return null;
+      case "APPROVE_SAMPLE": case "DECLINE_SAMPLE": return can.approveSample ? null : (ar ? "الموافقة للمدير" : "The manager decides");
       case "CREATE_ORDER": return can.createOrder ? null : (ar ? "إنشاء الطلب يحتاج صلاحية الطلبات" : "Creating the order needs the orders permission");
       case "VIEW_ORDER": return null;
       default: return can.write ? null : (ar ? "يحتاج صلاحية تعديل الصفقات" : "Needs the deal write permission");
@@ -426,7 +448,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   async function runAction(a: DealAction) {
     switch (a.key) {
       case "RECORD_NEEDS": setDialog("needs"); return;
-      case "REQUEST_SAMPLE": setDialog("sample"); return;
+      case "REQUEST_SAMPLE": openSample(); return;
       case "RECORD_SAMPLE_EVALUATION": { const x = deal?.samples.find((y) => y.id === a.sampleId) ?? deal?.samples.find((y) => y.status === "SENT"); if (x) setFeedbackFor(x); return; }
       case "SKIP_SAMPLES": setSkipTarget(null); setDialogError(""); setDialog("skip"); return;
       case "SEND_SAMPLE": {
@@ -437,6 +459,9 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
         if (res.ok) { setSuccess(ar ? "عُلّمت العيّنة مُرسلة." : "Sample marked sent."); reload(); } else setError(res.data.error ?? "");
         return;
       }
+      // أبو فهد B7: the approver decides the second sample from «المطلوب منك الآن» (the same dialogs as the samples table).
+      case "APPROVE_SAMPLE": { const x = deal?.samples.find((y) => y.id === a.sampleId); if (x) setApproveFor(x); return; }
+      case "DECLINE_SAMPLE": { const x = deal?.samples.find((y) => y.id === a.sampleId); if (x) setDeclineFor(x); return; }
       case "LOG_CALL": setDialog("activity"); return;
       case "DOCUMENT_LOSS": setDialogError(""); setDialog("close"); return;
       case "WIN": transition({ toOutcome: "WON" }, ar ? "سُجّلت الصفقة رابحة." : "Deal marked won."); return;
@@ -640,7 +665,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
                   {can.approveSample && awaitsManager(s) && (
                     <>
                       <button type="button" className="btn sm" data-testid={`approve-sample-${s.id}`} disabled={busy}
-                        onClick={() => decideSample(s.id, "APPROVE")}>
+                        onClick={() => setApproveFor(s)}>
                         {ar ? "موافقة" : "Approve"}
                       </button>{" "}
                       <button type="button" className="btn sm" data-testid={`decline-sample-${s.id}`} disabled={busy}
@@ -841,7 +866,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       <div className="h">
         <h2 id="pv2-smp-h">{ar ? "العيّنات في هذه الصفقة" : "Samples on this deal"}</h2>
         <span className="c">{deal.samples.length}</span>
-        {can.write && open && <button type="button" className="lk" data-testid="add-sample" onClick={() => setDialog("sample")}>{ar ? "طلب عيّنة" : "Request sample"}</button>}
+        {maySample && open && <button type="button" className="lk" data-testid="add-sample" onClick={openSample}>{ar ? "إرسال عيّنة" : "Send a sample"}</button>}
       </div>
       {deal.samples.length === 0 ? <p className="txt">{ar ? "لا توجد عيّنات." : "No samples."}</p> : deal.samples.map((x) => (
         <div key={x.id} className="pv2-smp" data-testid={`sample-${x.id}`}>
@@ -851,7 +876,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
             {x.description && x.productSku ? <span><bdi>{x.description}</bdi></span> : null}
             <small data-testid={`sample-kind-${x.id}`}>{x.fromStock ? (ar ? "من المخزون" : "from stock") : (ar ? "للتسجيل فقط · لا يُصرف من المخزون" : "record only · no stock movement")}{x.sentAt ? ` · ${ar ? "أُرسلت" : "sent"} ${shortDate(x.sentAt, lang)}` : ""}</small>
             {(x.approval === "APPROVED" || x.approval === "DECLINED") && (
-              <small data-testid={`sample-approval-${x.id}`}>{pick(SAMPLE_APPROVAL_LABELS, x.approval, lang)}{x.approval === "DECLINED" && x.approvalNote ? <>: <bdi data-testid={`sample-approval-note-${x.id}`}>{x.approvalNote}</bdi></> : null}</small>
+              <small data-testid={`sample-approval-${x.id}`}>{pick(SAMPLE_APPROVAL_LABELS, x.approval, lang)}{(x.approval === "DECLINED" || x.approval === "APPROVED") && x.approvalNote ? <>: <bdi data-testid={`sample-approval-note-${x.id}`}>{x.approvalNote}</bdi></> : null}</small>
             )}
             {canSend && <span className="deal-smp-act" style={{ marginTop: 6 }}>{sampleButtons(x)}</span>}
           </span>
@@ -1045,7 +1070,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   const sideSamples = !showSamplesMain && (deal.samples.length > 0 || samplesSkipped) ? (
     <section className="pv2-panel" aria-labelledby="pv2-ss-h" data-testid="side-samples">
       <div className="h"><h2 id="pv2-ss-h">{ar ? "العيّنات" : "Samples"}</h2>
-        {can.write && open && <button type="button" className="lk" data-testid="add-sample" onClick={() => setDialog("sample")}>{ar ? "طلب عيّنة" : "Request"}</button>}</div>
+        {maySample && open && <button type="button" className="lk" data-testid="add-sample" onClick={openSample}>{ar ? "إرسال عيّنة" : "Send"}</button>}</div>
       {deal.samples.length === 0 && samplesSkipped ? (
         <>
           <span><Chip dashed label={ar ? "تُخطّيت" : "Skipped"} testId="samples-skipped" /></span>
@@ -1178,6 +1203,23 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
             if (ok) { setFeedbackFor(null); setSuccess(ar ? "سُجّلت نتيجة العيّنة." : "Sample result recorded."); }
           }} />
       )}
+      {approveFor && (
+        <ApproveSampleDialog ar={ar} busy={busy} onClose={() => setApproveFor(null)}
+          onSubmit={async (note) => { if (await decideSample(approveFor.id, "APPROVE", note || undefined)) setApproveFor(null); }} />
+      )}
+      {toCustomer === "ask" && (
+        <Modal title={ar ? "الصفقة ما لها عميل" : "This deal has no customer"} onClose={() => setToCustomer(null)} testId="deal-to-customer"
+          footer={<>
+            <Button variant="secondary" onClick={() => setToCustomer(null)}>{ar ? "إلغاء" : "Cancel"}</Button>
+            {can.makeCustomer ? <Button testId="deal-to-customer-go" onClick={() => setToCustomer("form")}>{ar ? "حوّله لعميل" : "Make it a customer"}</Button> : null}
+          </>}>
+          <p>{can.makeCustomer
+            ? (ar ? "العيّنة تنرسل بفاتورة ضريبية باسم العميل — حوّل الصفقة لعميل أول، وبعدها تنفتح صفحة العيّنة على العميل الجديد وهالصفقة." : "A sample goes out with a tax invoice in the customer's name — make this deal a customer first; the sample page then opens on the new customer and this deal.")
+            : <span data-testid="deal-to-customer-forbidden">{ar ? "ما عندك صلاحية تحوّل الصفقة لعميل — اطلب من مشرفك يسجّل العميل ويربطه بالصفقة، وبعدها ترسل العيّنة." : "You may not make this deal a customer — ask your supervisor to register the customer and link it to the deal; then send the sample."}</span>}</p>
+        </Modal>
+      )}
+      <NewCustomerDialog open={toCustomer === "form"} ar={ar} onClose={() => setToCustomer(null)} onCreated={madeCustomer}
+        initialName={deal.conversion?.lead?.companyName ?? deal.title} />
       {declineFor && (
         <DeclineSampleDialog ar={ar} busy={busy} onClose={() => setDeclineFor(null)}
           onSubmit={async (reason) => { if (await decideSample(declineFor.id, "DECLINE", reason)) setDeclineFor(null); }} />
@@ -1200,7 +1242,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
     <button key="fu" type="button" role="menuitem" data-testid="menu-follow-up" onClick={() => { setMore(false); setDialogError(""); setDialog("followup"); }}>{ar ? "جدولة متابعة" : "Schedule a follow-up"}</button>,
     <button key="mv" type="button" role="menuitem" data-testid="move-deal" disabled={!!pendingMove} onClick={() => { setMore(false); setDialogError(""); setDialog("move"); }}>
       {moveDirect ? (ar ? "نقل إلى…" : "Move to…") : (ar ? "طلب نقل إلى…" : "Request a move…")}</button>,
-    <button key="smp" type="button" role="menuitem" data-testid="menu-add-sample" onClick={() => { setMore(false); setDialog("sample"); }}>{ar ? "طلب عيّنة" : "Request a sample"}</button>,
+    ...(maySample ? [<button key="smp" type="button" role="menuitem" data-testid="menu-add-sample" onClick={() => { setMore(false); openSample(); }}>{ar ? "إرسال عيّنة" : "Send a sample"}</button>] : []),
   );
   if (open && can.quote) moreItems.push(<Link key="q" role="menuitem" href={`/dashboard/sales/quotes/new?opportunityId=${deal.id}`} data-testid="menu-new-quote">{ar ? "عرض سعر جديد" : "New quotation"}</Link>);
   if (open && can.write) moreItems.push(<button key="ed" type="button" role="menuitem" data-testid="menu-edit-deal" onClick={() => { setMore(false); setDialog("edit"); }}>{ar ? "تعديل التفاصيل" : "Edit details"}</button>);
@@ -1413,6 +1455,35 @@ function FeedbackDialog({
 }
 
 /** The manager declines a customer's second sample of a product: the reason is required (the rep reads it). */
+/** D22 gate (owner 4أ): the manager approves a repeat sample with an optional note, kept on the request (approvalNote). */
+function ApproveSampleDialog({
+  ar, busy, onClose, onSubmit,
+}: {
+  ar: boolean; busy: boolean; onClose: () => void; onSubmit: (note: string) => void;
+}) {
+  const [note, setNote] = useState("");
+  return (
+    <Modal
+      title={ar ? "الموافقة على العيّنة الثانية" : "Approve the second sample"}
+      onClose={onClose}
+      testId="sample-approve-dialog"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>{ar ? "إلغاء" : "Cancel"}</Button>
+          <Button disabled={busy} testId="confirm-sample-approve" onClick={() => onSubmit(note.trim())}>
+            {ar ? "موافقة" : "Approve"}
+          </Button>
+        </>
+      }
+    >
+      <Field id="smp-approve" label={ar ? "ملاحظة الموافقة (اختيارية)" : "Approval note (optional)"}>
+        <TextArea id="smp-approve" value={note} onChange={setNote} rows={3} />
+      </Field>
+      <p data-ui="field-hint">{ar ? "تنحفظ مع الطلب ويشوفها المندوب، والطلب يروح لقسم الشحن." : "Kept on the request for the rep to read; the request goes to dispatch."}</p>
+    </Modal>
+  );
+}
+
 function DeclineSampleDialog({
   ar, busy, onClose, onSubmit,
 }: {

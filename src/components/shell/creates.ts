@@ -1,4 +1,4 @@
-import { canEdit, hasModuleAccess, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
+import { hasModuleAccess, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 import type { Viewer } from "@/lib/nav/registry";
 
 /**
@@ -31,6 +31,10 @@ export type CreateAction = {
    * (`/dashboard/customers/<id>?new=<kind>`); elsewhere it first asks «لأي عميل؟».
    */
   onCustomer?: "activity" | "quote" | "sample";
+  /** D22: a page that takes `&customerId=` — on a customer page the shell opens it on that customer. */
+  withCustomer?: boolean;
+  /** D22: the phone sheet's line under the label, and its icon (Ico name). */
+  subAr?: string; subEn?: string; icon?: string;
 };
 
 const p = (v: Viewer): Permissions => v.permissions;
@@ -43,8 +47,6 @@ export const CREATE_ACTIONS: Record<string, CreateAction[]> = {
     // The leads page's own `?new=1` (kept from batch 0/1: shared links already use it).
     { id: "sales.lead.new", labelAr: "عميل محتمل", labelEn: "Lead", href: "/dashboard/sales/leads?new=1", permitted: (v) => hasSubPrivilege(p(v), "sales", "lead_write") },
     { id: "sales.quote.new", labelAr: "عرض سعر", labelEn: "Quotation", href: "/dashboard/sales/quotes/new", permitted: (v) => hasSubPrivilege(p(v), "sales", "quote_write") },
-    // A sales order is Sales work for a seller (registry: sales.quotes.orders).
-    ORDER,
   ],
   operations: [ORDER],
   hr: [
@@ -66,33 +68,40 @@ export function createActions(viewer: Viewer, moduleId: string | undefined): Cre
   return (CREATE_ACTIONS[moduleId] ?? []).filter((a) => a.permitted(viewer));
 }
 
-// ── Batch 24 WP-A: «+ جديد» everywhere for a sales user ──────────────────────────────────────
-// The rep's menu (BATCH24-DESIGN §WP-A 2, mockup «زر + جديد»): نشاط N · عرض سعر Q · طلب عيّنة S · طلب O ·
-// عميل جديد C · عميل محتمل L · أضف لخطتي P (D16) — on EVERY page, not only inside Sales. Each item is offered only when the
-// API it ends at would accept it (the same checks as the customer page's buttons and the pages' own
-// create buttons): nothing new is granted.
+// ── «+ جديد» everywhere for a sales user ─────────────────────────────────────────────────────────
+// D22 (owner-approved, 11 Nov 2026 — Figma 2024:2), in this order: نشاط (اتصال، زيارة، واتساب) · عرض سعر · إرسال عيّنة ·
+// بيع مباشر (فاتورة ضريبية بدون عرض سعر) · عميل محتمل · أضف خطة — on EVERY page, not only inside Sales. «إرسال عيّنة» and
+// «بيع مباشر» open the tax invoice page in its mode (invoices/new?mode=sample | direct-sale); the 3-step direct-sale wizard is
+// no longer linked. Each item is offered only when the API it ends at would accept it: nothing new is granted.
 const onCustomer = (v: Viewer) => hasModuleAccess(p(v), "customers");
 export const SALES_MENU: CreateAction[] = [
   { id: "sales.activity.new", key: "N", onCustomer: "activity", labelAr: "نشاط (اتصال، زيارة، واتساب)", labelEn: "Activity (call, visit, WhatsApp)", href: "/dashboard/customers",
+    icon: "phone", subAr: "سجّل اللي صار مع العميل", subEn: "Record what happened with the customer",
     permitted: (v) => hasSubPrivilege(p(v), "sales", "lead_write") && onCustomer(v) },
   { id: "sales.quote.new", key: "Q", onCustomer: "quote", labelAr: "عرض سعر", labelEn: "Quotation", href: "/dashboard/sales/quotes/new",
+    icon: "quote", subAr: "للعميل يوافق عليه قبل الطلب", subEn: "For the customer to accept before ordering",
     permitted: (v) => hasSubPrivilege(p(v), "sales", "quote_write") },
-  { id: "sales.sample.new", key: "S", onCustomer: "sample", labelAr: "طلب عيّنة", labelEn: "Sample request", href: "/dashboard/customers",
-    permitted: (v) => hasSubPrivilege(p(v), "sales", "lead_write") && onCustomer(v) },
-  { ...ORDER, key: "O" },
-  { id: "customers.customer.new", key: "C", labelAr: "عميل جديد", labelEn: "New customer", href: "/dashboard/customers?new=customer",
-    permitted: (v) => canEdit(p(v), "customers") },
+  // POST /api/sales/sample-send (maySendSample): requests samples, prepares the zero invoice.
+  { id: "sales.sample.new", key: "S", withCustomer: true, labelAr: "إرسال عيّنة", labelEn: "Send a sample", href: "/dashboard/sales/invoices/new?mode=sample",
+    icon: "box", subAr: "فاتورة بصفر وتروح للتحضير", subEn: "A zero invoice, sent to preparation",
+    permitted: (v) => hasSubPrivilege(p(v), "sales", "lead_write") && hasSubPrivilege(p(v), "sales", "invoices_create") && onCustomer(v) },
+  // POST /api/sales/direct-sale (mayDirectSell): the order and the invoice draft.
+  { id: "sales.direct.new", key: "D", withCustomer: true, labelAr: "بيع مباشر (فاتورة ضريبية بدون عرض سعر)", labelEn: "Direct sale (tax invoice without a quotation)", href: "/dashboard/sales/invoices/new?mode=direct-sale",
+    icon: "invoice", subAr: "الأصناف والدفع في صفحة وحدة", subEn: "Items and payment on one page",
+    permitted: (v) => hasSubPrivilege(p(v), "orders", "create") && hasSubPrivilege(p(v), "sales", "invoices_create") },
   { id: "sales.lead.new", key: "L", labelAr: "عميل محتمل", labelEn: "Lead", href: "/dashboard/sales/leads?new=1",
+    icon: "user", subAr: "اسم ورقم وتكمل بعدين", subEn: "A name and a number, the rest later",
     permitted: (v) => hasSubPrivilege(p(v), "sales", "lead_write") },
-  // D16 (owner, 9 Nov 2026): «أضف لخطتي» — the one sheet of «خطتي», for today or any day ahead. The plan is the sales
+  // D16 (owner, 9 Nov 2026): «أضف خطة» — the one sheet of «خطتي», for today or any day ahead. The plan is the sales
   // module's (POST /api/sales/plan/items: requireModule("sales")).
-  { id: "sales.plan.item", key: "P", labelAr: "أضف لخطتي", labelEn: "Add to my plan", href: "/dashboard/my-day?add=plan",
+  { id: "sales.plan.item", key: "P", labelAr: "أضف خطة", labelEn: "Add to my plan", href: "/dashboard/my-day?add=plan",
+    icon: "cal", subAr: "زيارة أو مكالمة أو شغلة في خطتك", subEn: "A visit, a call or a task in your plan",
     permitted: (v) => hasModuleAccess(p(v), "sales") },
 ];
 
 /** «sales permissions»: the sales module with at least one way to create sales work. */
 export function hasSalesMenu(viewer: Viewer): boolean {
-  return hasModuleAccess(p(viewer), "sales") && SALES_MENU.some((a) => a.id !== ORDER.id && a.id !== "sales.plan.item" && a.permitted(viewer));
+  return hasModuleAccess(p(viewer), "sales") && SALES_MENU.some((a) => a.id !== "sales.plan.item" && a.permitted(viewer));
 }
 
 /**
@@ -112,6 +121,7 @@ export function shellCreates(viewer: Viewer, moduleId: string | undefined): Crea
 export function customerActionHref(a: CreateAction, customerId: string): string {
   if (a.onCustomer) return `/dashboard/customers/${encodeURIComponent(customerId)}?new=${a.onCustomer}`;
   if (a.id === ORDER.id) return `${ORDER.href}&customerId=${encodeURIComponent(customerId)}`;
+  if (a.withCustomer) return `${a.href}&customerId=${encodeURIComponent(customerId)}`;
   return a.href;
 }
 

@@ -12,7 +12,20 @@ import { usePhone } from "@/components/shell/page-context";
 type Row = {
   id: string; kind: string; family: string; customerName: string; orderId: string | null; orderNumber: number | null; createdByName: string | null; requestedByName: string | null;
   requestNote: string | null; grandTotal: string; supplyDate: string | null; requestedAt: string; requestedDay: string; ageBusinessDays: number; deadline: string; daysToDeadline: number; pastDeadline: boolean; tone: "ok" | "amber" | "red";
+  sample?: { dealId: string | null; dealTitle: string | null; awaitingApproval: boolean; cancelled: boolean } | null;
 };
+
+/** D22: a sample's invoice says so — «عيّنة», the customer and the deal, and «تنتظر موافقة المدير» while its issue is held. */
+function SampleTag({ r, L }: { r: Row; L: (ar: string, en: string) => string }) {
+  if (!r.sample) return null;
+  return (
+    <span className="inv-sub" data-testid="request-sample">
+      <span className="inv-badge is-sample">{L("عيّنة", "Sample")}</span>{" "}
+      {L("عيّنة لـ", "Sample for ")}<bdi>{r.customerName}</bdi>{r.sample.dealTitle ? <> · {L("صفقة ", "deal ")}<bdi>{r.sample.dealTitle}</bdi></> : null}
+      {r.sample.awaitingApproval ? <> · <span className="inv-age is-amber" data-testid="request-sample-awaiting">{L("تنتظر موافقة المدير", "Waiting for the manager's approval")}</span></> : null}
+    </span>
+  );
+}
 
 export function RequestQueue() {
   const { L } = useLang();
@@ -33,6 +46,7 @@ export function RequestQueue() {
               <Link href={`/dashboard/sales/invoices/${r.id}`} className="inv-req-card" data-testid="request-open">
                 <span className="inv-req-top"><b><bdi>{r.customerName}</bdi></b><span className="hr-num inv-req-amt"><bdi>{money(r.grandTotal)}</bdi> {L("⃁", "SAR")}</span></span>
                 <span className="inv-sub">{L(KIND[r.kind]?.[r.family]?.[0] ?? r.kind, KIND[r.kind]?.[r.family]?.[1] ?? r.kind)}{r.orderNumber ? <> · {L("من الطلب", "from order")} <bdi dir="ltr" className="hr-num">#{r.orderNumber}</bdi></> : null}</span>
+                <SampleTag r={r} L={L} />
                 {r.requestNote ? <span className="inv-sub"><bdi>{r.requestNote}</bdi></span> : null}
                 <span className="inv-req-meta">
                   <span className={`inv-age is-${r.tone}`} data-testid="request-age">{L(`${r.ageBusinessDays} يوم عمل`, `${r.ageBusinessDays} business day(s)`)}{r.tone === "red" ? L(" · متأخر", " · late") : r.tone === "amber" ? L(" · انتبه", " · due soon") : ""}</span>
@@ -53,6 +67,7 @@ export function RequestQueue() {
             <tbody>{rows.map((r) => (
               <tr key={r.id} data-testid={`request-row-${r.id}`} data-tone={r.tone}>
                 <td><Link href={`/dashboard/sales/invoices/${r.id}`} data-testid="request-open">{L(KIND[r.kind]?.[r.family]?.[0] ?? r.kind, KIND[r.kind]?.[r.family]?.[1] ?? r.kind)} · {L("يُعطى الرقم عند الإصدار", "numbered at issue")}</Link>
+                  <SampleTag r={r} L={L} />
                   {r.requestNote ? <span className="inv-sub"><bdi>{r.requestNote}</bdi></span> : null}</td>
                 <td><bdi>{r.customerName}</bdi></td>
                 <td className="hr-num">{r.orderNumber ? <bdi dir="ltr">#{r.orderNumber}</bdi> : "—"}</td>

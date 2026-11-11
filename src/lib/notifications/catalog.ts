@@ -212,7 +212,8 @@ export const EVENTS: NotificationEventDef[] = [
   {
     key: "sales.sample_approval_pending", category: "sales", severity: "warning",
     label: { ar: "عيّنة ثانية تنتظر اعتمادك", en: "A second sample awaits your approval" },
-    recipients: [{ perm: [sales("lead_assign")] }, { person: "admins" }], requires: [MOD("sales")],
+    // D22: also whoever holds the approval alone (sales › sample_approve_repeat).
+    recipients: [{ perm: [sales("lead_assign")] }, { perm: [sales("sample_approve_repeat")] }, { person: "admins" }], requires: [MOD("sales")],
     trigger: "requestStockSampleIn — the customer already had this product as a sample (approvalRequired, not self-approved)",
     render: (f) => ({
       titleAr: `اعتمادك مطلوب: عيّنة ثانية لـ ${s(f.customerName)}`, titleEn: `Your approval is needed: a second sample for ${sEn(f, "customerName")}`,

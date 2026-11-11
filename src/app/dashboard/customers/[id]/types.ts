@@ -165,6 +165,6 @@ export type Account = {
   orders: Order[] | null;
   collections: Collection[] | null;
   timeline: TimelineEntry[];
-  can: { edit: boolean; editContact?: boolean; manageProfiles: boolean; manageFiles: boolean; logActivity: boolean; quote: boolean; createDeal: boolean; editOwner?: boolean; editCreditTerms?: boolean; editFileDates?: boolean };
+  can: { edit: boolean; editContact?: boolean; manageProfiles: boolean; manageFiles: boolean; logActivity: boolean; sendSample?: boolean; quote: boolean; createDeal: boolean; editOwner?: boolean; editCreditTerms?: boolean; editFileDates?: boolean };
   now: string;
 };

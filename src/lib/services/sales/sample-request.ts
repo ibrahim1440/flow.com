@@ -28,7 +28,7 @@ import type { Permissions } from "@/lib/auth-shared";
 import { Prisma } from "@/generated/prisma/client";
 import { seesAllSales, NOT_FOUND_MESSAGE } from "./scope";
 import {
-  SAMPLE_REQUEST_REPLAY_MS, approvesSamples, sampleApprovalState, sampleOneUnitRefusal, type SampleApprovalState,
+  SAMPLE_REQUEST_REPLAY_MS, approvesSamples, sampleYearStart, sampleApprovalState, sampleOneUnitRefusal, type SampleApprovalState,
 } from "./sample-rules";
 import { closeSampleFollowUp } from "./follow-through";
 
@@ -56,11 +56,13 @@ const withState = (s: SampleRow) => ({ ...s, approval: sampleApprovalState(s) })
  * and any deal of the customer. Without a customer the deal stands for the prospect. `exceptId`: the row itself.
  */
 export async function priorSamplesOf(
-  db: Tx | typeof prisma, who: { customerId: string | null; opportunityId: string }, productId: string, exceptId?: string,
+  db: Tx | typeof prisma, who: { customerId: string | null; opportunityId: string }, productId: string, exceptId?: string, now: Date = new Date(),
 ): Promise<number> {
   return db.sampleShipment.count({
     where: {
       status: { not: "CANCELLED" },
+      // D22: within the calendar year (sampleYearStart).
+      createdAt: { gte: sampleYearStart(now) },
       productSku: { productId },
       ...(who.customerId ? { opportunity: { customerId: who.customerId } } : { opportunityId: who.opportunityId }),
       ...(exceptId ? { id: { not: exceptId } } : {}),
@@ -69,10 +71,10 @@ export async function priorSamplesOf(
 }
 
 /** The coffee products (ProductSKU.productId) a customer — or a customer-less deal — has had a sample of. */
-export async function sampledProductIds(db: Tx | typeof prisma, who: { customerId: string | null; opportunityId: string }): Promise<string[]> {
+export async function sampledProductIds(db: Tx | typeof prisma, who: { customerId: string | null; opportunityId: string }, now: Date = new Date()): Promise<string[]> {
   const rows = await db.sampleShipment.findMany({
     where: {
-      status: { not: "CANCELLED" }, productSkuId: { not: null },
+      status: { not: "CANCELLED" }, productSkuId: { not: null }, createdAt: { gte: sampleYearStart(now) },
       ...(who.customerId ? { opportunity: { customerId: who.customerId } } : { opportunityId: who.opportunityId }),
     },
     select: { productSku: { select: { productId: true } } },
@@ -101,7 +103,10 @@ export async function requestStockSample(
  */
 export async function requestStockSampleIn(
   tx: Prisma.TransactionClient,
-  input: { opportunityId: string; productSkuId: string; units: number; description: string | null; approvalNote?: string | null },
+  input: { opportunityId: string; productSkuId: string; units: number; description: string | null; approvalNote?: string | null;
+    /** D22 «إرسال عيّنة»: the send has its own request key (one replay per key), so the two-minute window is not used —
+     *  a second send of the product is a second sample (a repeat this year waits for a manager). */
+    noReplayWindow?: boolean },
   actor: SampleActor,
 ): Promise<RequestOutcome> {
   const one = sampleOneUnitRefusal(input.units);
@@ -121,7 +126,7 @@ export async function requestStockSampleIn(
     }
 
     // ── 2. S3: the replay window — before the count, so a first request's retry is the first request ──
-    const same = await tx.sampleShipment.findFirst({
+    const same = input.noReplayWindow ? null : await tx.sampleShipment.findFirst({
       where: {
         opportunityId: input.opportunityId, productSkuId: input.productSkuId, quantity, unit: "UNIT", fromStock: true,
         status: "REQUESTED", createdById: actor.id,
@@ -232,6 +237,14 @@ export async function decideSampleApproval(
     if (decision === "DECLINE") {
       const row = await tx.sampleShipment.findUniqueOrThrow({ where: { id: s.id }, select: { opportunityId: true } });
       await closeSampleFollowUp(tx, { sampleId: s.id, opportunityId: row.opportunityId }, now);
+      // D22 gate: a sample sent from the invoice page takes its zero invoice with it (cancelled, or its line withdrawn).
+      const { withdrawDeclinedSampleIn } = await import("./sample-send");
+      await withdrawDeclinedSampleIn(tx, s.id, actor.id, reason);
+    }
+    if (decision === "APPROVE") {
+      // أبو فهد B1: a send's zero invoice is held by the samples still waiting — the draft names the next one, if any.
+      const { sampleApprovedIn } = await import("./sample-send");
+      await sampleApprovedIn(tx, s.id);
     }
     const { notifySampleDecided } = await import("./sample-stage-notify");
     await notifySampleDecided(tx, s.id, actor.id, decision, reason ?? null);

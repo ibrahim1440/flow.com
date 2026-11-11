@@ -16,6 +16,7 @@ import "../_parts/sections.css";
 
 type Inv = {
   defaultVatPercent: string | null; effectiveDefaultVatPercent: string; isDefault: boolean; range: { default: number };
+  sampleVatAlertSar: string | null; effectiveSampleVatAlertSar: string;
   registration: { vatNumber: string | null; crNumber: string | null }; can: { edit: boolean };
 };
 
@@ -45,6 +46,18 @@ export default function InvoicingSettingsPage() {
                 unit="%"
                 onSaved={(j) => setS((x) => (x ? { ...x, ...(j as Partial<Inv>) } : x))}
                 savedText={(j) => L(`حُفظ. البنود الجديدة في عروض الأسعار تبدأ بنسبة ${String(j.effectiveDefaultVatPercent)}%.`, `Saved. New quotation lines start at ${String(j.effectiveDefaultVatPercent)}%.`)}
+              />
+            </Sec>
+            {/* D22 (owner-approved, 11 Nov 2026): «حد تنبيه ضريبة العيّنات» — an alert for holders of sales › samples_vat_alert. */}
+            <Sec title={L("حد العيّنات المجانية", "Free samples alert")} caption={L("لما تتعدى عيّنات عميل هالحد في السنة الميلادية (بسعر القائمة قبل الضريبة)، يطلع التنبيه لمن عنده «تنبيه ضريبة العيّنات» · تأكد من الحد والقاعدة في zatca.gov.sa — تنبيه للمتابعة، مو حساب ضريبة", "When a customer's samples in the calendar year pass this (list price before VAT), holders of «samples VAT alert» are alerted · check the rule on zatca.gov.sa — an alert, not a tax computation")} testId="sample-vat-alert">
+              <SingleSetting
+                url="/api/settings/invoicing" field="sampleVatAlertSar" testId="sample-vat-alert"
+                stored={s.sampleVatAlertSar} effective={s.effectiveSampleVatAlertSar} isDefault={s.sampleVatAlertSar === null} canEdit={s.can.edit}
+                label={L("الحد لكل عميل في السنة", "Per customer per year")}
+                help={L("فارغ = الافتراضي 200", "Empty = the default 200")}
+                unit="⃁"
+                onSaved={(j) => setS((x) => (x ? { ...x, ...(j as Partial<Inv>) } : x))}
+                savedText={(j) => L(`حُفظ. التنبيه فوق ${String(j.effectiveSampleVatAlertSar)} ⃁ لكل عميل في السنة.`, `Saved. The alert is above SAR ${String(j.effectiveSampleVatAlertSar)} per customer per year.`)}
               />
             </Sec>
             <Sec title={L("التسجيل الضريبي", "Tax registration")} caption={L("يُعدَّل في «المنشأة» ويُطبع في المستندات", "Edited on «Organisation» and printed on the documents")} testId="tax-registration">

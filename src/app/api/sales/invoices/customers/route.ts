@@ -14,10 +14,14 @@ export async function GET(request: Request) {
   if (error) return error;
   if (!canCreateInvoices(user.permissions) && !canViewInvoices(user.permissions)) return forbidden();
   try {
-    const q = (new URL(request.url).searchParams.get("q") ?? "").trim().slice(0, 80);
+    const sp = new URL(request.url).searchParams;
+    const q = (sp.get("q") ?? "").trim().slice(0, 80);
+    // D22: `?id=` — one customer (the invoice page opened from the customer, «بيع مباشر» / «إرسال عيّنة»), in the same scope.
+    const id = (sp.get("id") ?? "").trim().slice(0, 64);
     const scope = await scopedCustomerIds(user);
+    if (id && scope && !scope.includes(id)) return NextResponse.json({ items: [] });
     const rows = await prisma.customer.findMany({
-      where: { ...(scope ? { id: { in: scope } } : {}), ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { nameAr: { contains: q } }, { vatNumber: { contains: q } }] } : {}) },
+      where: { ...(id ? { id } : scope ? { id: { in: scope } } : {}), ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { nameAr: { contains: q } }, { vatNumber: { contains: q } }] } : {}) },
       orderBy: { name: "asc" }, take: 50,
       select: { id: true, name: true, nameAr: true, vatNumber: true, commercialRegNo: true, city: true, address: true, phone: true, paymentTermsDays: true, unifiedNumber: true, nationalBuildingNo: true, nationalStreet: true, nationalDistrict: true, nationalCity: true, nationalPostalCode: true, nationalAdditionalNo: true },
     });

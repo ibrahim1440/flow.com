@@ -1,5 +1,6 @@
 // «بيع مباشر» — POST: the order, its deal (WON), the invoice draft and its request to the accountant, in ONE transaction
-// (services/sales/direct-sale.ts). Idempotent by body.requestKey: a second tap replays the first sale (200, replayed).
+// (services/sales/direct-sale.ts). Idempotent by body.requestKey: a second tap replays the first sale (200, replayed). D22: from the
+// tax invoice page the lines carry their own price / discount / VAT and `invoice` the header (direct-sale-terms.ts).
 import { NextResponse } from "@/lib/api-response";
 import { requireAuth, forbidden } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
@@ -16,7 +17,7 @@ export async function POST(request: Request) {
   try { body = await request.json(); } catch { return NextResponse.json({ error: "طلب غير صالح.", errorEn: "Invalid JSON body.", code: "BAD_INPUT" }, { status: 400 }); }
   try {
     const r = await createDirectSale(
-      { customerId: body.customerId, lines: body.lines, requestKey: body.requestKey, note: body.note, discountPercent: body.discountPercent, payment: body.payment, reference: body.reference },
+      { customerId: body.customerId, lines: body.lines, requestKey: body.requestKey, note: body.note, discountPercent: body.discountPercent, payment: body.payment, reference: body.reference, invoice: body.invoice, opportunityId: body.opportunityId },
       user,
       auditFromRequest(request, user.id),
     );

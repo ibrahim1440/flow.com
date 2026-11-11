@@ -41,7 +41,8 @@ import { isSimpleMode } from "@/lib/simple-mode";
 import { appendOrderActivity, lockOrderLifecycleResources } from "@/lib/services/order-operations";
 import { assertSalesAllowed } from "@/lib/services/customers/credit-db";
 import { customerInScope } from "./customer-access";
-import { customersScopedToOwner, ownedCustomerWhere } from "./scope";
+import { customersScopedToOwner, ownedCustomerWhere, seesAllSales } from "./scope";
+import { hasTerms, mayOverrideTax, parseHeader, priceTerms, termsApproval, type SaleTerms } from "./direct-sale-terms";
 
 type Tx = Prisma.TransactionClient;
 type Db = Tx | typeof prisma;
@@ -188,11 +189,20 @@ export async function directSaleOptions(actor: DirectSaleActor, q: string, onlyI
       select: { id: true, skuCode: true, name: true, nameAr: true, price: true, product: { select: { productNameAr: true, productNameEn: true } } },
     }),
   ]);
+  // D22 (أبو فهد B2): for the customer chosen, the open deals the sale may join — the rep's own (or any, with the all-sales
+  // view: the same scope the link checks); the page asks «تربطه بصفقة؟» whenever there is one.
+  const deals = onlyId && customers.length ? await prisma.opportunity.findMany({
+    where: { customerId: onlyId, outcome: "OPEN", ...(seesAllSales(actor.permissions) ? {} : { ownerId: actor.id }) },
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: 20,
+    select: { id: true, title: true, amount: true, createdAt: true, stage: { select: { nameAr: true, nameEn: true } }, _count: { select: { quotes: true, samples: true } } },
+  }) : [];
   return {
     customers: customers.map((c) => ({ id: c.id, name: c.name, nameAr: c.nameAr, city: c.city, lastOrderAt: c.orders[0]?.createdAt.toISOString() ?? null })),
+    deals: deals.map((d) => ({ id: d.id, title: d.title, amount: d.amount == null ? null : d.amount.toFixed(2), createdAt: d.createdAt.toISOString(), stageAr: d.stage.nameAr, stageEn: d.stage.nameEn, quotes: d._count.quotes, samples: d._count.samples })),
     products: products.map((p) => ({ id: p.id, skuCode: p.skuCode, name: p.nameAr || p.name || p.product.productNameAr || p.product.productNameEn, price: p.price.toFixed(2) })),
     can: {
       approveDiscount: mayApproveDiscount(actor.permissions),
+      taxOverride: mayOverrideTax(actor.permissions),
       collect: hasSubPrivilege(actor.permissions as Permissions, "sales", "collection_submit"),
       threshold: Number((await discountThreshold(prisma)).toString()), max: DISCOUNT_MAX,
     },
@@ -205,17 +215,41 @@ export type DirectSaleResult = {
   /** PENDING: waiting for a supervisor's approval of the discount — no deal won, no invoice, no collection yet. */
   discountApproval: "NONE" | "PENDING" | "APPROVED";
   opportunityId: string | null;
+  /** The deal the sale landed on (D22 done screen «الصفقة: «…» صارت رابحة»): joined = an existing open deal, now WON. */
+  deal: { id: string; title: string; joined: boolean } | null;
   invoice: { id: string; requested: boolean; warnings: unknown[] } | null;
   totals: { net: string; tax: string; gross: string; discountPercent: string };
   payment: { method: PaymentChoice; collectionId: string | null };
 };
 
-/** What the sale's own audit row says (written in the sale's transaction): its key, payment and note. */
-type SaleRecord = { requestKey: string; payment: PaymentChoice; note: string | null; customerId: string; reference: string | null };
+/** What the sale's own audit row says (written in the sale's transaction): its key, payment and note — and, for a sale
+ *  made on the tax invoice page (D22), its terms (the latest: a resubmit after a refusal records the new ones). */
+type SaleRecord = { requestKey: string; payment: PaymentChoice; note: string | null; customerId: string; reference: string | null; terms: SaleTerms | null };
 async function saleRecord(tx: Tx, orderId: string): Promise<SaleRecord | null> {
   const row = await tx.hrAuditLog.findFirst({ where: { action: "DIRECT_SALE_CREATED", entityType: "Order", entityId: orderId }, orderBy: { createdAt: "asc" }, select: { after: true } });
-  const a = row?.after as Partial<SaleRecord> | null;
-  return a?.requestKey && a.payment && a.customerId ? { requestKey: a.requestKey, payment: a.payment, note: a.note ?? null, customerId: a.customerId, reference: a.reference ?? null } : null;
+  const a = row?.after as (Partial<SaleRecord> & { terms?: SaleTerms }) | null;
+  if (!a?.requestKey || !a.payment || !a.customerId) return null;
+  let terms = a.terms ?? null;
+  if (terms) {
+    const re = await tx.hrAuditLog.findFirst({ where: { action: "DIRECT_SALE_RESUBMITTED", entityType: "Order", entityId: orderId }, orderBy: { createdAt: "desc" }, select: { after: true } });
+    const t = (re?.after as { terms?: SaleTerms } | null)?.terms;
+    // The deal choice is the sale's, made once (a resubmit re-prices the lines only).
+    if (t) terms = { ...t, ...(terms.dealId !== undefined ? { dealId: terms.dealId } : {}) };
+  }
+  return { requestKey: a.requestKey, payment: a.payment, note: a.note ?? null, customerId: a.customerId, reference: a.reference ?? null, terms };
+}
+
+/** The sale's price as the rest of the code reads it — the wizard's (catalogue × one discount) or the invoice page's terms. */
+type SalePrice = { lines: { productSkuId: string; quantityUnits: number }[]; subtotal: string; discount: string; discountPercent: string; net: string; tax: string; gross: string };
+async function priceSale(tx: Db, orderId: string, discountPercent: Prisma.Decimal, terms: SaleTerms | null): Promise<SalePrice> {
+  if (terms) return (await priceTerms(tx, terms.lines, await discountThreshold(tx))).quote;
+  return priceDirectSale(tx, await orderLines(tx as Tx, orderId), discountPercent);
+}
+
+/** A pending (or refused) direct sale's figures now — the approvals inbox shows them (wizard or invoice page). */
+export async function pricePendingSale(db: Db, orderId: string, percent: Prisma.Decimal): Promise<SalePrice & { lines: { productSkuId: string; quantityUnits: number; name?: string }[] }> {
+  const sale = await saleRecord(db as Tx, orderId);
+  return priceSale(db, orderId, percent, sale?.terms ?? null);
 }
 
 /** The order's lines as a direct-sale cart (SKU + units). */
@@ -230,9 +264,10 @@ async function orderLines(tx: Tx, orderId: string) {
  * decision 2). Run at «إرسال» for a sale that needs no approval, or at the supervisor's approval for one that did — the
  * rep is always the actor (the deal, the request and the collection are the rep's).
  */
-async function completeSale(tx: Tx, input: { orderId: string; orderNumber: number; customerId: string; rep: DirectSaleActor; key: string; discountPercent: Prisma.Decimal; method: PaymentChoice; reference?: string | null; note: string | null; ctx: AuditContext; now: Date }) {
+async function completeSale(tx: Tx, input: { orderId: string; orderNumber: number; customerId: string; rep: DirectSaleActor; key: string; discountPercent: Prisma.Decimal; method: PaymentChoice; reference?: string | null; note: string | null; ctx: AuditContext; now: Date; terms?: SaleTerms | null }) {
   const { orderId, rep, key, method } = input;
-  const priced = await priceDirectSale(tx, await orderLines(tx, orderId), input.discountPercent);
+  const terms = input.terms ?? null;
+  const priced = await priceSale(tx, orderId, input.discountPercent, terms);
   // The customer's open deals as they stand BEFORE the sale (the link re-syncs a joined deal's amount), so a cancelled
   // order can put the one it joins back exactly — outcome, stage and amount (D1 revert, gate L2).
   const order = await tx.order.findUniqueOrThrow({ where: { id: orderId }, select: { customerId: true } });
@@ -246,7 +281,14 @@ async function completeSale(tx: Tx, input: { orderId: string; orderNumber: numbe
   // discount approval (gate round 3).
   await emitAutomationEvent(tx, { eventType: "order.created", subjectType: "Order", subjectId: orderId, actorId: rep.id });
   const before = await tx.opportunity.findMany({ where: { customerId: order.customerId, outcome: "OPEN" }, select: { id: true, outcome: true, stageId: true, amount: true } });
-  const link = await linkDirectOrderDeal(tx, { orderId, actor: rep, mode: "create" });
+  // D22 (أبو فهد B2): a sale from the invoice page links the deal the rep chose — or a new WON one — never one picked for him.
+  // A chosen deal closed while the sale waited for its approval: a new deal (the audit row says so: dealCreated).
+  let chosen: string | null | undefined = terms?.dealId;
+  if (chosen) {
+    const d = await tx.opportunity.findUnique({ where: { id: chosen }, select: { outcome: true, customerId: true } });
+    if (!d || d.outcome !== "OPEN" || d.customerId !== order.customerId) chosen = null;
+  }
+  const link = await linkDirectOrderDeal(tx, { orderId, actor: rep, mode: "create", ...(chosen !== undefined ? { chosenOpportunityId: chosen, noAutoPick: true } : {}) });
   const opportunityId = link.opportunityId || null;
   let priorDeal: { id: string; outcome: string; stageId: string; amount: string | null } | null = null;
   if (opportunityId && !link.created) {
@@ -256,12 +298,13 @@ async function completeSale(tx: Tx, input: { orderId: string; orderNumber: numbe
     await winOnAcceptedQuote(tx, opportunityId, rep.id, DIRECT_SALE_WIN_REASON);
   }
   // The discount: the deal link's snapshot is what the customer owes — the discounted value, VAT included.
-  if (opportunityId && input.discountPercent.greaterThan(0)) {
+  // D22: a sale priced on the invoice page differs from the catalogue line by line — its snapshot is its own total too.
+  if (opportunityId && (input.discountPercent.greaterThan(0) || terms)) {
     await tx.opportunityOrder.updateMany({ where: { orderId, opportunityId }, data: { directGross: priced.gross, directTax: priced.tax } });
     if (link.created) await tx.opportunity.update({ where: { id: opportunityId }, data: { amount: priced.gross } });
     else await syncDealAmount(tx, opportunityId);
   }
-  const draft = await draftFromOrderIn(tx, orderId, key, { ...input.ctx, actorId: rep.id }, priced.discountPercent);
+  const draft = await draftFromOrderIn(tx, orderId, key, { ...input.ctx, actorId: rep.id }, priced.discountPercent, terms ? { lines: terms.lines, header: terms.header } : undefined);
   const req = await requestInvoiceIn(tx, draft.id, input.note, { ...input.ctx, actorId: rep.id }, input.now);
   let collectionId: string | null = null;
   if (method !== "CREDIT") {
@@ -292,16 +335,26 @@ async function notifyPending(tx: Tx, order: { id: string; orderNumber: number; c
   });
 }
 
+/** The deal a completed sale landed on (its DIRECT_SALE_COMPLETED row), for the done screen. */
+async function saleDeal(tx: Tx, orderId: string): Promise<DirectSaleResult["deal"]> {
+  const row = await tx.hrAuditLog.findFirst({ where: { action: "DIRECT_SALE_COMPLETED", entityType: "Order", entityId: orderId }, orderBy: { createdAt: "desc" }, select: { after: true } });
+  const a = row?.after as { opportunityId?: string | null; dealCreated?: boolean } | null;
+  if (!a?.opportunityId) return null;
+  const d = await tx.opportunity.findUnique({ where: { id: a.opportunityId }, select: { id: true, title: true } });
+  return d ? { id: d.id, title: d.title, joined: !a.dealCreated } : null;
+}
+
 /** A replayed key: the sale as it stands now. */
 async function describeSale(tx: Tx, orderId: string, method: PaymentChoice, repId: string, key: string): Promise<DirectSaleResult> {
   const o = await tx.order.findUniqueOrThrow({ where: { id: orderId }, select: { id: true, orderNumber: true, status: true, discountApprovalStatus: true, requestedDiscountPercent: true, opportunityLinks: { select: { opportunityId: true }, take: 1 } } });
   const inv = await tx.salesInvoice.findUnique({ where: { requestKey: key }, select: { id: true, requestedAt: true, taxTotal: true, grandTotal: true, lineExtensionTotal: true } });
   const pending = o.discountApprovalStatus === "PENDING" || o.discountApprovalStatus === "REJECTED";
-  const priced = inv ? null : await priceDirectSale(tx, await orderLines(tx, orderId), new Prisma.Decimal((o.requestedDiscountPercent ?? 0).toString()));
+  const priced = inv ? null : await priceSale(tx, orderId, new Prisma.Decimal((o.requestedDiscountPercent ?? 0).toString()), (await saleRecord(tx, orderId))?.terms ?? null);
   return {
     replayed: true, order: { id: o.id, orderNumber: o.orderNumber, status: o.status },
     discountApproval: pending ? "PENDING" : o.discountApprovalStatus === "APPROVED" ? "APPROVED" : "NONE",
     opportunityId: o.opportunityLinks[0]?.opportunityId ?? null,
+    deal: await saleDeal(tx, orderId),
     invoice: inv ? { id: inv.id, requested: !!inv.requestedAt, warnings: [] } : null,
     totals: inv ? { net: inv.lineExtensionTotal.toString(), tax: inv.taxTotal.toString(), gross: inv.grandTotal.toString(), discountPercent: (o.requestedDiscountPercent ?? 0).toString() }
       : { net: priced!.net, tax: priced!.tax, gross: priced!.gross, discountPercent: priced!.discountPercent },
@@ -309,9 +362,22 @@ async function describeSale(tx: Tx, orderId: string, method: PaymentChoice, repI
   };
 }
 
+/**
+ * «تربطه بصفقة؟» (D22, أبو فهد B2): "" / null / absent = «لا — صفقة جديدة» (a new WON deal); otherwise an OPEN deal of this
+ * customer the rep may work (theirs, or any with the all-sales view) — another rep's or no such deal: the same 404.
+ */
+async function chosenDeal(tx: Tx, actor: DirectSaleActor, customerId: string, raw: unknown): Promise<string | null> {
+  if (raw === undefined || raw === null || raw === "") return null;
+  if (typeof raw !== "string") throw refuse(400, "DEAL_INVALID", "الصفقة غير صحيحة.", "Invalid deal.");
+  const d = await tx.opportunity.findFirst({ where: { id: raw, customerId, ...(seesAllSales(actor.permissions) ? {} : { ownerId: actor.id }) }, select: { id: true, outcome: true } });
+  if (!d) throw refuse(404, "DEAL_NOT_FOUND", "الصفقة غير موجودة لهذا العميل.", "Deal not found for this customer.");
+  if (d.outcome !== "OPEN") throw refuse(409, "DEAL_CLOSED", "الصفقة مقفلة — اختر صفقة مفتوحة أو «صفقة جديدة».", "The deal is closed — choose an open deal or a new one.");
+  return d.id;
+}
+
 /** «إرسال». Throws `{ _appCode, code, errorAr }` refusals (handleDomainError maps them). */
 export async function createDirectSale(
-  input: { customerId: unknown; lines: unknown; requestKey: unknown; note?: unknown; discountPercent?: unknown; payment?: unknown; reference?: unknown },
+  input: { customerId: unknown; lines: unknown; requestKey: unknown; note?: unknown; discountPercent?: unknown; payment?: unknown; reference?: unknown; invoice?: unknown; opportunityId?: unknown },
   actor: DirectSaleActor,
   ctx: AuditContext,
   now: Date = new Date(),
@@ -319,7 +385,11 @@ export async function createDirectSale(
   if (!mayDirectSell(actor.permissions)) throw refuse(403, "FORBIDDEN", "ما عندك صلاحية البيع المباشر.", "You may not make a direct sale.");
   const key = directSaleRequestKey(input.requestKey);
   const customerId = await assertDirectSaleCustomer(prisma, actor, input.customerId);
-  const { percent: discountPercent, needsApproval } = parseDiscount(input.discountPercent, await discountThreshold(prisma), mayApproveDiscount(actor.permissions));
+  // D22: from the tax invoice page — the lines carry their own price / discount / VAT (direct-sale-terms.ts); the approval
+  // is decided on the highest line's effective discount inside the transaction. The wizard: one discount on every line.
+  const termsMode = hasTerms(input);
+  const header = termsMode ? parseHeader(input.invoice) : null;
+  let { percent: discountPercent, needsApproval } = termsMode ? { percent: new Prisma.Decimal(0), needsApproval: false } : parseDiscount(input.discountPercent, await discountThreshold(prisma), mayApproveDiscount(actor.permissions));
   const method = (PAYMENT_CHOICES as readonly string[]).includes(String(input.payment)) ? input.payment as PaymentChoice : null;
   if (!method) throw refuse(400, "PAYMENT_REQUIRED", "اختر طريقة الدفع: كاش أو شبكة أو تحويل بنكي أو آجل.", "Choose how the customer pays: cash, card, bank transfer or on account.");
   const reference = parseTransferReference(input.reference, method);
@@ -338,7 +408,18 @@ export async function createDirectSale(
       return describeSale(tx, hit.entityId, a.payment ?? method, actor.id, key);
     }
 
-    const priced = await priceDirectSale(tx, input.lines, discountPercent);
+    let terms: SaleTerms | null = null;
+    let priced: SalePrice;
+    if (termsMode) {
+      const threshold = await discountThreshold(tx);
+      // D22 (owner, option 1): S at the default rate unless the rep holds sales › invoice_tax_override (else 400 TAX_LOCKED).
+      const t = await priceTerms(tx, input.lines, threshold, "0", mayOverrideTax(actor.permissions));
+      ({ percent: discountPercent, needsApproval } = termsApproval(t.quote, threshold, mayApproveDiscount(actor.permissions)));
+      terms = { lines: t.terms, header: header!, dealId: await chosenDeal(tx, actor, customerId, input.opportunityId) };
+      priced = t.quote;
+    } else {
+      priced = await priceDirectSale(tx, input.lines, discountPercent);
+    }
     const resolved = await resolveOrderLines(tx, priced.lines.map((l) => ({ productSkuId: l.productSkuId, quantityUnits: l.quantityUnits })));
     const note = typeof input.note === "string" ? input.note.trim().slice(0, 1000) || null : null;
     const order = await createOrderWithNumber(tx, { customerId, notes: ["بيع مباشر", note].filter(Boolean).join(" — "), ownerId: actor.id, channel: "DIRECT_SALE" }, resolved, false);
@@ -355,18 +436,18 @@ export async function createDirectSale(
     });
     await audit(tx, {
       action: "DIRECT_SALE_CREATED", entityType: "Order", entityId: order.id, actorId: actor.id,
-      after: { orderNumber: order.orderNumber, customerId, requestKey: key, payment: method, reference, note, discountPercent: priced.discountPercent, pending: needsApproval, subtotal: priced.subtotal, gross: priced.gross, lines: priced.lines.length },
+      after: { orderNumber: order.orderNumber, customerId, requestKey: key, payment: method, reference, note, discountPercent: priced.discountPercent, pending: needsApproval, subtotal: priced.subtotal, gross: priced.gross, lines: priced.lines.length, ...(terms ? { terms, source: "INVOICE_PAGE" } : {}) } as unknown as Prisma.InputJsonValue,
     });
     if (needsApproval) {
       await notifyPending(tx, { id: order.id, orderNumber: order.orderNumber, customerId }, discountPercent, actor.id);
       return {
-        replayed: false, order: { id: order.id, orderNumber: order.orderNumber, status: order.status }, discountApproval: "PENDING", opportunityId: null, invoice: null,
+        replayed: false, order: { id: order.id, orderNumber: order.orderNumber, status: order.status }, discountApproval: "PENDING", opportunityId: null, deal: null, invoice: null,
         totals: { net: priced.net, tax: priced.tax, gross: priced.gross, discountPercent: priced.discountPercent }, payment: { method, collectionId: null },
       } satisfies DirectSaleResult;
     }
-    const done = await completeSale(tx, { orderId: order.id, orderNumber: order.orderNumber, customerId, rep: actor, key, discountPercent, method, reference, note, ctx, now });
+    const done = await completeSale(tx, { orderId: order.id, orderNumber: order.orderNumber, customerId, rep: actor, key, discountPercent, method, reference, note, ctx, now, terms });
     return {
-      replayed: false, order: { id: order.id, orderNumber: order.orderNumber, status: order.status }, discountApproval: "NONE", opportunityId: done.opportunityId, invoice: done.invoice,
+      replayed: false, order: { id: order.id, orderNumber: order.orderNumber, status: order.status }, discountApproval: "NONE", opportunityId: done.opportunityId, deal: await saleDeal(tx, order.id), invoice: done.invoice,
       totals: { net: done.priced.net, tax: done.priced.tax, gross: done.priced.gross, discountPercent: done.priced.discountPercent }, payment: { method, collectionId: done.collectionId },
     } satisfies DirectSaleResult;
   }, TX_OPTS);
@@ -409,8 +490,9 @@ export async function decideDirectSaleDiscount(input: { orderId: string; decisio
     const note = (input.note ?? "").trim().slice(0, 1000);
     if (input.decision === "REJECT" && note.length < 3) throw refuse(400, "REASON_REQUIRED", "اكتب سبب الرفض.", "Give the reason for the refusal.");
     const percent = new Prisma.Decimal((o.requestedDiscountPercent ?? 0).toString());
+    const terms = (await saleRecord(tx, o.id))?.terms ?? null;
     // A refusal must stay possible when the order can no longer be priced (gate L4); an approval needs the price.
-    const priced = await priceDirectSale(tx, await orderLines(tx, o.id), percent).catch((e) => { if (input.decision === "APPROVE") throw e; return null; });
+    const priced = await priceSale(tx, o.id, percent, terms).catch((e) => { if (input.decision === "APPROVE") throw e; return null; });
     if (input.expected && ((input.expected.discountPercent && new Prisma.Decimal(input.expected.discountPercent).toFixed(2) !== percent.toFixed(2)) || (input.expected.grandTotal && priced && input.expected.grandTotal !== priced.gross))) {
       throw refuse(409, "STALE_REQUEST", "تغيّر الطلب من بعد ما فتحته — حدّث الصفحة.", "The order changed since you opened it — refresh.");
     }
@@ -424,7 +506,7 @@ export async function decideDirectSaleDiscount(input: { orderId: string; decisio
     } else {
       await tx.order.update({ where: { id: o.id }, data: { status: o.status === "Waiting Approval" ? "Waiting Preparation Review" : o.status, discountApprovalStatus: "APPROVED", discountApprovedById: input.actor.id, discountApprovedAt: now } });
       await appendOrderActivity(tx, { orderId: o.id, type: "DIRECT_SALE", authorId: input.actor.id, authorName: input.actor.name, message: `اعتُمد الخصم ${percent.toString()}٪`, metadata: { decision: "APPROVE", percent: percent.toFixed(2) } });
-      const done = await completeSale(tx, { orderId: o.id, orderNumber: o.orderNumber, customerId: sale.customerId, rep: await repOf(tx, o.ownerId), key: sale.requestKey, discountPercent: percent, method: sale.payment, reference: sale.reference, note: sale.note, ctx: input.ctx, now });
+      const done = await completeSale(tx, { orderId: o.id, orderNumber: o.orderNumber, customerId: sale.customerId, rep: await repOf(tx, o.ownerId), key: sale.requestKey, discountPercent: percent, method: sale.payment, reference: sale.reference, note: sale.note, ctx: input.ctx, now, terms: sale.terms });
       if (sale.payment === "BANK_TRANSFER" && done.opportunityId && done.collectionId) receiptDue = { dealId: done.opportunityId };
     }
     await audit(tx, { action: input.decision === "APPROVE" ? "DIRECT_SALE_DISCOUNT_APPROVED" : "DIRECT_SALE_DISCOUNT_REJECTED", entityType: "Order", entityId: o.id, actorId: input.actor.id, after: { percent: percent.toFixed(2), gross: priced?.gross ?? null, note: note || null } });
@@ -453,16 +535,26 @@ export async function resubmitDirectSale(input: { orderId: string; discountPerce
     if (o.discountApprovalStatus !== "REJECTED" || ["Cancelled", "Rejected"].includes(o.status)) throw refuse(409, "NOT_REJECTED", "الطلب ما انرفض خصمه.", "This order's discount was not refused.");
     const sale = await saleRecord(tx, o.id);
     if (!sale) throw refuse(409, "NOT_A_DIRECT_SALE", "الطلب ما هو بيع مباشر.", "This order is not a direct sale.");
-    const { percent, needsApproval } = parseDiscount(input.discountPercent, await discountThreshold(tx), mayApproveDiscount(input.actor.permissions));
+    // D22: a sale made on the invoice page gets the new discount on every line (its prices / VAT stay), re-priced as terms.
+    let percent: Prisma.Decimal; let needsApproval: boolean; let terms: SaleTerms | null = null;
+    if (sale.terms) {
+      const threshold = await discountThreshold(tx);
+      const d = parseDiscount(input.discountPercent, new Prisma.Decimal(DISCOUNT_MAX), true).percent.toFixed(2);
+      const t = await priceTerms(tx, sale.terms.lines.map((l) => ({ ...l, discountPercent: d })), threshold);
+      ({ percent, needsApproval } = termsApproval(t.quote, threshold, mayApproveDiscount(input.actor.permissions)));
+      terms = { lines: t.terms, header: sale.terms.header };
+    } else {
+      ({ percent, needsApproval } = parseDiscount(input.discountPercent, await discountThreshold(tx), mayApproveDiscount(input.actor.permissions)));
+    }
     if (needsApproval) {
       await tx.order.update({ where: { id: o.id }, data: { discountApprovalStatus: "PENDING", requestedDiscountPercent: percent.toFixed(2) } });
       await notifyPending(tx, o, percent, input.actor.id);
     } else {
       await tx.order.update({ where: { id: o.id }, data: { status: o.status === "Waiting Approval" ? "Waiting Preparation Review" : o.status, discountApprovalStatus: "NONE", requestedDiscountPercent: null } });
-      await completeSale(tx, { orderId: o.id, orderNumber: o.orderNumber, customerId: sale.customerId, rep: input.actor, key: sale.requestKey, discountPercent: percent, method: sale.payment, reference: sale.reference, note: sale.note, ctx: input.ctx, now });
+      await completeSale(tx, { orderId: o.id, orderNumber: o.orderNumber, customerId: sale.customerId, rep: input.actor, key: sale.requestKey, discountPercent: percent, method: sale.payment, reference: sale.reference, note: sale.note, ctx: input.ctx, now, terms });
     }
     await appendOrderActivity(tx, { orderId: o.id, type: "DIRECT_SALE", authorId: input.actor.id, authorName: input.actor.name, message: needsApproval ? `أُعيد الإرسال بخصم ${percent.toString()}٪ — بانتظار موافقة المشرف` : `أُعيد الإرسال بخصم ${percent.toString()}٪`, metadata: { resubmit: true, percent: percent.toFixed(2) } });
-    await audit(tx, { action: "DIRECT_SALE_RESUBMITTED", entityType: "Order", entityId: o.id, actorId: input.actor.id, after: { percent: percent.toFixed(2), pending: needsApproval } });
+    await audit(tx, { action: "DIRECT_SALE_RESUBMITTED", entityType: "Order", entityId: o.id, actorId: input.actor.id, after: { percent: percent.toFixed(2), pending: needsApproval, ...(terms ? { terms } : {}) } as unknown as Prisma.InputJsonValue });
     return { pending: needsApproval, orderId: o.id };
   }, TX_OPTS);
   if (!out.pending) await autoPrepareOrder(out.orderId, "order_created", { id: input.actor.id, name: input.actor.name });

@@ -658,7 +658,8 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       <h2 className="bt">{ar ? "البنود" : "Lines"}</h2>
       {editable ? (
         <span className="sub">
-          {ar ? `الضريبة تُحسب لكل بند بعد الخصم · خصم البند حتى ${DISCOUNT_MAX}%` : `Tax per line after discount · line discount up to ${DISCOUNT_MAX}%`}
+          {/* أبو فهد (wording): two different limits — the approval threshold and the hard ceiling — said apart. */}
+          {ar ? `الضريبة تُحسب لكل بند بعد الخصم · موافقة المشرف فوق ${threshold}٪ · الحد الأقصى ${DISCOUNT_MAX}٪` : `Tax per line after discount · supervisor approval above ${threshold}% · maximum ${DISCOUNT_MAX}%`}
         </span>
       ) : quote.issuedAt ? (
         <span className="sub">{ar ? "مثبّتة كما أُرسلت للعميل" : "Frozen as sent to the customer"}</span>

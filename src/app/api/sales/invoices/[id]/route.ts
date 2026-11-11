@@ -1,4 +1,5 @@
 import { requireInvoiceDuty } from "@/lib/services/invoicing/guard";
+import { sampleInvoiceInfo } from "@/lib/services/invoicing/sample-hold";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { forbidden, requireAuth } from "@/lib/auth-server";
@@ -41,6 +42,8 @@ export async function GET(_request: Request, { params }: Ctx) {
     return NextResponse.json({
       ...documentJson(doc, { entries: entries.map((e) => ({ id: e.id, ref: postingRef(e), event: e.sourceEvent, status: String(e.status) })) }),
       customer, order, people, history, credit,
+      // D22: a sample's invoice — its deal, and whether its issue waits for the manager (أبو فهد B1).
+      sample: (await sampleInvoiceInfo(prisma, [doc])).get(doc.id) ?? null,
       // What would stop the issue now (a draft only): warnings on a request, the list «حفظ وإصدار» lands on (NOT_READY).
       problems: doc.status === "DRAFT" ? await draftProblems(prisma, doc) : [],
       can: { ...can, self: doc.createdById === user.id, requester: doc.requestedById === user.id },

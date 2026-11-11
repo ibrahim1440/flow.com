@@ -3,9 +3,11 @@
 // A new invoice draft: «فاتورة يدوية» (Figma ZT-14) or «إنشاء فاتورة من الطلب» (?orderId=…, the order's lines with
 // what is ordered, delivered, already invoiced and left; full, partial or delivered-only). Saving creates a DRAFT
 // (no number) and opens it; issuing is a separate, privileged step on the draft.
+import { useUser } from "@/app/dashboard/user-context";
+import { canIssueInvoices } from "@/lib/services/invoicing/access";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { use, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useRef, useState } from "react";
 import { OpsLoading } from "@/components/ops/ui";
 import { Select } from "@/components/ui/Select";
 import { InvShell, Msg, money, useApi, useLang, useWrite, todayRiyadh } from "../_ui/inv";
@@ -15,6 +17,7 @@ import { useTerm } from "@/components/chrome";
 import { useAccountantView } from "../../../accounting/_ui/qoyod-pages";
 import { PartyCard } from "@/components/forms/QoyodForm";
 import { UNASSIGNED_LOCATION, useLocations } from "../../../accounting/_ui/locations";
+import { DirectDealPicker, DoneCard, ModeBadge, PaymentSection, SampleDealPicker, samplePaidText, SampleNotes, effectiveDiscounts, isSaleMode, lineForSku, modeLine, sendMode, useModeData, type ModeDone, type SaleMode } from "../_ui/sale-mode";
 
 type Customer = { id: string; name: string; nameAr: string | null; vatNumber: string | null; commercialRegNo: string | null; city: string | null; address: string | null; paymentTermsDays: number | null;
   nationalBuildingNo?: string | null; nationalStreet?: string | null; nationalDistrict?: string | null; nationalCity?: string | null; nationalPostalCode?: string | null };
@@ -24,13 +27,16 @@ type OrderFacts = {
   lines: { orderItemId: string; description: string; skuCode: string | null; unit: "UNIT" | "KG"; ordered: string; delivered: string; drafted: string; issued: string; remaining: string; deliveredNotInvoiced: string; price: { source: "QUOTE" | "SKU" | "NONE"; unitPrice: string } }[];
   invoices: { id: string; number: string | null; status: string; grandTotal: string }[];
 };
-type Search = { orderId?: string; q?: string };
+type Search = { orderId?: string; q?: string; mode?: string; customerId?: string; opportunityId?: string };
 const NO_SEARCH: Promise<Search> = Promise.resolve({});
 const newKey = () => `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 
 export default function NewInvoicePage({ searchParams = NO_SEARCH }: { searchParams?: Promise<Search> }) {
   const sp = use(searchParams);
-  return sp.orderId ? <FromOrder orderId={sp.orderId} /> : <Manual initialQ={sp.q} />;
+  // D22: «بيع مباشر (فاتورة ضريبية بدون عرض سعر)» (?mode=direct-sale) and «إرسال عيّنة» (?mode=sample) — this same page,
+  // with the mode's additions (_ui/sale-mode.tsx); without a mode the manual invoice is exactly as before.
+  if (sp.orderId) return <FromOrder orderId={sp.orderId} />;
+  return isSaleMode(sp.mode) ? <Manual initialQ={sp.q} mode={sp.mode} initialCustomerId={sp.customerId} opportunityId={sp.opportunityId} /> : <Manual initialQ={sp.q} />;
 }
 
 function FromOrder({ orderId }: { orderId: string }) {
@@ -99,8 +105,8 @@ function FromOrder({ orderId }: { orderId: string }) {
 
 const blankBuyer = (): Buyer => ({ name: "", vatNumber: "", crNumber: "", city: "", district: "", street: "", buildingNo: "", postalCode: "" });
 
-function Manual({ initialQ }: { initialQ?: string }) {
-  const { L } = useLang();
+function Manual({ initialQ, mode = null, initialCustomerId, opportunityId }: { initialQ?: string; mode?: SaleMode | null; initialCustomerId?: string; opportunityId?: string }) {
+  const { L, ar: isAr } = useLang();
   const router = useRouter();
   const w = useWrite();
   // «العملاء» of the accountant: «فاتورة» opens here with the customer's name already searched (?q=).
@@ -112,7 +118,7 @@ function Manual({ initialQ }: { initialQ?: string }) {
   const [supplyDate, setSupplyDate] = useState(todayRiyadh());
   const [terms, setTerms] = useState("");
   const [notes, setNotes] = useState("");
-  const [lines, setLines] = useState<EditLine[]>([emptyLine()]);
+  const [lines, setLines] = useState<EditLine[]>(() => [mode ? modeLine(mode)() : emptyLine()]);
   // «الموقع» (WP-B, council Q-F1 / Q-F4): "" = the default (the order's, else the requester's branch), "none" = «غير محدد».
   const [branchId, setBranchId] = useState("");
   const branches = useLocations();
@@ -126,7 +132,38 @@ function Manual({ initialQ }: { initialQ?: string }) {
     setFamily(c.vatNumber ? "STANDARD" : "SIMPLIFIED");
   };
   const options = useMemo(() => custs.data?.items ?? [], [custs.data]);
+  // ── D22 modes only (every hook below is idle without a mode) ──
+  const md = useModeData(mode, customer?.id ?? null);
+  const asked = useApi<{ items: Customer[] }>(mode && initialCustomerId ? `/api/sales/invoices/customers?id=${encodeURIComponent(initialCustomerId)}` : null);
+  const prefilled = useRef(false);
+  const askedFirst = asked.data?.items[0] ?? null;
+  useEffect(() => {
+    // «＋» from a customer: the page opens on that customer (once; «تغيير» still works).
+    if (!askedFirst || prefilled.current) return;
+    prefilled.current = true;
+    pickCustomer(askedFirst);
+  }, [askedFirst]);
+  const [payment, setPayment] = useState<"CASH" | "CARD" | "BANK_TRANSFER" | "CREDIT" | null>(null);
+  const [reference, setReference] = useState("");
+  const [receipt, setReceipt] = useState<File | null>(null);
+  const [done, setDone] = useState<ModeDone | null>(null);
+  const [sending, setSending] = useState(false);
+  // «إرسال عيّنة» with several open deals: the deal chosen (default: the one passed in, else the most recent — owner 2أ).
+  const [pickedDeal, setPickedDeal] = useState<string | null>(null);
+  const sampleDeals = md.facts?.deals ?? [];
+  const sampleDeal = pickedDeal && sampleDeals.some((d) => d.id === pickedDeal) ? pickedDeal
+    : opportunityId && customer?.id === initialCustomerId && sampleDeals.some((d) => d.id === opportunityId) ? opportunityId
+    : sampleDeals[0]?.id ?? null;
+  // «بيع مباشر» (أبو فهد B2): «لا — صفقة جديدة» unless the rep picks one of the customer's open deals (per customer).
+  const [directPick, setDirectPick] = useState<{ customerId: string; dealId: string } | null>(null);
+  const directDeal = directPick && directPick.customerId === customer?.id && md.directDeals.some((d) => d.id === directPick.dealId) ? directPick.dealId : "";
   const qoyod = useAccountantView();
+  // أبو فهد (clutter): in the D22 modes a rep (no invoices_issue) sees the sale, not the accountant's fields — the invoice
+  // type, dates and the buyer's particulars are prefilled from the customer and folded away; the checks wait for the first
+  // «أرسل». The accountant (invoices_issue) sees everything, as on the manual invoice.
+  const viewer = useUser();
+  const simple = !!mode && !(viewer && canIssueInvoices(viewer.permissions));
+  const [tried, setTried] = useState(false);
   const t = useTerm();
   // The customer card's «الرصيد الحالي» (the accountant workspace): the AR aging's balance for the customer.
   const ar = useApi<{ rows: { customerId: string; balance: string; overdue: string }[] }>(qoyod && customer ? `/api/accounting/ar/aging?asOf=${todayRiyadh()}` : null);
@@ -146,10 +183,37 @@ function Manual({ initialQ }: { initialQ?: string }) {
     </>
   );
   // Q-F2: who may do what decides the split button (Sales requests; an issuer saves and issues). The API re-checks.
-  const abilities = useApi<{ can: { create: boolean; issue: boolean; sellAssets?: boolean } }>("/api/sales/invoices?take=1");
-  const series = useApi<{ invoicePrefix: string }>("/api/sales/invoices/settings");
+  // أبو فهد B6: the manual invoice's own questions (who may issue, the series) — not asked in the D22 modes, whose rep may
+  // hold invoices_create without invoices_view (two 403s in the console for nothing).
+  const abilities = useApi<{ can: { create: boolean; issue: boolean; sellAssets?: boolean } }>(mode ? null : "/api/sales/invoices?take=1");
+  const series = useApi<{ invoicePrefix: string }>(mode ? null : "/api/sales/invoices/settings");
   const can = abilities.data?.can ?? { create: false, issue: false };
   const totals = useTotals(lines);
+  const eff = mode ? effectiveDiscounts(lines, lines.map((_, i) => totals.priced?.lines[i]?.lineNet.toFixed(2) ?? null), md.skus) : [];
+  const topEff = eff.length ? Math.max(...eff) : 0;
+  const needsApproval = mode === "direct-sale" && !!md.can && topEff > md.can.threshold && !md.can.approveDiscount;
+  const lockTax = !(mode === "sample" ? md.facts?.taxOverride : md.can?.taxOverride);
+  const modeGross = totals.priced ? Number(totals.priced.grandTotal.toFixed(2)) : 0;
+  // A second sample of a product this year (the same rule SampleNotes shows): its «أرسل» says where it goes.
+  const repeatSample = mode === "sample" && !!md.facts && lines.some((l) => { const s = md.skus.find((x) => x.id === l.productSkuId); return !!s?.productId && md.facts!.sampledProducts.some((p) => p.productId === s.productId); });
+  const modeReady = !!mode && !!customer && totals.ok && lines.length > 0 && lines.every((l) => !!l.productSkuId) && (mode === "sample" || !!payment);
+  const sendSale = async () => {
+    setTried(true);
+    if (!mode || !customer || !modeReady || sending) return;
+    w.setError(null);
+    const body = {
+      customerId: customer.id, requestKey: key, note: notes || undefined,
+      lines: lines.map((l) => ({ productSkuId: l.productSkuId, quantityUnits: Number(l.quantity), unitPrice: l.unitPrice, discountPercent: l.discountPercent, taxCategory: l.taxCategory, taxRatePercent: l.taxRatePercent, exemptionReasonCode: l.exemptionReasonCode ?? null })),
+      invoice: { family, buyer, supplyDate, paymentTermsDays: terms || undefined, notes, ...(branchId ? { branchId: branchId === UNASSIGNED_LOCATION ? null : branchId } : {}) },
+      // A sample goes on the deal chosen (or passed in from the deal page); with no open deal the server opens one.
+      ...(mode === "sample" && sampleDeal ? { opportunityId: sampleDeal } : {}),
+      ...(mode === "direct-sale" ? { payment, reference: payment === "BANK_TRANSFER" ? reference.trim() || undefined : undefined, opportunityId: directDeal || null, dealTitle: md.directDeals.find((d) => d.id === directDeal)?.title } : {}),
+    };
+    setSending(true);
+    const r = await sendMode(mode, body, payment === "BANK_TRANSFER" ? receipt : null, L);
+    setSending(false);
+    if (r.ok) setDone(r.done); else w.setError(r.error);
+  };
   const [confirm, setConfirm] = useState<null | "issue" | "print" | "pdf">(null);
   const payload = () => ({ customerId: customer!.id, family, buyer, supplyDate, paymentTermsDays: terms || undefined, notes, lines, requestKey: key,
     ...(branchId ? { branchId: branchId === UNASSIGNED_LOCATION ? null : branchId } : {}) });
@@ -177,9 +241,18 @@ function Manual({ initialQ }: { initialQ?: string }) {
     if (!res.ok) { w.setError(b.error ?? b.errorEn ?? `HTTP ${res.status}`); return; }
     router.push(then === "issue" ? `/dashboard/sales/invoices/${b.id}` : `/dashboard/sales/invoices/${b.id}/print${then === "pdf" ? "?pdf=1" : ""}`);
   };
+  if (mode && done) {
+    return (
+      <InvShell title={L("فاتورة مبيعات جديدة", "New sales invoice")} testId="invoice-new" bare={simple}>
+        <ModeBadge mode={mode} />
+        <DoneCard done={done} />
+      </InvShell>
+    );
+  }
   return (
-    <InvShell title={L("فاتورة مبيعات جديدة", "New sales invoice")} testId="invoice-new">
-      <Msg error={w.error} />
+    <InvShell title={L("فاتورة مبيعات جديدة", "New sales invoice")} testId="invoice-new" bare={simple}>
+      {mode ? <ModeBadge mode={mode} lockTax={lockTax} gross={modeGross} /> : null}
+      <Msg error={w.error ?? (mode ? md.error : null)} />
       <div className="acct-card">
         <h2>{L("العميل", "Customer")}</h2>
         {customer ? (
@@ -198,6 +271,8 @@ function Manual({ initialQ }: { initialQ?: string }) {
         <>
           {/* Qoyod parity (accountant workspace): the header reads party → date → terms → type, the lines and totals
               follow, and the buyer's particulars come after the lines. Same fields and payload for everyone. */}
+          {mode === "sample" ? <SampleDealPicker facts={md.facts} value={sampleDeal ?? ""} onChange={setPickedDeal} /> : null}
+          {mode === "direct-sale" && customer ? <DirectDealPicker deals={md.directDeals} customerNames={md.directNames} value={directDeal} onChange={(id) => setDirectPick({ customerId: customer.id, dealId: id })} /> : null}
           {qoyod ? (
             <PartyCard title={L("تفاصيل بيانات العميل", "Customer details")} empty="—" testId="invoice-party"
               action={<Link className="hr-btn is-sm" href={`/dashboard/customers/${customer.id}`} data-testid="invoice-party-edit">✎ {L("تعديل بيانات العميل", "Edit the customer")}</Link>}
@@ -207,7 +282,7 @@ function Manual({ initialQ }: { initialQ?: string }) {
                 ...(arRow ? [{ k: L("الرصيد الحالي", "Current balance"), v: <bdi className="hr-num">{money(arRow.balance)} {L("⃁", "SAR")}</bdi>, tone: Number(arRow.overdue) > 0 ? ("bad" as const) : ("good" as const), testId: "invoice-party-balance" }] : []),
               ]} />
           ) : null}
-          <div className="acct-card" data-testid="invoice-header">
+          {simple ? null : <div className="acct-card" data-testid="invoice-header">
             {qoyod ? (
               <div className="acct-row">
                 <label className="hr-field"><span className="hr-label">{L("المرجع", "Reference")}</span><span className="hr-input" aria-readonly="true" data-testid="invoice-ref-placeholder" style={{ display: "flex", alignItems: "center", color: "var(--text-muted)" }}>{L("يُعطى الرقم عند الإصدار", "The number is given at issue")}</span></label>
@@ -229,16 +304,62 @@ function Manual({ initialQ }: { initialQ?: string }) {
               {qoyod ? familyField : null}
             </div>
             {qoyod ? null : buyerBlock}
-          </div>
+          </div>}
+          {simple ? (
+            <details className="acct-card inv-acct-fields" data-testid="invoice-accountant-fields">
+              <summary>{L("بيانات الفاتورة والمشتري — من ملف العميل، والمحاسب يراجعها", "Invoice and buyer particulars — from the customer's file; the accountant reviews them")}</summary>
+              <div className="acct-row">
+                {familyField}
+                <label className="hr-field"><span className="hr-label">{L("تاريخ التوريد", "Supply date")}</span><input type="date" className="hr-input" value={supplyDate} onChange={(e) => setSupplyDate(e.target.value)} data-testid="supply-date" /></label>
+                <label className="hr-field"><span className="hr-label">{L("مدة السداد (يوم)", "Payment terms (days)")}</span><input className="hr-input acct-amount" inputMode="numeric" value={terms} onChange={(e) => setTerms(e.target.value)} placeholder="30" /></label>
+              </div>
+              {buyerBlock}
+            </details>
+          ) : null}
           <div className="acct-card">
             <h2>{L("البنود", "Lines")}</h2>
+            {mode ? (
+              <LinesEditor lines={lines} onChange={setLines} sellAssets={false} qoyod={qoyod} newLine={modeLine(mode)}
+                sku={{ skus: md.skus, ar: isAr, oneUnit: mode === "sample", lockTax, quietProblems: simple && !tried, onPick: (i, sk) => setLines(lines.map((l, j) => (j === i ? lineForSku(mode, l, md.skus.find((x) => x.id === sk?.id) ?? null, isAr) : l))) }} />
+            ) : (
             <LinesEditor lines={lines} onChange={setLines} sellAssets={!!abilities.data?.can.sellAssets} qoyod={qoyod} />
+            )}
+            {mode === "direct-sale" && md.can ? (
+              <p className={`acct-hint${needsApproval ? " is-warn" : ""}`} data-testid="mode-discount-note" data-pending={needsApproval ? "1" : "0"}>
+                {needsApproval
+                  ? L(`خصم ${topEff}٪ من سعر القائمة فوق الحد (${md.can.threshold}٪). لما ترسل يروح لمشرفك يوافق — الطلب ينتظر، والفاتورة ما تروح للمحاسب قبل الموافقة.`, `${topEff}% off the list price is above the limit (${md.can.threshold}%). When you send, it goes to your supervisor — the order waits, and the invoice reaches the accountant only after the approval.`)
+                  : lockTax
+                    ? L(`لين ${md.can.threshold}٪ بدون موافقة. فوقها يروح لمشرفك يوافق. السعر والخصم تقدر تعدّلها — الضريبة 15٪ ثابتة، والمحاسب يراجع قبل ما يصدر`, `Up to ${md.can.threshold}% needs no approval; above it your supervisor approves. You can change the price and the discount — VAT is a fixed 15%, and the accountant reviews before issue`)
+                    : L(`لين ${md.can.threshold}٪ بدون موافقة. فوقها يروح لمشرفك يوافق. السعر والخصم والضريبة تقدر تعدّلها — المحاسب يراجع قبل ما يصدر`, `Up to ${md.can.threshold}% needs no approval; above it your supervisor approves. You can change the price, discount and VAT — the accountant reviews before issue`)}
+              </p>
+            ) : null}
+            {mode === "sample" ? <p className="acct-hint" data-testid="sample-qty-hint">{L("عبوة وحدة لكل صنف", "One unit of each product")}</p> : null}
+            {mode === "sample" ? <SampleNotes lines={lines} skus={md.skus} facts={md.facts} /> : null}
             <div className="inv-grid2">
               <label className="hr-field"><span className="hr-label">{L("ملاحظات للعميل", "Notes to the customer")}</span><textarea className="hr-input" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
               <Totals lines={lines} qoyod={qoyod} />
             </div>
           </div>
           {qoyod ? <div className="acct-card" data-testid="buyer-card">{buyerBlock}</div> : null}
+          {mode === "direct-sale" ? <PaymentSection can={md.can} payment={payment} setPayment={setPayment} reference={reference} setReference={setReference} receipt={receipt} setReceipt={setReceipt} pending={needsApproval} /> : null}
+          {mode ? (
+            <div className="acct-foot inv-mode-foot" data-testid="invoice-mode-foot">
+              {/* أبو فهد (B4 / wording): what «أرسل» does, as the state really is — never a line that contradicts it. */}
+              <span className="acct-hint" data-testid="invoice-mode-foot-text">{mode === "sample"
+                ? (modeGross > 0
+                  ? <>{L("لما تضغط «أرسل»: تنسوّى شحنة العيّنة وتروح للتحضير · ", "On «Send»: the sample goes to preparation · ")}{samplePaidText(modeGross, L)}</>
+                  : L("لما تضغط «أرسل»: تنسوّى شحنة العيّنة وتروح للتحضير · الفاتورة بصفر تروح للمحاسب يصدرها · ما فيه دفع", "On «Send»: the sample goes to preparation · the zero invoice goes to the accountant to issue · no payment"))
+                : needsApproval
+                  ? L("لما تضغط «أرسل»: يروح لمشرفك يوافق — بعدها الطلب للتحضير والفاتورة للمحاسب", "On «Send»: it goes to your supervisor — then the order to preparation and the invoice to the accountant")
+                  : payment === "CREDIT"
+                    ? L("لما تضغط «أرسل»: ينسوّى الطلب ويروح للتحضير · تروح الفاتورة للمحاسب يصدرها · ما ينسجل تحصيل — الفاتورة تنتظر الدفع", "On «Send»: the order goes to preparation · the invoice goes to the accountant to issue · no collection is recorded — the invoice waits for payment")
+                    : L("لما تضغط «أرسل»: ينسوّى الطلب ويروح للتحضير · تروح الفاتورة للمحاسب يصدرها · ينسجل التحصيل", "On «Send»: the order goes to preparation · the invoice goes to the accountant to issue · the collection is recorded")}</span>
+              <span className="acct-actions">
+                <button type="button" className="hr-btn is-primary" disabled={sending || ((!simple || tried) && !modeReady)} onClick={sendSale} data-testid="invoice-mode-send">{sending ? L("نرسل…", "Sending…") : needsApproval ? L("أرسل للموافقة", "Send for approval") : repeatSample ? L("أرسل للمدير يوافق", "Send to the manager to approve") : L("أرسل", "Send")}</button>
+                <Link className="hr-btn" href="/dashboard/my-day">{L("إلغاء", "Cancel")}</Link>
+              </span>
+            </div>
+          ) : (
           <div className="acct-foot">
             <span className="acct-hint">{L("تُحفظ مسودة بلا رقم؛ الرقم يُعطى عند الإصدار.", "Saved as a draft without a number; the number is given at issue.")}</span>
             <span className="acct-actions">
@@ -257,6 +378,7 @@ function Manual({ initialQ }: { initialQ?: string }) {
               ) : null}
             </span>
           </div>
+          )}
           {confirm && totals.priced ? (
             <IssueConfirm busy={!!w.busy} onClose={() => setConfirm(null)} onConfirm={() => saveAndIssue(confirm)}
               facts={{ customer: buyer.name || customer.nameAr || customer.name, vatNumber: buyer.vatNumber || null, family,

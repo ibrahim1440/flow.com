@@ -71,7 +71,8 @@ export const QUOTE_STATE_LABELS: Record<QuoteState, { ar: string; en: string }> 
 export type DealActionKey =
   | "RECORD_NEEDS" | "REQUEST_SAMPLE" | "SEND_SAMPLE" | "RECORD_SAMPLE_EVALUATION" | "SKIP_SAMPLES" | "WAIT_SAMPLE"
   | "CREATE_QUOTE" | "ISSUE_QUOTE" | "EDIT_QUOTE" | "REVISE_QUOTE" | "REQUEST_APPROVAL" | "RECORD_REPLY" | "LOG_CALL"
-  | "WIN" | "CREATE_ORDER" | "VIEW_ORDER" | "DOCUMENT_LOSS" | "REOPEN" | "ADVANCE";
+  | "WIN" | "CREATE_ORDER" | "VIEW_ORDER" | "DOCUMENT_LOSS" | "REOPEN" | "ADVANCE"
+  | "APPROVE_SAMPLE" | "DECLINE_SAMPLE";
 
 export type DealAction = {
   key: DealActionKey;
@@ -91,6 +92,8 @@ const LABEL: Record<DealActionKey, { ar: string; en: string }> = {
   RECORD_SAMPLE_EVALUATION: { ar: "سجّل رأي العميل في العيّنة", en: "Record the customer's view of the sample" },
   SKIP_SAMPLES: { ar: "العميل ما يحتاج عينات", en: "The customer needs no sample" },
   WAIT_SAMPLE: { ar: "العيّنة بانتظار الصرف", en: "The sample awaits dispatch" },
+  APPROVE_SAMPLE: { ar: "وافق", en: "Approve" },
+  DECLINE_SAMPLE: { ar: "ارفض", en: "Decline" },
   CREATE_QUOTE: { ar: "إنشاء عرض سعر", en: "Create a quotation" },
   ISSUE_QUOTE: { ar: "راجع العرض وأرسله", en: "Review and send the quotation" },
   EDIT_QUOTE: { ar: "عدّل العرض", en: "Edit the quotation" },
@@ -199,7 +202,7 @@ export function phaseOf(outcome: NextStepDeal["outcome"], purpose: StagePurpose 
   return p === "SAMPLE_EVALUATION" ? "SAMPLES" : p === "QUOTATION" ? "QUOTE" : "QUALIFIED";
 }
 
-export function dealNextStep(deal: NextStepDeal, now: Date, viewer: { approveDiscount?: boolean } = {}): DealNextStep {
+export function dealNextStep(deal: NextStepDeal, now: Date, viewer: { approveDiscount?: boolean; approveSamples?: boolean } = {}): DealNextStep {
   const purpose = deal.stagePurpose;
   const phase = phaseOf(deal.outcome, purpose);
   const q = currentQuote(deal.quotes);
@@ -284,7 +287,7 @@ export function dealNextStep(deal: NextStepDeal, now: Date, viewer: { approveDis
   }
 
   if (live.length > 0) {
-    sampleRules(live, sent, sentDue, t, state, q, required, secondary, (a) => { next = a; });
+    sampleRules(live, sent, sentDue, t, state, q, required, secondary, (a) => { next = a; }, viewer);
     return done();
   }
   if (state === "DRAFT" && q) {
@@ -314,6 +317,7 @@ function sampleRules(
   live: NextStepSample[], sent: NextStepSample | undefined, sentDue: number | null, t: number,
   state: QuoteState, q: NextStepQuote | null,
   required: DealNextStep["requiredNow"], secondary: DealAction[], setNext: (a: DealAction) => void,
+  viewer: { approveSamples?: boolean } = {},
 ) {
   if (sent) {
     const left = sentDue !== null ? Math.ceil((sentDue - t) / DAY) : SAMPLE_FEEDBACK_DAYS;
@@ -338,9 +342,13 @@ function sampleRules(
     required.push(approval
       ? { key: "SAMPLE_APPROVAL", ar: "العيّنة بانتظار اعتماد المدير", en: "The sample awaits the manager's approval" }
       : { key: "SAMPLE_DISPATCH", ar: "العيّنة بانتظار الصرف من قسم الشحن", en: "The sample awaits dispatch" });
+    // أبو فهد B7: the approver (sales manager / admin) is offered the decision itself — «وافق / ارفض» — never a grey wait.
     setNext(approval
-      ? act("WAIT_SAMPLE", { sampleId: waiting.id, disabled: true, ar: "بانتظار اعتماد المدير", en: "Awaiting the manager's approval" })
+      ? (viewer.approveSamples
+        ? act("APPROVE_SAMPLE", { sampleId: waiting.id, ar: "وافق", en: "Approve" })
+        : act("WAIT_SAMPLE", { sampleId: waiting.id, disabled: true, ar: "بانتظار اعتماد المدير", en: "Awaiting the manager's approval" }))
       : act("WAIT_SAMPLE", { sampleId: waiting.id, disabled: true }));
+    if (approval && viewer.approveSamples) secondary.push(act("DECLINE_SAMPLE", { sampleId: waiting.id, ar: "ارفض", en: "Decline" }));
     secondary.push(state === "DRAFT" && q ? act("ISSUE_QUOTE", { quoteId: q.id }) : act("CREATE_QUOTE"));
     return;
   }

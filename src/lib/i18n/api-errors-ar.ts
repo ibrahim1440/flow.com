@@ -256,6 +256,7 @@ export const API_ERRORS_AR: Readonly<Record<string, string>> = {
   "The field round was not found.": "الجولة غير موجودة.",
   "A customer with this phone number already exists.": "هذا الجوال لعميل مسجّل عندنا.",
   "The default VAT is a percentage from 0 to 100, with at most two decimals.": "ضريبة القيمة المضافة الافتراضية نسبة من 0 إلى 100 بمنزلتين على الأكثر.",
+  "The samples alert is an amount from 0 to 1,000,000 SAR, with at most two decimals.": "حد تنبيه العيّنات مبلغ من 0 إلى 1,000,000 ريال، بمنزلتين عشريتين على الأكثر.",
   "The shortfall limit is a percentage from 0 to 100, with at most two decimals.": "حد نسبة النقص من 0 إلى 100، بمنزلتين عشريتين على الأكثر.",
   "The shortfall value limit is an amount in SAR of 0 or more, with at most two decimals.": "حد قيمة النقص مبلغ بالريال من صفر فأكثر، بمنزلتين عشريتين على الأكثر.",
   "«Received at zero needs a supervisor» is on or off.": "«الاستلام بصفر يحتاج مشرفًا» تشغيل أو إيقاف.",

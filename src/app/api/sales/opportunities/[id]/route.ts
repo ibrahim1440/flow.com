@@ -3,7 +3,7 @@ import { lastClosedQuote } from "@/lib/services/sales/deal-amount";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
-import { hasSubPrivilege } from "@/lib/auth-shared";
+import { canEdit, hasSubPrivilege } from "@/lib/auth-shared";
 import { seesAllSales, collectionWhere, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
 import { collectionSummary, collectionAction } from "@/lib/services/sales/collections";
 import { serialiseSummary } from "@/app/api/sales/collections/route";
@@ -193,7 +193,7 @@ export async function GET(_request: Request, { params }: Params) {
       })),
       openActivities: deal.activities.filter((a) => !a.completedAt).map((a) => ({ id: a.id, type: a.type, dueAt: a.dueAt, sourceKey: a.sourceKey })),
       orderId: deal.orderLinks[0]?.order.id ?? null,
-    }, new Date(), { approveDiscount: hasSubPrivilege(user.permissions, "sales", "quote_approve_discount") });
+    }, new Date(), { approveDiscount: hasSubPrivilege(user.permissions, "sales", "quote_approve_discount"), approveSamples: approvesSamples(user.permissions) });
 
     // Owner decision 3: a rep's manual move waiting for a supervisor — «طلب نقل بانتظار اعتماد المشرف».
     const pending = await prisma.stageMoveRequest.findFirst({
@@ -253,6 +253,10 @@ export async function GET(_request: Request, { params }: Params) {
         moveDirectly: movesDirectly(user.permissions, await isGeneralManager(prisma, user.id)),
         // A customer's second sample of a product: the sales manager or the administrator approves it.
         approveSample: approvesSamples(user.permissions),
+        // D22: «إرسال عيّنة» opens the tax invoice page's sample mode (it prepares the zero invoice — sample-send.ts), and a
+        // deal with no customer is first made a customer (the shared new-customer form, POST /api/customers' own rule).
+        sendSample: hasSubPrivilege(user.permissions, "sales", "lead_write") && hasSubPrivilege(user.permissions, "sales", "invoices_create"),
+        makeCustomer: canEdit(user.permissions, "customers") || hasSubPrivilege(user.permissions, "sales", "lead_write") || hasSubPrivilege(user.permissions, "sales", "lead_convert"),
         createOrder: hasSubPrivilege(user.permissions, "orders", "create"),
         submitCollection: hasSubPrivilege(user.permissions, "sales", "collection_submit"),
         verifyCollection: hasSubPrivilege(user.permissions, "commissions", "collection_verify"),

@@ -399,3 +399,27 @@
   .d21-no-opt { flex-direction: column; align-items: flex-start; min-height: 0; padding: 20px 16px }
   .d21-no-chev { display: none }
 }
+
+/* D22 (owner-approved Figma 2024:2): the tab bar's «＋» menu — a popover on a wide screen, a bottom sheet on a phone
+   (the D20.1 sheet pattern: scrim, grip, title, rows of 56 px with an icon and a line under the label). */
+.d21-menu-scrim { display: none; }
+.d21-menu-head { display: none; }
+.d21-menu .d21-menu-txt { display: flex; flex-direction: column; min-width: 0; }
+@media (max-width: 767px) {
+  .d21-menu-scrim { display: block; position: fixed; inset: 0; z-index: 90; background: var(--overlay-scrim-sheet, rgba(31, 27, 22, .42)); }
+  .d21-menu.up.is-sheet { position: fixed; inset: auto 0 0 0; left: 0; transform: none; z-index: 91; min-width: 0; max-height: calc(100dvh - 48px); overflow-y: auto; overscroll-behavior: contain;
+    border-radius: 20px 20px 0 0; padding: 10px 16px calc(12px + env(safe-area-inset-bottom)); display: grid; gap: 4px; animation: d21-sheet-up .2s ease-out; }
+  .d21-menu.up.is-sheet::before { content: ""; justify-self: center; width: 36px; height: 4px; border-radius: 2px; background: var(--border-strong); margin-bottom: 6px; }
+  .d21-menu.is-sheet .d21-menu-head { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 4px; }
+  .d21-menu.is-sheet .d21-menu-head b { font-size: 17px; font-weight: 600; color: var(--text-primary); }
+  .d21-menu.is-sheet .d21-menu-x { width: 44px; height: 44px; display: grid; place-items: center; border: 0; background: none; color: var(--text-muted); cursor: pointer; border-radius: 10px; }
+  .d21-menu.is-sheet a.d21-menu-item, .d21-menu.is-sheet button.d21-menu-item { height: auto; min-height: 56px; padding: 8px 4px; gap: 12px; white-space: normal; font-size: 15px; color: var(--text-primary); border-radius: 12px; }
+  .d21-menu.is-sheet .d21-menu-item > .d21-menu-ico:first-child { flex: 0 0 44px; }
+  .d21-menu.is-sheet .d21-menu-item > .d21-menu-txt { flex: 1; text-align: start; }
+  .d21-menu.is-sheet .d21-menu-ico { flex: none; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 12px; background: var(--surface-subtle, var(--surface-hover)); color: var(--text-secondary); }
+  .d21-menu.is-sheet .d21-menu-txt > span { font-weight: 600; }
+  .d21-menu.is-sheet .d21-menu-txt small { font-size: 12.5px; color: var(--text-muted); font-weight: 400; }
+  .d21-menu.is-sheet .d21-kbd { display: none; }
+}
+@keyframes d21-sheet-up { from { transform: translateY(24px); opacity: .6; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .d21-menu.up.is-sheet { animation: none; } }

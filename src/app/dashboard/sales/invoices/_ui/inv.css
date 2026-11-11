@@ -35,6 +35,9 @@
 .inv .inv-age { display: inline-flex; align-items: center; gap: 6px; }
 .inv .inv-age.is-amber { color: var(--hr-warning); font-weight: 600; }
 .inv .inv-age.is-red { color: var(--hr-danger); font-weight: 600; }
+/* D22: a sample's invoice says so (the list, the queue, the document). */
+.inv .inv-badge { display: inline-flex; align-items: center; padding: 0 8px; border-radius: 999px; font-size: 12px; line-height: 20px; font-weight: 600; }
+.inv .inv-badge.is-sample { background: var(--hr-warning-tint, #FBF3E5); color: var(--hr-warning, #95651E); }
 .inv .inv-check-row { display: inline-flex; gap: 8px; align-items: center; min-height: 36px; font-weight: 500; }
 .inv .inv-check-row input { width: 18px; height: 18px; }
 .inv-confirm .inv-confirm-wide { grid-column: 1 / -1; }
@@ -57,3 +60,61 @@
 .inv .inv-fix { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 12px 14px; border-radius: var(--hr-r-md); background: var(--hr-subtle); border: 1px solid var(--hr-border-strong); font-size: 14px; }
 .inv .inv-fix > span { flex: 1 1 320px; line-height: 1.7; }
 @media (max-width: 767px) { .inv .inv-fix .hr-btn { width: 100%; min-height: 44px; } }
+
+/* D22 (owner-approved Figma 2010:2): «بيع مباشر (فاتورة ضريبية بدون عرض سعر)» and «إرسال عيّنة» on this page — only these
+   modes carry the classes below (the manual invoice and the invoice from an order never do). */
+.inv .inv-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; }
+.inv .inv-chip.is-mode { background: var(--hr-primary-tint, var(--hr-subtle)); color: var(--hr-primary, var(--hr-text)); font-weight: 600; height: auto; min-height: 24px; white-space: normal; }
+.inv .inv-chip.is-sand { background: var(--kp-sand-tint, var(--hr-warning-tint)); color: var(--kp-sand, var(--hr-warning)); font-weight: 600; height: auto; min-height: 24px; }
+.inv .inv-pay-row { display: grid; grid-template-columns: repeat(4, minmax(0, 150px)); gap: 10px; }
+.inv .inv-pay-opt { appearance: none; font: inherit; font-size: 15px; font-weight: 500; min-height: 48px; border-radius: 12px; border: 1px solid var(--hr-border-strong); background: var(--hr-surface); color: var(--hr-text); cursor: pointer; }
+.inv .inv-pay-opt.on { border: 2px solid var(--hr-primary, var(--hr-text)); background: var(--hr-subtle); color: var(--hr-primary, var(--hr-text)); }
+.inv .inv-pay-opt:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.inv .inv-bank { display: grid; gap: 10px; max-width: 560px; }
+.inv .inv-drop { appearance: none; font: inherit; display: grid; gap: 2px; justify-items: center; padding: 12px; border-radius: 10px; border: 1px dashed var(--hr-border-strong); background: var(--hr-subtle); color: var(--hr-text); cursor: pointer; min-height: 56px; width: 100%; }
+.inv .inv-drop small { color: var(--hr-muted); font-size: 12px; }
+.inv .inv-file { display: inline-flex; gap: 8px; align-items: center; }
+.inv .acct-hint.is-warn { color: var(--hr-warning); }
+.inv .inv-done .acct-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.inv .inv-mode-foot .acct-actions .hr-btn.is-primary { min-width: 160px; }
+@media (max-width: 767px) {
+  /* The lines as cards: one SKU per card, each field labelled; nothing scrolls sideways. */
+  .inv .inv-lines.is-cards, .inv .inv-lines.is-cards tbody, .inv .inv-lines.is-cards tr, .inv .inv-lines.is-cards td { display: block; width: 100%; }
+  .inv .inv-lines.is-cards { overflow: visible; }
+  .inv .inv-lines.is-cards thead { display: none; }
+  .inv .inv-lines.is-cards tr { position: relative; box-sizing: border-box; border: 1px solid var(--hr-border-subtle, var(--hr-border-strong)); border-radius: 12px; padding: 10px 12px; margin-block-end: 10px; background: var(--hr-surface); }
+  .inv .inv-lines.is-cards td { box-sizing: border-box; height: auto; border: 0; padding: 4px 0; min-width: 0; white-space: normal; overflow: visible; }
+  .inv .inv-lines.is-cards td .hr-input, .inv .inv-lines.is-cards td select, .inv .inv-lines.is-cards td [role="combobox"] { box-sizing: border-box; max-width: 100%; }
+  .inv .inv-lines.is-cards td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; color: var(--hr-muted); margin-block-end: 2px; }
+  .inv .inv-lines.is-cards td:first-child { display: none; }
+  .inv .inv-lines.is-cards .w-desc { min-width: 0; padding-inline-end: 40px; }
+  .inv .inv-lines.is-cards .hr-input { min-width: 0; width: 100%; min-height: 44px; }
+  .inv .inv-lines.is-cards td.inv-x { position: absolute; top: 6px; inset-inline-end: 6px; width: auto; padding: 0; }
+  .inv .inv-lines.is-cards td.inv-x .hr-btn { min-width: 44px; min-height: 44px; }
+  .inv .inv-pay-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .inv .inv-mode-foot { position: sticky; bottom: 0; background: var(--hr-surface); padding-block: 12px; z-index: 5; }
+  .inv .inv-mode-foot .acct-actions { width: 100%; display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+  .inv .inv-mode-foot .acct-actions .hr-btn { min-height: 48px; }
+}
+/* D22: the SKU picker of the modes (ProductCombo — its own sheet lives with the quotations, quotes.css, not loaded here). */
+.inv .inv-lines.is-cards .q-combo, .inv .inv-lines .q-combo { position: relative; min-width: 0; }
+.inv .inv-lines .q-combo input.prodsel { width: 100%; box-sizing: border-box; height: 40px; padding-inline: 12px 34px; border-radius: var(--hr-r-md); border: 1px solid var(--hr-border-strong); background: var(--hr-surface); font: inherit; color: var(--hr-text); }
+.inv .inv-lines .q-combo input.prodsel:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.inv .inv-lines .q-combo-chev { position: absolute; inset-inline-end: 10px; top: 0; height: 40px; display: flex; align-items: center; color: var(--hr-muted); pointer-events: none; }
+.inv .q-combo-list { position: fixed; z-index: 60; max-height: 300px; overflow-y: auto; margin: 0; padding: 4px; list-style: none; border-radius: 10px; background: var(--hr-surface); box-shadow: 0 8px 24px rgba(40, 36, 26, .12), inset 0 0 0 1px var(--hr-border-strong); }
+.inv .q-combo-list li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 13.5px; min-height: 44px; }
+.inv .q-combo-list li.is-active { background: var(--hr-subtle); }
+.inv .q-combo-main { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.inv .q-combo-main b { font-weight: 500; }
+.inv .q-combo-sub { font-size: 12px; color: var(--hr-muted); }
+.inv .q-combo-price { flex: none; font-size: 13px; color: var(--hr-text-2); }
+.inv .q-combo-none { color: var(--hr-muted); cursor: default !important; }
+@media (max-width: 767px) { .inv .inv-lines .q-combo input.prodsel { min-height: 44px; } .inv .inv-lines .q-combo-chev { height: 44px; } }
+@media (max-width: 767px) {
+  /* D22: the mode's «أرسل» bar sits on the tab bar — the page's own bottom padding would leave a band under it. */
+  .inv .hr-page:has(.inv-mode-foot) { padding-bottom: 0; }
+}
+
+/* أبو فهد (clutter): a rep's direct sale / sample folds the accountant's fields (prefilled from the customer). */
+.inv .inv-acct-fields > summary { cursor: pointer; font-weight: 600; color: var(--hr-muted); min-height: 44px; display: flex; align-items: center; }
+.inv .inv-acct-fields[open] > summary { margin-bottom: 12px; }

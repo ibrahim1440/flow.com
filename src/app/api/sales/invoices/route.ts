@@ -1,4 +1,5 @@
 import { requireInvoiceDuty } from "@/lib/services/invoicing/guard";
+import { sampleInvoiceInfo } from "@/lib/services/invoicing/sample-hold";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
@@ -65,6 +66,7 @@ export async function GET(request: Request) {
           // «فاتورة قيود»: the rep's list shows which issued invoices carry Qoyod's PDF (number only; the bytes are the
           // document route's).
           qoyodCopy: { select: { qoyodNumber: true } },
+          channel: true, externalOrderRef: true,
         },
       }),
       prisma.salesInvoice.count({ where }),
@@ -72,6 +74,7 @@ export async function GET(request: Request) {
     ]);
     const orders = await prisma.order.findMany({ where: { id: { in: rows.map((r) => r.orderId).filter((x): x is string => !!x) } }, select: { id: true, orderNumber: true } });
     const today = new Date().toISOString().slice(0, 10);
+    const samples = await sampleInvoiceInfo(prisma, rows);
     return NextResponse.json({
       items: rows.map((r) => {
         const paid = r.applications.reduce((s, a) => s + Number(a.amount), 0);
@@ -85,6 +88,7 @@ export async function GET(request: Request) {
           payment: open === null ? null : open <= 0.0001 ? "PAID" : paid > 0 ? "PARTIAL" : "UNPAID",
           overdue: open !== null && open > 0 && !!r.dueDate && day(r.dueDate)! < today,
           qoyodNumber: r.qoyodCopy?.qoyodNumber ?? null,
+          sample: samples.get(r.id) ?? null,
         };
       }),
       total, take, skip,

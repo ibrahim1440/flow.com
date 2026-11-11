@@ -11,7 +11,7 @@
 //     finished lot is counted in (lots are unit-tracked; a 0.25 kg scoop is not a bag), so they cannot be issued.
 import { Decimal } from "@/lib/services/commissions/engine";
 import { issue, qty4 } from "@/lib/accounting/ops/costing";
-import type { Permissions } from "@/lib/auth-shared";
+import { hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 import { seesAllSales } from "./scope";
 
 export const SAMPLE_STATUSES = ["REQUESTED", "PREPARING", "SENT", "FEEDBACK_RECEIVED", "CANCELLED"] as const;
@@ -78,7 +78,18 @@ export function sampleOneUnitRefusal(units: number) {
 export function approvesSamples(permissions: Permissions | Record<string, unknown>): boolean {
   // By permission only (release gate N2): `sales › lead_assign`, the sales-manager mark. The admin role holds it
   // through its template (and every permission under SIMPLE MODE), so no unreviewed role check decides an approval.
-  return seesAllSales(permissions);
+  // D22 (owner, 11 Nov 2026): or `sales › sample_approve_repeat`, the approval alone, without the team's reach.
+  return seesAllSales(permissions) || hasSubPrivilege(permissions as Permissions, "sales", "sample_approve_repeat");
+}
+
+/**
+ * D22 (owner, 11 Nov 2026): «عيّنة وحدة من كل صنف لكل عميل في السنة» — a sample counts towards the one-per-product rule
+ * in the CALENDAR YEAR it was requested (Riyadh time); a new year starts again. The first instant of `now`'s year in
+ * Riyadh (UTC+3, no daylight saving).
+ */
+export function sampleYearStart(now: Date = new Date()): Date {
+  const y = new Date(now.getTime() + 3 * 3_600_000).getUTCFullYear();
+  return new Date(Date.UTC(y, 0, 1) - 3 * 3_600_000);
 }
 
 export type SampleApprovalState = "NOT_NEEDED" | "PENDING" | "APPROVED" | "DECLINED";
