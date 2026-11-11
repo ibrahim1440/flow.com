@@ -531,7 +531,7 @@ export function AppShell({
     const label = (c: CreateAction) => (
       <>
         {sheet && c.icon ? <span className="d21-menu-ico" aria-hidden><Ico name={c.icon as D21IconName} small /></span> : null}
-        <span className="d21-menu-txt"><span>{ar ? c.labelAr : c.labelEn}</span>{sheet && c.subAr ? <small>{ar ? c.subAr : c.subEn}</small> : null}</span>
+        <span className="d21-menu-txt"><span>{ar ? c.labelAr : c.labelEn}</span></span>
         {c.key ? <span className="d21-kbd" aria-hidden>{c.key}</span> : null}
       </>
     );

@@ -183,7 +183,7 @@ const QUICK_OUTCOMES = ["INTERESTED", "NO_ANSWER", "LEFT_MESSAGE", "FOLLOW_UP_RE
  * A WhatsApp or an email starts at «تُركت رسالة» — nothing says the customer answered until the rep says so.
  */
 /** A deal the dialog may link the activity to: what its label is built from (D21). */
-type LinkDeal = Pick<Deal, "id" | "title"> & Partial<Pick<Deal, "amount" | "createdAt" | "stage" | "_count">>;
+type LinkDeal = Pick<Deal, "id" | "title"> & Partial<Pick<Deal, "amount" | "createdAt" | "stage" | "_count">> & { quoteAt?: string | null };
 export function ActivityDialog({ ar, customerId, customerName, customerNames, deals, defaultDealId, initialKind = "CALL", onClose, onDone }: {
   ar: boolean; customerId: string | null; customerName?: string; customerNames?: (string | null | undefined)[]; deals: LinkDeal[]; defaultDealId?: string | null;
   initialKind?: ActivityKind; onClose: () => void; onDone: () => void;
@@ -282,7 +282,7 @@ export function ActivityDialog({ ar, customerId, customerName, customerNames, de
             <Select className="hr-select" value={dealId} onChange={(e) => setDealId(e.target.value)} data-testid="activity-deal">
               <option value="">{ar ? NO_DEAL_LABEL.ar : NO_DEAL_LABEL.en}</option>
               {deals.map((d) => {
-                const l = dealLabel({ title: d.title, amount: d.amount, createdAt: d.createdAt, stageAr: d.stage?.nameAr, stageEn: d.stage?.nameEn, quotes: d._count?.quotes, samples: d._count?.samples },
+                const l = dealLabel({ title: d.title, amount: d.amount, createdAt: d.createdAt, stageAr: d.stage?.nameAr, stageEn: d.stage?.nameEn, quotes: d._count?.quotes, samples: d._count?.samples, quoteAt: d.quoteAt },
                   { lang: ar ? "ar" : "en", customerNames: customerNames ?? [customerName] });
                 return <option key={d.id} value={d.id} data-hint={l.hint || undefined}>{l.label}</option>;
               })}
@@ -333,7 +333,7 @@ export function ActivityDialog({ ar, customerId, customerName, customerNames, de
 /** Several open deals of yours with this customer: which one? One tap, the most recent first. */
 export function DealPickDialog({ ar, purpose, deals, customerNames, onClose, onPick }: {
   ar: boolean; purpose: "quote" | "sample";
-  deals: { id: string; title: string; stageAr: string; stageEn: string; amount: string | null; createdAt?: string | null; quotes?: number; samples?: number }[];
+  deals: { id: string; title: string; stageAr: string; stageEn: string; amount: string | null; createdAt?: string | null; quotes?: number; samples?: number; quoteAt?: string | null }[];
   customerNames?: (string | null | undefined)[];
   onClose: () => void; onPick: (id: string) => void;
 }) {
@@ -345,7 +345,7 @@ export function DealPickDialog({ ar, purpose, deals, customerNames, onClose, onP
       <ul className="acc-pick" role="list">
         {deals.map((d, i) => {
           // D21: the same label as «تربطه بصفقة؟» — type · amount · date, the stage below; a written title stays first.
-          const l = dealLabel({ title: d.title, amount: d.amount, createdAt: d.createdAt, stageAr: d.stageAr, stageEn: d.stageEn, quotes: d.quotes, samples: d.samples },
+          const l = dealLabel({ title: d.title, amount: d.amount, createdAt: d.createdAt, stageAr: d.stageAr, stageEn: d.stageEn, quotes: d.quotes, samples: d.samples, quoteAt: d.quoteAt },
             { lang: ar ? "ar" : "en", customerNames });
           return (
             <li key={d.id}>

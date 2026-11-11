@@ -52,7 +52,7 @@ const FIRST = 4;
 const customerNamesOf = (t: Target) => [t.customer?.name, t.customer?.nameAr];
 /** A deal's «عرض سعر · 644.00 ⃁ · 6 نوفمبر», and whether its title was generated from the customer's name (D21). */
 const factsOf = (t: Target, ar: boolean) =>
-  dealFacts({ title: t.name, amount: t.deal?.amount, createdAt: t.deal?.createdAt, quotes: t.deal?.quotes, samples: t.deal?.samples }, { lang: ar ? "ar" : "en", customerNames: customerNamesOf(t) });
+  dealFacts({ title: t.name, amount: t.deal?.amount, createdAt: t.deal?.createdAt, quotes: t.deal?.quotes, samples: t.deal?.samples, quoteAt: t.deal?.quoteAt }, { lang: ar ? "ar" : "en", customerNames: customerNamesOf(t) });
 
 /** The record's name as the row shows it: «محمصة النخبة — خلطة خاصة», or the lead's company. A deal whose title the
  *  system generated from the customer's name («… — عرض سعر 2026-11-06») is named by the customer alone (D21). */

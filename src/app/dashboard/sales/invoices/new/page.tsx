@@ -3,6 +3,8 @@
 // A new invoice draft: «فاتورة يدوية» (Figma ZT-14) or «إنشاء فاتورة من الطلب» (?orderId=…, the order's lines with
 // what is ordered, delivered, already invoiced and left; full, partial or delivered-only). Saving creates a DRAFT
 // (no number) and opens it; issuing is a separate, privileged step on the draft.
+import { NewCustomerDialog, type CreatedCustomer } from "@/components/customers/new-customer-form";
+import { canEdit, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 import { useUser } from "@/app/dashboard/user-context";
 import { canIssueInvoices } from "@/lib/services/invoicing/access";
 import Link from "next/link";
@@ -132,6 +134,16 @@ function Manual({ initialQ, mode = null, initialCustomerId, opportunityId }: { i
     setFamily(c.vatNumber ? "STANDARD" : "SIMPLIFIED");
   };
   const options = useMemo(() => custs.data?.items ?? [], [custs.data]);
+  // D22.1: «+ عميل جديد» — the same rule as everywhere a rep registers a customer (POST /api/customers re-checks it).
+  const [newCust, setNewCust] = useState(false);
+  const me = useUser();
+  const mayCreateCustomer = !!me && (canEdit(me.permissions as Permissions, "customers") || hasSubPrivilege(me.permissions as Permissions, "sales", "lead_write") || hasSubPrivilege(me.permissions as Permissions, "sales", "lead_convert"));
+  const madeCustomer = async (c: CreatedCustomer) => {
+    setNewCust(false);
+    // The invoice's own view of the customer (VAT number, address, terms) — the new one, picked, and the sale goes on.
+    const r = await fetch(`/api/sales/invoices/customers?id=${encodeURIComponent(c.id)}`).then((x) => (x.ok ? x.json() : null)).catch(() => null) as { items?: Customer[] } | null;
+    pickCustomer(r?.items?.[0] ?? { id: c.id, name: c.name, nameAr: c.nameAr, vatNumber: null, commercialRegNo: null, city: c.city, address: null, paymentTermsDays: null });
+  };
   // ── D22 modes only (every hook below is idle without a mode) ──
   const md = useModeData(mode, customer?.id ?? null);
   const asked = useApi<{ items: Customer[] }>(mode && initialCustomerId ? `/api/sales/invoices/customers?id=${encodeURIComponent(initialCustomerId)}` : null);
@@ -261,9 +273,20 @@ function Manual({ initialQ, mode = null, initialCustomerId, opportunityId }: { i
           <>
             <label className="hr-field"><span className="hr-label">{L("ابحث عن العميل", "Find the customer")}</span>
               <input className="hr-input" value={q} onChange={(e) => setQ(e.target.value)} data-testid="customer-search" /></label>
-            <ul className="ops-list" data-testid="customer-options">
-              {options.slice(0, 8).map((c) => <li key={c.id}><button type="button" className="hr-btn is-ghost" onClick={() => pickCustomer(c)}><bdi>{c.nameAr || c.name}</bdi>{c.vatNumber ? <span className="inv-sub acct-code">{c.vatNumber}</span> : null}</button></li>)}
+            {/* D22.1 (owner on the phone): the whole row picks the customer (a full-width button, 48px tall), the VAT
+                number stays inside it; in the direct sale / sample, «+ عميل جديد» registers one and continues with it. */}
+            {mode && mayCreateCustomer ? <button type="button" className="hr-btn is-sm inv-cust-new" onClick={() => setNewCust(true)} data-testid="invoice-new-customer">{L("+ عميل جديد", "+ New customer")}</button> : null}
+            <ul className="inv-cust-list" data-testid="customer-options">
+              {options.slice(0, 8).map((c) => (
+                <li key={c.id}>
+                  <button type="button" className="inv-cust-row" onClick={() => pickCustomer(c)} data-testid={`customer-option-${c.id}`}>
+                    <span className="inv-cust-name"><bdi>{c.nameAr || c.name}</bdi></span>
+                    {c.vatNumber ? <bdi className="inv-cust-vat acct-code" dir="ltr">{c.vatNumber}</bdi> : null}
+                  </button>
+                </li>
+              ))}
             </ul>
+            <NewCustomerDialog open={newCust} ar={isAr} initialName={/\d{3,}/.test(q) ? "" : q.trim()} onClose={() => setNewCust(false)} onCreated={madeCustomer} />
           </>
         )}
       </div>

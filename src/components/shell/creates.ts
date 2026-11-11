@@ -74,28 +74,29 @@ export function createActions(viewer: Viewer, moduleId: string | undefined): Cre
 // «بيع مباشر» open the tax invoice page in its mode (invoices/new?mode=sample | direct-sale); the 3-step direct-sale wizard is
 // no longer linked. Each item is offered only when the API it ends at would accept it: nothing new is granted.
 const onCustomer = (v: Viewer) => hasModuleAccess(p(v), "customers");
+// D22.1 (owner on the phone, 11 Nov 2026): title and icon only — no description line under an item.
 export const SALES_MENU: CreateAction[] = [
   { id: "sales.activity.new", key: "N", onCustomer: "activity", labelAr: "نشاط (اتصال، زيارة، واتساب)", labelEn: "Activity (call, visit, WhatsApp)", href: "/dashboard/customers",
-    icon: "phone", subAr: "سجّل اللي صار مع العميل", subEn: "Record what happened with the customer",
+    icon: "phone",
     permitted: (v) => hasSubPrivilege(p(v), "sales", "lead_write") && onCustomer(v) },
   { id: "sales.quote.new", key: "Q", onCustomer: "quote", labelAr: "عرض سعر", labelEn: "Quotation", href: "/dashboard/sales/quotes/new",
-    icon: "quote", subAr: "للعميل يوافق عليه قبل الطلب", subEn: "For the customer to accept before ordering",
+    icon: "quote",
     permitted: (v) => hasSubPrivilege(p(v), "sales", "quote_write") },
   // POST /api/sales/sample-send (maySendSample): requests samples, prepares the zero invoice.
   { id: "sales.sample.new", key: "S", withCustomer: true, labelAr: "إرسال عيّنة", labelEn: "Send a sample", href: "/dashboard/sales/invoices/new?mode=sample",
-    icon: "box", subAr: "فاتورة بصفر وتروح للتحضير", subEn: "A zero invoice, sent to preparation",
+    icon: "box",
     permitted: (v) => hasSubPrivilege(p(v), "sales", "lead_write") && hasSubPrivilege(p(v), "sales", "invoices_create") && onCustomer(v) },
   // POST /api/sales/direct-sale (mayDirectSell): the order and the invoice draft.
   { id: "sales.direct.new", key: "D", withCustomer: true, labelAr: "بيع مباشر (فاتورة ضريبية بدون عرض سعر)", labelEn: "Direct sale (tax invoice without a quotation)", href: "/dashboard/sales/invoices/new?mode=direct-sale",
-    icon: "invoice", subAr: "الأصناف والدفع في صفحة وحدة", subEn: "Items and payment on one page",
+    icon: "invoice",
     permitted: (v) => hasSubPrivilege(p(v), "orders", "create") && hasSubPrivilege(p(v), "sales", "invoices_create") },
   { id: "sales.lead.new", key: "L", labelAr: "عميل محتمل", labelEn: "Lead", href: "/dashboard/sales/leads?new=1",
-    icon: "user", subAr: "اسم ورقم وتكمل بعدين", subEn: "A name and a number, the rest later",
+    icon: "user",
     permitted: (v) => hasSubPrivilege(p(v), "sales", "lead_write") },
   // D16 (owner, 9 Nov 2026): «أضف خطة» — the one sheet of «خطتي», for today or any day ahead. The plan is the sales
   // module's (POST /api/sales/plan/items: requireModule("sales")).
   { id: "sales.plan.item", key: "P", labelAr: "أضف خطة", labelEn: "Add to my plan", href: "/dashboard/my-day?add=plan",
-    icon: "cal", subAr: "زيارة أو مكالمة أو شغلة في خطتك", subEn: "A visit, a call or a task in your plan",
+    icon: "cal",
     permitted: (v) => hasModuleAccess(p(v), "sales") },
 ];
 

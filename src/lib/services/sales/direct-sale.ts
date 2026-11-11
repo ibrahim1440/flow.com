@@ -194,11 +194,11 @@ export async function directSaleOptions(actor: DirectSaleActor, q: string, onlyI
   const deals = onlyId && customers.length ? await prisma.opportunity.findMany({
     where: { customerId: onlyId, outcome: "OPEN", ...(seesAllSales(actor.permissions) ? {} : { ownerId: actor.id }) },
     orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: 20,
-    select: { id: true, title: true, amount: true, createdAt: true, stage: { select: { nameAr: true, nameEn: true } }, _count: { select: { quotes: true, samples: true } } },
+    select: { id: true, title: true, amount: true, createdAt: true, stage: { select: { nameAr: true, nameEn: true } }, _count: { select: { quotes: true, samples: true } }, quotes: { orderBy: { createdAt: "desc" }, take: 1, select: { createdAt: true } } },
   }) : [];
   return {
     customers: customers.map((c) => ({ id: c.id, name: c.name, nameAr: c.nameAr, city: c.city, lastOrderAt: c.orders[0]?.createdAt.toISOString() ?? null })),
-    deals: deals.map((d) => ({ id: d.id, title: d.title, amount: d.amount == null ? null : d.amount.toFixed(2), createdAt: d.createdAt.toISOString(), stageAr: d.stage.nameAr, stageEn: d.stage.nameEn, quotes: d._count.quotes, samples: d._count.samples })),
+    deals: deals.map((d) => ({ id: d.id, title: d.title, amount: d.amount == null ? null : d.amount.toFixed(2), createdAt: d.createdAt.toISOString(), stageAr: d.stage.nameAr, stageEn: d.stage.nameEn, quotes: d._count.quotes, samples: d._count.samples, quoteAt: d.quotes[0]?.createdAt.toISOString() ?? null })),
     products: products.map((p) => ({ id: p.id, skuCode: p.skuCode, name: p.nameAr || p.name || p.product.productNameAr || p.product.productNameEn, price: p.price.toFixed(2) })),
     can: {
       approveDiscount: mayApproveDiscount(actor.permissions),

@@ -45,7 +45,7 @@ type LeadRow = {
 };
 type DealRow = {
   id: string; title: string; customerName: string | null; customerNameAr: string | null;
-  amount: unknown; dealCreatedAt: Date | null; quotes: number | null; samples: number | null;
+  amount: unknown; dealCreatedAt: Date | null; quotes: number | null; samples: number | null; quoteAt?: Date | null;
   stageEn: string; stageAr: string; subject: string | null; dueAt: Date | null;
 };
 type GroupRow = {
@@ -53,10 +53,12 @@ type GroupRow = {
   companyName: string | null; companyNameAr: string | null; contactName: string | null;
   title: string | null; customerName: string | null; customerNameAr: string | null;
   stageEn: string | null; stageAr: string | null;
-  amount: unknown; dealCreatedAt: Date | null; quotes: number | null; samples: number | null;
+  amount: unknown; dealCreatedAt: Date | null; quotes: number | null; samples: number | null; quoteAt?: Date | null;
 };
-const dealFactsOf = (r: { amount: unknown; dealCreatedAt: Date | null; quotes: number | null; samples: number | null }) => ({
+const dealFactsOf = (r: { amount: unknown; dealCreatedAt: Date | null; quotes: number | null; samples: number | null; quoteAt?: Date | null }) => ({
   amount: r.amount == null ? null : String(r.amount), createdAt: iso(r.dealCreatedAt), quotes: Number(r.quotes ?? 0), samples: Number(r.samples ?? 0),
+  // D21 L2: a quote deal is dated by its latest quotation.
+  quoteAt: iso(r.quoteAt ?? null),
 });
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
@@ -120,7 +122,7 @@ export async function GET(request: Request) {
         wantLeads ? prisma.$queryRaw<{ n: bigint }[]>`SELECT COUNT(*) n FROM "Lead" l WHERE ${leadWhere}` : Promise.resolve([{ n: BigInt(0) }]),
         wantDeals ? prisma.$queryRaw<DealRow[]>`
           SELECT o.id, o.title, c.name AS "customerName", c."nameAr" AS "customerNameAr", o.amount, o."createdAt" AS "dealCreatedAt",
-                 (SELECT count(*)::int FROM "Quote" q WHERE q."opportunityId" = o.id) AS quotes,
+                 (SELECT count(*)::int FROM "Quote" q WHERE q."opportunityId" = o.id) AS quotes, (SELECT max(q."createdAt") FROM "Quote" q WHERE q."opportunityId" = o.id) AS "quoteAt",
                  (SELECT count(*)::int FROM "SampleShipment" sm WHERE sm."opportunityId" = o.id) AS samples,
                  s."nameEn" AS "stageEn", s."nameAr" AS "stageAr", f.subject, f."dueAt"
           FROM "Opportunity" o
@@ -186,7 +188,7 @@ export async function GET(request: Request) {
       d."leadId", d."opportunityId", d.subject, d."dueAt", d."createdAt",
       l."companyName", l."companyNameAr", l."contactName",
       o.title, c.name AS "customerName", c."nameAr" AS "customerNameAr", o.amount, o."createdAt" AS "dealCreatedAt",
-      (SELECT count(*)::int FROM "Quote" q WHERE q."opportunityId" = o.id) AS quotes,
+      (SELECT count(*)::int FROM "Quote" q WHERE q."opportunityId" = o.id) AS quotes, (SELECT max(q."createdAt") FROM "Quote" q WHERE q."opportunityId" = o.id) AS "quoteAt",
       (SELECT count(*)::int FROM "SampleShipment" sm WHERE sm."opportunityId" = o.id) AS samples,
       s."nameEn" AS "stageEn", s."nameAr" AS "stageAr"
       FROM d

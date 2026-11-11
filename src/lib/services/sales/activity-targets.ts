@@ -12,7 +12,7 @@ export type Target = {
   customer: { name: string; nameAr: string | null } | null;
   stage: { nameEn: string; nameAr: string } | null;
   /** A deal's amount, opening day and documents — its label (D21: «عرض سعر · 644.00 ⃁ · 6 نوفمبر»). */
-  deal?: { amount: string | null; createdAt: string | null; quotes: number; samples: number } | null;
+  deal?: { amount: string | null; createdAt: string | null; quotes: number; samples: number; quoteAt?: string | null } | null;
   /** The follow-up the row is about (due group), or the activity last logged (recent group). */
   subject: string | null;
   dueAt: string | null;

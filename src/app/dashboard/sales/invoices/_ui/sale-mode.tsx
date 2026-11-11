@@ -24,7 +24,7 @@ export const isSaleMode = (v: unknown): v is SaleMode => v === "direct-sale" || 
 export type ModeSku = ComboSku & { productId: string | null };
 type Payment = "CASH" | "CARD" | "BANK_TRANSFER" | "CREDIT";
 type Can = { approveDiscount: boolean; collect: boolean; threshold: number; max: number; taxOverride?: boolean };
-export type SampleDeal = { id: string; title: string; amount: string | null; createdAt: string; stageAr: string; stageEn: string; quotes: number; samples: number };
+export type SampleDeal = { id: string; title: string; amount: string | null; createdAt: string; stageAr: string; stageEn: string; quotes: number; samples: number; quoteAt?: string | null };
 type Facts = { sampledProducts: { productId: string; at: string }[]; alert: { yearValue: string; threshold: string } | null; customerNames?: string[]; deals?: SampleDeal[]; taxOverride?: boolean };
 
 /** A new line of the mode: one unit; a sample starts at 100 % off. */

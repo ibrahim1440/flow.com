@@ -97,12 +97,12 @@ export async function sampleSendFacts(actor: SampleSendActor, customerId: string
   const deals = !mayList ? [] : await prisma.opportunity.findMany({
     where: { customerId, outcome: "OPEN", ownerId: owner },
     orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }], take: 20,
-    select: { id: true, title: true, amount: true, createdAt: true, stage: { select: { nameAr: true, nameEn: true } }, _count: { select: { quotes: true, samples: true } } },
+    select: { id: true, title: true, amount: true, createdAt: true, stage: { select: { nameAr: true, nameEn: true } }, _count: { select: { quotes: true, samples: true } }, quotes: { orderBy: { createdAt: "desc" }, take: 1, select: { createdAt: true } } },
   });
   return {
     sampledProducts: [...byProduct].map(([productId, at]) => ({ productId, at })), alert, taxOverride: mayOverrideTax(actor.permissions),
     customerNames: [c?.nameAr ?? null, c?.name ?? null].filter(Boolean),
-    deals: deals.map((d) => ({ id: d.id, title: d.title, amount: d.amount == null ? null : d.amount.toFixed(2), createdAt: d.createdAt.toISOString(), stageAr: d.stage.nameAr, stageEn: d.stage.nameEn, quotes: d._count.quotes, samples: d._count.samples })),
+    deals: deals.map((d) => ({ id: d.id, title: d.title, amount: d.amount == null ? null : d.amount.toFixed(2), createdAt: d.createdAt.toISOString(), stageAr: d.stage.nameAr, stageEn: d.stage.nameEn, quotes: d._count.quotes, samples: d._count.samples, quoteAt: d.quotes[0]?.createdAt.toISOString() ?? null })),
   };
 }
 

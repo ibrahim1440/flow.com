@@ -118,3 +118,14 @@
 /* أبو فهد (clutter): a rep's direct sale / sample folds the accountant's fields (prefilled from the customer). */
 .inv .inv-acct-fields > summary { cursor: pointer; font-weight: 600; color: var(--hr-muted); min-height: 44px; display: flex; align-items: center; }
 .inv .inv-acct-fields[open] > summary { margin-bottom: 12px; }
+
+/* D22.1 (owner on the phone): the customer picker — the whole row is the button; the VAT number never leaves it. */
+.inv .inv-cust-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.inv .inv-cust-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; width: 100%; min-height: 48px; padding: 8px 12px; box-sizing: border-box;
+  border: 1px solid var(--hr-border-subtle); border-radius: var(--hr-r-md); background: var(--hr-surface); color: var(--hr-text); font: inherit; text-align: start; cursor: pointer; }
+.inv .inv-cust-row:hover { background: var(--hr-subtle); }
+.inv .inv-cust-row:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.inv .inv-cust-name { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+/* The whole number, never cut: a long name sends it to its own line inside the row. */
+.inv .inv-cust-vat { flex: 0 0 auto; max-width: 100%; white-space: nowrap; color: var(--hr-muted); font-variant-numeric: tabular-nums; }
+.inv .inv-cust-new { margin-top: 8px; }

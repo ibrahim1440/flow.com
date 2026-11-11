@@ -296,7 +296,9 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
     else setNotice({ text: res.data.error ?? L("تعذّر الحذف.", "Could not delete."), ok: false });
   }
 
-  const openDeals = (data.deals ?? []).filter((d) => d.outcome === "OPEN");
+  // D21 L2: a quote deal is dated by its latest quotation (the account's quotes are newest first).
+  const openDeals = (data.deals ?? []).filter((d) => d.outcome === "OPEN")
+    .map((d) => ({ ...d, quoteAt: (data.quotes ?? []).find((q) => q.opportunity?.id === d.id)?.createdAt ?? null }));
   // ── The rep's action bar (batch 24 WP-A §3): 📞 اتصال · 💬 واتساب · 📝 سجّل نشاط · 🫘 عيّنة · 📄 عرض سعر (primary). ──
   // The number dialled is the customer's own, else its first contact's.
   const dialPhone = c.phone || c.contacts.find((x) => x.phone)?.phone || null;

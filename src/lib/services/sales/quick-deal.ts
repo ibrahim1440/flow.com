@@ -31,7 +31,7 @@ import type { Permissions } from "@/lib/auth-shared";
  * The caller decides first that the customer is in the viewer's book (`customerInScope`).
  */
 export type QuickPurpose = "quote" | "sample";
-export type QuickDealPick = { id: string; title: string; stageAr: string; stageEn: string; amount: string | null; updatedAt: Date; createdAt: Date; quotes: number; samples: number };
+export type QuickDealPick = { id: string; title: string; stageAr: string; stageEn: string; amount: string | null; updatedAt: Date; createdAt: Date; quotes: number; samples: number; quoteAt: Date | null };
 export type QuickDealResult =
   | { kind: "use"; opportunityId: string }
   | { kind: "created"; opportunityId: string }
@@ -75,7 +75,7 @@ export async function resolveQuickDeal(
     where: { customerId, ownerId: dealOwner, outcome: "OPEN" },
     orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
     take: 20,
-    select: { id: true, title: true, amount: true, updatedAt: true, createdAt: true, stage: { select: { nameAr: true, nameEn: true } }, _count: { select: { quotes: true, samples: true } } },
+    select: { id: true, title: true, amount: true, updatedAt: true, createdAt: true, stage: { select: { nameAr: true, nameEn: true } }, _count: { select: { quotes: true, samples: true } }, quotes: { orderBy: { createdAt: "desc" }, take: 1, select: { createdAt: true } } },
   });
   if (open.length === 1) return { kind: "use", opportunityId: open[0].id };
   if (open.length > 1) {
@@ -83,7 +83,7 @@ export async function resolveQuickDeal(
       kind: "pick",
       deals: open.map((d) => ({ id: d.id, title: d.title, stageAr: d.stage.nameAr, stageEn: d.stage.nameEn, amount: d.amount != null ? d.amount.toFixed(2) : null, updatedAt: d.updatedAt,
         // D21: what the picker's label is built from (type · amount · date).
-        createdAt: d.createdAt, quotes: d._count.quotes, samples: d._count.samples })),
+        createdAt: d.createdAt, quotes: d._count.quotes, samples: d._count.samples, quoteAt: d.quotes[0]?.createdAt ?? null })),
     };
   }
   if (!actor.canOpenDeal) return { kind: "none" };
