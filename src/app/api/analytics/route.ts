@@ -3,6 +3,7 @@ import { readQcSettings } from "@/lib/services/settings/sections";
 import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
 import { anonymousOrder, canSeeCustomerDetail } from "@/lib/auth/customer-detail";
+import { orderVisibilityWhere } from "@/lib/services/sales/scope";
 
 function isoWeekStart(date: Date): string {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -13,7 +14,9 @@ function isoWeekStart(date: Date): string {
 }
 
 export async function GET() {
-  const { user, error } = await requireModule("dashboard");
+  // P0 SEC-03 (rep QA audit): the company's figures and open orders are the ANALYTICS module's — not the «dashboard» every
+  // account holds (the dashboard page reads /api/dashboard/today, scoped). The open-order list is scoped as well.
+  const { user, error } = await requireModule("analytics");
   if (error) return error;
   // Owner decision F4: identifiable customer data only with the customer-detail permission.
   const customerDetail = canSeeCustomerDetail(user.permissions);
@@ -82,7 +85,7 @@ export async function GET() {
       orderBy: { quantityKg: "asc" },
     }),
     prisma.order.findMany({
-      where: { items: { some: { productionStatus: { not: "Completed" } } } },
+      where: { AND: [{ items: { some: { productionStatus: { not: "Completed" } } } }, orderVisibilityWhere(user)] },
       include: {
         customer: { select: { name: true, nameAr: true } },
         items: { select: { productionStatus: true, deliveryStatus: true, quantityKg: true, beanTypeName: true } },

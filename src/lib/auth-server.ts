@@ -216,6 +216,8 @@ export const STEP_UP_KEYS: ReadonlySet<string> = new Set([
   "accounting.receipts_confirm",
   // Sales invoicing A2: issuing a tax invoice and a credit / debit note step up.
   "sales.invoices_issue", "sales.invoices_credit_note",
+  // P0 C5: the independent approval of a VAT-treatment change.
+  "sales.invoice_tax_override_approve",
   // Accounting A3: posting a supplier invoice, recording / voiding a supplier payment, cancelling an invoice.
   "accounting.ap",
   // ZATCA Phase 2 A4: onboarding (OTP, CSIDs, renewal, the e-invoicing switch, the numbering cut-over) steps up.

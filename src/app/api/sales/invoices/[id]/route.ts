@@ -12,6 +12,7 @@ import { creditBadges } from "@/lib/services/customers/credit-db";
 import { documentJson, inScope } from "@/lib/services/invoicing/http";
 import { draftProblems, loadDocument, updateDraft } from "@/lib/services/invoicing/service";
 import { invError } from "@/lib/services/invoicing/refusals";
+import { draftControlView, termsOf } from "@/lib/services/invoicing/draft-control";
 
 type Ctx = { params: Promise<{ id: string }> };
 const notFound = () => NextResponse.json({ error: "غير موجود.", errorEn: "Not found.", code: "NOT_FOUND" }, { status: 404 });
@@ -46,6 +47,8 @@ export async function GET(_request: Request, { params }: Ctx) {
       sample: (await sampleInvoiceInfo(prisma, [doc])).get(doc.id) ?? null,
       // What would stop the issue now (a draft only): warnings on a request, the list «حفظ وإصدار» lands on (NOT_READY).
       problems: doc.status === "DRAFT" ? await draftProblems(prisma, doc) : [],
+      // P0 SEC-02 / C4: a direct sale's / sample's draft — the supervisor's approval of an edit and «تعدّلت بعد الإرسال».
+      control: doc.status === "DRAFT" ? (await draftControlView(prisma, [doc.id], new Map([[doc.id, termsOf(doc.lines, doc.paymentTermsDays)]]))).get(doc.id) ?? null : null,
       can: { ...can, self: doc.createdById === user.id, requester: doc.requestedById === user.id },
     });
   } catch (err) {
@@ -70,7 +73,7 @@ export async function PATCH(request: Request, { params }: Ctx) {
   try {
     const body = await jsonBody(request);
     const canIssue = head.kind === "INVOICE" ? canIssueInvoices(user.permissions) : canCreditNote(user.permissions);
-    return NextResponse.json(await updateDraft(id, body, auditFromRequest(request, user.id, requested ? "accountant correction" : "edit draft"), { canIssue: requested && canIssue, canSellAssets: canSellAssets(user.permissions) }));
+    return NextResponse.json(await updateDraft(id, body, auditFromRequest(request, user.id, requested ? "accountant correction" : "edit draft"), { canIssue: requested && canIssue, canSellAssets: canSellAssets(user.permissions), actor: { id: user.id, permissions: user.permissions } }));
   } catch (err) {
     return invError(err);
   }

@@ -70,7 +70,7 @@ export async function GET(_request: Request, { params }: Params) {
             issuedAt: true, acceptedAt: true, rejectedAt: true, rejectionNote: true,
             discountApprovedAt: true, supersedesId: true,
             // For `discountApproval` below (the stage primary action «request approval»).
-            discountApprovedById: true, discountApprovedPercent: true, discountRejectedAt: true,
+            discountApprovedById: true, discountApprovedPercent: true, discountRejectedAt: true, approvalRequired: true, approvalBasisPercent: true,
             // The VAT rate is per line; the deal page names it only when every line agrees.
             lines: { select: { taxRatePercent: true } },
             _count: { select: { lines: true, orderLinks: true } },

@@ -33,3 +33,11 @@ export async function orderCustomerAccess(user: Viewer, customerId: string, db: 
   const row = await db.customer.findFirst({ where: { id: customerId, accountOwnerId: null }, select: { id: true } });
   return row ? "unassigned" : null;
 }
+
+/** P0 SEC-04: an order line an operations read may show this viewer (opsScopedRep → only a line of an order in their book). */
+export async function orderItemInOpsScope(user: Viewer, orderItemId: string): Promise<boolean> {
+  const { opsScopedRep } = await import("./scope");
+  if (!opsScopedRep(user)) return true;
+  const item = await prisma.orderItem.findUnique({ where: { id: orderItemId }, select: { orderId: true } });
+  return !!item && (await orderInScope(user, item.orderId));
+}

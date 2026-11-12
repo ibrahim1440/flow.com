@@ -1,4 +1,6 @@
 import { findDuplicateCustomerIn } from "@/lib/services/customers/duplicates-core";
+import type { Permissions } from "@/lib/auth-shared";
+import { seesAllSales } from "./scope";
 import { addressFromNational, DUPLICATE_CUSTOMER } from "@/lib/services/customers/customer-identity";
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 import { resolveLostReason, type LostReasonCode } from "./needs";
@@ -50,8 +52,9 @@ export function normalizePhone(raw: string | null | undefined): string | null {
 }
 
 export type DuplicateCandidate = {
-  leadId: string;
-  companyName: string;
+  /** P0 SEC-06: null (with the names) for a lead outside the caller's book — only the match is said. */
+  leadId: string | null;
+  companyName: string | null;
   contactName: string | null;
   matchedOn: ("phone" | "company")[];
   /** True only for a phone match, which identifies a person rather than an organisation. */
@@ -67,6 +70,8 @@ export type DuplicateCandidate = {
 export async function findDuplicateCandidates(
   tx: Tx,
   input: { companyName: string; phone?: string | null; excludeLeadId?: string },
+  /** P0 SEC-06 (rep QA audit): the caller — a lead they neither own nor see (seesAllSales) is reported by its match only. */
+  viewer?: { id: string; permissions: Permissions | Record<string, unknown> },
 ): Promise<DuplicateCandidate[]> {
   const company = normalizeCompany(input.companyName);
   const phone = normalizePhone(input.phone);
@@ -84,18 +89,20 @@ export async function findDuplicateCandidates(
         },
       ],
     },
-    select: { id: true, companyName: true, contactName: true, normalizedCompany: true, normalizedPhone: true },
+    select: { id: true, companyName: true, contactName: true, normalizedCompany: true, normalizedPhone: true, ownerId: true },
     take: 25,
   });
+  const visible = (ownerId: string | null) => !viewer || seesAllSales(viewer.permissions) || ownerId === viewer.id;
 
   return rows.map((r) => {
     const matchedOn: ("phone" | "company")[] = [];
     if (phone && r.normalizedPhone === phone) matchedOn.push("phone");
     if (company && r.normalizedCompany === company) matchedOn.push("company");
+    const mine = visible(r.ownerId);
     return {
-      leadId: r.id,
-      companyName: r.companyName,
-      contactName: r.contactName,
+      leadId: mine ? r.id : null,
+      companyName: mine ? r.companyName : null,
+      contactName: mine ? r.contactName : null,
       matchedOn,
       strong: matchedOn.includes("phone"),
     };

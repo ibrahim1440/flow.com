@@ -52,7 +52,7 @@ export async function GET() {
             select: {
               id: true, quoteNumber: true, revision: true, status: true, acceptedAt: true, issuedAt: true, validUntil: true, createdAt: true,
               // Pipeline v2: the card's sub-status chip (next-step.ts) needs the discount state and the orders.
-              subtotal: true, discountTotal: true, discountApprovedById: true, discountApprovedPercent: true, discountRejectedAt: true,
+              subtotal: true, discountTotal: true, discountApprovedById: true, discountApprovedPercent: true, discountRejectedAt: true, approvalRequired: true, approvalBasisPercent: true,
               _count: { select: { orderLinks: true } },
             },
           },

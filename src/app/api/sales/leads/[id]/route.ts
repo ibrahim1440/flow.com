@@ -201,7 +201,7 @@ export async function PATCH(request: Request, { params }: Params) {
       companyName: lead.companyName,
       phone: lead.phone,
       excludeLeadId: lead.id,
-    });
+    }, user);
 
     return NextResponse.json({ lead, duplicates: weakDuplicates });
   } catch (err) {

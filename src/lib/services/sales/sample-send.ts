@@ -31,7 +31,7 @@ import { sampleYearStart } from "./sample-rules";
 import { resolveQuickDeal, actsForAccountOwner } from "./quick-deal";
 import { advanceToPurpose } from "./lifecycle";
 import { customerInScope } from "./customer-access";
-import { assertTaxAllowed, mayOverrideTax, parseHeader, parseLineTerms, invoiceRawLines, type LineTerms } from "./direct-sale-terms";
+import { assertTaxAllowed, parseHeader, parseLineTerms, invoiceRawLines, type LineTerms } from "./direct-sale-terms";
 
 type Tx = Prisma.TransactionClient;
 type Db = Tx | typeof prisma;
@@ -100,7 +100,7 @@ export async function sampleSendFacts(actor: SampleSendActor, customerId: string
     select: { id: true, title: true, amount: true, createdAt: true, stage: { select: { nameAr: true, nameEn: true } }, _count: { select: { quotes: true, samples: true } }, quotes: { orderBy: { createdAt: "desc" }, take: 1, select: { createdAt: true } } },
   });
   return {
-    sampledProducts: [...byProduct].map(([productId, at]) => ({ productId, at })), alert, taxOverride: mayOverrideTax(actor.permissions),
+    sampledProducts: [...byProduct].map(([productId, at]) => ({ productId, at })), alert, taxOverride: false,
     customerNames: [c?.nameAr ?? null, c?.name ?? null].filter(Boolean),
     deals: deals.map((d) => ({ id: d.id, title: d.title, amount: d.amount == null ? null : d.amount.toFixed(2), createdAt: d.createdAt.toISOString(), stageAr: d.stage.nameAr, stageEn: d.stage.nameEn, quotes: d._count.quotes, samples: d._count.samples, quoteAt: d.quotes[0]?.createdAt.toISOString() ?? null })),
   };
@@ -148,7 +148,8 @@ export async function createSampleSend(
     const skus = await tx.productSKU.findMany({ where: { id: { in: ids } }, select: { id: true, skuCode: true, name: true, nameAr: true, price: true, isActive: true, product: { select: { productNameAr: true, productNameEn: true } } } });
     const terms: LineTerms[] = parseLineTerms(input.lines, new Map(skus.map((s) => [s.id, { price: s.price }])), "100");
     // D22 (owner, option 1): S at the default rate unless the caller holds sales › invoice_tax_override (else 400 TAX_LOCKED).
-    assertTaxAllowed(terms, mayOverrideTax(actor.permissions));
+    // P0 C5: a new send is S at the standard rate (an override is a request on the draft, approved by a second person).
+    assertTaxAllowed(terms);
     const byId = new Map(skus.map((s) => [s.id, s]));
     for (const t of terms) {
       const s = byId.get(t.productSkuId);

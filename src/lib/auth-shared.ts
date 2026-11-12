@@ -124,7 +124,10 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "samples_vat_alert", label: "See the samples VAT (deemed supply) alert" },
     // D22 (owner, option 1): a direct sale / sample from the invoice page is S at the default rate; only this changes the
     // category (Z / E / O) or the rate there. The accountant keeps full control on the draft.
-    { key: "invoice_tax_override", label: "Change the VAT category or rate of a direct sale / sample line" },
+    // P0 C5 (owner, 11 Nov 2026): ASK for a VAT-treatment change on a draft (a ZATCA treatment with its reason code and a
+    // written reason) — applied only once a second person approves it (invoice_tax_override_approve, never the requester).
+    { key: "invoice_tax_override", label: "Request a VAT-treatment change on a draft quotation / invoice (applies once a second person approves)" },
+    { key: "invoice_tax_override_approve", label: "Approve or refuse another person's VAT-treatment change request" },
   ],
   // Fine-grained on purpose: every key below decides either what somebody is paid or who
   // gets to see it, and "manage_plans" in particular must never fall to the person the

@@ -149,6 +149,6 @@ export function fmtAt(iso: string): string {
   return `${d.slice(0, 10)} ${d.slice(11, 16)} (AST)`;
 }
 
-export function Banner({ tone, children, testId }: { tone: "warning" | "info"; children: ReactNode; testId?: string }) {
+export function Banner({ tone, children, testId }: { tone: "warning" | "info" | "success" | "danger"; children: ReactNode; testId?: string }) {
   return <div className={`inv-banner is-${tone}`} role="status" data-testid={testId}>{children}</div>;
 }

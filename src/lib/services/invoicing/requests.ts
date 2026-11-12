@@ -9,6 +9,7 @@
 //   return    POST /api/sales/invoices/[id]/return    invoices_issue (a note: invoices_credit_note); reason code + ≥ 10 chars
 //   queue     GET  /api/sales/invoices/requests        invoices_issue: oldest first, aged in Riyadh business days
 //   «حفظ وإصدار»  POST /api/sales/invoices {issue: true, requestKey}  invoices_issue: create under the key, then issue
+import { assertDraftCovered, draftControlView, termsOf } from "./draft-control";
 import { sampleInvoiceInfo } from "./sample-hold";
 import { prisma, TX_OPTS } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
@@ -44,6 +45,8 @@ export async function requestInvoiceIn(tx: Prisma.TransactionClient, id: string,
   if (doc.requestedAt) throw refuseInv("ALREADY_REQUESTED");
   if (!doc.lines.length) throw refuseInv("LINES_INVALID", "(no lines)", "(لا بنود)");
   if (doc.kind === "INVOICE" && !doc.orderId) await assertSalesAllowed(tx, doc.customerId, now);
+  // P0 SEC-02 / C4: not while the supervisor's approval of an edit is pending (the first request records the baseline).
+  await assertDraftCovered(tx, doc);
   const warnings = await draftProblems(tx, doc, now);
   const requestNote = clean(note, 1000) || null;
   await tx.salesInvoice.update({ where: { id }, data: { requestedAt: now, requestedById: ctx.actorId, requestNote } });
@@ -101,11 +104,15 @@ export async function requestHistory(invoiceId: string) {
  */
 export async function requestQueue(opts: { customerIds?: string[] | null; now?: Date; take?: number } = {}) {
   const now = opts.now ?? new Date();
+  // P0 C4: a direct sale's / sample's draft edited above the threshold waits for the supervisor — the accountant sees it
+  // in the queue as «بانتظار المشرف» (it cannot be issued before the approval).
+  const waiting = await prisma.salesInvoiceDraftControl.findMany({ where: { approvalStatus: "PENDING", invoice: { status: "DRAFT" } }, select: { invoiceId: true, requestedAt: true } });
   const rows = await prisma.salesInvoice.findMany({
-    where: { status: "DRAFT", requestedAt: { not: null }, ...(opts.customerIds ? { customerId: { in: opts.customerIds } } : {}) },
+    where: { status: "DRAFT", OR: [{ requestedAt: { not: null } }, { id: { in: waiting.map((w) => w.invoiceId) } }], ...(opts.customerIds ? { customerId: { in: opts.customerIds } } : {}) },
     orderBy: [{ requestedAt: "asc" }, { id: "asc" }], take: Math.min(Math.max(opts.take ?? 200, 1), 500),
-    select: { id: true, kind: true, family: true, customerId: true, orderId: true, buyer: true, grandTotal: true, taxTotal: true, supplyDate: true, requestedAt: true, requestedById: true, requestNote: true, createdById: true, source: true, channel: true, externalOrderRef: true },
+    select: { id: true, kind: true, family: true, customerId: true, orderId: true, buyer: true, grandTotal: true, taxTotal: true, supplyDate: true, requestedAt: true, requestedById: true, requestNote: true, createdById: true, source: true, channel: true, externalOrderRef: true, paymentTermsDays: true, lines: { orderBy: [{ position: "asc" }, { id: "asc" }] } },
   });
+  const controls = await draftControlView(prisma, rows.map((r) => r.id), new Map(rows.map((r) => [r.id, termsOf(r.lines, r.paymentTermsDays)])));
   const samples = await sampleInvoiceInfo(prisma, rows);
   const [orders, people] = await Promise.all([
     prisma.order.findMany({ where: { id: { in: rows.map((r) => r.orderId).filter((x): x is string => !!x) } }, select: { id: true, orderNumber: true } }),
@@ -113,14 +120,18 @@ export async function requestQueue(opts: { customerIds?: string[] | null; now?: 
   ]);
   const name = (id: string | null) => people.find((p) => p.id === id)?.name ?? null;
   return rows.map((r) => {
-    const aging = queueAging(r.requestedAt!, r.supplyDate ? r.supplyDate.toISOString().slice(0, 10) : null, now);
+    const control = controls.get(r.id) ?? null;
+    const since = r.requestedAt ?? waiting.find((w) => w.invoiceId === r.id)?.requestedAt ?? now;
+    const aging = queueAging(since, r.supplyDate ? r.supplyDate.toISOString().slice(0, 10) : null, now);
     return {
       id: r.id, kind: r.kind, family: r.family, customerId: r.customerId, customerName: (r.buyer as { name?: string } | null)?.name ?? "",
       orderId: r.orderId, orderNumber: orders.find((o) => o.id === r.orderId)?.orderNumber ?? null, source: r.source,
       createdById: r.createdById, createdByName: name(r.createdById), requestedById: r.requestedById, requestedByName: name(r.requestedById), requestNote: r.requestNote,
       grandTotal: r.grandTotal.toFixed(2), taxTotal: r.taxTotal.toFixed(2), supplyDate: r.supplyDate ? r.supplyDate.toISOString().slice(0, 10) : null,
-      requestedAt: r.requestedAt!.toISOString(), ...aging,
+      requestedAt: since.toISOString(), ...aging,
       sample: samples.get(r.id) ?? null,
+      // «بانتظار المشرف» / «تعدّلت بعد الإرسال».
+      waitingSupervisor: control?.approval === "PENDING", changedSinceSent: control?.changedSinceSent ?? [],
     };
   });
 }

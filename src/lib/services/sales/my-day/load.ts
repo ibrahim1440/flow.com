@@ -141,7 +141,8 @@ export async function loadMyDay(db: Db, opts: {
       purpose: string | null; stageAr: string | null; stageEn: string | null; sentAt: Date | null;
       stageCode: string | null; businessType: string | null; needSummary: string | null; agreedNextStep: string | null;
       quote: { id: string; status: string; revision: number; issuedAt: string | null; validUntil: string | null; subtotal: string; discountTotal: string;
-        discountApprovedById: string | null; discountApprovedPercent: string | null; discountRejectedAt: string | null; orderLinks: number } | null;
+        discountApprovedById: string | null; discountApprovedPercent: string | null; discountRejectedAt: string | null; orderLinks: number;
+        approvalRequired?: boolean | null; approvalBasisPercent?: string | null } | null;
       liveSamples: { id: string; status: string; fromStock: boolean; approvalRequired: boolean; approvedAt: string | null; declinedAt: string | null; sentAt: string | null }[] | null }[]>`
       SELECT 'DEAL' AS kind, o."id", o."id" AS "dealId", o."title", o."amount", o."customerId", c."name" AS "customerName", c."nameAr" AS "customerNameAr",
              c."phone" AS "customerPhone", o."nextFollowUpAt", st."purpose"::text AS purpose, st."nameAr" AS "stageAr", st."nameEn" AS "stageEn", NULL::timestamp AS "sentAt",
@@ -151,6 +152,7 @@ export async function loadMyDay(db: Db, opts: {
              (SELECT json_build_object('id', q."id", 'status', q."status", 'revision', q."revision", 'issuedAt', q."issuedAt", 'validUntil', q."validUntil",
                        'subtotal', q."subtotal", 'discountTotal', q."discountTotal", 'discountApprovedById', q."discountApprovedById",
                        'discountApprovedPercent', q."discountApprovedPercent", 'discountRejectedAt', q."discountRejectedAt",
+                       'approvalRequired', q."approvalRequired", 'approvalBasisPercent', q."approvalBasisPercent",
                        'orderLinks', (SELECT count(*) FROM "OpportunityOrder" ol WHERE ol."quoteId" = q."id"))
                 FROM "Quote" q WHERE q."opportunityId" = o."id" AND q."status"::text <> 'SUPERSEDED'
                ORDER BY (q."status"::text = 'ACCEPTED') DESC, q."revision" DESC, q."createdAt" DESC LIMIT 1) AS "quote",

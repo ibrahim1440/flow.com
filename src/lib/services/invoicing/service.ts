@@ -1,6 +1,8 @@
 // Sales invoicing A2 — the documents: drafts (manual, from an order, from a delivery), issue, cancel, credit and
 // debit notes. Every write runs in one transaction with its ledger entry (./postings) and its audit context; the
 // database re-checks the lifecycle, the numbering, the E-10 totals and the caps (20261103090000_sales_invoicing).
+import { assertDraftCovered, checkDraftEdit } from "./draft-control";
+import type { Permissions } from "@/lib/auth-shared";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { setAuditContext, type AuditContext } from "@/lib/accounting/audit";
@@ -13,6 +15,7 @@ import {
   Decimal, addDays, defaultInvoiceFamily, issueProblems, parseBuyer, parseLines, priceInvoice, riyadhStamp, seriesFor,
   type BuyerParticulars, type CleanLine, type InvoiceFamily, type InvoiceKind, type NoteReason, NOTE_REASONS,
   SAMPLE_CHANNEL,
+  EXEMPTION_REASONS,
 } from "./pricing";
 import { readInvoiceSettings, sellerSnapshot } from "./settings";
 import { postDocumentIssued } from "./postings";
@@ -513,7 +516,7 @@ export async function lockDocument(tx: Tx, id: string) {
 export type DraftPatch = { family?: unknown; lines?: unknown; buyer?: unknown; supplyDate?: unknown; supplyEndDate?: unknown; paymentTermsDays?: unknown; notes?: unknown; reasonCode?: unknown; reason?: unknown; branchId?: unknown };
 
 /** Who is saving (the route passes the actor's abilities): an issuer may correct a requested draft (compliance only). */
-export type DraftEditor = { canIssue: boolean; canSellAssets?: boolean };
+export type DraftEditor = { canIssue: boolean; canSellAssets?: boolean; actor?: { id: string; permissions: Permissions | Record<string, unknown> | null } };
 
 const headerOf = (d: { family: string; buyer: unknown; supplyDate: Date | null; supplyEndDate: Date | null; paymentTermsDays: number | null; notes: string | null; reasonCode: string | null; reason: string | null }) => ({
   family: d.family, buyer: d.buyer, supplyDate: dayOf(d.supplyDate), supplyEndDate: dayOf(d.supplyEndDate), paymentTermsDays: d.paymentTermsDays, notes: d.notes, reasonCode: d.reasonCode, reason: d.reason,
@@ -560,6 +563,13 @@ export async function updateDraft(id: string, patch: DraftPatch, ctx: AuditConte
       }
       if (patch.reason !== undefined) data.reason = notesOf(patch.reason);
     }
+    // P0 SEC-02 / C4: a direct sale's or sample's draft keeps its creation rules after an edit (tax lock, list discount,
+    // ceiling; above the threshold the SAME draft waits for the supervisor).
+    const control = doc.kind === "INVOICE" && (parsed || patch.paymentTermsDays !== undefined) ? await checkDraftEdit(tx, {
+      invoiceId: id, doc: { ...doc, createdById: doc.createdById },
+      next: { lines: parsed ? parsed.lines : doc.lines, paymentTermsDays: data.paymentTermsDays !== undefined ? (data.paymentTermsDays as number | null) : doc.paymentTermsDays },
+      actor: editor.actor ?? { id: ctx.actorId, permissions: null },
+    }) : null;
     if (parsed) {
       let lines = parsed.lines;
       if (doc.kind !== "INVOICE") lines = noteLinesFrom(doc, lines);
@@ -577,8 +587,35 @@ export async function updateDraft(id: string, patch: DraftPatch, ctx: AuditConte
       const diff = correctionDiff({ header: headerOf(doc), lines: doc.lines.map((l) => ({ ...l })) }, { header: headerOf(after), lines: after.lines.map((l) => ({ ...l })) });
       if (diff) await writeRequestEvent(tx, { invoiceId: id, kind: "EDITED_BY_ACCOUNTANT", actorId: ctx.actorId, diff });
     }
-    return { id };
+    return { id, approval: control?.approval ?? null };
   }, TX_OPTS);
+}
+
+/**
+ * P0 C5: an APPROVED VAT override applied to a draft invoice (inside the decision's transaction): each named line takes the
+ * approved treatment (category, 0 %, the ZATCA reason code and its text); the totals are re-derived. A draft only.
+ * `keyOf(line, index)` is the request's line key (tax-override.ts lineKey).
+ */
+type RetaxLine = { productSkuId: string | null; description: string | null; quantity: { toString(): string }; unitPrice: { toString(): string }; taxCategory: string | null; taxRatePercent: { toString(): string }; exemptionReasonCode: string | null };
+export async function retaxDraftIn(tx: Tx, id: string, coverOf: (ls: RetaxLine[]) => ({ taxCategory: string; taxRatePercent: string; exemptionReasonCode?: string | null } | undefined)[]) {
+  const row = await lockDocument(tx, id);
+  if (row.status !== "DRAFT") throw refuseInv("DRAFT_ONLY");
+  const doc = (await loadDocument(tx, id))!;
+  // P0 gate M1 / R2: the line by its CONTENT (sku / description, quantity, price) — never by its place; one approval
+  // covers one line (identical lines share their approvals as a pool, tax-override.ts coverLines).
+  const cover = coverOf(doc.lines.map((l) => ({ productSkuId: l.productSkuId, description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, taxCategory: l.taxCategory, taxRatePercent: l.taxRatePercent, exemptionReasonCode: l.exemptionReasonCode })));
+  const lines = doc.lines.map((l, i) => {
+    const c = toClean(l);
+    const t = cover[i];
+    if (!t) return c;
+    const reason = EXEMPTION_REASONS.find((r) => r.code === t.exemptionReasonCode);
+    return { ...c, taxCategory: t.taxCategory as CleanLine["taxCategory"], taxRatePercent: D(t.taxRatePercent), exemptionReasonCode: t.taxCategory === "S" ? null : t.exemptionReasonCode ?? null, exemptionReason: t.taxCategory === "S" ? null : (reason?.ar ?? t.exemptionReasonCode ?? null) };
+  });
+  const { priced, rows } = lineRows(lines);
+  await tx.salesInvoiceLine.deleteMany({ where: { invoiceId: id } });
+  if (rows.length) await tx.salesInvoiceLine.createMany({ data: rows.map((r, i) => ({ ...r, ...saleColumns(lines[i]), invoiceId: id })) });
+  await tx.salesInvoice.update({ where: { id }, data: totalsData(priced) });
+  return { id };
 }
 
 /** A credit note's lines inherit the original line's item, unit and tax; quantity and price are the credit's. */
@@ -742,6 +779,9 @@ export async function issueDocument(id: string, ctx: AuditContext, now: Date = n
     if (row.status === "CANCELLED") throw refuseInv("ALREADY_CANCELLED");
     const doc = (await loadDocument(tx, id))!;
     if (row.status === "ISSUED") return { id, number: doc.number!, replayed: true, posting: { status: "replayed" } };
+    // P0 SEC-02 / C4 / C5: a direct sale's or sample's draft is issued only on covered terms (VAT standard or approved;
+    // a discount above the threshold approved on exactly these terms).
+    await assertDraftCovered(tx, doc);
     // Defence in depth (D10 gate M2): an invoice is never issued for an order that no longer exists as a sale.
     // Only a direct sale's own draft (M4): an ordinary invoice of a cancelled order stays issuable — goods may have been
     // delivered before the cancel.

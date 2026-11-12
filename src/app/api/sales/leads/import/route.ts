@@ -118,7 +118,7 @@ export async function POST(request: Request) {
                 ...(companies.length ? [{ normalizedCompany: { in: companies } }] : []),
               ],
             },
-            select: { id: true, companyName: true, contactName: true, normalizedPhone: true, normalizedCompany: true },
+            select: { id: true, companyName: true, contactName: true, normalizedPhone: true, normalizedCompany: true, ownerId: true },
           })
         : [];
     const byPhone = new Map(existing.filter((e) => e.normalizedPhone).map((e) => [e.normalizedPhone!, e]));
@@ -126,8 +126,9 @@ export async function POST(request: Request) {
     const strongDuplicates: {
       row: number;
       companyName: string;
-      matchesLeadId: string;
-      matchesCompany: string;
+      /** P0 SEC-06: null for another rep's lead (the importer sees only that the phone exists). */
+      matchesLeadId: string | null;
+      matchesCompany: string | null;
     }[] = [];
     parsed.rows.forEach((r, i) => {
       const phone = normalizePhone(r.phone);
@@ -136,8 +137,8 @@ export async function POST(request: Request) {
         strongDuplicates.push({
           row: i + 2,
           companyName: r.companyName!,
-          matchesLeadId: hit.id,
-          matchesCompany: hit.companyName,
+          matchesLeadId: canAssign || hit.ownerId === user.id ? hit.id : null,
+          matchesCompany: canAssign || hit.ownerId === user.id ? hit.companyName : null,
         });
       }
     });

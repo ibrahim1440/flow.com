@@ -204,7 +204,9 @@ function Manual({ initialQ, mode = null, initialCustomerId, opportunityId }: { i
   const eff = mode ? effectiveDiscounts(lines, lines.map((_, i) => totals.priced?.lines[i]?.lineNet.toFixed(2) ?? null), md.skus) : [];
   const topEff = eff.length ? Math.max(...eff) : 0;
   const needsApproval = mode === "direct-sale" && !!md.can && topEff > md.can.threshold && !md.can.approveDiscount;
-  const lockTax = !(mode === "sample" ? md.facts?.taxOverride : md.can?.taxOverride);
+  // P0 C5 (owner, 11 Nov 2026): a new sale / sample is always S at the standard rate — a VAT change is a request on the
+  // draft, approved by a second person (also for a holder of invoice_tax_override).
+  const lockTax = true;
   const modeGross = totals.priced ? Number(totals.priced.grandTotal.toFixed(2)) : 0;
   // A second sample of a product this year (the same rule SampleNotes shows): its «أرسل» says where it goes.
   const repeatSample = mode === "sample" && !!md.facts && lines.some((l) => { const s = md.skus.find((x) => x.id === l.productSkuId); return !!s?.productId && md.facts!.sampledProducts.some((p) => p.productId === s.productId); });

@@ -16,6 +16,7 @@ import { ZatcaPanel } from "@/app/dashboard/accounting/zatca/_ui/zatca";
 import { QRCodeSVG } from "qrcode.react";
 import { Section } from "@/components/chrome";
 import { useAccountantView } from "../../../accounting/_ui/qoyod-pages";
+import { TaxOverridePanel } from "@/components/sales/tax-override-panel";
 import { Banner, IssueConfirm, RequestHistory, ReturnDialog, SplitButton, fmtAt, type HistoryRow } from "../_ui/request-ui";
 import { RETURN_REASON_LABEL, type ReturnReason } from "@/lib/services/invoicing/request-math";
 import { QoyodPanel } from "../_ui/qoyod-panel";
@@ -42,7 +43,16 @@ type Doc = {
   credit: { overLimit: boolean; overdueDays: number; hold: unknown } | null;
   zatca?: { qr: string | null; ref: string | null; status: string | null } | null;
   sample?: { dealId: string | null; dealTitle: string | null; awaitingApproval: boolean; cancelled: boolean } | null;
+  /** P0 SEC-02 / C4: a direct sale's / sample's draft — the supervisor's approval of an edit, and «تعدّلت بعد الإرسال». */
+  control?: { kind: string; approval: "PENDING" | "APPROVED" | "REJECTED" | null; approvalPercent: string | null; decisionNote: string | null; requestedAt: string | null; changedSinceSent: { line: number; field: string; before: string | null; after: string | null }[] } | null;
 };
+
+const DIFF_FIELD: Record<string, [string, string]> = {
+  unitPrice: ["السعر", "price"], discountPercent: ["الخصم", "discount"], quantity: ["الكمية", "quantity"], productSkuId: ["الصنف", "product"],
+  taxCategory: ["فئة الضريبة", "VAT category"], taxRatePercent: ["نسبة الضريبة", "VAT rate"], exemptionReasonCode: ["سبب الإعفاء", "exemption code"],
+  added: ["بند جديد", "line added"], removed: ["بند محذوف", "line removed"], paymentTermsDays: ["مدة السداد", "payment terms"],
+};
+const pctField = (f: string) => f === "discountPercent" || f === "taxRatePercent";
 
 const toEdit = (l: Line): EditLine => ({ description: l.description, quantity: l.quantity, unit: l.unit, unitPrice: l.unitPrice, discountPercent: l.discountPercent, taxCategory: l.taxCategory, taxRatePercent: l.taxRatePercent, exemptionReasonCode: l.exemptionReasonCode, orderItemId: l.orderItemId, productSkuId: l.productSkuId, skuCode: l.skuCode, originalLineId: l.originalLineId, deliveryId: l.deliveryId, kind: l.kind, fixedAssetId: l.fixedAssetId, disposalKind: l.disposalKind, ...(l.priceIncludesVat ? { priceIncludesVat: true, unitPriceGross: l.unitPriceGross ?? null } : {}) });
 
@@ -90,6 +100,8 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const canEditDraft = d.status === "DRAFT" && (requested ? issuerHere : (isNote ? d.can.creditNote : d.can.create));
   const canIssue = d.status === "DRAFT" && issuerHere;
   const canRequest = d.status === "DRAFT" && !requested && (isNote ? d.can.creditNote : d.can.create);
+  // P0 C4: an edited draft waiting for (or refused by) the supervisor is neither sent nor issued (the server refuses too).
+  const waitingSupervisor = d.status === "DRAFT" && (d.control?.approval === "PENDING" || d.control?.approval === "REJECTED");
   const lastEvent = d.history?.length ? d.history[d.history.length - 1] : null;
   const returned = d.status === "DRAFT" && !requested && lastEvent?.kind === "RETURNED" ? lastEvent : null;
   const issueProblemsList = d.status === "DRAFT" && (search?.get("notReady") === "1" || requested) ? d.problems ?? [] : [];
@@ -156,11 +168,11 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           {requested && d.can.requester ? <button type="button" className="hr-btn" disabled={!!w.busy} onClick={withdraw} data-testid="withdraw-request">{L("سحب الطلب", "Withdraw the request")}</button> : null}
           {requested && issuerHere ? <button type="button" className="hr-btn" onClick={() => setDialog("return")} data-testid="return-request">{L("إعادة إلى المبيعات", "Send back to Sales")}</button> : null}
           {canRequest && !canIssue ? (
-            <SplitButton testId="request-split" disabled={!!w.busy} label={L("إرسال الطلب للمحاسب", "Send the request to the accountant")} onPrimary={sendRequest}
+            <SplitButton testId="request-split" disabled={!!w.busy || waitingSupervisor} label={L("إرسال الطلب للمحاسب", "Send the request to the accountant")} onPrimary={sendRequest}
               items={canEditDraft ? [{ id: "draft", label: L("حفظ كمسودة", "Save as draft"), onSelect: () => { void save(); } }] : []} />
           ) : null}
           {d.status === "DRAFT" && canIssue ? <button type="button" className="hr-btn is-primary" onClick={() => setDialog("issue")} data-testid="issue"
-            disabled={!!d.sample?.awaitingApproval} title={d.sample?.awaitingApproval ? L("تنتظر موافقة المدير", "Waiting for the manager's approval") : undefined}>{requested ? L("مراجعة وإصدار", "Review and issue") : isNote ? L("إصدار الإشعار", "Issue the note") : L("إصدار الفاتورة", "Issue the invoice")}</button> : null}
+            disabled={!!d.sample?.awaitingApproval || waitingSupervisor} title={d.sample?.awaitingApproval ? L("تنتظر موافقة المدير", "Waiting for the manager's approval") : waitingSupervisor ? L("تنتظر موافقة المشرف", "Waiting for the supervisor's approval") : undefined}>{requested ? L("مراجعة وإصدار", "Review and issue") : isNote ? L("إصدار الإشعار", "Issue the note") : L("إصدار الفاتورة", "Issue the invoice")}</button> : null}
         </span>
       }>
       <Msg error={w.error} done={w.done} onClose={() => { w.setError(null); w.setDone(null); }} />
@@ -171,6 +183,36 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             {d.sample.dealId ? <> · <Link href={`/dashboard/sales/deals/${d.sample.dealId}`} data-testid="sample-deal-link">{L("صفقة ", "deal ")}<bdi>{d.sample.dealTitle ?? ""}</bdi></Link></> : null}</b>
           {d.status === "DRAFT" && d.sample.awaitingApproval ? <span data-testid="sample-awaiting">{L("تنتظر موافقة المدير — ما تُصدر قبل ما يقرر.", "Waiting for the manager's approval — it is not issued before the decision.")}</span> : null}
         </Banner>
+      ) : null}
+      {d.status === "DRAFT" && d.control?.approval === "PENDING" ? (
+        <Banner tone="warning" testId="control-pending">
+          <b>⏳ {L(`تنتظر موافقة المشرف على الخصم ${d.control.approvalPercent ?? ""}٪`, `Waiting for the supervisor to approve the ${d.control.approvalPercent ?? ""}% discount`)}</b>
+          <span>{L("تعدّلت بعد الإرسال، والخصم صار فوق الحد. المسودة ما تنرسل للمحاسب ولا تنصدر قبل ما يوافق المشرف.", "It was edited after sending and the discount is now above the limit. The draft is not sent to the accountant or issued before the supervisor approves.")}</span>
+          {d.control.requestedAt ? <span className="inv-sub hr-num">{fmtAt(d.control.requestedAt)}</span> : null}
+        </Banner>
+      ) : d.status === "DRAFT" && d.control?.approval === "APPROVED" ? (
+        <Banner tone="success" testId="control-approved">
+          <b>✓ {L(`اعتمد المشرف الخصم ${d.control.approvalPercent ?? ""}٪`, `The supervisor approved the ${d.control.approvalPercent ?? ""}% discount`)}</b>
+          <span>{L("أرسل المسودة للمحاسب الحين. أي تعديل جديد يرجّعها للمشرف.", "Send the draft to the accountant now. Any new change sends it back to the supervisor.")}</span>
+        </Banner>
+      ) : d.status === "DRAFT" && d.control?.approval === "REJECTED" ? (
+        <Banner tone="danger" testId="control-rejected">
+          <b>✕ {L("المشرف رفض الخصم", "The supervisor refused the discount")}</b>
+          {d.control.decisionNote ? <span><bdi>«{d.control.decisionNote}»</bdi></span> : null}
+          <span>{L("عدّل الخصم لين الحد أو أقل وأرسلها، أو ألغِ المسودة.", "Bring the discount down to the limit or less and send it, or cancel the draft.")}</span>
+        </Banner>
+      ) : null}
+      {d.status === "DRAFT" && d.control?.changedSinceSent.length ? (
+        <Banner tone="info" testId="control-changed">
+          <b>{L("تعدّلت بعد الإرسال", "Changed after it was sent")}</b>
+          <ul>{d.control.changedSinceSent.map((c, i) => (
+            <li key={i}>{c.line ? L(`البند ${c.line}: `, `Line ${c.line}: `) : ""}{L(DIFF_FIELD[c.field]?.[0] ?? c.field, DIFF_FIELD[c.field]?.[1] ?? c.field)}
+              {c.field !== "added" && c.field !== "removed" && c.field !== "productSkuId" ? <> <bdi className="hr-num">{c.before ?? "—"}{pctField(c.field) ? "٪" : ""}</bdi> ← <bdi className="hr-num">{c.after ?? "—"}{pctField(c.field) ? "٪" : ""}</bdi></> : null}</li>
+          ))}</ul>
+        </Banner>
+      ) : null}
+      {d.status === "DRAFT" && d.control ? (
+        <TaxOverridePanel documentType="INVOICE" documentId={d.id} ar={lang === "ar"} editable onApplied={() => doc.reload()} reloadKey={d.totals.grand + d.lines.length} />
       ) : null}
       {requested ? (
         <Banner tone="info" testId="request-banner">
@@ -243,7 +285,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           </div>
           <div className="acct-card">
             <h2>{L("البنود", "Lines")}</h2>
-            <LinesEditor lines={lines} onChange={setLines} lockItems={d.kind === "CREDIT_NOTE"} lockCommercial={requested} sellAssets={!isNote && !!d.can.sellAssets} inclusive={qoyod && !isNote} />
+            <LinesEditor lines={lines} onChange={setLines} lockItems={d.kind === "CREDIT_NOTE"} lockCommercial={requested} sellAssets={!isNote && !!d.can.sellAssets} inclusive={qoyod && !isNote} lockTax={!!d.control} />
             <div className="inv-grid2">
               <label className="hr-field"><span className="hr-label">{L("ملاحظات للعميل", "Notes to the customer")}</span><textarea className="hr-input" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
               <Totals lines={lines} />

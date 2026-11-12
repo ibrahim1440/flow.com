@@ -28,7 +28,7 @@ import { listApprovals as mktList } from "@/lib/marketing/server/approvals";
 import { parseDay } from "@/lib/hr/dates";
 import type { WsActor } from "./context";
 
-export type ApprovalType = "LEAVE" | "ADVANCE" | "DISCOUNT" | "SAMPLE" | "STAGE_MOVE" | "FINANCE" | "MARKETING";
+export type ApprovalType = "LEAVE" | "ADVANCE" | "DISCOUNT" | "SAMPLE" | "STAGE_MOVE" | "TAX_OVERRIDE" | "FINANCE" | "MARKETING";
 
 export type ApprovalItem = {
   key: string;
@@ -131,7 +131,7 @@ async function discountItems(actor: WsActor): Promise<ApprovalItem[]> {
     orderBy: { updatedAt: "desc" }, take: 200,
     select: {
       id: true, quoteNumber: true, revision: true, status: true, subtotal: true, discountTotal: true, grandTotal: true, currency: true, createdAt: true, updatedAt: true, createdById: true,
-      discountApprovedById: true, discountApprovedPercent: true, discountRejectedAt: true,
+      discountApprovedById: true, discountApprovedPercent: true, discountRejectedAt: true, approvalRequired: true, approvalBasisPercent: true,
       customer: { select: { name: true } }, opportunity: { select: { title: true, owner: { select: { name: true } } } },
       lines: { select: { quantity: true, unitPrice: true, discountPercent: true, taxRatePercent: true } },
     },
@@ -144,7 +144,9 @@ async function discountItems(actor: WsActor): Promise<ApprovalItem[]> {
     if (!q.opportunity) continue;
     if (!isSimpleMode() && q.createdById === actor.id) continue;
     const priced = priceQuote(q.lines.map((l) => ({ quantity: l.quantity, unitPrice: l.unitPrice, discountPercent: l.discountPercent, taxRatePercent: l.taxRatePercent })));
-    const pct = priced.effectiveDiscountPercent.toDecimalPlaces(2).toString();
+    // P0 SEC-01: the figure decided on is the discount against the list (as saved); a draft from before the batch shows
+    // its old figure until it is saved again (the decision re-computes it either way).
+    const pct = (q.approvalBasisPercent ? new Prisma.Decimal(q.approvalBasisPercent.toString()) : priced.effectiveDiscountPercent).toDecimalPlaces(2).toString();
     const grand = priced.grandTotal.toFixed(2);
     out.push({
       key: `DISCOUNT:${q.id}`, type: "DISCOUNT", id: q.id,
@@ -204,6 +206,77 @@ async function directSaleDiscountItems(actor: WsActor): Promise<ApprovalItem[]> 
       decide: { url: `/api/sales/direct-sale/${encodeURIComponent(o.id)}/discount-approval`, rejectNeedsReason: true, expected: { discountPercent: p, ...(priced ? { grandTotal: priced.gross } : {}) }, stepUp: true },
       openUrl: `/dashboard/orders?order=${o.orderNumber}`,
       notice: { ar: "اعتماد الخصم يكمّل البيع: تنقفل الصفقة رابحة وتروح الفاتورة للمحاسب يصدرها.", en: "Approving completes the sale: the deal is won and the invoice goes to the accountant to issue." },
+    });
+  }
+  return out;
+}
+
+/** P0 SEC-02 / C4: a direct sale's / sample's invoice DRAFT edited above the threshold — the same approvers and inbox as a
+ *  quotation's discount, decided at POST /api/sales/invoices/[id]/draft-approval. */
+async function draftDiscountItems(actor: WsActor): Promise<ApprovalItem[]> {
+  if (!hasSubPrivilege(actor.permissions, "sales", "quote_approve_discount")) return [];
+  const threshold = await discountThreshold(prisma);
+  const scopeAll = seesAllSales(actor.permissions);
+  const own = scopeAll ? null : (await prisma.customer.findMany({ where: ownedCustomerWhere(actor.id), select: { id: true } })).map((c) => c.id);
+  const rows = await prisma.salesInvoiceDraftControl.findMany({
+    where: { approvalStatus: "PENDING", invoice: { status: "DRAFT", ...(own ? { customerId: { in: own } } : {}) } },
+    orderBy: { requestedAt: "asc" }, take: 200,
+    select: { invoiceId: true, kind: true, approvalPercent: true, requestedById: true, requestedAt: true, invoice: { select: { lineExtensionTotal: true, discountTotal: true, grandTotal: true, currency: true, customerId: true } } },
+  });
+  const custs = new Map((await prisma.customer.findMany({ where: { id: { in: rows.map((r) => r.invoice.customerId) } }, select: { id: true, name: true, nameAr: true } })).map((c) => [c.id, c]));
+  const people = new Map((await prisma.employee.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.requestedById).filter((x): x is string => !!x))] } }, select: { id: true, name: true } })).map((p) => [p.id, p.name]));
+  const out: ApprovalItem[] = [];
+  for (const r of rows) {
+    if (!isSimpleMode() && r.requestedById === actor.id) continue;
+    const pct = (r.approvalPercent ?? new Prisma.Decimal(0)).toString();
+    const what = r.kind === "SAMPLE" ? ["فاتورة عيّنة", "sample invoice"] : ["فاتورة بيع مباشر", "direct-sale invoice"];
+    out.push({
+      key: `DISCOUNT:invoice:${r.invoiceId}`, type: "DISCOUNT", id: r.invoiceId,
+      title: `خصم ${pct}% · مسودة ${what[0]}`, titleEn: `Discount ${pct}% · ${what[1]} draft`,
+      requester: r.requestedById ? people.get(r.requestedById) ?? null : null, subject: custs.get(r.invoice.customerId)?.nameAr || custs.get(r.invoice.customerId)?.name || null, subjectEn: custs.get(r.invoice.customerId)?.name ?? null,
+      createdAt: iso(r.requestedAt ?? new Date()),
+      facts: {
+        invoiceDraft: true, customer: custs.get(r.invoice.customerId)?.nameAr || custs.get(r.invoice.customerId)?.name || null, discountPercent: pct, thresholdPercent: threshold.toString(),
+        subtotal: r.invoice.lineExtensionTotal.plus(r.invoice.discountTotal).toFixed(2), discountTotal: r.invoice.discountTotal.toFixed(2), grandTotal: r.invoice.grandTotal.toFixed(2), currency: r.invoice.currency,
+      },
+      warnings: [],
+      decide: { url: `/api/sales/invoices/${encodeURIComponent(r.invoiceId)}/draft-approval`, rejectNeedsReason: true, stepUp: true },
+      openUrl: `/dashboard/sales/invoices/${encodeURIComponent(r.invoiceId)}`,
+      notice: { ar: "الاعتماد ما يصدر الفاتورة: المندوب يرسلها للمحاسب بعده، والمحاسب يصدرها.", en: "Approving does not issue the invoice: the rep sends it to the accountant, who issues it." },
+    });
+  }
+  return out;
+}
+
+/** P0 C5: «طلب تغيير المعاملة الضريبية» — decided by a holder of sales › invoice_tax_override_approve who is NOT the
+ *  requester (never, SIMPLE MODE included), at POST /api/sales/tax-overrides/[id]/decision. */
+async function taxOverrideItems(actor: WsActor): Promise<ApprovalItem[]> {
+  if (!hasSubPrivilege(actor.permissions, "sales", "invoice_tax_override_approve")) return [];
+  const rows = await prisma.taxOverrideRequest.findMany({ where: { status: "PENDING", requestedById: { not: actor.id } }, orderBy: { requestedAt: "asc" }, take: 200 });
+  const quoteIds = rows.filter((r) => r.documentType === "QUOTE").map((r) => r.documentId), invIds = rows.filter((r) => r.documentType === "INVOICE").map((r) => r.documentId);
+  const [quotes, invs, people] = await Promise.all([
+    prisma.quote.findMany({ where: { id: { in: quoteIds } }, select: { id: true, quoteNumber: true, status: true, customer: { select: { name: true, nameAr: true } }, opportunity: { select: { customer: { select: { name: true, nameAr: true } } } } } }),
+    prisma.salesInvoice.findMany({ where: { id: { in: invIds } }, select: { id: true, status: true, customerId: true } }),
+    prisma.employee.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.requestedById))] } }, select: { id: true, name: true } }),
+  ]);
+  const invCusts = await prisma.customer.findMany({ where: { id: { in: invs.map((i) => i.customerId) } }, select: { id: true, name: true, nameAr: true } });
+  const out: ApprovalItem[] = [];
+  for (const r of rows) {
+    const q = quotes.find((x) => x.id === r.documentId), inv = invs.find((x) => x.id === r.documentId);
+    const status = q?.status ?? inv?.status;
+    if (!status || String(status) !== "DRAFT") continue;
+    const c = q ? q.opportunity?.customer ?? q.customer : invCusts.find((x) => x.id === inv!.customerId) ?? null;
+    const lines = (r.lines as { key: string; taxCategory: string; taxRatePercent: string; exemptionReasonCode: string | null }[]) ?? [];
+    out.push({
+      key: `TAX_OVERRIDE:${r.id}`, type: "TAX_OVERRIDE", id: r.id,
+      title: q ? `تغيير ضريبة · عرض ${q.quoteNumber}` : "تغيير ضريبة · مسودة فاتورة", titleEn: q ? `VAT change · quotation ${q.quoteNumber}` : "VAT change · invoice draft",
+      requester: people.find((p) => p.id === r.requestedById)?.name ?? null, subject: c ? c.nameAr || c.name : null, subjectEn: c?.name ?? null,
+      createdAt: iso(r.requestedAt),
+      facts: { documentType: r.documentType, customer: c ? c.nameAr || c.name : null, reason: r.reason, lines: lines.map((l) => ({ key: l.key, taxCategory: l.taxCategory, taxRatePercent: l.taxRatePercent, exemptionReasonCode: l.exemptionReasonCode })) },
+      warnings: [],
+      decide: { url: `/api/sales/tax-overrides/${encodeURIComponent(r.id)}/decision`, rejectNeedsReason: true, stepUp: true },
+      openUrl: q ? `/dashboard/sales/quotes/${encodeURIComponent(r.documentId)}` : `/dashboard/sales/invoices/${encodeURIComponent(r.documentId)}`,
+      notice: { ar: "الاعتماد يطبّق المعاملة الضريبية على المسودة مباشرة. المستند الصادر ما يتغير.", en: "Approving applies the VAT treatment to the draft at once. An issued document never changes." },
     });
   }
   return out;
@@ -319,7 +392,7 @@ async function marketingItems(actor: WsActor): Promise<ApprovalItem[]> {
 }
 
 const SOURCES: [ApprovalType, (a: WsActor) => Promise<ApprovalItem[]>][] = [
-  ["LEAVE", leaveItems], ["ADVANCE", advanceItems], ["DISCOUNT", async (a: WsActor) => [...(await discountItems(a)), ...(await directSaleDiscountItems(a))]], ["SAMPLE", sampleItems], ["STAGE_MOVE", stageMoveItems], ["FINANCE", financeItems], ["MARKETING", marketingItems],
+  ["LEAVE", leaveItems], ["ADVANCE", advanceItems], ["DISCOUNT", async (a: WsActor) => [...(await discountItems(a)), ...(await directSaleDiscountItems(a)), ...(await draftDiscountItems(a))]], ["SAMPLE", sampleItems], ["STAGE_MOVE", stageMoveItems], ["TAX_OVERRIDE", taxOverrideItems], ["FINANCE", financeItems], ["MARKETING", marketingItems],
 ];
 
 export async function myApprovals(actor: WsActor, only?: ApprovalType | null) {

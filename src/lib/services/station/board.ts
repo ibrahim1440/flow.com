@@ -9,6 +9,7 @@
 //
 // Privacy (owner decision, 8 Nov 2026): no customer is selected at all — not even the name — and no price, amount,
 // payment or invoice field. The order number, its source, quantities, stage and times only.
+import { opsOrderWhere } from "@/lib/services/sales/scope";
 import { createHash } from "node:crypto";
 import type { Prisma } from "@/generated/prisma/client";
 import { cookies } from "next/headers";
@@ -25,19 +26,20 @@ import { DEVICE_REQUIRED, DEVICE_REVOKED, WRONG_STATION, deviceFromToken, device
 export const BOARD_STATION_TYPE = "ORDERS_BOARD";
 
 /** The board's guard. `error` is the refusal to return as it is. */
-export async function requireBoardViewer(): Promise<{ mode: "device" | "personal"; error: null } | { mode: null; error: Response }> {
+export async function requireBoardViewer(): Promise<{ mode: "device" | "personal"; error: null; orderWhere: Prisma.OrderWhereInput } | { mode: null; error: Response }> {
   const jar = await cookies();
   const token = jar.get(STATION_DEVICE_COOKIE)?.value ?? null;
   if (!token) {
     const r = await requireModule("orders");
-    return r.error ? { mode: null, error: r.error } : { mode: "personal", error: null };
+    // P0 SEC-04: off a board device, a sales rep's board is their own orders (opsOrderWhere); the floor sees all of it.
+    return r.error ? { mode: null, error: r.error } : { mode: "personal", error: null, orderWhere: opsOrderWhere(r.user) };
   }
   const dev = await deviceFromToken(token);
   if (dev.state === "none" || dev.state === "unknown") return { mode: null, error: DEVICE_REQUIRED().response() };
   if (dev.state === "revoked") return { mode: null, error: DEVICE_REVOKED().response() };
   const served = await deviceStations(dev.device, dev.station);
   if (!served.some((s) => s.type === BOARD_STATION_TYPE)) return { mode: null, error: WRONG_STATION().response() };
-  return { mode: "device", error: null };
+  return { mode: "device", error: null, orderWhere: {} };
 }
 
 const OFF_BOARD = ["Completed", "Cancelled", "Rejected"];
@@ -56,15 +58,15 @@ const ORDER_SELECT = {
 } satisfies Prisma.OrderSelect;
 
 /** The board as it is now: every card, the open columns and a version of both (the poll's ETag). */
-export async function boardSnapshot(now = new Date()): Promise<BoardAnswer> {
+export async function boardSnapshot(now = new Date(), orderWhere: Prisma.OrderWhereInput = {}): Promise<BoardAnswer> {
   const dayStart = riyadhDayStart(now);
   const rows = await prisma.order.findMany({
     where: {
-      OR: [
+      AND: [orderWhere, { OR: [
         { status: { notIn: OFF_BOARD } },
         // «سُلّم اليوم»: completed orders with a delivery today (the last one decides, below).
         { status: "Completed", items: { some: { deliveries: { some: { date: { gte: dayStart } } } } } },
-      ],
+      ] }],
     },
     select: ORDER_SELECT,
     orderBy: { orderNumber: "asc" },

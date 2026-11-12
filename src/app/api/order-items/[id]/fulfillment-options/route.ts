@@ -1,4 +1,5 @@
 import { NextResponse } from "@/lib/api-response";
+import { orderItemInOpsScope } from "@/lib/services/sales/customer-access";
 import { prisma } from "@/lib/db";
 import { requireAnyModule } from "@/lib/auth-server";
 import {
@@ -20,10 +21,12 @@ type Params = { params: Promise<{ id: string }> };
  * the preparation workstation both call it before anyone commits to a decision.
  */
 export async function GET(_request: Request, { params }: Params) {
-  const { error } = await requireAnyModule("orders", "dispatch", "inventory", "production");
+  const { user, error } = await requireAnyModule("orders", "dispatch", "inventory", "production");
   if (error) return error;
 
   const { id } = await params;
+  // P0 SEC-04: a rep's line only (another rep's order line is the same 404 as a missing one).
+  if (!(await orderItemInOpsScope(user, id))) return NextResponse.json({ error: "Order item not found." }, { status: 404 });
 
   const orderItem = await prisma.orderItem.findUnique({
     where: { id },

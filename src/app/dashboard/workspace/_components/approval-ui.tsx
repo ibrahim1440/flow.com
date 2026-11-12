@@ -39,7 +39,9 @@ function Facts({ item }: { item: ApprovalItem }) {
     const cur = f.currency === "SAR" ? L("⃁", "SAR") : n(f.currency);
     const direct = !f.quoteNumber && f.orderNumber;
     rows.push([L("العميل", "Customer"), n(f.customer)]);
-    if (direct) {
+    if (f.invoiceDraft) {
+      rows.push([L("المستند", "Document"), L("مسودة فاتورة — عدّلها المندوب بعد إرسالها", "Invoice draft — edited by the rep after it was sent")]);
+    } else if (direct) {
       rows.push([L("البيع المباشر", "Direct sale"), `${L("طلب", "Order")} #${n(f.orderNumber)}${f.dealOwner ? ` · ${f.dealOwner}` : ""}`]);
       if (f.payment) rows.push([L("الدفع", "Payment"), <span key="pay" data-testid="approval-payment">{f.payment === "BANK_TRANSFER" ? L("تحويل بنكي (الإيصال بعد الموافقة)", "Bank transfer (receipt after the approval)") : f.payment === "CASH" ? L("كاش", "Cash") : f.payment === "CARD" ? L("شبكة", "Card") : L("آجل", "On account")}</span>]);
     } else {
@@ -57,6 +59,15 @@ function Facts({ item }: { item: ApprovalItem }) {
     rows.push([L("الصفقة", "Deal"), `${n(f.deal)}${f.dealOwner ? ` · ${f.dealOwner}` : ""}`]);
     rows.push([L("المحصول", "Product"), <span key="p"><bdi>{n(lang === "ar" ? f.productAr ?? f.product : f.product)}</bdi> · <span className="hr-num">{n(f.units)}</span> {L("عبوة", "unit")}</span>]);
     if (f.note) rows.push([L("ملاحظة المندوب", "The rep's note"), <bdi key="n">{n(f.note)}</bdi>]);
+  } else if (item.type === "TAX_OVERRIDE") {
+    // P0 C5: a VAT treatment change on a draft — what changes, the ZATCA reason code and the written reason.
+    const cat = (c: string) => c === "Z" ? L("صفرية", "Zero-rated") : c === "E" ? L("معفاة", "Exempt") : c === "O" ? L("خارج النطاق", "Out of scope") : L("أساسية", "Standard");
+    rows.push([L("العميل", "Customer"), n(f.customer)]);
+    rows.push([L("المستند", "Document"), f.documentType === "QUOTE" ? L("عرض سعر (مسودة)", "Quotation (draft)") : L("فاتورة (مسودة)", "Invoice (draft)")]);
+    (Array.isArray(f.lines) ? (f.lines as { key: string; taxCategory: string; taxRatePercent: string; exemptionReasonCode: string | null }[]) : []).forEach((l, i) => {
+      rows.push([`${L("البند", "Line")} ${i + 1}`, <span key={`l${i}`} data-testid={`approval-tax-line-${i}`}>{cat(l.taxCategory)} · <span className="hr-num">{l.taxRatePercent}%</span>{l.exemptionReasonCode ? <> · <bdi>{l.exemptionReasonCode}</bdi></> : null}</span>]);
+    });
+    rows.push([L("السبب", "Reason"), <bdi key="r">{n(f.reason)}</bdi>]);
   } else if (item.type === "STAGE_MOVE") {
     // Pipeline v2: a rep's manual stage move waiting for the supervisor.
     rows.push([L("الصفقة", "Deal"), `${n(f.deal)}${f.dealOwner ? ` · ${f.dealOwner}` : ""}`]);

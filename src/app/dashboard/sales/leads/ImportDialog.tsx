@@ -25,7 +25,7 @@ type Preview = {
   rowsRead: number;
   problems: { row: number; column?: string; message: string }[];
   duplicatesInFile: { row: number; message: string }[];
-  duplicatesInSystem: { row: number; companyName: string; matchesCompany: string }[];
+  duplicatesInSystem: { row: number; companyName: string; matchesCompany: string | null }[];
   unknownColumns: string[];
 };
 
@@ -231,7 +231,7 @@ export default function ImportDialog({
                       <li key={i} className="text-oo-status-hold">
                         {ar ? "صف " : "Row "}
                         {d.row}: {d.companyName} — {ar ? "يطابق " : "matches "}
-                        {d.matchesCompany}
+                        {d.matchesCompany ?? (ar ? "عميل محتمل عند مندوب آخر" : "another rep's lead")}
                       </li>
                     ))}
                   </ul>

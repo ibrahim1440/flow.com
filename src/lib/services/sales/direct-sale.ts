@@ -42,7 +42,7 @@ import { appendOrderActivity, lockOrderLifecycleResources } from "@/lib/services
 import { assertSalesAllowed } from "@/lib/services/customers/credit-db";
 import { customerInScope } from "./customer-access";
 import { customersScopedToOwner, ownedCustomerWhere, seesAllSales } from "./scope";
-import { hasTerms, mayOverrideTax, parseHeader, priceTerms, termsApproval, type SaleTerms } from "./direct-sale-terms";
+import { hasTerms, parseHeader, priceTerms, termsApproval, type SaleTerms } from "./direct-sale-terms";
 
 type Tx = Prisma.TransactionClient;
 type Db = Tx | typeof prisma;
@@ -202,7 +202,7 @@ export async function directSaleOptions(actor: DirectSaleActor, q: string, onlyI
     products: products.map((p) => ({ id: p.id, skuCode: p.skuCode, name: p.nameAr || p.name || p.product.productNameAr || p.product.productNameEn, price: p.price.toFixed(2) })),
     can: {
       approveDiscount: mayApproveDiscount(actor.permissions),
-      taxOverride: mayOverrideTax(actor.permissions),
+      taxOverride: false,
       collect: hasSubPrivilege(actor.permissions as Permissions, "sales", "collection_submit"),
       threshold: Number((await discountThreshold(prisma)).toString()), max: DISCOUNT_MAX,
     },
@@ -413,7 +413,8 @@ export async function createDirectSale(
     if (termsMode) {
       const threshold = await discountThreshold(tx);
       // D22 (owner, option 1): S at the default rate unless the rep holds sales › invoice_tax_override (else 400 TAX_LOCKED).
-      const t = await priceTerms(tx, input.lines, threshold, "0", mayOverrideTax(actor.permissions));
+      // P0 C5: a new sale is S at the standard rate (an override is a request on the draft, approved by a second person).
+      const t = await priceTerms(tx, input.lines, threshold, "0");
       ({ percent: discountPercent, needsApproval } = termsApproval(t.quote, threshold, mayApproveDiscount(actor.permissions)));
       terms = { lines: t.terms, header: header!, dealId: await chosenDeal(tx, actor, customerId, input.opportunityId) };
       priced = t.quote;

@@ -58,6 +58,8 @@ export const PRIVILEGED_SUBS: [module: string, sub: string][] = [
   ["marketing", "ads_manage"], ["marketing", "integrations_manage"], ["marketing", "automation_manage"],
   // Sales invoicing A2: issuing a tax invoice and the credit / debit notes (verified individual + step-up).
   ["sales", "invoices_issue"], ["sales", "invoices_credit_note"],
+  // P0 C5 (owner, 11 Nov 2026): approving another person's VAT-treatment change (verified individual + step-up).
+  ["sales", "invoice_tax_override_approve"],
 ];
 
 /** Why an account is privileged (empty = operational). Stable keys, for the audit and the report. */

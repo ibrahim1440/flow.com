@@ -196,6 +196,59 @@ export const EVENTS: NotificationEventDef[] = [
       link: f.decision === "APPROVE" && f.receiptDealId ? `/dashboard/sales/deals/${enc(s(f.receiptDealId))}#collections` : `/dashboard/sales/direct-sale?order=${enc(s(f.orderId))}`,
     }),
   },
+  // P0 SEC-02 / C4 (20261230090000_p0_rep_security): a direct sale's or sample's invoice draft edited above the discount
+  // threshold waits for the same approvers, in the same inbox; the editor learns the decision.
+  {
+    key: "sales.invoice_draft_discount_pending", category: "sales", severity: "warning",
+    label: { ar: "مسودة فاتورة تنتظر اعتمادك للخصم", en: "An invoice draft's discount awaits your approval" },
+    recipients: [{ perm: [sales("quote_approve_discount")] }], requires: [MOD("sales")], scope: "customer",
+    trigger: "PATCH /api/sales/invoices/[id] — a direct-sale / sample draft edited above the threshold (checkDraftEdit)",
+    render: (f) => ({
+      titleAr: `اعتمادك مطلوب: خصم ${s(f.percent)}٪ على مسودة فاتورة`,
+      titleEn: `Your approval is needed: ${s(f.percent)}% discount on an invoice draft`,
+      bodyAr: s(f.customerName), bodyEn: s(f.customerName),
+      link: "/dashboard/workspace/approvals",
+    }),
+  },
+  {
+    key: "sales.invoice_draft_discount_decided", category: "sales", severity: "info",
+    label: { ar: "اعتُمد الخصم على مسودة فاتورتك أو رُفض", en: "The discount on your invoice draft approved / refused" },
+    recipients: [{ person: "requester" }], requires: [MOD("sales")],
+    trigger: "POST /api/sales/invoices/[id]/draft-approval (decideDraftApproval)",
+    render: (f) => ({
+      severity: f.decision === "APPROVE" ? "success" : "warning",
+      titleAr: f.decision === "APPROVE" ? "اعتُمد الخصم — أرسل المسودة للمحاسب" : "الخصم انرفض على مسودة الفاتورة",
+      titleEn: f.decision === "APPROVE" ? "Discount approved — send the draft to the accountant" : "The discount on the invoice draft was refused",
+      bodyAr: s(f.note), bodyEn: s(f.note),
+      link: `/dashboard/sales/invoices/${enc(s(f.invoiceId))}`,
+    }),
+  },
+  // P0 C5: a change of a line's VAT treatment on a draft — decided by a second person.
+  {
+    key: "sales.tax_override_pending", category: "sales", severity: "warning",
+    label: { ar: "طلب تغيير ضريبة ينتظر اعتمادك", en: "A VAT change request awaits your approval" },
+    recipients: [{ perm: [sales("invoice_tax_override_approve")] }], requires: [MOD("sales")],
+    trigger: "POST /api/sales/tax-overrides (requestTaxOverride)",
+    render: (f) => ({
+      titleAr: `اعتمادك مطلوب: تغيير الضريبة على ${f.documentType === "QUOTE" ? "عرض سعر" : "مسودة فاتورة"}`,
+      titleEn: `Your approval is needed: a VAT change on ${f.documentType === "QUOTE" ? "a quotation" : "an invoice draft"}`,
+      bodyAr: s(f.reason), bodyEn: s(f.reason),
+      link: "/dashboard/workspace/approvals",
+    }),
+  },
+  {
+    key: "sales.tax_override_decided", category: "sales", severity: "info",
+    label: { ar: "تقرر طلب تغيير الضريبة", en: "Your VAT change request was decided" },
+    recipients: [{ person: "requester" }], requires: [MOD("sales")],
+    trigger: "POST /api/sales/tax-overrides/[id]/decision (decideTaxOverride)",
+    render: (f) => ({
+      severity: f.decision === "APPROVE" ? "success" : "warning",
+      titleAr: f.decision === "APPROVE" ? "اعتُمد تغيير الضريبة وتطبّق على المسودة" : "انرفض طلب تغيير الضريبة",
+      titleEn: f.decision === "APPROVE" ? "The VAT change was approved and applied to the draft" : "The VAT change request was refused",
+      bodyAr: s(f.note), bodyEn: s(f.note),
+      link: f.documentType === "QUOTE" ? `/dashboard/sales/quotes/${enc(s(f.documentId))}` : `/dashboard/sales/invoices/${enc(s(f.documentId))}`,
+    }),
+  },
   // Readiness review P1-6: samples and stage-move requests were pull-only (the approvals inbox, the dispatch tab).
   {
     key: "sales.sample_requested", category: "sales", severity: "info",

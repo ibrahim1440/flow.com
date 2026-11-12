@@ -34,7 +34,7 @@ export async function GET(_request: Request, { params }: Params) {
         id: true, quoteNumber: true, revision: true, status: true, currency: true,
         validUntil: true, subtotal: true, discountTotal: true, taxTotal: true, grandTotal: true,
         issuedAt: true, issuedSnapshot: true, acceptedAt: true, rejectedAt: true,
-        rejectionNote: true, discountApprovedById: true, discountApprovedAt: true,
+        rejectionNote: true, discountApprovedById: true, discountApprovedAt: true, approvalRequired: true, approvalBasisPercent: true,
         discountApprovedPercent: true, discountRejectedById: true, discountRejectedAt: true,
         discountRejectionNote: true, customerNotes: true, createdById: true,
         supersedesId: true, createdAt: true, updatedAt: true, channel: true,
@@ -118,6 +118,9 @@ export async function GET(_request: Request, { params }: Params) {
       issuer: quote.createdById ? await prisma.employee.findUnique({ where: { id: quote.createdById }, select: { id: true, name: true } }) : null,
       discount: {
         state: noDeal ? "NOT_NEEDED" : discountApprovalState(quote, threshold),
+        // P0 SEC-01: the discount against the list as last saved, and whether a custom line is why it needs a manager.
+        basisPercent: quote.approvalBasisPercent?.toString() ?? null,
+        customLine: !!quote.approvalRequired && !!quote.approvalBasisPercent && !new Decimal(quote.approvalBasisPercent.toString()).greaterThan(threshold),
         approvedBy: nameOf(quote.discountApprovedById),
         rejectedBy: nameOf(quote.discountRejectedById),
       },

@@ -1,0 +1,7 @@
+/* P0 C5 «طلب تغيير الضريبة» (approved Figma 2029-2, frame 3) — the same banners on the quotation and the invoice page. */
+.tax-ovr { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.tax-ovr .inv-banner { align-self: stretch; border-radius: 8px; padding: 10px 14px; font-size: 14px; display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--hr-border-strong, #7E8B82); color: var(--hr-text, #25312B); }
+.tax-ovr .inv-banner.is-warning { background: var(--hr-warning-tint, #FBF3E5); border-color: var(--hr-warning, #95651E); }
+.tax-ovr .inv-banner.is-danger { background: var(--hr-danger-tint, #F9EEEB); border-color: var(--hr-danger, #A34435); }
+.tax-ovr .inv-sub { color: var(--hr-muted, #68756D); font-size: 12px; }
+.tax-ovr .hr-btn { min-height: 44px; }

@@ -23,7 +23,8 @@ type RawComponent = {
 };
 
 export async function GET(_request: Request, { params }: Params) {
-  const { error } = await requireAnyModule("inventory", "orders", "production");
+  // P0 SEC-04: the recipe (components and quantities) is production's and the warehouse's — not the orders module's.
+  const { error } = await requireAnyModule("inventory", "production");
   if (error) return error;
 
   const { id } = await params;

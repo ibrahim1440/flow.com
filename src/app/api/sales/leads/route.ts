@@ -163,7 +163,7 @@ export async function POST(request: Request) {
     const candidates = await findDuplicateCandidates(prisma, {
       companyName,
       phone: b.phone as string | null,
-    });
+    }, user);
     const strong = candidates.filter((c) => c.strong);
     // D17 (Abu Fahd): a shop met on a field round may already be a CUSTOMER — the same phone (normalised) stops the add
     // until confirmed. A customer outside the caller's book is reported without its name or id. The expression is EXACTLY

@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db";
 import { requireAnyModule } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { canSeeCustomerDetail } from "@/lib/auth/customer-detail";
+import { opsScopedRep } from "@/lib/services/sales/scope";
+import { orderInScope } from "@/lib/services/sales/customer-access";
 import {
   productionProgress,
   PRODUCTION_ORDER_ACTIONS,
@@ -73,7 +75,10 @@ export async function GET(_request: Request, { params }: Params) {
       },
     });
 
-    if (!order) return NextResponse.json({ error: "Production order not found." }, { status: 404 });
+    // P0 SEC-04: out of a rep's book (another rep's order, or stock production) is the same 404 as a missing one.
+    if (!order || (opsScopedRep(user) && !(order.sourceOrderItem?.order?.id && (await orderInScope(user, order.sourceOrderItem.order.id))))) {
+      return NextResponse.json({ error: "Production order not found." }, { status: 404 });
+    }
 
     const progress = await productionProgress(prisma, order);
 

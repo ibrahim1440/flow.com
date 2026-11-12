@@ -17,19 +17,30 @@ import { prisma } from "@/lib/db";
 import { DEFAULT_VAT_RATE, EXEMPTION_REASONS, parseLines, priceInvoice, type RawLine } from "@/lib/services/invoicing/pricing";
 import { hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 
-/** D22 (owner, option 1): who may set a line's VAT category (Z / E / O) or a rate other than the default. */
+/**
+ * Who may ASK for a VAT-treatment change on a draft (P0 C5: sales › invoice_tax_override — the authorised finance officer).
+ * Asking is all it gives: the change applies only once a second person (sales › invoice_tax_override_approve, never the
+ * requester) approves it (tax-override.ts). D22's direct change by the holder is gone (owner, 11 Nov 2026).
+ */
 export const mayOverrideTax = (permissions: Permissions | Record<string, unknown>) => hasSubPrivilege(permissions as Permissions, "sales", "invoice_tax_override");
 
+/** The refusal of a non-standard line (C6 wording). */
+export const taxLocked = (i: number) => refuse(400, "TAX_LOCKED",
+  `البند ${i + 1}: الضريبة «أساسية ${DEFAULT_VAT_RATE}٪» ثابتة — تغييرها يكون بطلب على المسودة مع سببه، ويوافق عليه شخص ثاني.`,
+  `Line ${i + 1}: VAT is a fixed standard ${DEFAULT_VAT_RATE}% — a change is a request on the draft, with its reason, approved by a second person.`, { index: i });
+
 /**
- * Without sales › invoice_tax_override every line is S at the default rate (DEFAULT_VAT_RATE): anything else is REFUSED
- * (400 TAX_LOCKED) — never silently changed, so what the rep sent is what is priced or nothing is. Pure.
+ * Every line S at the default rate (DEFAULT_VAT_RATE) unless `approved(line, index)` says an approved override covers it
+ * (an existing draft's — tax-override.ts). A new document has none: anything else is REFUSED (400 TAX_LOCKED), never
+ * silently changed. Pure.
  */
-export function assertTaxAllowed(terms: LineTerms[], mayOverride: boolean): void {
-  if (mayOverride) return;
-  const i = terms.findIndex((t) => t.taxCategory !== "S" || Number(t.taxRatePercent) !== Number(DEFAULT_VAT_RATE));
-  if (i >= 0) throw refuse(400, "TAX_LOCKED", `البند ${i + 1}: الضريبة «أساسية ${DEFAULT_VAT_RATE}٪» — تغييرها يحتاج صلاحية «تغيير نوع الضريبة».`, `Line ${i + 1}: VAT is standard ${DEFAULT_VAT_RATE}% — changing it needs the «invoice tax override» permission.`, { index: i });
+export function assertTaxAllowed(terms: { taxCategory: string; taxRatePercent: string; exemptionReasonCode?: string | null }[], approved: (index: number) => boolean = () => false): void {
+  const i = terms.findIndex((t, k) => !isStandard(t) && !approved(k));
+  if (i >= 0) throw taxLocked(i);
 }
 import { DISCOUNT_MAX } from "./discount-limits";
+import { effectiveDiscount, isStandard } from "./discount-rules";
+export { effectiveDiscount } from "./discount-rules";
 
 type Db = Prisma.TransactionClient | typeof prisma;
 /** The same cap as the wizard (direct-sale.ts MAX_DIRECT_SALE_LINES). */
@@ -118,15 +129,9 @@ export function invoiceRawLines(terms: LineTerms[], names: Map<string, { name: s
   })) as unknown as RawLine[];
 }
 
-/** 1 − net ÷ list value, in %, 2 dp, never below 0 (a price above the list is no discount). Pure. */
-export function effectiveDiscount(listGross: Prisma.Decimal, lineNet: Prisma.Decimal): Prisma.Decimal {
-  if (listGross.lessThanOrEqualTo(0)) return new Prisma.Decimal(0);
-  const d = new Prisma.Decimal(1).minus(lineNet.dividedBy(listGross)).times(100).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
-  return d.lessThan(0) ? new Prisma.Decimal(0) : d;
-}
 
 /** The price of a direct sale's terms — the invoice arithmetic, line by line, and the approval figure. */
-export async function priceTerms(db: Db, raw: unknown, threshold: Prisma.Decimal, defaultDiscount = "0", mayOverride = true): Promise<{ quote: TermsQuote; terms: LineTerms[] }> {
+export async function priceTerms(db: Db, raw: unknown, threshold: Prisma.Decimal, defaultDiscount = "0"): Promise<{ quote: TermsQuote; terms: LineTerms[] }> {
   const ids = Array.isArray(raw) ? raw.map((l) => (l && typeof (l as { productSkuId?: unknown }).productSkuId === "string" ? (l as { productSkuId: string }).productSkuId.trim() : "")).filter(Boolean) : [];
   const skus = await db.productSKU.findMany({
     where: { id: { in: ids } },
@@ -134,7 +139,7 @@ export async function priceTerms(db: Db, raw: unknown, threshold: Prisma.Decimal
   });
   const byId = new Map(skus.map((s) => [s.id, s]));
   const terms = parseLineTerms(raw, new Map(skus.map((s) => [s.id, { price: s.price }])), defaultDiscount);
-  assertTaxAllowed(terms, mayOverride);
+  assertTaxAllowed(terms);
   for (const t of terms) {
     const s = byId.get(t.productSkuId);
     if (!s || !s.isActive) throw refuse(400, "SKU_UNAVAILABLE", "صنف غير متاح للبيع.", "A product is not available for sale.", { productSkuId: t.productSkuId });

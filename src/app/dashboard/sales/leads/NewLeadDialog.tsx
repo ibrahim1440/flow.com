@@ -14,7 +14,7 @@ import "./lead-form.css";
 
 export const LEAD_SOURCES = ["WALK_IN", "REFERRAL", "PHONE", "SOCIAL", "EXHIBITION", "WEBSITE", "OTHER"] as const;
 export type SavedLead = { id: string; companyName: string; companyNameAr: string | null };
-type Dup = { leadId: string; companyName: string; contactName: string | null };
+type Dup = { leadId: string | null; companyName: string | null; contactName: string | null };
 
 const blank = () => ({ companyName: "", companyNameAr: "", contactName: "", phone: "", email: "", source: "OTHER", notes: "" });
 
@@ -54,7 +54,7 @@ export function NewLeadDialog({ ar, sourceLabel, onClose, onSaved }: {
       const d = await res.json().catch(() => ({}));
       if (res.status === 409 && Array.isArray(d.duplicates)) { setDups(d.duplicates); return; }
       if (!res.ok) { setErr(localizeApiError(d, ar ? "ar" : "en") ?? (ar ? d.error : d.errorEn ?? d.error) ?? L("تعذّر الحفظ.", "Could not save.")); return; }
-      const weak = Array.isArray(d.weakDuplicates) ? (d.weakDuplicates as { companyName: string }[]).map((w) => w.companyName) : [];
+      const weak = Array.isArray(d.weakDuplicates) ? (d.weakDuplicates as { companyName: string | null }[]).map((w) => w.companyName).filter((x): x is string => !!x) : [];
       onSaved({ id: d.lead.id, companyName: d.lead.companyName, companyNameAr: f.companyNameAr.trim() || null }, { logActivity, weak });
     } catch {
       setErr(L("تعذّر الاتصال — حاول مرة ثانية.", "Could not connect — try again."));
@@ -109,7 +109,7 @@ export function NewLeadDialog({ ar, sourceLabel, onClose, onSaved }: {
           {dups.length ? (
             <div className="lf-dup" role="alert" data-testid="lead-duplicates">
               <b>{L("فيه عميل محتمل موجود بنفس رقم الجوال", "A lead with this mobile number already exists")}</b>
-              <ul>{dups.map((d) => <li key={d.leadId}><bdi>{d.companyName}</bdi>{d.contactName ? <> — <bdi>{d.contactName}</bdi></> : null}</li>)}</ul>
+              <ul>{dups.map((d, i) => <li key={d.leadId ?? `x${i}`}>{d.companyName ? <><bdi>{d.companyName}</bdi>{d.contactName ? <> — <bdi>{d.contactName}</bdi></> : null}</> : L("عند مندوب آخر — ما نعرض بياناته", "With another rep — not shown")}</li>)}</ul>
               <button type="button" className="hr-btn" onClick={() => void save(lastLog, true)} data-testid="lead-save-anyway">{L("احفظه على أي حال", "Create anyway")}</button>
             </div>
           ) : null}

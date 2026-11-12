@@ -50,7 +50,7 @@ export type Task = {
   roles: string[]; actions: string[];
 };
 export type ApprovalItem = {
-  key: string; type: "LEAVE" | "ADVANCE" | "DISCOUNT" | "SAMPLE" | "STAGE_MOVE" | "FINANCE" | "MARKETING"; id: string; title: string; titleEn?: string; requester: string | null; subject: string | null; subjectEn?: string | null; createdAt: string;
+  key: string; type: "LEAVE" | "ADVANCE" | "DISCOUNT" | "SAMPLE" | "STAGE_MOVE" | "TAX_OVERRIDE" | "FINANCE" | "MARKETING"; id: string; title: string; titleEn?: string; requester: string | null; subject: string | null; subjectEn?: string | null; createdAt: string;
   facts: Record<string, unknown>; warnings: { ar: string; en: string }[];
   decide: { url: string; rejectNeedsReason: true; expected?: Record<string, string>; stepUp?: boolean };
   openUrl: string; notice?: { ar: string; en: string };
@@ -84,7 +84,7 @@ export type QuoteDue = { id: string; quoteNumber: string; dueAt: string; validUn
 
 export const TYPE_LABEL: Record<string, [string, string]> = {
   TASK: ["مهمة", "Task"], FOLLOW_UP: ["متابعة عميل", "Follow-up"], QUOTE: ["عرض سعر", "Quotation"], APPROVAL: ["اعتماد", "Approval"], APPOINTMENT: ["موعد", "Appointment"], CRM: ["متابعة", "Follow-up"],
-  LEAVE: ["إجازة", "Leave"], ADVANCE: ["سلفة", "Advance"], CORRECTION: ["تصحيح", "Correction"], DISCOUNT: ["خصم", "Discount"], SAMPLE: ["عيّنة", "Sample"], STAGE_MOVE: ["نقل صفقة", "Deal move"], FINANCE: ["مالية", "Finance"], MARKETING: ["تسويق", "Marketing"],
+  LEAVE: ["إجازة", "Leave"], ADVANCE: ["سلفة", "Advance"], CORRECTION: ["تصحيح", "Correction"], DISCOUNT: ["خصم", "Discount"], SAMPLE: ["عيّنة", "Sample"], STAGE_MOVE: ["نقل صفقة", "Deal move"], TAX_OVERRIDE: ["ضريبة", "VAT"], FINANCE: ["مالية", "Finance"], MARKETING: ["تسويق", "Marketing"],
   MEETING: ["اجتماع", "Meeting"], VISIT: ["زيارة", "Visit"], CALL: ["مكالمة", "Call"], OTHER: ["موعد", "Appointment"],
 };
 // The six a rep reaches for first, then the rest (services/sales/qualification.ts ACTIVITY_OUTCOMES).

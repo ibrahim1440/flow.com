@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireAnyModule } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { productionProgressMany } from "@/lib/services/production-planning";
+import { opsOrderWhere, opsScopedRep } from "@/lib/services/sales/scope";
 
 // Read access is deliberately wider than write access. Production runs these orders, but
 // preparation and sales both need to answer "where is the coffee for order #123?" without
@@ -17,7 +18,7 @@ const READ_MODULES = ["production", "orders", "qc", "packaging"] as const;
  * whole page in one pair of queries rather than one pair per row.
  */
 export async function GET(request: Request) {
-  const { error } = await requireAnyModule(...READ_MODULES);
+  const { user, error } = await requireAnyModule(...READ_MODULES);
   if (error) return error;
 
   const { searchParams } = new URL(request.url);
@@ -27,6 +28,9 @@ export async function GET(request: Request) {
   const where = {
     ...(statusParam ? { status: { in: statusParam.split(",") as never } } : {}),
     ...(sourceOrderItemId ? { sourceOrderItemId } : {}),
+    // P0 SEC-04: a sales rep (orders module only) sees the production of their own orders — never another rep's order,
+    // customer or quantities, and no stock production. The floor (production / qc / packaging) sees everything.
+    ...(opsScopedRep(user) ? { sourceOrderItem: { is: { order: { is: opsOrderWhere(user) } } } } : {}),
   };
 
   try {

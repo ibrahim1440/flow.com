@@ -82,7 +82,9 @@ export function Totals({ lines, qoyod = false }: { lines: EditLine[]; qoyod?: bo
  * الضريبة · القيمة» and «إضافة المزيد» with its Shift+A shortcut. Display only: the same lines and totals engine.
  * `inclusive` (WP-K, default = `qoyod`): the «شامل؟» column — the price typed VAT-inclusive, the net derived on the server.
  */
-export function LinesEditor({ lines, onChange, lockItems, lockCommercial, sellAssets, testId = "draft-lines", qoyod = false, inclusive = qoyod, sku, newLine = emptyLine }: { lines: EditLine[]; onChange: (lines: EditLine[]) => void; lockItems?: boolean; lockCommercial?: boolean; sellAssets?: boolean; testId?: string; qoyod?: boolean; inclusive?: boolean;
+export function LinesEditor({ lines, onChange, lockItems, lockCommercial, sellAssets, testId = "draft-lines", qoyod = false, inclusive = qoyod, sku, newLine = emptyLine, lockTax: lockTaxAll }: { lines: EditLine[]; onChange: (lines: EditLine[]) => void; lockItems?: boolean; lockCommercial?: boolean; sellAssets?: boolean; testId?: string; qoyod?: boolean; inclusive?: boolean;
+  /** P0 C5: a direct sale's / sample's draft — VAT fixed (a change is «طلب تغيير الضريبة», approved by a second person). */
+  lockTax?: boolean;
   /** D22 «بيع مباشر» / «إرسال عيّنة» (owner-approved 2010:2): each line is a SKU picked from the list (ProductCombo), in units;
    *  `oneUnit`: a sample (one unit of each, the quantity fixed); the lines become cards on a phone (`.inv-lines.is-cards`).
    *  Absent (every other invoice): the editor as it always was. */
@@ -148,7 +150,7 @@ export function LinesEditor({ lines, onChange, lockItems, lockCommercial, sellAs
                 aria-label={L("السعر شامل الضريبة؟", "Price includes VAT?")} data-testid={`line-incl-${i}`} /></label></td> : null}
               <td data-label={lab("الخصم %", "Disc. %")}><input className="hr-input acct-amount" inputMode="decimal" value={l.discountPercent} disabled={lockCommercial} onChange={(e) => set(i, { discountPercent: e.target.value })} aria-label={L("الخصم", "Discount")} data-testid={`line-disc-${i}`} /></td>
               <td data-label={lab("الضريبة", "VAT")}>
-                {sku?.lockTax ? <span className="hr-input" aria-readonly="true" data-testid={`line-tax-locked-${i}`} title={L("يغيّرها المحاسب", "The accountant changes it")} style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap", color: "var(--hr-muted)" }}><span aria-hidden="true">🔒</span>{L(`${Number(l.taxRatePercent) || 15}٪ (ثابتة)`, `${Number(l.taxRatePercent) || 15}% (fixed)`)}</span> : <>
+                {sku?.lockTax || lockTaxAll ? <span className="hr-input" aria-readonly="true" data-testid={`line-tax-locked-${i}`} title={L("يغيّرها المحاسب", "The accountant changes it")} style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap", color: "var(--hr-muted)" }}><span aria-hidden="true">🔒</span>{L(`${Number(l.taxRatePercent) || 15}٪ (ثابتة)`, `${Number(l.taxRatePercent) || 15}% (fixed)`)}</span> : <>
                 <Select value={l.taxCategory} onChange={(e) => { const c = e.target.value as EditLine["taxCategory"]; set(i, { taxCategory: c, taxRatePercent: c === "S" ? "15" : "0", exemptionReasonCode: c === "S" ? null : EXEMPTION_REASONS.find((x) => x.category === c)?.code ?? null }); }} aria-label={L("فئة الضريبة", "VAT category")}>
                   {Object.entries(CATEGORY).map(([k, v]) => <option key={k} value={k}>{L(v[0], v[1])}</option>)}
                 </Select>

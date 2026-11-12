@@ -3,7 +3,9 @@ import { assertSalesAllowed } from "../customers/credit-db";
 import { Decimal, ZERO, roundMoney, parseFiniteDecimal } from "../commissions/engine";
 import { DISCOUNT_APPROVAL_THRESHOLD, DISCOUNT_MAX } from "./discount-limits";
 import { settingsFromRow } from "./quote-settings";
-import { netFromGross } from "../invoicing/pricing";
+import { DEFAULT_VAT_RATE, netFromGross } from "../invoicing/pricing";
+import { discountFigures, fingerprint, needsApproval, num, type DiscountFigures } from "./discount-rules";
+import { assertLinesTax } from "./tax-override";
 import { dealOfQuote, noteQuoteClosed, syncDealAmount } from "./deal-amount";
 
 type Tx = PrismaNS.TransactionClient;
@@ -41,6 +43,10 @@ export const DISCOUNT_APPROVAL_THRESHOLD_PERCENT = new Decimal(DISCOUNT_APPROVAL
 
 /** Hard ceiling. Not even an approver may give the coffee away by typing a wrong number. */
 export const MAX_DISCOUNT_PERCENT = new Decimal(DISCOUNT_MAX);
+
+/** ERR-14: the largest figures a quotation line takes (QuoteLine.quantity Decimal(12,3); amounts Decimal(18,2)). */
+export const MAX_QUOTE_QTY = new Decimal(999999);
+export const MAX_QUOTE_PRICE = new Decimal(10000000);
 
 const HUNDRED = new Decimal(100);
 
@@ -226,7 +232,8 @@ export function parseLineInputs(raw: unknown[]): LineInput[] {
       unit: typeof l.unit === "string" && l.unit ? l.unit : "KG",
       unitPrice: inclusive ? ZERO : dec(l.unitPrice, "unit price"),
       discountPercent: dec(l.discountPercent, "discount", "0"),
-      taxRatePercent: dec(l.taxRatePercent, "tax rate", "0"),
+      // P0 SEC-07: an omitted rate is the standard one (a non-standard rate must be sent — and approved — explicitly).
+      taxRatePercent: dec(l.taxRatePercent, "tax rate", DEFAULT_VAT_RATE),
       position: i,
       priceIncludesVat: inclusive, unitPriceGross: gross,
     });
@@ -273,6 +280,9 @@ export function validateLines(lines: LineInput[], skus: Map<string, SkuFacts>): 
     if (line.unitPrice.isNegative()) {
       at("PRICE", "A unit price cannot be negative.");
     }
+    // ERR-14 (rep QA audit): a number the columns cannot hold was a 500 — refused here with a reason instead.
+    if (line.quantity.greaterThan(MAX_QUOTE_QTY)) at("QTY_TOO_LARGE", `Quantity is above ${MAX_QUOTE_QTY.toString()}.`);
+    if (line.unitPrice.greaterThan(MAX_QUOTE_PRICE)) at("PRICE_TOO_LARGE", `A unit price above ${MAX_QUOTE_PRICE.toString()} is refused.`);
 
     const disc = line.discountPercent ?? ZERO;
     if (disc.isNegative() || disc.greaterThan(HUNDRED)) {
@@ -339,6 +349,62 @@ export function approvalCovers(
   return effectiveDiscountPercent.lessThanOrEqualTo(new Decimal(approval.discountApprovedPercent.toString()));
 }
 
+// ─── P0 SEC-01 / C1–C3: the approval rule against the list price, and the fingerprint of the terms ──────────────
+
+type RuleLine = {
+  productSkuId: string | null; description: string | null; quantity: { toString(): string }; unit: string;
+  unitPrice: { toString(): string }; discountPercent: { toString(): string }; taxRatePercent: { toString(): string };
+  lineSubtotal: { toString(): string }; position: number;
+};
+
+/** The fingerprint of a quotation's financial terms (C3): lines, quantities, prices, discounts, VAT, validity, currency. Pure. */
+export function quoteTermsHash(quote: { validUntil: Date | null; currency: string; customerId?: string | null }, lines: RuleLine[]): string {
+  return fingerprint({
+    validUntil: quote.validUntil ? quote.validUntil.toISOString().slice(0, 10) : null, currency: quote.currency, customerId: quote.customerId ?? null,
+    lines: [...lines].sort((a, b) => a.position - b.position).map((l) => ({
+      sku: l.productSkuId, text: l.productSkuId ? null : (l.description ?? "").trim(), qty: num(l.quantity.toString()), unit: l.unit,
+      price: num(l.unitPrice.toString()), disc: num(l.discountPercent.toString()), vat: num(l.taxRatePercent.toString()),
+    })),
+  });
+}
+
+/**
+ * The rule a quotation's lines are held to (C2): the discount against the list on the eligible lines (an active SKU priced
+ * above 0), the custom lines (no SKU, or an active SKU at price 0 — they need a manager), and an INACTIVE SKU refused.
+ */
+export async function quoteRule(db: Tx, quote: { validUntil: Date | null; currency: string; customerId?: string | null }, lines: RuleLine[], threshold: Decimal):
+  Promise<{ figures: DiscountFigures; needs: boolean; hash: string }> {
+  const ids = [...new Set(lines.map((l) => l.productSkuId).filter((x): x is string => !!x))];
+  const skus = ids.length ? await db.productSKU.findMany({ where: { id: { in: ids } }, select: { id: true, isActive: true, price: true } }) : [];
+  const byId = new Map(skus.map((x) => [x.id, x]));
+  const figures = discountFigures(lines.map((l) => ({
+    sku: l.productSkuId ? byId.get(l.productSkuId) ?? { isActive: false, price: 0 } : null,
+    quantity: l.quantity.toString(), lineNet: l.lineSubtotal.toString(),
+  })));
+  return { figures, needs: needsApproval(figures, threshold), hash: quoteTermsHash(quote, lines) };
+}
+
+/** The refusals the rule makes on its own (an inactive product; a price more than 60 % under the list). */
+export function assertQuoteRule(f: DiscountFigures): void {
+  if (f.inactiveLines.length) {
+    const i = f.inactiveLines[0];
+    throw { _appCode: 400, code: "SKU_INACTIVE", message: `البند ${i + 1}: الصنف موقوف ولا يُعرض.`, errorEn: `Line ${i + 1}: the product is inactive and cannot be quoted.`, index: i };
+  }
+  if (f.overCeiling.length) {
+    const i = f.overCeiling[0];
+    throw {
+      _appCode: 400, code: "DISCOUNT_CEILING",
+      message: `البند ${i + 1}: السعر أقل من سعر القائمة بأكثر من ${MAX_DISCOUNT_PERCENT.toString()}٪ — ما يُقبل حتى بموافقة.`,
+      errorEn: `Line ${i + 1}: the price is more than ${MAX_DISCOUNT_PERCENT.toString()}% below the list price — refused even with approval.`, index: i,
+    };
+  }
+}
+
+/** The refusal of an issue / approval that a custom line or a discount still needs (C2 / C3 wording). */
+const approvalWord = (f: DiscountFigures, threshold: Decimal) => f.customLines.length
+  ? `فيه بند بدون سعر قائمة معتمد (بند حر أو صنف بلا سعر) — يحتاج موافقة المدير.`
+  : `الخصم عن سعر القائمة ${f.maxEffective.toString()}٪ فوق الحد ${threshold.toString()}٪ — يحتاج موافقة المشرف.`;
+
 /** The approval state of a draft, as the list and the editor show it. */
 export type DiscountApprovalState = "NOT_NEEDED" | "PENDING" | "APPROVED" | "REJECTED";
 
@@ -349,8 +415,16 @@ export function discountApprovalState(input: {
   discountApprovedById: string | null;
   discountApprovedPercent: { toString(): string } | null;
   discountRejectedAt: Date | string | null;
+  /** P0: the draft's need as last saved (NULL basis = saved before the batch → the stored-figure reading below). */
+  approvalRequired?: boolean | null;
+  approvalBasisPercent?: { toString(): string } | null;
 }, threshold: Decimal): DiscountApprovalState {
   if (input.status !== "DRAFT") return input.discountApprovedById ? "APPROVED" : "NOT_NEEDED";
+  if (input.approvalBasisPercent !== undefined && input.approvalBasisPercent !== null) {
+    if (!input.approvalRequired) return "NOT_NEEDED";
+    if (input.discountApprovedById) return "APPROVED";
+    return input.discountRejectedAt ? "REJECTED" : "PENDING";
+  }
   const subtotal = new Decimal(input.subtotal.toString());
   if (subtotal.isZero()) return "NOT_NEEDED";
   const pct = new Decimal(input.discountTotal.toString()).times(HUNDRED).dividedBy(subtotal).toDecimalPlaces(6, Decimal.ROUND_HALF_UP);
@@ -450,6 +524,8 @@ export async function nextQuoteNumber(tx: Tx, at: Date): Promise<string> {
 export type SaveLinesResult = {
   priced: PricedQuote;
   needsDiscountApproval: boolean;
+  /** P0: the highest line's discount against the list, and the custom lines (needing a manager). */
+  rule?: { maxEffective: string; customLines: number[] };
 };
 
 /**
@@ -486,7 +562,10 @@ export async function saveQuoteLines(
 ): Promise<SaveLinesResult> {
   const quote = await tx.quote.findUnique({
     where: { id: input.quoteId },
-    select: { id: true, status: true, currency: true, subtotal: true, discountTotal: true, taxTotal: true, grandTotal: true },
+    select: {
+      id: true, status: true, currency: true, subtotal: true, discountTotal: true, taxTotal: true, grandTotal: true,
+      validUntil: true, customerId: true, approvalRequired: true, discountApprovedById: true, discountApprovedTermsHash: true,
+    },
   });
   if (!quote) throw { _appCode: 404, message: "Quotation not found." };
   if (!isEditable(quote.status as QuoteStatus)) {
@@ -522,6 +601,17 @@ export async function saveQuoteLines(
   input = { ...input, lines: input.lines.map(toNetLine) };
   const priced = priceQuote(input.lines);
 
+  // P0 SEC-07 / C6: VAT is the standard rate unless an approved override covers the line — refused, never corrected.
+  await assertLinesTax(tx, "QUOTE", input.quoteId, input.lines.map((l) => ({ productSkuId: l.productSkuId, description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, taxRatePercent: l.taxRatePercent ?? ZERO })));
+  // P0 SEC-01 / C2: the discount against the list, the custom lines, the ceiling — on the server, at every save.
+  const ruleLines = input.lines.map((l, i) => ({
+    productSkuId: l.productSkuId || null, description: l.description ?? null, quantity: l.quantity, unit: l.unit ?? "KG",
+    unitPrice: l.unitPrice, discountPercent: l.discountPercent ?? ZERO, taxRatePercent: l.taxRatePercent ?? ZERO,
+    lineSubtotal: priced.lines[i].lineSubtotal, position: l.position ?? i,
+  }));
+  const rule = await quoteRule(tx, { validUntil: quote.validUntil, currency: quote.currency, customerId: quote.customerId }, ruleLines, input.threshold ?? DISCOUNT_APPROVAL_THRESHOLD_PERCENT);
+  assertQuoteRule(rule.figures);
+
   // Replaced wholesale rather than diffed. A draft's lines have no history worth
   // preserving — the document that matters is the issued snapshot — and a diff here would
   // be a second place for the totals to drift out of step with the rows.
@@ -550,6 +640,9 @@ export async function saveQuoteLines(
     !priced.subtotal.equals(quote.subtotal.toString()) || !priced.discountTotal.equals(quote.discountTotal.toString()) ||
     !priced.taxTotal.equals(quote.taxTotal.toString()) || !priced.grandTotal.equals(quote.grandTotal.toString());
 
+  // C1 / C3: an approval stands only on the exact terms it was given on (its fingerprint). One recorded before this batch
+  // (no fingerprint) does not cover the new rules: it is cleared and renewed.
+  const approvalVoid = !!quote.discountApprovedById && quote.discountApprovedTermsHash !== rule.hash;
   await tx.quote.update({
     where: { id: input.quoteId },
     data: {
@@ -557,19 +650,21 @@ export async function saveQuoteLines(
       discountTotal: priced.discountTotal,
       taxTotal: priced.taxTotal,
       grandTotal: priced.grandTotal,
-      ...(figuresChanged
+      approvalRequired: rule.needs,
+      approvalBasisPercent: rule.figures.maxEffective,
+      ...(figuresChanged || approvalVoid
         ? {
-            discountApprovedById: null, discountApprovedAt: null, discountApprovedPercent: null,
-            discountRejectedById: null, discountRejectedAt: null, discountRejectionNote: null,
+            discountApprovedById: null, discountApprovedAt: null, discountApprovedPercent: null, discountApprovedTermsHash: null,
+            ...(figuresChanged ? { discountRejectedById: null, discountRejectedAt: null, discountRejectionNote: null } : {}),
           }
         : {}),
     },
   });
 
-  const needsDiscountApproval = discountNeedsApproval(priced, input.threshold);
+  const needsDiscountApproval = rule.needs;
   // feat/notifications: a draft whose discount newly needs approval («اعتمادك مطلوب») is announced to
   // the discount approvers — once per set of figures (saving the same figures again adds nothing).
-  if (needsDiscountApproval && figuresChanged) {
+  if (needsDiscountApproval && (figuresChanged || approvalVoid || !quote.approvalRequired)) {
     const q = await tx.quote.findUnique({ where: { id: input.quoteId }, select: { quoteNumber: true, customer: { select: { name: true, nameAr: true, accountOwnerId: true } }, opportunity: { select: { ownerId: true, customer: { select: { name: true, nameAr: true, accountOwnerId: true } } } } } });
     if (q) {
       // An ACCOUNTING quotation has no deal: its own customer.
@@ -578,12 +673,12 @@ export async function saveQuoteLines(
       await notify(tx, {
         event: "sales.discount_pending", dedupeKey: `${input.quoteId}:${priced.grandTotal.toFixed(2)}:${priced.discountTotal.toFixed(2)}`,
         actorId: input.actorId ?? null, entity: { type: "Quote", id: input.quoteId },
-        facts: { quoteNumber: q.quoteNumber, percent: priced.effectiveDiscountPercent.toDecimalPlaces(2).toString(), customerName: qc ? qc.nameAr || qc.name : "", quoteId: input.quoteId },
+        facts: { quoteNumber: q.quoteNumber, percent: rule.figures.maxEffective.toDecimalPlaces(2).toString(), customerName: qc ? qc.nameAr || qc.name : "", quoteId: input.quoteId },
         scopeOwners: [q.opportunity?.ownerId, qc?.accountOwnerId],
       });
     }
   }
-  return { priced, needsDiscountApproval };
+  return { priced, needsDiscountApproval, rule: { maxEffective: rule.figures.maxEffective.toString(), customLines: rule.figures.customLines } };
 }
 
 /**
@@ -617,7 +712,7 @@ export async function issueQuote(
     select: {
       id: true, quoteNumber: true, revision: true, currency: true, validUntil: true,
       customerId: true, opportunityId: true, createdById: true, customerNotes: true,
-      discountApprovedById: true, discountApprovedAt: true, discountApprovedPercent: true,
+      discountApprovedById: true, discountApprovedAt: true, discountApprovedPercent: true, discountApprovedTermsHash: true,
       customer: {
         select: {
           name: true, nameAr: true, phone: true, email: true, address: true, city: true,
@@ -665,8 +760,13 @@ export async function issueQuote(
   // the draft (POST …/discount-approval) already covers this discount and is kept as it is.
   let approvedNow = false;
   const threshold = input.threshold ?? DISCOUNT_APPROVAL_THRESHOLD_PERCENT;
-  if (discountNeedsApproval(priced, threshold)) {
-    if (approvalCovers(quote, priced.effectiveDiscountPercent)) {
+  // P0 SEC-01 / SEC-07 (C1–C3, C6): the VAT lock, the discount against the list and the custom lines, recomputed from the
+  // lines as they stand — whatever the saves said. An approval covers the issue only on the same terms (fingerprint).
+  await assertLinesTax(tx, "QUOTE", quote.id, quote.lines.map((l) => ({ productSkuId: l.productSkuId, description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, taxRatePercent: l.taxRatePercent })));
+  const rule = await quoteRule(tx, quote, quote.lines.map((l, i) => ({ ...l, lineSubtotal: priced.lines[i].lineSubtotal })), threshold);
+  assertQuoteRule(rule.figures);
+  if (rule.needs) {
+    if (quote.discountApprovedById && quote.discountApprovedTermsHash === rule.hash) {
       // Approved on the draft by a discount approver, for these figures: anyone who may issue
       // may now issue it. The approval stays the approver's.
       discountApproved = true;
@@ -674,10 +774,11 @@ export async function issueQuote(
       if (!input.canApproveDiscount) {
         throw {
           _appCode: 403,
-          message:
-            `This quotation discounts ${priced.effectiveDiscountPercent.toDecimalPlaces(2).toString()}%, ` +
-            `above the ${threshold.toString()}% that may be given without approval. ` +
-            "A manager with discount approval must approve or issue it.",
+          message: approvalWord(rule.figures, threshold),
+          errorEn: rule.figures.customLines.length
+            ? "A line has no approved list price (a custom line, or a product priced 0) — a manager must approve the quotation."
+            : `This quotation is ${rule.figures.maxEffective.toString()}% below the list price, above the ${threshold.toString()}% ` +
+              "that may be given without approval. A manager with discount approval must approve or issue it.",
           code: "DISCOUNT_APPROVAL_REQUIRED",
         };
       }
@@ -752,8 +853,9 @@ export async function issueQuote(
       discountTotal: priced.discountTotal,
       taxTotal: priced.taxTotal,
       grandTotal: priced.grandTotal,
+      approvalRequired: rule.needs, approvalBasisPercent: rule.figures.maxEffective,
       ...(approvedNow
-        ? { discountApprovedById: input.actorId, discountApprovedAt: at, discountApprovedPercent: priced.effectiveDiscountPercent }
+        ? { discountApprovedById: input.actorId, discountApprovedAt: at, discountApprovedPercent: rule.figures.maxEffective, discountApprovedTermsHash: rule.hash }
         : {}),
     },
   });
@@ -961,7 +1063,8 @@ export async function decideDiscount(
     where: { id: input.quoteId },
     select: {
       quoteNumber: true, createdById: true, subtotal: true, discountTotal: true, taxTotal: true, grandTotal: true,
-      lines: { select: { quantity: true, unitPrice: true, discountPercent: true, taxRatePercent: true } },
+      validUntil: true, currency: true, customerId: true,
+      lines: { orderBy: { position: "asc" }, select: { productSkuId: true, description: true, quantity: true, unit: true, unitPrice: true, discountPercent: true, taxRatePercent: true, lineSubtotal: true, position: true } },
       opportunity: { select: { ownerId: true } },
     },
   });
@@ -969,14 +1072,19 @@ export async function decideDiscount(
   const priced = priceQuote(quote.lines.map((l) => ({
     quantity: l.quantity, unitPrice: l.unitPrice, discountPercent: l.discountPercent, taxRatePercent: l.taxRatePercent,
   })));
-  if (!discountNeedsApproval(priced, input.threshold)) {
+  // P0 SEC-01 / C2–C3: what is approved is the discount against the list AND the custom lines, on these exact terms.
+  const rule = await quoteRule(tx, quote, quote.lines.map((l, i) => ({ ...l, lineSubtotal: priced.lines[i].lineSubtotal })), input.threshold);
+  if (input.decision === "APPROVE") assertQuoteRule(rule.figures);
+  if (!rule.needs) {
     throw {
       _appCode: 409,
-      message: `This discount (${priced.effectiveDiscountPercent.toDecimalPlaces(2).toString()}%) is within the ${input.threshold.toString()}% threshold and needs no approval.`,
+      message: `هالعرض ما يحتاج موافقة — خصمه عن سعر القائمة ${rule.figures.maxEffective.toString()}٪ ضمن الحد ${input.threshold.toString()}٪ وما فيه بند حر.`,
+      errorEn: `This discount (${rule.figures.maxEffective.toString()}% below the list) is within the ${input.threshold.toString()}% threshold, with no custom line, and needs no approval.`,
       code: "NO_APPROVAL_NEEDED",
     };
   }
-  if (input.expected && isStale(input.expected, priced)) {
+  // The approver saw the discount against the list (P0) — compared on that figure.
+  if (input.expected && isStale(input.expected, { ...priced, effectiveDiscountPercent: rule.figures.maxEffective })) {
     throw {
       _appCode: 409,
       message: "The quotation changed after you opened it. Review the new figures before deciding.",
@@ -996,11 +1104,11 @@ export async function decideDiscount(
     where: { id: input.quoteId },
     data: input.decision === "APPROVE"
       ? {
-          discountApprovedById: input.actor.id, discountApprovedAt: at, discountApprovedPercent: priced.effectiveDiscountPercent,
+          discountApprovedById: input.actor.id, discountApprovedAt: at, discountApprovedPercent: rule.figures.maxEffective, discountApprovedTermsHash: rule.hash,
           discountRejectedById: null, discountRejectedAt: null, discountRejectionNote: null,
         }
       : {
-          discountApprovedById: null, discountApprovedAt: null, discountApprovedPercent: null,
+          discountApprovedById: null, discountApprovedAt: null, discountApprovedPercent: null, discountApprovedTermsHash: null,
           discountRejectedById: input.actor.id, discountRejectedAt: at, discountRejectionNote: note,
         },
   });
@@ -1013,7 +1121,9 @@ export async function decideDiscount(
       actorName: input.actor.name,
       createdAt: at,
       details: {
-        effectiveDiscountPercent: priced.effectiveDiscountPercent.toString(),
+        effectiveDiscountPercent: rule.figures.maxEffective.toString(),
+        customLines: rule.figures.customLines.length,
+        termsHash: rule.hash,
         thresholdPercent: input.threshold.toString(),
         subtotal: priced.subtotal.toFixed(2),
         discountTotal: priced.discountTotal.toFixed(2),
@@ -1033,6 +1143,6 @@ export async function decideDiscount(
   });
   return {
     state: input.decision === "APPROVE" ? "APPROVED" : "REJECTED",
-    effectiveDiscountPercent: priced.effectiveDiscountPercent.toString(),
+    effectiveDiscountPercent: rule.figures.maxEffective.toString(),
   };
 }

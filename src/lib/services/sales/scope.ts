@@ -201,3 +201,19 @@ export function orderedByOrForWhere(userId: string) {
 export function orderVisibilityWhere(user: { id: string; role?: string | null; permissions: Permissions | Record<string, unknown> }) {
   return customersScopedToOwner(user) ? orderedByOrForWhere(user.id) : {};
 }
+
+/**
+ * P0 SEC-04 (rep QA audit): the operations reads a rep reaches through the orders module (production orders, an order
+ * line's fulfilment options and production requirement, the station board) are scoped to the rep's own orders — the
+ * people who run the floor (production / qc / packaging / dispatch / inventory) keep all of it, whatever else they hold.
+ */
+export function opsScopedRep(user: { id: string; role?: string | null; permissions: Permissions | Record<string, unknown> }): boolean {
+  if (!customersScopedToOwner(user)) return false;
+  const p = user.permissions as Permissions;
+  return !["production", "qc", "packaging", "dispatch", "inventory"].some((m) => hasModuleAccess(p, m));
+}
+
+/** The Prisma `where` for orders an operations read may show this viewer: `{}` for the floor, the rep's own book else. */
+export function opsOrderWhere(user: { id: string; role?: string | null; permissions: Permissions | Record<string, unknown> }) {
+  return opsScopedRep(user) ? orderedByOrForWhere(user.id) : {};
+}

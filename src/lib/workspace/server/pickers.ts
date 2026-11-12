@@ -1,7 +1,7 @@
 // «مساحة عملي» — the pickers: people (to assign / invite) and records (to link). Names and ids only.
 import { prisma } from "@/lib/db";
 import { hasModuleAccess } from "@/lib/auth-shared";
-import { seesAllSales } from "@/lib/services/sales/scope";
+import { customerVisibilityWhere, seesAllSales } from "@/lib/services/sales/scope";
 import { teamCtx, type WsActor } from "./context";
 
 /**
@@ -30,7 +30,8 @@ export async function links(actor: WsActor, q: string | null) {
   const seesCustomers = hasModuleAccess(actor.permissions, "customers") || sales;
   const own = seesAllSales(actor.permissions) ? {} : { ownerId: actor.id };
   const [customers, leads, deals] = await Promise.all([
-    seesCustomers ? prisma.customer.findMany({ where: { OR: [{ name: ci }, { nameAr: ci }] }, select: { id: true, name: true }, take: 8 }) : [],
+    // P0 SEC-05 (rep QA audit): a rep finds only the customers of their book (customerVisibilityWhere — /api/search's rule).
+    seesCustomers ? prisma.customer.findMany({ where: { AND: [{ OR: [{ name: ci }, { nameAr: ci }] }, customerVisibilityWhere(actor)] }, select: { id: true, name: true }, take: 8 }) : [],
     sales ? prisma.lead.findMany({ where: { ...own, OR: [{ companyName: ci }, { contactName: ci }] }, select: { id: true, companyName: true, contactName: true }, take: 8 }) : [],
     sales ? prisma.opportunity.findMany({ where: { ...own, title: ci }, select: { id: true, title: true, customerId: true }, take: 8 }) : [],
   ]);

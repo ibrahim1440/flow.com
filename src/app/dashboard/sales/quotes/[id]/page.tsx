@@ -1,5 +1,6 @@
 "use client";
 
+import { TaxOverridePanel } from "@/components/sales/tax-override-panel";
 import { CustomerCreditNotice } from "@/components/credit/credit-ui";
 import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useMemo, useRef, use } from "react";
@@ -110,7 +111,9 @@ type Quote = CommissionInfo & {
 
 type State = { editable: boolean; revisable: boolean; expired: boolean; orderable: boolean };
 type Can = { decideCommission?: boolean; write: boolean; approveDiscount: boolean; approveThisDiscount: boolean; createOrder: boolean; close: boolean; viaAccounting?: boolean; reject?: boolean };
-type DiscountInfo = { state: "NOT_NEEDED" | "PENDING" | "APPROVED" | "REJECTED"; approvedBy: string | null; rejectedBy: string | null };
+type DiscountInfo = { state: "NOT_NEEDED" | "PENDING" | "APPROVED" | "REJECTED"; approvedBy: string | null; rejectedBy: string | null;
+  /** P0 SEC-01: the discount against the list (as saved) and whether a custom line is why a manager is needed. */
+  basisPercent?: string | null; customLine?: boolean };
 /** The lines as frozen at issue (`issuedSnapshot.lines`): the names the customer was sent. */
 type SnapLine = { position: number; name: string | null; nameAr: string | null; description: string | null };
 
@@ -129,7 +132,7 @@ function plusDays(fromIso: string | null | undefined, n: number): string {
 }
 
 /** A new line. `vat`: Settings › Invoicing & tax («النسبة الافتراضية للبند الجديد»), else the built-in 15. */
-const emptyLine = (vat = "15"): Line => ({
+const emptyLine = (vat = "15"): Line => ({ // P0 SEC-07: the server holds every new line to the standard rate
   productSkuId: "",
   description: "",
   quantity: "1",
@@ -569,12 +572,14 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                   ? (ar ? "الخصم فوق الحدّ — اعتمادك مطلوب." : "Discount above the limit — your approval is required.")
                   : (ar ? "الخصم فوق الحدّ — يحتاج اعتماد خصم." : "Discount above the limit — it needs discount approval.")}
               </b>{" "}
-              {ar
-                ? `الخصم الفعّال ${preview.discountPercent.toFixed(2)}% وحدّ الاعتماد ${threshold}%، ` +
+              {!dirty && discount?.customLine ? (
+                <span data-testid="discount-custom-line">{ar ? "فيه بند بدون سعر قائمة معتمد (بند حر أو صنف بلا سعر) — يحتاج موافقة المدير قبل الإصدار." : "A line has no approved list price (a custom line, or a product priced 0) — a manager approves it before issue."}</span>
+              ) : ar
+                ? `الخصم عن سعر القائمة ${(!dirty && discount?.basisPercent ? Number(discount.basisPercent) : preview.discountPercent).toFixed(2)}% وحدّ الاعتماد ${threshold}%، ` +
                   (can.approveThisDiscount
                     ? "والإصدار يسجّل اعتمادك على العرض."
                     : "ويبقى العرض مسودة حتى يعتمده مديرٌ لديه صلاحية اعتماد الخصم.")
-                : `The effective discount is ${preview.discountPercent.toFixed(2)}% against a ${threshold}% limit; ` +
+                : `The discount below the list price is ${(!dirty && discount?.basisPercent ? Number(discount.basisPercent) : preview.discountPercent).toFixed(2)}% against a ${threshold}% limit; ` +
                   (can.approveThisDiscount
                     ? "issuing records your approval."
                     : "the quotation stays a draft until a manager with discount approval approves it.")}
@@ -750,13 +755,11 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                   )}
                 </td>
                 <td>
-                  <span className="pctw" dir="ltr"><input
-                    aria-label={ar ? `ضريبة البند ${i + 1}` : `Tax for line ${i + 1}`}
-                    value={l.taxRatePercent}
-                    inputMode="decimal"
-                    onChange={(e) => setLine(i, { taxRatePercent: e.target.value })}
-                    className="qi num pct"
-                  /><span className="sfx" aria-hidden>%</span></span>
+                  {/* P0 SEC-07 / C6: the VAT is fixed (S at the standard rate); a change is a request approved by a second person. */}
+                  <span className="qi num pct" aria-readonly="true" data-testid={`quote-line-tax-locked-${i}`} title={ar ? "يغيّرها المحاسب بطلب وموافقة" : "Changed by the accountant, with a request and an approval"}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
+                    <span aria-hidden="true">🔒</span><bdi>{Number(l.taxRatePercent)}٪</bdi>{Number(l.taxRatePercent) === 15 ? (ar ? " (ثابتة)" : " (fixed)") : null}
+                  </span>
                 </td>
                 <td data-testid={`line-total-${i}`}><bdi className="n">{formatMoney(lineTotal.toFixed(2))}</bdi></td>
                 <td className="x">
@@ -855,6 +858,10 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       </dl>
       {previewNote}
       {quote.status !== "DRAFT" ? <SentMessagesLine subjectType="Quote" subjectId={quote.id} ar={ar} isAdmin={viewerIsAdmin} reloadKey={justIssued ? 1 : 0} /> : null}
+      {quote.status === "DRAFT" ? (
+        // P0 C5 (approved Figma 2029-2): VAT is fixed; a holder of the request privilege asks, a second person decides.
+        <TaxOverridePanel documentType="QUOTE" documentId={quote.id} ar={ar} editable={!dirty} onApplied={reload} reloadKey={quote.grandTotal + quote.lines.length} />
+      ) : null}
       <CommissionPanel quoteId={quote.id} info={quote} issuer={issuer} canDecide={!!canRaw?.decideCommission} ar={ar} onDone={reload} />
     </div>
   );
@@ -1122,7 +1129,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                         </Select></label>
                       <label><span>{ar ? "سعر الوحدة" : "Unit price"}</span><input aria-label={lab("سعر الوحدة", "Unit price")} value={l.unitPrice} inputMode="decimal" onChange={(e) => setLine(i, { unitPrice: e.target.value })} className="qi num" /></label>
                       <label className={over ? "wa" : undefined}><span>{ar ? "خصم %" : "Disc. %"}</span><input aria-label={lab("الخصم", "Discount")} value={l.discountPercent} inputMode="decimal" onChange={(e) => setLine(i, { discountPercent: e.target.value })} className="qi num" /></label>
-                      <label><span>{ar ? "ضريبة %" : "Tax %"}</span><input aria-label={lab("الضريبة", "Tax")} value={l.taxRatePercent} inputMode="decimal" onChange={(e) => setLine(i, { taxRatePercent: e.target.value })} className="qi num" /></label>
+                      <label><span>{ar ? "ضريبة %" : "Tax %"}</span><span className="qi num" aria-readonly="true" data-testid={`quote-line-tax-locked-${i}`} title={ar ? "يغيّرها المحاسب بطلب وموافقة" : "Changed by the accountant, with a request and an approval"} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><span aria-hidden="true">🔒</span><bdi>{Number(l.taxRatePercent)}٪</bdi>{Number(l.taxRatePercent) === 15 ? (ar ? " (ثابتة)" : " (fixed)") : null}</span></label>
                       <div className="q-pcard-t"><span>{ar ? "الإجمالي شامل الضريبة" : "Total incl. VAT"}</span><b data-testid={`line-total-${i}`}><bdi className="n">{formatMoney(lineTotal.toFixed(2))}</bdi></b></div>
                     </div>
                   </div>
@@ -1164,6 +1171,10 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         {previewNote}
         {issuedNote}
         {quote.status !== "DRAFT" ? <SentMessagesLine subjectType="Quote" subjectId={quote.id} ar={ar} isAdmin={viewerIsAdmin} reloadKey={justIssued ? 1 : 0} /> : null}
+      {quote.status === "DRAFT" ? (
+        // P0 C5 (approved Figma 2029-2): VAT is fixed; a holder of the request privilege asks, a second person decides.
+        <TaxOverridePanel documentType="QUOTE" documentId={quote.id} ar={ar} editable={!dirty} onApplied={reload} reloadKey={quote.grandTotal + quote.lines.length} />
+      ) : null}
       <CommissionPanel quoteId={quote.id} info={quote} issuer={issuer} canDecide={!!canRaw?.decideCommission} ar={ar} onDone={reload} />
         {chain && <div style={{ marginTop: 20 }}>{chain}</div>}
         <p className="q-band">

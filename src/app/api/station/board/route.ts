@@ -12,7 +12,7 @@ export async function GET(request: Request) {
   const g = await requireBoardViewer();
   if (g.error) return g.error;
   try {
-    const board = await boardSnapshot();
+    const board = await boardSnapshot(new Date(), g.orderWhere);
     const etag = `"${board.version}"`;
     if (request.headers.get("if-none-match") === etag) return new NextResponse(null, { status: 304, headers: { ETag: etag, "Cache-Control": "no-store" } });
     return NextResponse.json(board, { headers: { ETag: etag, "Cache-Control": "no-store" } });
