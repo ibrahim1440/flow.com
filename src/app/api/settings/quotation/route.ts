@@ -62,7 +62,7 @@ export async function PUT(request: Request) {
       await tx.systemConfig.upsert({ where: { id: "singleton" }, create: { id: "singleton" }, update: {} });
       await tx.$queryRaw`SELECT "id" FROM "SystemConfig" WHERE "id" = 'singleton' FOR UPDATE`;
       const before = settingsFromRow(await tx.systemConfig.findUnique({ where: { id: "singleton" } }));
-      const row = await tx.systemConfig.update({ where: { id: "singleton" }, data: parsed.data });
+      const row = await tx.systemConfig.upsert({ where: { id: "singleton" }, create: { id: "singleton", ...parsed.data }, update: parsed.data });
       const after = settingsFromRow(row);
       const changed = (["discountApprovalPercent", "requireQualificationMinimum"] as const).filter((k) => before[k] !== after[k]) as string[];
       for (const k of SELLER_FIELDS) if (before.seller[k] !== after.seller[k]) changed.push(k);

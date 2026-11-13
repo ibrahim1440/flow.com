@@ -1,5 +1,6 @@
 "use client";
 
+import { prepareReceipt } from "@/lib/files/receipt-prep";
 import { useState, useEffect, type ReactNode } from "react";
 import Link from "next/link";
 import { Paperclip } from "lucide-react";
@@ -7,6 +8,7 @@ import {
   useLang, Spinner, Modal, Field, TextArea, Button, FocusDialog, api, formatDay, formatMoney, num, moneyText,
 } from "../_components/ui";
 import { Ico } from "@/components/shell/icons";
+import { fullDate } from "@/components/credit/credit-ui";
 import "../_components/money.css";
 import { usePhone, useD21Phone } from "@/components/shell/page-context";
 import { splitTitle } from "@/components/d21/labels";
@@ -123,6 +125,8 @@ type Payload = {
   counts?: Record<string, number>;
   /** Qoyod parity: what each listed receipt is applied to (only for an invoices viewer). */
   allocations?: Record<string, { id: string; invoiceId: string; number: string | null; amount: string; appliedDate: string }[]>;
+  /** Abu Fahd (friction 7): a pending collection holding a direct sale → the order number its approval releases. */
+  releases?: Record<string, number>;
   /** Per-status sums (gross / net), over the same scope. */
   totals?: Record<string, { gross: string; net: string }>;
 };
@@ -151,11 +155,18 @@ const METHODS: Record<string, { en: string; ar: string }> = {
   OTHER: { en: "Other", ar: "أخرى" },
 };
 
-function StatusDot({ status, ar }: { status: string; ar: boolean }) {
+/** P1 ERR-10: a collection the accountant returned for correction (and not yet corrected) is «رجع لك» — in the list AND the detail. */
+const isReturned = (r: { status: string; decisionReasonCode?: string | null; correctedBy?: unknown }) =>
+  r.status === "REJECTED" && r.decisionReasonCode === "RETURN_FOR_CORRECTION" && !r.correctedBy;
+
+/** Abu Fahd R4 F7: a collection the rep corrected is not «مرفوض» to them — it is «رجع لك — صُحّح», pointing at the new one. */
+const isCorrected = (r: { status: string; correctedBy?: unknown }) => r.status === "REJECTED" && !!r.correctedBy;
+
+function StatusDot({ status, ar, returned = false, corrected = false }: { status: string; ar: boolean; returned?: boolean; corrected?: boolean }) {
   const s = STATUS[status] ?? STATUS.PENDING_VERIFICATION;
   return (
-    <span className={`st ${s.dot}`} data-testid={`collection-status-${status}`}>
-      {ar ? s.ar : s.en}
+    <span className={`st ${corrected ? "x" : s.dot}`} data-testid={`collection-status-${status}`} data-corrected={corrected || undefined}>
+      {corrected ? (ar ? "رجع لك — صُحّح" : "Back to you — corrected") : returned ? (ar ? "رجع لك" : "Back to you") : ar ? s.ar : s.en}
     </span>
   );
 }
@@ -179,7 +190,7 @@ export default function CollectionsPage() {
   const [success, setSuccess] = useState("");
   // The rep's view (owner-approved Figma page 09): a local filter over their own list.
   const [repFilter, setRepFilter] = useState<"all" | "pending" | "approved" | "returned">("all");
-  const [dialog, setDialog] = useState<{ kind: "reject" | "reverse"; row: Collection } | null>(null);
+  const [dialog, setDialog] = useState<{ kind: "reject" | "return" | "reverse"; row: Collection } | null>(null);
   /** The row a reviewer has opened to look at properly before deciding. */
   const [detail, setDetail] = useState<Collection | null>(null);
   const [reason, setReason] = useState("");
@@ -233,7 +244,7 @@ export default function CollectionsPage() {
     return () => { cancelled = true; };
   }, [status, ar, reloadToken]);
 
-  async function decide(row: Collection, action: "approve" | "reject" | "reverse", why: string) {
+  async function decide(row: Collection, action: "approve" | "reject" | "return" | "reverse", why: string) {
     if (busy) return;
     setBusy(true);
     setError("");
@@ -260,6 +271,8 @@ export default function CollectionsPage() {
           : `Collection approved${moved ? ` · commission ${moved}` : ""}.`
         : action === "reject"
           ? ar ? "رُفض التحصيل. لم تُنشأ أي عمولة." : "Collection rejected. No commission was created."
+        : action === "return"
+          ? ar ? "رجع التحصيل للمندوب يصحّحه — يشوفه «رجع لك»." : "Returned to the rep to correct — they see it under «Back to you»."
           : ar
             ? `عُكس التحصيل${moved ? ` · تسوية ${moved}` : ""}.`
             : `Collection reversed${moved ? ` · adjustment ${moved}` : ""}.`,
@@ -458,6 +471,7 @@ export default function CollectionsPage() {
     const why = blockedReason(r);
     return (
       <div className="acts">
+        {data?.releases?.[r.id] ? <span className="wa" data-testid={`releases-order-${r.id}`}>{ar ? `يفك الطلب #${data.releases[r.id]}` : `Releases order #${data.releases[r.id]}`}</span> : null}
         {why && (
           <span className="why" data-testid={`decision-blocked-${r.id}`} data-reason={why}>
             {ar ? WHY_NOT[why].ar : WHY_NOT[why].en}
@@ -481,6 +495,13 @@ export default function CollectionsPage() {
           <button type="button" className="btn sm" disabled={busy} data-testid={`reject-${r.id}`}
             onClick={() => { setDialog({ kind: "reject", row: r }); setReason(""); }}>
             {ar ? "رفض التحصيل" : "Reject collection"}
+          </button>
+        )}
+        {/* Owner أ: «رجّعه للتصحيح» — the endpoint and rules of «سندات العملاء» (reason of 10+, audited, the rep told). */}
+        {d.reject.allowed && (
+          <button type="button" className="btn sm" disabled={busy} data-testid={`return-${r.id}`}
+            onClick={() => { setDialog({ kind: "return", row: r }); setReason(""); }}>
+            {ar ? "رجّعه للتصحيح" : "Return for correction"}
           </button>
         )}
         {d.reverse.allowed && (
@@ -559,7 +580,7 @@ export default function CollectionsPage() {
       case "method": return <td key={k}>{methodText(r.paymentMethod)}{noReceipt(r) ? <><br />{noReceiptChip(r)}</> : null}</td>;
       case "status": return (
         <td key={k} style={{ whiteSpace: "normal" }}>
-          <StatusDot status={r.status} ar={ar} />
+          <StatusDot status={r.status} ar={ar} returned={isReturned(r)} corrected={isCorrected(r)} />
           {qoyod ? allocPill(r) : null}
           {(r.decisionReason || r.reversalReason) && (
             <span className="sm">{r.reversalReason ?? r.decisionReason}</span>
@@ -620,6 +641,7 @@ export default function CollectionsPage() {
       title={
         dialog.kind === "reject"
           ? (ar ? "رفض التحصيل" : "Reject the collection")
+          : dialog.kind === "return" ? (ar ? "رجّعه للتصحيح" : "Return for correction")
           : (ar ? "عكس تحصيل معتمَد" : "Reverse an approved collection")
       }
       onClose={() => setDialog(null)}
@@ -629,11 +651,11 @@ export default function CollectionsPage() {
           <Button variant="secondary" onClick={() => setDialog(null)}>{ar ? "إلغاء" : "Cancel"}</Button>
           <Button
             variant="danger"
-            disabled={busy || reason.trim().length < 3}
+            disabled={busy || reason.trim().length < (dialog.kind === "return" ? 10 : 3)}
             testId="confirm-decision"
             onClick={() => decide(dialog.row, dialog.kind, reason)}
           >
-            {dialog.kind === "reject" ? (ar ? "رفض" : "Reject") : (ar ? "عكس" : "Reverse")}
+            {dialog.kind === "reject" ? (ar ? "رفض" : "Reject") : dialog.kind === "return" ? (ar ? "رجّعه للمندوب" : "Return to the rep") : (ar ? "عكس" : "Reverse")}
           </Button>
         </>
       }
@@ -641,14 +663,27 @@ export default function CollectionsPage() {
       <p className="lbl" style={{ fontWeight: 400, margin: 0 }}>
         <bdi>{dealText(dialog.row)}</bdi> · <bdi className="n">{moneyText(dialog.row.amountGross, dialog.row.currency, lang)}</bdi>
       </p>
+      {dialog.kind !== "reverse" && data?.releases?.[dialog.row.id] ? (
+        <p className="notice" data-testid="reject-holds-order">{ar
+          ? dialog.kind === "return"
+            ? `هذا التحصيل يفك الطلب #${data.releases[dialog.row.id]} (بيع مباشر والعميل فوق الحد). إذا رجّعته للتصحيح يظل الطلب موقوف لين يصحّحه المندوب وتعتمد التصحيح.`
+            : `هذا التحصيل يفك الطلب #${data.releases[dialog.row.id]} (بيع مباشر والعميل فوق الحد). إذا رفضته يظل الطلب موقوف.`
+          : dialog.kind === "return"
+            ? `This collection releases order #${data.releases[dialog.row.id]} (a direct sale over the credit limit). Returned for correction, the order stays held until the rep corrects it and you approve the correction.`
+            : `This collection releases order #${data.releases[dialog.row.id]} (a direct sale over the credit limit). Rejecting it keeps the order held.`}</p>
+      ) : null}
       <p className="notice">
-        {dialog.kind === "reject"
+        {dialog.kind === "return"
+          ? (ar
+              ? "يرجع للمندوب يصحّحه ويرسله من جديد — السبب يظهر له (10 أحرف على الأقل). ما تُنشأ أي عمولة."
+              : "It goes back to the rep to correct and resend — they see the reason (at least 10 characters). No commission is created.")
+          : dialog.kind === "reject"
           ? (ar
               ? "لن تُنشأ أي عمولة. السبب يظهر للمندوب الذي سجّل التحصيل."
               : "No commission will be created. The reason is shown to the rep who recorded it.")
           : (ar
-              ? "القيد الأصلي يبقى كما هو، وتُكتب تسوية سالبة مرتبطة به تُنقص العمولة بالمقدار نفسه."
-              : "The original stays as approved; a linked negative adjustment reduces the commission by the same amount.")}
+              ? "القيد الأصلي يبقى كما هو، وتُكتب تسوية سالبة مرتبطة به تُنقص العمولة بالمقدار نفسه. عكس تحصيل فكّ طلب بيع مباشر موقوف ما يرجّع إيقاف الطلب — الطلب الجاي لهالعميل يمر على فحص حد الائتمان العادي."
+              : "The original stays as approved; a linked negative adjustment reduces the commission by the same amount. Reversing a collection that released a held direct sale does not hold that order again — the customer's next order goes through the normal credit-limit check.")}
       </p>
       <Field id="decision-reason" label={ar ? "السبب" : "Reason"} hint={ar ? "مطلوب." : "Required."}>
         <TextArea id="decision-reason" value={reason} onChange={setReason} rows={3} />
@@ -674,7 +709,7 @@ export default function CollectionsPage() {
                 <bdi>{dealText(detail)}</bdi>
                 {detail.quote && <> · <bdi className="id" style={{ fontSize: 12 }}>{detail.quote.quoteNumber}</bdi></>}
               </div>
-              <StatusDot status={detail.status} ar={ar} />
+              <StatusDot status={detail.status} ar={ar} returned={isReturned(detail)} corrected={isCorrected(detail)} />
             </div>
             <button type="button" className="ib" onClick={() => setDetail(null)} aria-label={ar ? "إغلاق" : "Close"}>
               <Ico name="close" />
@@ -736,7 +771,8 @@ export default function CollectionsPage() {
               <p className="lbl" style={{ fontWeight: 400, margin: "0 0 8px" }} data-testid="detail-receipt-number">{ar ? "سند قبض" : "Receipt"} <bdi className="id">{detail.receiptNumber}</bdi>{detail.status === "REVERSED" ? (ar ? " · معكوس" : " · reversed") : ""}</p>
             ) : null}
             {detail.status === "REJECTED" && detail.decisionReasonCode === "RETURN_FOR_CORRECTION" && detail.submittedBy?.id === viewer?.id ? (
-              <CorrectCollection row={detail} ar={ar} onDone={(msg) => { setDetail(null); setSuccess(msg); reload(); }} onError={setError} />
+              <CorrectCollection row={detail} ar={ar} onDone={(msg) => { setDetail(null); setSuccess(msg); reload(); }} onError={setError}
+                onOpenCorrection={(id) => { const next = rows.find((x) => x.id === id); if (next) setDetail(next); }} />
             ) : null}
 
             {qoyod && allocs ? (
@@ -804,6 +840,12 @@ export default function CollectionsPage() {
                 {ar ? "رفض التحصيل" : "Reject collection"}
               </button>
             )}
+            {d.reject.allowed && (
+              <button type="button" className="btn" disabled={busy} data-testid="detail-return"
+                onClick={() => { setDialog({ kind: "return", row: detail }); setReason(""); setDetail(null); }}>
+                {ar ? "رجّعه للتصحيح" : "Return for correction"}
+              </button>
+            )}
             {d.reverse.allowed && (
               <button type="button" className="btn" disabled={busy} data-testid="detail-reverse"
                 onClick={() => { setDialog({ kind: "reverse", row: detail }); setReason(""); setDetail(null); }}>
@@ -827,7 +869,8 @@ export default function CollectionsPage() {
       r.status === "PENDING_VERIFICATION" ? [ar ? "بانتظار المالية" : "Awaiting finance", "t-wa"]
         : r.status === "APPROVED" ? [ar ? "معتمد" : "Approved", "t-ok"]
           : r.status === "REVERSED" ? [ar ? "معكوس" : "Reversed", "t-in"]
-            : returned.includes(r) ? [ar ? "رجع لك" : "Back to you", "t-er"] : [ar ? "مرفوض" : "Rejected", "t-er"];
+            : returned.includes(r) ? [ar ? "رجع لك" : "Back to you", "t-er"]
+              : isCorrected(r) ? [ar ? "رجع لك — صُحّح" : "Back to you — corrected", "t-in"] : [ar ? "مرفوض" : "Rejected", "t-er"];
     const shown = rows.filter((r) => repFilter === "all" ? true : repFilter === "pending" ? r.status === "PENDING_VERIFICATION" : repFilter === "approved" ? r.status === "APPROVED" : returned.includes(r));
     const recordHref = eligible.length === 1 ? `/dashboard/sales/deals/${eligible[0].id}#collections` : "#mny-owing";
     const dayText = (iso: string) => new Date(iso).toLocaleDateString(ar ? "ar-SA-u-ca-gregory-nu-latn" : "en-GB", { day: "numeric", month: "long", timeZone: "Asia/Riyadh" });
@@ -843,7 +886,10 @@ export default function CollectionsPage() {
         <div className="mny" data-testid="collections-rep">
           <div className="mny-top">
             <div>{phone ? null : <h1>{ar ? "التحصيل" : "Collections"}</h1>}<p>{ar ? "الفلوس اللي استلمتها من العملاء، ووين وصلت" : "The money you received from customers, and where it got to"}</p></div>
-            {data.can.submit ? <Link className="btn p" href={recordHref} data-testid="record-collection" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Ico name="plus" small />{ar ? "سجّل تحصيل" : "Record a collection"}</Link> : null}
+            {/* Abu Fahd R4 F6: with no deal due for collection the button said nothing — say why instead. */}
+            {data.can.submit ? (eligible.length
+              ? <Link className="btn p" href={recordHref} data-testid="record-collection" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Ico name="plus" small />{ar ? "سجّل تحصيل" : "Record a collection"}</Link>
+              : <span className="lbl" style={{ fontWeight: 400 }} data-testid="record-collection-none">{ar ? "ما فيه صفقات مستحقة للتحصيل الحين" : "No deal is due for collection right now"}</span>) : null}
           </div>
           <div className="mny-row" style={{ ["--n" as string]: 3 }}>
             <div className="mny-stt t-wa" data-testid="stat-pending"><span className="h"><Ico name="clock" small />{ar ? "بانتظار المالية" : "Awaiting finance"}</span><b className="num">{whole(pendingGross)} {unit}</b></div>
@@ -866,7 +912,7 @@ export default function CollectionsPage() {
             <section className="mny-card" aria-labelledby="mny-mine-h" data-testid="collections-table">
               <div className="mny-h"><div><h2 id="mny-mine-h">{ar ? "تحصيلاتي" : "My collections"}</h2><small>{ar ? "الأحدث أولًا" : "Newest first"}</small></div>
                 <span className="mny-chips" role="group" aria-label={ar ? "الحالة" : "Status"}>
-                  {([["all", "الكل", "All"], ["pending", "بانتظار", "Waiting"], ["approved", "معتمد", "Approved"], ["returned", "رجع لي", "Back to me"]] as const).map(([k, a2, e]) => (
+                  {([["all", "الكل", "All"], ["pending", "بانتظار", "Waiting"], ["approved", "معتمد", "Approved"], ["returned", "رجع لك", "Back to you"]] as const).map(([k, a2, e]) => (
                     <button key={k} type="button" aria-pressed={repFilter === k} onClick={() => setRepFilter(k)}>{ar ? a2 : e}</button>
                   ))}
                 </span></div>
@@ -928,7 +974,7 @@ export default function CollectionsPage() {
                   {r.quote && " · "}
                   <bdi className="n">{formatDay(r.collectedAt).slice(0, 5)}</bdi>
                 </span>
-                <StatusDot status={r.status} ar={ar} />
+                <StatusDot status={r.status} ar={ar} returned={isReturned(r)} corrected={isCorrected(r)} />
                 <button type="button" className="open" onClick={() => setDetail(r)} data-testid={`open-${r.id}`}
                   aria-label={`${ar ? "فتح" : "Open"} ${dealText(r)}`} />
               </div>
@@ -1033,29 +1079,69 @@ export default function CollectionsPage() {
  * «نسخ وتصحيح» (BATCH22 WP-D): the accountant returned this collection for correction. A NEW pending collection is made
  * from it — the amount, date and reference corrected here, its evidence copied — and the returned one stays as it is.
  */
-function CorrectCollection({ row, ar, onDone, onError }: { row: Collection; ar: boolean; onDone: (msg: string) => void; onError: (msg: string) => void }) {
-  const [amount, setAmount] = useState(row.amountGross);
+function CorrectCollection({ row, ar, onDone, onError, onOpenCorrection }: { row: Collection; ar: boolean; onDone: (msg: string) => void; onError: (msg: string) => void; onOpenCorrection?: (id: string) => void }) {
+  const [amount, setAmount] = useState(Number(row.amountGross).toFixed(2));
   const [date, setDate] = useState(new Date(Date.parse(row.collectedAt) + 3 * 3600_000).toISOString().slice(0, 10));
   const [ref, setRef] = useState(row.referenceNumber ?? "");
+  const [today] = useState(() => new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10));
   const [busy, setBusy] = useState(false);
+  // P1 ERR-10 (approved Figma 2033:57): «صحّحه» carries the receipt — checked the moment it is chosen (size up to 5 MB,
+  // PDF or image, not empty), its error under the field; uploaded to the corrected collection right after it is made.
+  const [receipt, setReceipt] = useState<File | null>(null);
+  const [receiptErr, setReceiptErr] = useState("");
+  const [preparing, setPreparing] = useState(false);
   const [key] = useState(() => `fix-${row.id}-${Math.random().toString(36).slice(2, 10)}`);
   if (row.correctedBy) {
-    return <p className="lbl" style={{ fontWeight: 400 }} data-testid="detail-corrected">{ar ? "صُحّح هذا التحصيل بتحصيل جديد." : "This collection was corrected by a new one."}</p>;
+    return (
+      <p className="lbl" style={{ fontWeight: 400 }} data-testid="detail-corrected">{ar ? "صُحّح هذا التحصيل بتحصيل جديد." : "This collection was corrected by a new one."}{" "}
+        {onOpenCorrection ? <button type="button" className="btn sm g" onClick={() => onOpenCorrection(row.correctedBy!.id)} data-testid="open-correction">{ar ? "افتح التصحيح ←" : "Open the correction →"}</button> : null}
+      </p>
+    );
+  }
+  async function choose(f: File | null) {
+    setReceiptErr(""); setReceipt(null);
+    if (!f) return;
+    setPreparing(true);
+    const r = await prepareReceipt(f);
+    setPreparing(false);
+    if (r.ok) setReceipt(r.file); else setReceiptErr(ar ? r.ar : r.en);
   }
   async function go() {
     setBusy(true);
     const res = await api<{ collectionId: string }>(`/api/sales/collections/${row.id}/correct`, { method: "POST", body: { idempotencyKey: key, amountGross: amount, collectedAt: `${date}T12:00:00+03:00`, referenceNumber: ref || null } });
+    if (!res.ok) { setBusy(false); onError(res.data.error ?? ""); return; }
+    let uploadNote = "";
+    if (receipt && res.data.collectionId) {
+      const form = new FormData();
+      form.append("file", receipt);
+      const up = await fetch(`/api/sales/collections/${res.data.collectionId}/evidence`, { method: "POST", body: form }).catch(() => null);
+      if (!up || !up.ok) uploadNote = ar ? " الإيصال ما انرفع — أرفقه من التحصيل الجديد." : " The receipt was not uploaded — attach it on the new collection.";
+    }
     setBusy(false);
-    if (!res.ok) { onError(res.data.error ?? ""); return; }
-    onDone(ar ? "أُنشئ تحصيل مصحّح وأُرسل للتأكيد." : "A corrected collection was created and sent for confirmation.");
+    onDone((ar ? "أُنشئ تحصيل مصحّح وأُرسل للتأكيد." : "A corrected collection was created and sent for confirmation.") + uploadNote);
   }
   return (
-    <section data-testid="detail-correct" style={{ margin: "12px 0", display: "grid", gap: 8 }}>
+    <section data-testid="detail-correct" className="mny-fix">
       <p className="c-ev-h">{ar ? "أُعيد إليك للتصحيح" : "Returned to you for correction"}</p>
-      <label className="lbl" style={{ fontWeight: 400 }}>{ar ? "المبلغ (⃁)" : "Amount (SAR)"}<input className="q-input" dir="ltr" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} data-testid="correct-amount" /></label>
-      <label className="lbl" style={{ fontWeight: 400 }}>{ar ? "تاريخ التحصيل" : "Collected on"}<input className="q-input" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
-      <label className="lbl" style={{ fontWeight: 400 }}>{ar ? "المرجع" : "Reference"}<input className="q-input" dir="ltr" value={ref} onChange={(e) => setRef(e.target.value)} /></label>
-      <button type="button" className="btn p" disabled={busy} onClick={go} data-testid="correct-submit">{ar ? "نسخ وتصحيح" : "Copy and correct"}</button>
+      <label className="mny-fix-f">{ar ? "المبلغ (⃁)" : "Amount (SAR)"}<input className="mny-fix-in" dir="ltr" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} data-testid="correct-amount" /></label>
+      {/* The app's date format («12 نوفمبر 2026»), the native picker behind it. */}
+      <label className="mny-fix-f">{ar ? "تاريخ التحصيل" : "Collected on"}
+        <span className="mny-fix-in mny-fix-pick" data-testid="correct-date-text"><Ico name="cal" small /><span>{fullDate(`${date}T12:00:00+03:00`, ar)}</span>
+          <input className="mny-fix-sr" type="date" value={date} max={today} onChange={(e) => e.target.value && setDate(e.target.value)} onClick={(e) => (e.currentTarget as HTMLInputElement & { showPicker?: () => void }).showPicker?.()} data-testid="correct-date" />
+        </span>
+      </label>
+      <label className="mny-fix-f">{ar ? "المرجع (اختياري)" : "Reference (optional)"}<input className="mny-fix-in" dir="ltr" value={ref} onChange={(e) => setRef(e.target.value)} placeholder={ar ? "رقم الحوالة أو الإيصال" : "Transfer or receipt number"} data-testid="correct-ref" /></label>
+      <div className="mny-fix-f">{row.paymentMethod === "BANK_TRANSFER" ? (ar ? "إيصال التحويل" : "Transfer receipt") : (ar ? "الإيصال" : "Receipt")}
+        <label className="mny-fix-in mny-fix-pick" data-testid="correct-receipt-pick"><Paperclip size={14} aria-hidden />
+          <span>{receipt ? receipt.name : (ar ? "أرفق صورة الإيصال أو PDF" : "Attach the receipt (image or PDF)")}</span>
+          <input className="mny-fix-sr" type="file" accept="application/pdf,image/*" onChange={(e) => { const f = e.target.files?.[0] ?? null; e.target.value = ""; void choose(f); }} data-testid="correct-receipt" aria-invalid={!!receiptErr} aria-describedby="correct-receipt-help" />
+        </label>
+      </div>
+      {preparing ? <span className="mny-fix-help">{ar ? "جارٍ تجهيز الملف…" : "Preparing the file…"}</span> : null}
+      {receipt && !receiptErr ? <span className="mny-fix-help" data-testid="correct-receipt-ok"><bdi>{receipt.name}</bdi> · <bdi className="n">{Math.max(1, Math.round(receipt.size / 1024))}</bdi> {ar ? "ك.ب ✓" : "KB ✓"}</span> : null}
+      {receiptErr ? <span className="c-field-err" role="alert" data-testid="correct-receipt-error">{receiptErr}</span>
+        : <span id="correct-receipt-help" className="mny-fix-help">{ar ? "PDF أو صورة، حتى 5 ميجا." : "PDF or an image, up to 5 MB."}</span>}
+      <button type="button" className="btn p" disabled={busy || preparing || !!receiptErr} onClick={go} data-testid="correct-submit">{ar ? "أرسل التصحيح" : "Send the correction"}</button>
     </section>
   );
 }

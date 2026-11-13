@@ -51,8 +51,11 @@ type Line = {
  * Orders page. A line already blocked in data still reads «موقوف» (lineProgress), so nothing is
  * hidden.
  */
-export function OrderLines({ orderStatus, items, pipeline }: {
+export function OrderLines({ orderStatus, items, pipeline, paymentHold = null, paymentShort = null }: {
   orderStatus: string;
+  /** Owner decision أ: the order's payment hold — its lines read it instead of a production stage. */
+  paymentHold?: string | null;
+  paymentShort?: string | null;
   items: Line[];
   pipeline: PipelineInfo | null;
 }) {
@@ -63,7 +66,7 @@ export function OrderLines({ orderStatus, items, pipeline }: {
       <p className="hr-caption" style={{ margin: 0 }}>{t("ordLinesAutoNote")}</p>
       <ul className="ops-dlines" style={{ listStyle: "none", margin: 0, padding: 0 }}>
         {items.map((i) => {
-          const d = lineProgress(orderStatus, { stage: byLine.get(i.id)?.stage, blocked: i.preparationDecision === "Blocked" });
+          const d = lineProgress(orderStatus, { stage: byLine.get(i.id)?.stage, blocked: i.preparationDecision === "Blocked" }, paymentHold, paymentShort);
           return (
             <li key={i.id} className="ops-dline" data-testid={`order-line-prep-${i.id}`}>
               <div className="ops-dline-t">

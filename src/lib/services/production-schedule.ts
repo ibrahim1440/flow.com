@@ -99,7 +99,7 @@ export async function scheduleShortfallInTx(
       `(${order.targetWeightKg} kg finished, ${order.expectedGreenBeanKg} kg green) ` +
       (opts.automatic ? "automatically for the shortfall." : `by ${actor.name}.`),
     authorId: actor.id,
-    authorName: opts.automatic ? "System" : actor.name,
+    authorName: opts.automatic ? "النظام" : actor.name, // P1 ERR-05: the order log reads Arabic
     metadata: {
       productionOrderId: order.id,
       productionNumber: order.productionNumber,
@@ -254,7 +254,7 @@ export async function settleProductionOrders(
               `Production order ${po.productionNumber} (${po.targetUnits} × ${po.productSku.skuCode}) ` +
               `${to === "COMPLETED" ? "completed" : "cancelled"} automatically: ${why}.`,
             authorId: actor.id,
-            authorName: "System",
+            authorName: "النظام",
             metadata: { productionOrderId: po.id, productionNumber: po.productionNumber, from: po.status, to, automatic: true, producedUnits: produced },
           });
         }
@@ -334,7 +334,7 @@ export async function withdrawProvisionalPlansInTx(
         type: "PRODUCTION_ORDER_CANCELLED",
         message: `Automatic production order ${po.productionNumber} (${po.targetUnits} unit(s)) withdrawn: replaced by ${because}.`,
         authorId: actor.id,
-        authorName: "System",
+        authorName: "النظام",
         metadata: { productionOrderId: po.id, productionNumber: po.productionNumber, withdrawn: true, automatic: true },
       });
     }

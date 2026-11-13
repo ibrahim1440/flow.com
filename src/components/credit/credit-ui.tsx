@@ -88,7 +88,9 @@ export function CreditCallout({ ar, c, phone, onHold, onLift }: { ar: boolean; c
     return (
       <div className={`callout er cr-callout${phone ? " ph" : ""}`} role="status" data-testid="credit-warning">
         <CreditBadges ar={ar} s={badgesOf(c)} compact />
-        <span>{parts.join(ar ? "، و" : "; ")}. <span className="cr-muted">{t("تنبيه فقط؛ البيع مستمر ما لم يُوقف.", "A warning only; sales continue unless held.")}</span></span>
+        <span>{parts.join(ar ? "، و" : "; ")}. <span className="cr-muted">{c.warning.overLimit
+          ? t("فوق الحد: الطلب الجديد الآجل ما يمشي إلا باعتماد المشرف، والبيع الكاش يوقف لين يأكّد المحاسب المبلغ.", "Over the limit: a new order on account goes through only with a supervisor's approval; a cash sale is held until the accountant confirms the money.")
+          : t("تنبيه: البيع مستمر ما لم يُوقف.", "A warning: sales continue unless held.")}</span></span>
         {c.can.hold && <button type="button" className="btn sm" onClick={onHold} data-testid="credit-hold">{t("إيقاف البيع", "Hold sales")}</button>}
       </div>
     );
@@ -330,8 +332,85 @@ export function CreditNoticeBody({ c, ar, testId = "credit-notice" }: { c: Credi
       <CreditBadges ar={ar} s={badgesOf(c)} compact />
       <span>
         {c.warning.overLimit && c.amounts?.limit ? (ar ? `الرصيد ${money(c.amounts.outstanding)} ⃁ يتجاوز الحد ${money(c.amounts.limit)} ⃁ بمبلغ ${money(c.amounts.over)} ⃁. ` : `Balance SAR ${money(c.amounts.outstanding)} is SAR ${money(c.amounts.over)} over the SAR ${money(c.amounts.limit)} limit. `) : ""}
-        {t("تنبيه فقط؛ يمكنك المتابعة.", "A warning only; you may continue.")}
+        {c.warning.overLimit
+          ? t("فوق الحد: الطلب الآجل يحتاج اعتماد المشرف.", "Over the limit: an order on account needs a supervisor's approval.")
+          : t("تنبيه فقط؛ يمكنك المتابعة.", "A warning only; you may continue.")}
       </span>
     </div>
+  );
+}
+
+/** P1 ERR-02: the figures a 409 CREDIT_LIMIT carries (services/customers/credit-limit.ts creditLimitRefusal). */
+export type CreditRefusal = { limit: string; receivable: string; approvedNotInvoiced: string; used: string; order: string; total: string; excess: string };
+export type CreditKind = "ORDER" | "QUOTE_ORDER" | "DIRECT_SALE";
+
+/** A 409 CREDIT_LIMIT body → its figures (or null for any other answer). */
+export function creditRefusalOf(body: unknown): CreditRefusal | null {
+  const b = body as { code?: string; credit?: CreditRefusal } | null;
+  return b?.code === "CREDIT_LIMIT" && b.credit ? b.credit : null;
+}
+
+/**
+ * «الطلب يتجاوز حد الائتمان» (Figma 2033:28, approved 12 Nov 2026): the sentence with the figures, then «اطلب اعتماد
+ * المشرف» (a reason, sent to a holder of customers › sales_hold — never the rep) or «رجوع». Once a supervisor approves, the
+ * same order sent again within 3 days goes through once (the server consumes the approval).
+ */
+export function CreditLimitDialog({ ar, customerId, kind, credit, onClose, resume }: { ar: boolean; customerId: string; kind: CreditKind; credit: CreditRefusal; onClose: () => void;
+  /** Abu Fahd M1 / H2: the refused request (its endpoint and body), kept with the approval so the rep resumes it with one
+   *  tap from the approval notification (/dashboard/sales/credit-resume/[id]). */
+  resume?: { path: string; body: Record<string, unknown> | null } }) {
+  const t = L(ar);
+  const [asking, setAsking] = useState(false);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [sent, setSent] = useState(false);
+  // Two decimals, as the approved frame writes them (632.50 ⃁).
+  const m = (v: string) => <bdi className="hr-num">{Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</bdi>;
+  const cur = t("⃁", "SAR");
+  async function ask() {
+    if (busy || reason.trim().length < 5) return;
+    setBusy(true); setErr("");
+    const r = await post(`/api/customers/${customerId}/credit/override`, { amount: credit.order, kind, reason: reason.trim(), ...(resume ? { resume } : {}) });
+    setBusy(false);
+    if (r.ok) setSent(true);
+    else setErr(localizeApiError(r.data, ar ? "ar" : "en") ?? t("ما انرسل الطلب — جرّب مرة ثانية.", "Not sent — try again."));
+  }
+  return (
+    <Dialog open title={t("الطلب يتجاوز حد الائتمان", "The order exceeds the credit limit")} onClose={onClose} testId="credit-limit-dialog"
+      actions={sent
+        ? <button type="button" className="hr-btn is-primary" onClick={onClose} data-testid="credit-limit-close">{t("تمام", "OK")}</button>
+        : asking
+          ? <>
+            <button type="button" className="hr-btn is-primary" disabled={busy || reason.trim().length < 5} onClick={ask} data-testid="credit-limit-send">{busy ? t("جارٍ…", "Working…") : t("أرسل للمشرف", "Send to the supervisor")}</button>
+            <button type="button" className="hr-btn" onClick={() => setAsking(false)}>{t("رجوع", "Back")}</button>
+          </>
+          : <>
+            <button type="button" className="hr-btn is-primary" onClick={() => setAsking(true)} data-testid="credit-limit-ask">{t("اطلب اعتماد المشرف", "Ask a supervisor to approve")}</button>
+            <button type="button" className="hr-btn" onClick={onClose} data-testid="credit-limit-back">{t("رجوع", "Back")}</button>
+          </>}>
+      <div className="hr-stack cr-limit">
+        {err ? <p className="hr-err" role="alert" style={{ margin: 0 }}>{err}</p> : null}
+        {/* Abu Fahd M3: one figure a line, in a rep's words (the spirit of Figma 2033:28), the excess last and bold. */}
+        <dl className="cr-limit-sum" data-testid="credit-limit-figures" style={{ margin: 0, display: "grid", gridTemplateColumns: "1fr auto", gap: "4px 16px" }}>
+          {/* Abu Fahd R2 N1: a negative balance is money the customer paid ahead — «رصيد دائن», never a bare minus. */}
+          {Number(credit.receivable) < 0
+            ? <><dt>{t("رصيد دائن (دفعات مقدّمة)", "Credit balance (paid ahead)")}</dt><dd style={{ margin: 0 }} data-testid="credit-limit-credit-balance">− {m(String(-Number(credit.receivable)))} {cur}</dd></>
+            : <><dt>{t("عليه الحين", "Owed now")}</dt><dd style={{ margin: 0 }}>{m(credit.receivable)} {cur}</dd></>}
+          <dt>{t("طلبات معتمدة ما انفوترت", "Approved orders not yet invoiced")}</dt><dd style={{ margin: 0 }}>{m(credit.approvedNotInvoiced)} {cur}</dd>
+          <dt>{t("هذا الطلب", "This order")}</dt><dd style={{ margin: 0 }}>{m(credit.order)} {cur}</dd>
+          <dt><b>{t("المجموع", "Total")}</b></dt><dd style={{ margin: 0 }}><b>{m(credit.total)} {cur}</b></dd>
+          <dt>{t("الحد", "Credit limit")}</dt><dd style={{ margin: 0 }}>{m(credit.limit)} {cur}</dd>
+          <dt><b>{t("الزيادة", "Over by")}</b></dt><dd style={{ margin: 0 }}><b className="cr-excess" data-testid="credit-limit-excess">{m(credit.excess)} {cur}</b></dd>
+        </dl>
+        {sent
+          ? <p className="hr-notice tone-success" role="status" data-testid="credit-limit-sent" style={{ margin: 0 }}>{resume ? t("انرسل للمشرف — بيوصلك إشعار لما يقرر. إذا وافق، افتح الإشعار واضغط «كمّل» خلال 3 أيام — ما تحتاج تعيد الطلب.", "Sent to the supervisor — you will be notified. If approved, open the notification and tap «Continue» within 3 days — no need to redo the order.") : t("انرسل للمشرف — بيوصلك إشعار لما يقرر. إذا وافق، أرسل الطلب نفسه مرة ثانية خلال 3 أيام.", "Sent to the supervisor — you will be notified. If approved, send the same order again within 3 days.")}</p>
+          : asking
+            ? <Field label={t("ليش يعتمده المشرف؟ *", "Why should the supervisor approve it? *")} wide>
+              <textarea className="hr-input" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} placeholder={t("مثل: العميل وعد يسدد الفاتورة الأسبوع الجاي", "e.g. the customer promised to pay the invoice next week")} data-testid="credit-limit-reason" />
+            </Field>
+            : <p className="cr-muted" style={{ margin: 0 }}>{t("اطلب من المشرف يعتمده، أو حصّل من العميل أول.", "Ask a supervisor to approve it, or collect from the customer first.")}</p>}
+      </div>
+    </Dialog>
   );
 }

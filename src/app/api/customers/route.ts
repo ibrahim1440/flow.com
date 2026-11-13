@@ -1,10 +1,12 @@
 import { parseEmailAddress } from "@/lib/automation/email-mode";
+import { phoneField } from "@/lib/contact/phone";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireAnyModule, requireAuth } from "@/lib/auth-server";
 import { canEdit, hasSubPrivilege } from "@/lib/auth-shared";
 import { parseAccountFields } from "@/lib/services/customers/fields";
-import { addressFromNational, DUPLICATE_CUSTOMER, expandRegistrationNo, parseNationalFields } from "@/lib/services/customers/customer-identity";
+import { addressFromNational, DUPLICATE_CUSTOMER, DUPLICATE_CUSTOMER_OWN, expandRegistrationNo, parseNationalFields } from "@/lib/services/customers/customer-identity";
+import { customerInScope } from "@/lib/services/sales/customer-access";
 import { findDuplicateCustomer } from "@/lib/services/customers/duplicates";
 import { handlePrismaError } from "@/lib/api-error";
 import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
@@ -81,8 +83,15 @@ export async function POST(request: Request) {
       name: body.name, nameAr: typeof body.nameAr === "string" ? body.nameAr : null,
       vatNumber: account.data.vatNumber ?? null, commercialRegNo: account.data.commercialRegNo ?? null, unifiedNumber: national.data.unifiedNumber ?? null,
     });
-    if (dup) return NextResponse.json({ ...DUPLICATE_CUSTOMER, field: dup.by }, { status: 409 });
+    if (dup) {
+      // P1 ERR-08: in the caller's own book — named, to open it; anyone else's stays unnamed (SEC-06).
+      if (await customerInScope(user, dup.id)) return NextResponse.json({ ...DUPLICATE_CUSTOMER_OWN, field: dup.by, customer: { id: dup.id, name: dup.name } }, { status: 409 });
+      return NextResponse.json({ ...DUPLICATE_CUSTOMER, field: dup.by }, { status: 409 });
+    }
 
+    // P1 ERR-04: the shared reader — stored canonical (+966…), or a coded Arabic 400 on the phone field.
+    let phone: string | null;
+    try { phone = phoneField(body.phone) ?? null; } catch (e) { const x = e as { message: string; errorEn: string; code: string }; return NextResponse.json({ error: x.message, errorEn: x.errorEn, code: x.code, field: "phone" }, { status: 400 }); }
     const fromNational = addressFromNational(national.data);
     const freeAddress = typeof body.address === "string" ? body.address.trim() || null : null;
     const derived = { address: freeAddress ?? fromNational.address, city: account.data.city ?? fromNational.city };
@@ -91,7 +100,7 @@ export async function POST(request: Request) {
       data: {
         name: body.name.trim(),
         nameAr: typeof body.nameAr === "string" ? body.nameAr.trim() || null : null,
-        phone: typeof body.phone === "string" ? body.phone.trim() || null : null,
+        phone,
         email,
         whatsappOptOut: body.whatsappOptOut === true,
         ...account.data,

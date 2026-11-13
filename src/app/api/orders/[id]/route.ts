@@ -1,8 +1,10 @@
 import { withdrawProvisionalPlansInTx } from "@/lib/services/production-schedule";
 import { autoPrepareOrder } from "@/lib/services/orders/preparation";
 import { NextResponse } from "@/lib/api-response";
+import { handleDomainError } from "@/lib/api-error";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { awaitingDiscountRefusal, isAwaitingDiscount } from "@/lib/services/orders/discount-hold";
+import { awaitingPaymentRefusal, isPaymentHeld } from "@/lib/services/orders/payment-hold";
 import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
@@ -46,8 +48,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   // D10 gate H1 / H2: a direct sale waiting for (or refused) its discount approval keeps its customer, lines, dates and
   // branch exactly as the supervisor will see them — only `notes` may change until it completes.
   if (Object.keys(body).some((k) => k !== "notes")) {
-    const h = await prisma.order.findUnique({ where: { id }, select: { discountApprovalStatus: true } });
-    if (isAwaitingDiscount(h?.discountApprovalStatus)) { const r = awaitingDiscountRefusal(); return NextResponse.json({ error: r.error, errorEn: r.errorEn, code: r.code }, { status: 409 }); }
+    const h = await prisma.order.findUnique({ where: { id }, select: { discountApprovalStatus: true, paymentHold: true } });
+    if (isAwaitingDiscount(h?.discountApprovalStatus) || isPaymentHeld(h?.paymentHold)) { const r = isAwaitingDiscount(h?.discountApprovalStatus) ? awaitingDiscountRefusal() : awaitingPaymentRefusal(h?.paymentHold); return NextResponse.json({ error: r.error, errorEn: r.errorEn, code: r.code }, { status: 409 }); }
   }
 
   // ── Writable order fields, by allowlist ────────────────────────────────────
@@ -83,9 +85,12 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const result = await prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({
         where: { id },
-        select: { id: true, status: true },
+        select: { id: true, status: true, customerId: true },
       });
       if (!order) throw { _appCode: 404, message: "Order not found." };
+      // P1 gate R1 B1: what the order commits before the edit (its lines not yet invoiced, at their agreed prices).
+      const { orderRemaining } = await import("@/lib/services/customers/exposure");
+      const committedBefore = await orderRemaining(tx, id);
 
       if (editingItems) {
         assertStructuralEditAllowed(order.status);
@@ -278,6 +283,19 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       // already collected on the deal (Arabic 409), and an auto deal's amount follows.
       if (editingItems) await refreshDirectOrderDeal(tx, { orderId: id, actorId: user.id, change: "edit" });
 
+      // P1 gate R1 B1: an edit that raises what the order commits (more units, another line, a dearer SKU) or moves it to
+      // another customer meets the credit limit like a new order — on the order's new remaining value, the order itself
+      // not counted twice; an approved override of the editor's is consumed. A smaller order is never refused.
+      {
+        const customerId = typeof orderData.customerId === "string" ? orderData.customerId : order.customerId;
+        const committedAfter = await orderRemaining(tx, id);
+        if (customerId !== order.customerId || committedAfter.greaterThan(committedBefore)) {
+          const { assertCreditLimit, consumeCreditOverride } = await import("@/lib/services/customers/credit-limit");
+          const ov = await assertCreditLimit(tx, { customerId, amount: committedAfter, actorId: user.id, kind: "ORDER", exceptOrderId: id });
+          if (ov) await consumeCreditOverride(tx, ov.overrideId, id, user.id);
+        }
+      }
+
       // Review D-1: orders:edit is not the contact right. Without the customers module the
       // edited order comes back with the customer's name only, as GET /api/orders does.
       return tx.order.findUnique({
@@ -295,6 +313,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
     return NextResponse.json(result);
   } catch (err) {
+    if (err && typeof err === "object" && "_appCode" in err && (err as { code?: string }).code) return handleDomainError(err);
     if (err && typeof err === "object" && "_appCode" in err) {
       const e = err as { _appCode: number; message: string };
       return NextResponse.json({ error: e.message }, { status: e._appCode });
@@ -345,7 +364,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
       });
 
       // An automatic plan with nothing roasted against it is not history (Phase C item 3).
-      await withdrawProvisionalPlansInTx(tx, itemIds, id, { id: null, name: "System" }, "the order's deletion");
+      await withdrawProvisionalPlansInTx(tx, itemIds, id, { id: null, name: "النظام" }, "the order's deletion");
 
       // Validate every line first, so a single line with history refuses the whole delete
       // rather than the order being half dismantled.

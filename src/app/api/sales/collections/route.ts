@@ -227,11 +227,17 @@ export async function GET(request: Request) {
       }
     }
 
+    // Abu Fahd (friction 7): a pending collection that holds a direct sale (owner decision أ) names the order its approval
+    // releases — «يفك الطلب #112» on the accountant's row and in the reject dialog.
+    const { heldOrderNumbersFor } = await import("@/lib/services/orders/payment-hold");
+    const releases = await heldOrderNumbersFor(prisma as never, rows.filter((r) => r.status === "PENDING_VERIFICATION").map((r) => r.id));
+
     // R3-L1: a recorder reads no net basis and no commission rows (the server's rule, not the page's).
     const seesNet = seesCollectionNet(user.permissions);
     return NextResponse.json({
       rows: seesNet ? rows : rows.map(redactCollectionRow),
       ...(allocations ? { allocations } : {}),
+      releases,
       counts,
       totals: seesNet ? totals : Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, { gross: v.gross }])),
       decisions,
@@ -312,8 +318,11 @@ export async function POST(request: Request) {
     if (!deal) return NextResponse.json({ error: "Deal not found." }, { status: 404 });
 
     const result = await prisma.$transaction(
-      (tx) =>
+      async (tx) =>
         submitCollection(tx, {
+          // Owner أ (the manual-collection trap): a deal with a held order takes no collection here unless it names a
+          // non-held order of the deal — the held one is paid by «سجّل الباقي» on the order (409 ORDER_PAYMENT_HELD).
+          orderId: await (await import("@/lib/services/orders/payment-hold")).assertDealCollectionAllowed(tx as never, opportunityId, b.orderId),
           opportunityId,
           amountGross,
           currency: typeof b.currency === "string" && b.currency ? b.currency : "SAR",

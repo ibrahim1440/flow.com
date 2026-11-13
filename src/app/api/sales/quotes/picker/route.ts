@@ -1,4 +1,5 @@
 import { NextResponse } from "@/lib/api-response";
+import { phoneSearchKey } from "@/lib/contact/phone";
 import { prisma } from "@/lib/db";
 import { requireQuoteWrite } from "@/lib/services/sales/quote-guard";
 import { canQuoteWithoutDeal, quotesSeeAll } from "@/lib/services/sales/quote-access";
@@ -45,7 +46,7 @@ export async function GET(request: Request) {
 
   try {
     const nameMatch = q
-      ? { OR: [{ name: { contains: q, mode: "insensitive" as const } }, { nameAr: { contains: q, mode: "insensitive" as const } }, ...(/\d{3,}/.test(qDigits) ? [{ phone: { contains: qDigits } }] : [])] }
+      ? { OR: [{ name: { contains: q, mode: "insensitive" as const } }, { nameAr: { contains: q, mode: "insensitive" as const } }, ...(phoneSearchKey(qDigits) ? [{ phone: { contains: phoneSearchKey(qDigits)! } }] : [])] }
       : {};
     const customers = await prisma.customer.findMany({
       // AND, not a spread: the name match and the scope are both top-level `OR`s, and a spread would let the scope

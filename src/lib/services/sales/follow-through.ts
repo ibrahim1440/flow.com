@@ -21,6 +21,7 @@
 // Each is a conditional write, so a retried or concurrent request changes nothing twice.
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 import { SAMPLE_FEEDBACK_DAYS } from "./next-step";
+import { riyadhDay } from "@/lib/order-stage";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -37,11 +38,16 @@ export async function markLeadContacted(tx: Tx, leadId: string): Promise<boolean
   return r.count > 0;
 }
 
-/** Rule 2. Returns how many planned contacts were fulfilled. `exceptId` is the activity just recorded. */
+/**
+ * Rule 2. Returns how many planned contacts were fulfilled. `exceptId` is the activity just recorded.
+ * P1 ERR-03 (owner QA): a NOTE is not a contact — it fulfils nothing; and only what was due by the end of TODAY (Riyadh)
+ * is fulfilled — a call recorded today never closes next week's planned visit (that promise is still to keep).
+ */
 export async function fulfilPlannedContacts(
   tx: Tx,
-  input: { ownerId: string; leadId?: string | null; opportunityId?: string | null; customerId?: string | null; exceptId?: string | null; now?: Date },
+  input: { ownerId: string; type?: string | null; leadId?: string | null; opportunityId?: string | null; customerId?: string | null; exceptId?: string | null; now?: Date },
 ): Promise<number> {
+  if (input.type === "NOTE") return 0;
   const on = [
     ...(input.leadId ? [{ leadId: input.leadId }] : []),
     ...(input.opportunityId ? [{ opportunityId: input.opportunityId }] : []),
@@ -51,7 +57,7 @@ export async function fulfilPlannedContacts(
   if (!on.length) return 0;
   const r = await tx.activity.updateMany({
     where: {
-      ownerId: input.ownerId, completedAt: null, dueAt: { not: null }, type: { in: FULFILLABLE as never[] },
+      ownerId: input.ownerId, completedAt: null, dueAt: { not: null, lt: riyadhDay(input.now ?? new Date()).end }, type: { in: FULFILLABLE as never[] },
       OR: on, ...(input.exceptId ? { id: { not: input.exceptId } } : {}),
     },
     data: { completedAt: input.now ?? new Date() },
@@ -135,7 +141,8 @@ export async function ensureSampleFollowUp(
 ): Promise<boolean> {
   const key = sampleFollowUpKey(s.sampleId);
   const due = new Date(s.sentAt.getTime() + SAMPLE_FEEDBACK_DAYS * DAY);
-  const subject = `Follow up on sample: ${s.description || "product sample"}`;
+  // P1 ERR-05: the rep reads it in Arabic on «يومي» and the deal.
+  const subject = `متابعة العيّنة: ${s.description || "عيّنة منتج"}`;
   const n = await tx.$executeRaw`
     INSERT INTO "Activity" ("id", "type", "subject", "opportunityId", "dueAt", "ownerId", "sourceKey", "createdAt", "updatedAt")
     VALUES ('sfu_' || md5(${key} || clock_timestamp()::text), 'SAMPLE_FOLLOW_UP'::"ActivityType", ${subject}, ${s.opportunityId}, ${due}, ${s.ownerId}, ${key}, now(), now())

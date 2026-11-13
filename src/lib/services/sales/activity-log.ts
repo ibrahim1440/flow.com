@@ -106,7 +106,7 @@ export async function logLeadOrDealActivity(tx: Tx, actor: ActivityActor, a: Par
   // the planned contacts it fulfils from staying open as a second copy of the same promise.
   if (a.completed) {
     if (a.leadId && (CONTACT_TYPES as readonly string[]).includes(a.type)) await markLeadContacted(tx, a.leadId);
-    await fulfilPlannedContacts(tx, { ownerId: actor.id, leadId: a.leadId, opportunityId: a.opportunityId, exceptId: activity.id });
+    await fulfilPlannedContacts(tx, { ownerId: actor.id, type: a.type, leadId: a.leadId, opportunityId: a.opportunityId, exceptId: activity.id });
   }
   let qualification = null;
   if (a.leadId && qualifies(a.outcome)) {
@@ -138,7 +138,7 @@ export async function logCustomerActivity(tx: Tx, actor: ActivityActor, customer
     },
     select: { id: true, type: true, subject: true, outcome: true, dueAt: true, completedAt: true, createdAt: true, customerId: true, opportunityId: true },
   });
-  if (a.completed) await fulfilPlannedContacts(tx, { ownerId: actor.id, customerId, opportunityId: a.opportunityId, exceptId: activity.id });
+  if (a.completed) await fulfilPlannedContacts(tx, { ownerId: actor.id, type: a.type, customerId, opportunityId: a.opportunityId, exceptId: activity.id });
   if (a.opportunityId) await syncDealNextFollowUp(tx, a.opportunityId);
   return { activity };
 }

@@ -1,13 +1,16 @@
 "use client";
+import { displayPhone } from "@/lib/contact/phone";
+import { amountForServer } from "@/lib/money/amount-input";
+import { prepareReceipt } from "@/lib/files/receipt-prep";
 import { CHANNEL_LABEL, FORM_CHANNELS } from "@/lib/station/board";
-import { CustomerCreditNotice } from "@/components/credit/credit-ui";
+import { CreditLimitDialog, CustomerCreditNotice, creditRefusalOf, type CreditRefusal } from "@/components/credit/credit-ui";
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { requestShellCreate, useCreateRequest } from "@/components/shell/page-context";
 import { customersScopedToOwner } from "@/lib/services/sales/scope";
 
 import { useState, useEffect, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { countsAsDelivered, isPipelineStage, orderProgress, progressText, riyadhDay, stageCardOf, PIPELINE_STAGES, type PipelineStage } from "@/lib/order-stage";
+import { countsAsDelivered, isHeldForPayment, isPipelineStage, orderProgress, progressText, riyadhDay, stageCardOf, PIPELINE_STAGES, type PipelineStage } from "@/lib/order-stage";
 import { Plus, Trash2, UserPlus, X, Pencil, Save, Printer, PackageCheck } from "lucide-react";
 import Link from "next/link";
 import { PRINT_PHASE1_NOTE_ID, PrintPhase1Notice, usePrintDocuments } from "@/components/print/Certification";
@@ -104,6 +107,10 @@ type Order = {
   activities: LifecycleActivity[];
   /** Phase B: the roast → QC → pack → delivery bar, computed by GET /api/orders. */
   pipeline?: PipelineInfo | null;
+  /** Owner decision أ: PENDING / REJECTED — a paid-now direct sale held for its payment's confirmation. */
+  paymentHold?: string | null;
+  /** Abu Fahd R4 F4: what is left on a short hold (GET /api/orders) — «ناقص — باقي Z ⃁» on the list and the steps. */
+  paymentShort?: string | null;
 };
 
 function lastActivityOf(order: Order): LifecycleActivity | null {
@@ -123,6 +130,148 @@ function DiscountWait({ order, ar }: { order: { discountApprovalStatus?: string 
     <span className="hr-badge" style={{ marginInlineStart: 6, background: "var(--status-warning-tint)", color: "var(--status-warning)" }} data-testid={`order-discount-${order.orderNumber}`}>
       {s === "PENDING" ? (ar ? "بانتظار موافقة الخصم" : "Waiting for discount approval") : (ar ? "الخصم انرفض" : "Discount refused")}
     </span>
+  );
+}
+
+/** Owner decision أ: a paid-now direct sale over the credit limit, held until the accountant verifies its collection
+ *  (20261231100000_direct_sale_payment_hold) — or its receipt rejected. On the open order the rep can continue it after a
+ *  rejection; the server applies the normal credit check (POST /api/orders/[id]/payment-hold). */
+function PaymentWait({ order, ar, onChanged }: { order: { id?: string; paymentHold?: string | null; orderNumber: number; customer?: { id: string }; activities?: LifecycleActivity[] }; ar: boolean; onChanged?: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  // Abu Fahd H2: over the limit → the over-limit panel (Figma 2033:28) with «اطلب اعتماد المشرف»; the approval is kept with
+  // this order's «كمّل» so the rep resumes it from the notification with one tap.
+  const [credit, setCredit] = useState<CreditRefusal | null>(null);
+  // Owner أ on top-ups: «سجّل الباقي» — the rest of a short correction, recorded as a collection LINKED to this order on
+  // the server (POST …/payment-hold/top-up); its approval releases the hold once the money covers the sale.
+  const [topUp, setTopUp] = useState<{ open: boolean; amount: string; method: string; ref: string }>({ open: false, amount: "", method: "CASH", ref: "" });
+  const [topKey] = useState(() => `topup-${Math.random().toString(36).slice(2, 12)}`);
+  // Abu Fahd R3 A1: the same receipt as «سجّل تحصيل» (P1 ERR-01): checked the moment it is chosen, uploaded after the
+  // top-up is made; a failed upload is said here, the top-up kept, with «أرفق الإيصال» to send it again.
+  const [receipt, setReceipt] = useState<File | null>(null);
+  const receiptInput = useRef<HTMLInputElement>(null);
+  const [receiptErr, setReceiptErr] = useState("");
+  const [uploadFail, setUploadFail] = useState<{ id: string; text: string } | null>(null);
+  async function chooseReceipt(f: File | null) {
+    setReceiptErr(""); setReceipt(null);
+    if (!f) return;
+    const ready = await prepareReceipt(f);
+    if (ready.ok) setReceipt(ready.file); else setReceiptErr(ar ? ready.ar : ready.en);
+  }
+  async function upload(collectionId: string, file: File): Promise<boolean> {
+    const form = new FormData();
+    form.append("file", file);
+    const up = await fetch(`/api/sales/collections/${collectionId}/evidence`, { method: "POST", body: form }).catch(() => null);
+    if (up && up.ok) { setUploadFail(null); return true; }
+    const data = up ? await up.json().catch(() => ({})) : {};
+    setUploadFail({ id: collectionId, text: (ar ? "الإيصال ما انرفع — الباقي انسجّل بدون إيصال. " : "The receipt did not upload — the rest was recorded without it. ") + (localizeApiError(data) ?? (ar ? "تعذّر الاتصال." : "Could not connect.")) });
+    return false;
+  }
+  const s = order.paymentHold;
+  if (s !== "PENDING" && s !== "REJECTED") return null;
+  const rejected = s === "REJECTED";
+  // Abu Fahd R2 N3 / P2: the latest word on the hold — a short correction (approved X of Y, Z left), a top-up waiting for
+  // the accountant or rejected, a receipt returned for correction, or a rejection with its reason.
+  const why = [...(order.activities ?? [])].reverse().find((a) => (a.metadata as { paymentHold?: string } | null)?.paymentHold === "REJECTED");
+  const m = (why?.metadata ?? {}) as { reason?: string; returned?: boolean; short?: string; paid?: string; gross?: string; topUpPending?: string; topUpRejected?: string };
+  const sar = (v?: string) => `${Number(v ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ⃁`;
+  const shortNow = rejected && !!m.short && Number(m.short) > 0;
+  const canTopUp = shortNow && !m.topUpPending;
+  async function release() {
+    setBusy(true); setMsg(null);
+    const r = await fetch(`/api/orders/${order.id}/payment-hold`, { method: "POST" }).catch(() => null);
+    const j = r ? await r.json().catch(() => ({})) : {};
+    setBusy(false);
+    if (r?.ok) { onChanged?.(); return; }
+    const cr = creditRefusalOf(j);
+    if (cr) { setCredit(cr); return; }
+    setMsg((ar ? j.error : j.errorEn ?? j.error) ?? (ar ? "ما كمل — حاول مرة ثانية." : "It did not go through — try again."));
+  }
+  async function sendTopUp() {
+    setBusy(true); setMsg(null);
+    const r = await fetch(`/api/orders/${order.id}/payment-hold/top-up`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idempotencyKey: topKey, amountGross: amountForServer(topUp.amount), paymentMethod: topUp.method, referenceNumber: topUp.ref || null, collectedAt: new Date().toISOString() }),
+    }).catch(() => null);
+    const j = r ? await r.json().catch(() => ({})) : {};
+    if (r?.ok) {
+      if (receipt && j.collectionId) await upload(j.collectionId as string, receipt);
+      setBusy(false);
+      setReceipt(null);
+      setTopUp((t) => ({ ...t, open: false })); onChanged?.(); return;
+    }
+    setBusy(false);
+    setMsg((ar ? j.error : j.errorEn ?? j.error) ?? (ar ? "ما انسجّل — حاول مرة ثانية." : "It was not recorded — try again."));
+  }
+  return (
+    <>
+      {/* Abu Fahd R3 A2: after a short correction was approved the receipt is not «rejected» — it is short: «ناقص — باقي Z». */}
+      <span className="hr-badge" style={{ marginInlineStart: 6, background: rejected && !shortNow ? "var(--status-danger-tint)" : "var(--status-warning-tint)", color: rejected && !shortNow ? "var(--status-danger)" : "var(--status-warning)" }} data-testid={`order-payment-hold-${order.orderNumber}`}>
+        {shortNow ? (ar ? `ناقص — باقي ${sar(m.short)}` : `Short — ${sar(m.short)} left`) : rejected ? (ar ? "رُفض الإيصال" : "Receipt rejected") : (ar ? "بانتظار تأكيد استلام المبلغ" : "Awaiting payment confirmation")}
+      </span>
+      {rejected && onChanged && order.id ? (
+        <span style={{ display: "inline-flex", flexDirection: "column", gap: 4, marginInlineStart: 6 }}>
+          {/* Abu Fahd (friction 5): why it is held and what the button does. */}
+          <span className="hr-help" style={{ margin: 0 }} data-testid={`order-payment-reason-${order.orderNumber}`}>{(() => {
+            if (m.topUpPending) return ar
+              ? `انعتمد ${sar(m.paid)} من ${sar(m.gross)} — سجّلت الباقي ${sar(m.topUpPending)} وينتظر تأكيد المحاسب، ولما يتأكد يتحرك الطلب لحاله.`
+              : `${sar(m.paid)} of ${sar(m.gross)} approved — you recorded the remaining ${sar(m.topUpPending)}; once the accountant confirms it the order moves by itself.`;
+            if (m.short) return ar
+              ? `انعتمد ${sar(m.paid)} من ${sar(m.gross)} — باقي ${sar(m.short)}${m.topUpRejected ? ` (المحاسب رفض الباقي: ${m.topUpRejected})` : ""}. سجّل الباقي، أو كمّله آجل إذا العميل تحت الحد، أو اطلب اعتماد المشرف.`
+              : `${sar(m.paid)} of ${sar(m.gross)} approved — ${sar(m.short)} left${m.topUpRejected ? ` (the accountant rejected the rest: ${m.topUpRejected})` : ""}. Record the rest, continue on account if the customer is within the limit, or ask a supervisor.`;
+            if (m.returned) return ar
+              ? `المحاسب رجّع الإيصال${m.reason ? `: ${m.reason}` : ""} — صحّحه من «التحصيلات» ويتحرك الطلب لحاله.`
+              : `The accountant returned the receipt${m.reason ? `: ${m.reason}` : ""} — correct it from «Collections» and the order moves by itself.`;
+            return ar
+              ? `المحاسب رفض الإيصال${m.reason ? `: ${m.reason}` : ""}. تقدر تكمّله آجل إذا العميل تحت الحد، أو تطلب اعتماد المشرف.`
+              : `The accountant rejected the receipt${m.reason ? `: ${m.reason}` : ""}. Continue it on account if the customer is within the limit, or ask a supervisor to approve.`;
+          })()}</span>
+          {canTopUp && !topUp.open ? (
+            <Btn variant="primary" size="sm" disabled={busy} onClick={() => setTopUp({ open: true, amount: Number(m.short).toFixed(2), method: "CASH", ref: "" })} data-testid={`order-payment-topup-${order.orderNumber}`}>{ar ? `سجّل الباقي (${sar(m.short)})` : `Record the rest (${sar(m.short)})`}</Btn>
+          ) : null}
+          {canTopUp && topUp.open ? (
+            <span style={{ display: "flex", flexDirection: "column", gap: 6 }} data-testid={`order-topup-form-${order.orderNumber}`}>
+              <label className="hr-help" style={{ margin: 0 }}>{ar ? "المبلغ (⃁)" : "Amount (SAR)"}
+                <input className="hr-input" dir="ltr" inputMode="decimal" value={topUp.amount} onChange={(e) => setTopUp({ ...topUp, amount: e.target.value })} data-testid="topup-amount" /></label>
+              <label className="hr-help" style={{ margin: 0 }}>{ar ? "طريقة الدفع" : "Payment method"}
+                <Select value={topUp.method} onChange={(e) => setTopUp({ ...topUp, method: e.target.value })} data-testid="topup-method">
+                  <option value="CASH">{ar ? "كاش" : "Cash"}</option>
+                  <option value="POS_CARD">{ar ? "شبكة" : "Card"}</option>
+                  <option value="BANK_TRANSFER">{ar ? "تحويل بنكي" : "Bank transfer"}</option>
+                </Select></label>
+              <label className="hr-help" style={{ margin: 0 }}>{ar ? "المرجع (اختياري)" : "Reference (optional)"}
+                <input className="hr-input" dir="ltr" value={topUp.ref} onChange={(e) => setTopUp({ ...topUp, ref: e.target.value })} data-testid="topup-ref" /></label>
+              {/* Abu Fahd R4 F3: the same picker as «سجّل تحصيل» — «صوّر الإيصال أو اختر ملف», never the browser's raw input. */}
+              <span className="hr-help" style={{ margin: 0 }}>{topUp.method === "BANK_TRANSFER" ? (ar ? "إيصال التحويل" : "Transfer receipt") : (ar ? "الإيصال" : "Receipt")} <small>{ar ? "(اختياري)" : "(optional)"}</small></span>
+              <input ref={receiptInput} type="file" accept="image/*,application/pdf" capture="environment" hidden onChange={(e) => { const f = e.target.files?.[0] ?? null; e.target.value = ""; void chooseReceipt(f); }} aria-invalid={!!receiptErr} data-testid="topup-receipt" />
+              {receipt ? (
+                <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }} data-testid="topup-receipt-file"><bdi>{receipt.name}</bdi> <button type="button" className="hr-btn is-ghost is-sm" onClick={() => setReceipt(null)}>{ar ? "حذف" : "Remove"}</button></span>
+              ) : (
+                <button type="button" onClick={() => receiptInput.current?.click()} data-testid="topup-receipt-pick"
+                  style={{ appearance: "none", font: "inherit", display: "grid", gap: 2, justifyItems: "center", padding: 12, borderRadius: 10, border: "1px dashed var(--hr-border-strong)", background: "var(--hr-subtle)", color: "var(--hr-text)", cursor: "pointer", minHeight: 56, width: "100%" }}>
+                  <b>{ar ? "صوّر الإيصال أو اختر ملف" : "Photograph the receipt or choose a file"}</b><small style={{ color: "var(--hr-muted)", fontSize: 12 }}>{ar ? "صورة أو PDF · لين 5 ميجا" : "Photo or PDF · up to 5 MB"}</small>
+                </button>
+              )}
+              {receiptErr ? <span role="alert" style={{ color: "var(--status-danger)", fontSize: 12 }} data-testid="topup-receipt-error">{receiptErr}</span> : null}
+              <span style={{ display: "flex", gap: 6 }}>
+                <Btn variant="primary" size="sm" disabled={busy || !!receiptErr || !(Number(amountForServer(topUp.amount)) > 0)} onClick={sendTopUp} data-testid="topup-submit">{ar ? "أرسله للمحاسب" : "Send it to the accountant"}</Btn>
+                <Btn variant="secondary" size="sm" disabled={busy} onClick={() => setTopUp({ ...topUp, open: false })}>{ar ? "إلغاء" : "Cancel"}</Btn>
+              </span>
+            </span>
+          ) : null}
+          {!m.topUpPending ? <Btn variant="secondary" size="sm" disabled={busy} onClick={release} data-testid={`order-payment-release-${order.orderNumber}`}>{ar ? "كمّل الطلب آجل" : "Continue on account"}</Btn> : null}
+          {uploadFail ? (
+            <span role="alert" style={{ color: "var(--status-danger)", fontSize: 12, display: "flex", flexDirection: "column", gap: 4 }} data-testid="topup-upload-failed">{uploadFail.text}
+              <label className="hr-btn is-sm" style={{ alignSelf: "flex-start" }}>{ar ? "أرفق الإيصال" : "Attach the receipt"}
+                <input type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={async (e) => { const f = e.target.files?.[0] ?? null; e.target.value = ""; if (!f) return; const ready = await prepareReceipt(f); if (!ready.ok) { setUploadFail({ ...uploadFail, text: ar ? ready.ar : ready.en }); return; } setBusy(true); await upload(uploadFail.id, ready.file); setBusy(false); }} data-testid="topup-reattach" />
+              </label>
+            </span>
+          ) : null}
+          {msg ? <span role="alert" style={{ color: "var(--status-danger)", fontSize: 12 }}>{msg}</span> : null}
+        </span>
+      ) : null}
+      {credit && order.customer && order.id ? <CreditLimitDialog ar={ar} customerId={order.customer.id} kind="DIRECT_SALE" credit={credit} onClose={() => setCredit(null)} resume={{ path: `/api/orders/${order.id}/payment-hold`, body: null }} /> : null}
+    </>
   );
 }
 
@@ -201,7 +350,9 @@ export default function OrdersPage() {
   // «إيقاف البيع» (feat/credit-hold): the chosen customer's hold disables «إنشاء الطلب».
   const [customerHeld, setCustomerHeld] = useState(false);
   const creatingRef = useRef(false);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [creditRefusal, setCreditRefusal] = useState<{ customerId: string; credit: CreditRefusal; body?: Record<string, unknown> } | null>(null);
+  // Abu Fahd H2: a notification / the resume page opens one order directly (?order=<id>).
+  const [expanded, setExpanded] = useState<string | null>(() => params.get("order"));
   const [tab, setTab] = useState<OrdersTab>("all");
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -328,6 +479,9 @@ export default function OrdersPage() {
       });
       if (!res.ok) {
         const body = await res.json();
+        // P1 ERR-02: over the credit limit — the figures and «اطلب اعتماد المشرف» (Figma 2033:28), not an alert.
+        const cr = creditRefusalOf(body);
+        if (cr) { setCreditRefusal({ customerId: form.customerId, credit: cr, body: { ...form, ...(dealChoice ? { opportunityId: dealChoice } : {}) } }); return; }
         alert((localizeApiError(body, lang) ?? "") + (body.details ? "\n" + body.details.join("\n") : ""));
         return;
       }
@@ -565,7 +719,7 @@ export default function OrdersPage() {
                     aria-label={t("customer")} data-testid="order-customer"
                     className="flex-1 px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required>
                     <option value="">{t("selectCustomer")}</option>
-                    {customers.map((c) => <option key={c.id} value={c.id} data-hint={c.unassigned ? (lang === "ar" ? "غير مسند" : "Unassigned") : c.phone || undefined}>{c.name}</option>)}
+                    {customers.map((c) => <option key={c.id} value={c.id} data-hint={c.unassigned ? (lang === "ar" ? "غير مسند" : "Unassigned") : c.phone ? displayPhone(c.phone) : undefined}>{c.name}</option>)}
                   </Select>
                   {/* POST /api/customers is requireEdit("customers"): offered only to those who hold it. */}
                   {canAddCustomer && <button type="button" onClick={() => setShowNewCustomer(!showNewCustomer)}
@@ -600,6 +754,7 @@ export default function OrdersPage() {
                 )}
               </div>
               <CustomerCreditNotice customerId={form.customerId || null} ar={lang === "ar"} onHold={setCustomerHeld} testId="order-credit" />
+              {creditRefusal ? <CreditLimitDialog ar={lang === "ar"} customerId={creditRefusal.customerId} kind="ORDER" credit={creditRefusal.credit} onClose={() => setCreditRefusal(null)} resume={creditRefusal.body ? { path: "/api/orders", body: creditRefusal.body } : undefined} /> : null}
               <OrderDealPicker customerId={form.customerId || null} lang={lang === "ar" ? "ar" : "en"} value={dealChoice} onChange={setDealChoice} />
               <div>
                 <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">{t("quotationNumber")}</label>
@@ -783,7 +938,7 @@ export default function OrdersPage() {
                         <td className="num hr-hide-preview">{order.items.length}</td>
                         <td className="num">{kg(totalKg(order))}</td>
                         <td className="hr-hide-preview">{opsDate(order.createdAt, lang)}</td>
-                        <td className="m-end"><OrderStatusBadge status={order.status} /><DiscountWait order={order} ar={lang === "ar"} /></td>
+                        <td className="m-end">{/* Abu Fahd R2 P1: a held order reads its hold, not «بانتظار الموافقة». */}{isHeldForPayment(order.paymentHold) ? null : <OrderStatusBadge status={order.status} />}<DiscountWait order={order} ar={lang === "ar"} /><PaymentWait order={order} ar={lang === "ar"} /></td>
                         <td className="hr-hide-preview">{(() => { const d = orderProgress(order); return d ? <ProgressChip d={d} testId={`order-stage-${order.orderNumber}`} /> : <span className="hr-muted">—</span>; })()}</td>
                       </tr>
                     ))}
@@ -809,10 +964,11 @@ export default function OrdersPage() {
                 <div>
                   <h2 className="hr-section" style={{ fontSize: 22, lineHeight: "28.6px", margin: 0 }}>{order.customer.name}</h2>
                   <div className="hr-meta" style={{ marginTop: 6 }}>
-                    <OrderStatusBadge status={order.status} />
+                    {isHeldForPayment(order.paymentHold) ? null : <OrderStatusBadge status={order.status} />}
                     <DiscountWait order={order} ar={lang === "ar"} />
+                    <PaymentWait order={order} ar={lang === "ar"} onChanged={() => { void loadData(); }} />
                     {orderNeedsAttention(order) ? <NeedsAttentionBadge /> : null}
-                    <StatusBadge status={productionStatusOf(order)} />
+                    {isHeldForPayment(order.paymentHold) ? null : <StatusBadge status={productionStatusOf(order)} />}
                   </div>
                 </div>
 
@@ -841,7 +997,10 @@ export default function OrdersPage() {
                 {/* Sales invoicing A2: «إنشاء فاتورة من الطلب» (invoices_create) and the order's invoices (invoices_view). */}
                 {hasSubPrivilege(user?.permissions ?? {}, "sales", "invoices_create") || hasSubPrivilege(user?.permissions ?? {}, "sales", "invoices_view") ? (
                   <div className="hr-meta" style={{ gap: 8 }} data-testid={`order-invoicing-${order.orderNumber}`}>
-                    {hasSubPrivilege(user?.permissions ?? {}, "sales", "invoices_create") ? <Link href={`/dashboard/sales/invoices/new?orderId=${encodeURIComponent(order.id)}`} className="hr-btn is-sm" data-testid="order-create-invoice">{lang === "ar" ? "إنشاء فاتورة من الطلب" : "Invoice this order"}</Link> : null}
+                    {hasSubPrivilege(user?.permissions ?? {}, "sales", "invoices_create") && !isHeldForPayment(order.paymentHold) ? <Link href={`/dashboard/sales/invoices/new?orderId=${encodeURIComponent(order.id)}`} className="hr-btn is-sm" data-testid="order-create-invoice">{lang === "ar" ? "إنشاء فاتورة من الطلب" : "Invoice this order"}</Link> : null}
+                    {/* Abu Fahd R4 F1: a normal order on a deal takes its collection from here — the deal's form, on THIS order. */}
+                    {hasSubPrivilege(user?.permissions ?? {}, "sales", "collection_submit") && !isHeldForPayment(order.paymentHold) && order.opportunityLinks?.[0] && order.status !== "Cancelled"
+                      ? <Link href={`/dashboard/sales/deals/${encodeURIComponent(order.opportunityLinks[0].opportunityId)}?collect=${encodeURIComponent(order.id)}#collections`} className="hr-btn is-sm" data-testid="order-record-collection">{lang === "ar" ? "سجّل تحصيل" : "Record a collection"}</Link> : null}
                     {hasSubPrivilege(user?.permissions ?? {}, "sales", "invoices_view") ? <Link href={`/dashboard/sales/invoices?orderId=${encodeURIComponent(order.id)}`} className="hr-btn is-ghost is-sm">{lang === "ar" ? "فواتير الطلب" : "Order invoices"}</Link> : null}
                   </div>
                 ) : null}
@@ -869,7 +1028,7 @@ export default function OrdersPage() {
                               ) : <span className="hr-num">{item.remainingQty}</span>}
                             </span>
                             <span className="ops-sub" style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                              <StatusBadge status={item.productionStatus} />
+                              {isHeldForPayment(order.paymentHold) ? null : <StatusBadge status={item.productionStatus} />}
                               <StatusBadge status={item.deliveryStatus} />
                               {isOverproduced ? <span className="hr-flag tone-warning"><span>{t("overproduced")}</span></span> : null}
                             </span>
@@ -998,7 +1157,7 @@ export default function OrdersPage() {
                       name, quantity and one text status per line. Blocking a line is intentionally
                       not offered (see OrderLines in ./_parts/board for the server path kept and how
                       to re-enable it). */}
-                  <OrderLines orderStatus={order.status} items={order.items} pipeline={order.pipeline ?? null} />
+                  <OrderLines orderStatus={order.status} paymentHold={order.paymentHold} paymentShort={order.paymentShort ?? null} items={order.items} pipeline={order.pipeline ?? null} />
                 </div>
 
                 <StatusActionsBar orderId={order.id} status={order.status} ownerId={order.ownerId} onSuccess={loadData} />

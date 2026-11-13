@@ -92,7 +92,11 @@ async function convert(request: Request, id: string, user: { id: string; name: s
     return NextResponse.json(
       {
         ...result,
+        // P1 ERR-05: the Arabic screen shows `message`; `messageEn` for the English one.
         message: result.replayed
+          ? `الطلب رقم ${result.orderNumber} انعمل من هالعرض من قبل.`
+          : `انعمل الطلب رقم ${result.orderNumber}.`,
+        messageEn: result.replayed
           ? `Order #${result.orderNumber} was already raised from this quotation.`
           : `Order #${result.orderNumber} created.`,
       },

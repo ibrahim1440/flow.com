@@ -307,3 +307,8 @@
 .d21 .q-foot-totals .q-props { row-gap: 16px; line-height: 22px }
 .d21 .q-foot-totals .q-props dt.grand, .d21 .q-foot-totals .q-props dd.grand { padding-top: 16px; margin-top: 0 }
 .d21 .q-foot .q-notes-l { display: block }
+/* P1 UXM-01 (Figma 2033:39): an empty draft on the phone — the sentence, then one full-width «＋ أضف صنف» in the bar. */
+.d21 .q-emptyfirst { display: grid; gap: 4px; justify-items: center; text-align: center; padding: 28px 16px; margin: 8px 0; border-radius: 10px; background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle) }
+.d21 .q-emptyfirst b { font-size: 15px; color: var(--text-primary) }
+.d21 .q-emptyfirst span { font-size: 13.5px; color: var(--text-secondary); line-height: 22px }
+.d21 .q-addfirst { width: 100%; justify-content: center }

@@ -70,6 +70,9 @@ export type Order = {
   vatInvoiceStatus: string; quotationNumber: string | null; itemCount: number; totalKg: number;
   /** The orders board's computed stage (services/orders/pipeline.ts); null for cancelled / rejected. */
   pipeline: { key: string; stage: number; partDelivered: boolean } | null;
+  /** Owner أ: the payment hold, and what is left on a short one — «ناقص — باقي Z ⃁» (gate R7). */
+  paymentHold?: string | null;
+  paymentShort?: string | null;
 };
 
 /** A document on the customer's file («الملفات»). Metadata only. */
@@ -80,19 +83,18 @@ export type CustomerFile = {
   validFrom?: string | null; validUntil?: string | null; renewalNoticeDays?: number | null;
 };
 
-/** «كشف الحساب»: derived from accepted quotations and approved collections — not an accounting ledger. */
+/** «كشف الحساب» (P1 ERR-02): the accounting AR of the customer — issued invoices and notes, receipts, the opening balance. */
 export type StatementLine = {
-  kind: "document" | "payment"; key: string; at: string; opportunityId: string; dealTitle: string;
-  debit: string; credit: string; balance: string;
-  quoteId?: string; quoteNumber?: string; revision?: number;
-  paymentId?: string; method?: string; orderNumber?: number | null; reference?: string | null;
+  key: string; kind: "INVOICE" | "DEBIT_NOTE" | "CREDIT_NOTE" | "RECEIPT" | "RECEIPT_REVERSED" | "OPENING"; at: string; ref: string; id: string;
+  memo: string | null; debit: string; credit: string; balance: string;
 };
 export type AgingKey = "notDue" | "d1_30" | "d31_60" | "d61_90" | "d90plus";
 export type Statement = {
+  basis: "LEDGER";
   termsDays: number | null;
   lines: StatementLine[];
   totals: { debit: string; credit: string; net: string; outstanding: string; unapplied: string };
-  open: { opportunityId: string; dealTitle: string; quoteId: string; quoteNumber: string; total: string; paid: string; unpaid: string; dueAt: string; basis: "delivery" | "acceptance"; daysOverdue: number; bucket: AgingKey }[];
+  open: { id: string; kind: "INVOICE" | "DEBIT_NOTE" | "OPENING"; number: string; total: string; paid: string; unpaid: string; dueAt: string; daysOverdue: number }[];
   aging: Record<AgingKey | "total", string>;
   currency: string;
 };
@@ -140,6 +142,8 @@ export type Account = {
     unpricedOrders: number | null;
     /** The credit limit against the balance; null without a limit or without the sales section. */
     credit: Credit | null;
+    /** P1 ERR-02 «كم على العميل؟» — ONE source (services/customers/exposure.ts): the accounting AR + approved orders not invoiced. */
+    exposure?: Exposure | null;
   };
   statement: Statement | null;
   /** The credit warning, grace and hold (feat/credit-hold; GET /api/customers/[id]/credit's shape). */
@@ -167,4 +171,12 @@ export type Account = {
   timeline: TimelineEntry[];
   can: { edit: boolean; editContact?: boolean; manageProfiles: boolean; manageFiles: boolean; logActivity: boolean; sendSample?: boolean; quote: boolean; createDeal: boolean; editOwner?: boolean; editCreditTerms?: boolean; editFileDates?: boolean };
   now: string;
+};
+
+/** P1 ERR-02: the customer's exposure (GET /api/customers/[id]/exposure and the account's metrics.exposure). */
+export type Exposure = {
+  invoiced: string; collected: string; credited: string; receivable: string; overdue: string; oldestOverdueDays: number;
+  approvedNotInvoiced: string; ordersNotInvoiced: { orderId: string; orderNumber: number; amount: string }[];
+  commitment: string; acceptedQuotes: string; acceptedQuoteCount: number;
+  limit: string | null; available: string | null; usedPercent: number | null;
 };

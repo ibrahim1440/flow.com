@@ -8,6 +8,8 @@ datasource db {
 }
 
 model Employee {
+  creditOverridesRequested CreditLimitOverride[] @relation("CreditOverrideRequester")
+  creditOverridesDecided   CreditLimitOverride[] @relation("CreditOverrideDecider")
   id                String         @id @default(cuid())
   name              String
   username          String?        @unique
@@ -246,6 +248,7 @@ model AuthRecoveryCode {
 }
 
 model Customer {
+  creditLimitOverrides CreditLimitOverride[]
   id               String                    @id @default(cuid())
   name             String
   nameAr           String?
@@ -589,7 +592,8 @@ model Order {
   // Sales CRM (additive, relation fields only).
   opportunityLinks OpportunityOrder[]
   collectionEvents CollectionEvent[]
-  salesCollections SalesCollection[]
+  salesCollections SalesCollection[] @relation("CollectionOrder")
+  holdTopUps       SalesCollection[] @relation("CollectionHoldOrder")
 
   /// «الموقع» (20261125090000_location_dimension): the location (FinBranch) — NULL «غير محدد».
   branchId                 String?
@@ -603,6 +607,9 @@ model Order {
   discountRejectedById     String?
   discountRejectedAt       DateTime?
   discountRejectionNote    String?
+  /// «بانتظار تأكيد استلام المبلغ» (20261231100000_direct_sale_payment_hold): NULL | PENDING | REJECTED | RELEASED. A cash /
+  /// card direct sale let through over the credit limit (paid now) is held until its collection is verified (trigger).
+  paymentHold              String?
   /// «القناة» (20261224090000_station_orders_board): SALES | DIRECT_SALE | STORE | CAFE | BACK_OFFICE (CHECK). NULL on
   /// orders created before it: readers derive the source (lib/station/board.ts `orderSource`).
   channel                  String?
@@ -4380,7 +4387,11 @@ model SalesCollection {
   quoteId       String?
   quote         Quote?       @relation(fields: [quoteId], references: [id])
   orderId       String?
-  order         Order?       @relation(fields: [orderId], references: [id])
+  order         Order?       @relation("CollectionOrder", fields: [orderId], references: [id])
+  /// P1 payment hold, owner أ on top-ups (20261231120000_payment_hold_top_up): the held order this collection TOPS UP.
+  /// Set only by the top-up action (services/orders/payment-hold.ts), never from a client body; CHECK = orderId.
+  holdOrderId   String?
+  holdOrder     Order?       @relation("CollectionHoldOrder", fields: [holdOrderId], references: [id])
   customerId    String?
   customer      Customer?    @relation(fields: [customerId], references: [id])
 
@@ -4468,6 +4479,7 @@ model SalesCollection {
   @@index([invoiceId])
   @@index([depositAccountId])
   @@index([source, status])
+  @@index([holdOrderId])
 }
 
 /// Proof that the money arrived: a transfer screenshot, a deposit slip, a receipt.
@@ -10730,4 +10742,32 @@ model TaxOverrideRequest {
   decisionNote  String?
 
   @@index([documentType, documentId, status])
+}
+
+/// P1 ERR-02 (owner, 12 Nov 2026; 20261231090000_credit_limit_override): a supervisor's one-time permission for ONE order
+/// over the customer's credit limit — asked by the rep with the order's amount and a reason, decided by a holder of
+/// customers › sales_hold who is never the requester (CHECK), consumed by the requester's first order for the customer up
+/// to the amount. PENDING | APPROVED | REJECTED | USED | EXPIRED (CHECK). No DELETE grant.
+model CreditLimitOverride {
+  id            String    @id @default(cuid())
+  customerId    String
+  kind          String
+  amount        Decimal   @db.Decimal(14, 2)
+  limitAt       Decimal   @db.Decimal(14, 2)
+  commitmentAt  Decimal   @db.Decimal(14, 2)
+  reason        String
+  status        String    @default("PENDING")
+  requestedById String
+  requestedAt   DateTime  @default(now())
+  decidedById   String?
+  decidedAt     DateTime?
+  decisionNote  String?
+  expiresAt     DateTime?
+  usedOrderId   String?
+  usedAt        DateTime?
+  customer      Customer  @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  requestedBy   Employee  @relation("CreditOverrideRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  decidedBy     Employee? @relation("CreditOverrideDecider", fields: [decidedById], references: [id], onDelete: Restrict)
+
+  @@index([customerId, status])
 }

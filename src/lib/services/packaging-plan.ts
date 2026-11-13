@@ -66,7 +66,8 @@ export async function packagingPlan(db: Db, batch: IdentifiableBatch, availableG
           quantityUnits: { not: null },
           OR: [{ preparationDecision: null }, { preparationDecision: { not: "Blocked" } }],
           // D10: a direct sale waiting for (or refused) its discount approval is not demand until it completes.
-          order: { status: { in: [...OPEN_DEMAND_STATUSES] }, discountApprovalStatus: { notIn: ["PENDING", "REJECTED"] } },
+          // Gate R3 M8: nor a paid-now sale held for its payment's confirmation (owner decision أ) — demand once RELEASED.
+          order: { status: { in: [...OPEN_DEMAND_STATUSES] }, discountApprovalStatus: { notIn: ["PENDING", "REJECTED"] }, OR: [{ paymentHold: null }, { paymentHold: "RELEASED" }] },
         },
         select: { id: true, productSkuId: true, quantityUnits: true, deliveredUnits: true, order: { select: { orderNumber: true, createdAt: true } } },
         orderBy: [{ order: { createdAt: "asc" } }],

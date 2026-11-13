@@ -1,3 +1,4 @@
+import { toLatinDigits } from "@/lib/contact/phone";
 // «يومي» — the words of the page, in both languages, in one place (plain Saudi Arabic; Latin digits with separators).
 // Pure, so the tests read the same sentences the rep reads (tests/sales/unit/my-day.test.ts).
 
@@ -85,7 +86,8 @@ export function whyLine(item: { reason: Reason; tier: Tier | null; intervalDays:
 /** wa.me wants the number in international form without «+»: a Saudi 05… number becomes 9665…; null when unusable. */
 export function waNumber(phone: string | null | undefined): string | null {
   if (!phone) return null;
-  const d = phone.replace(/[^\d+]/g, "").replace(/^\+/, "").replace(/^00/, "");
+  // P1 ERR-04: Arabic-Indic digits are digits (lib/contact/phone.ts).
+  const d = toLatinDigits(phone).replace(/[^\d+]/g, "").replace(/^\+/, "").replace(/^00/, "");
   if (/^05\d{8}$/.test(d)) return `966${d.slice(1)}`;
   if (/^5\d{8}$/.test(d)) return `966${d}`;
   if (/^9665\d{8}$/.test(d)) return d;
@@ -95,7 +97,7 @@ export function waNumber(phone: string | null | undefined): string | null {
 
 export function telHref(phone: string | null | undefined): string | null {
   if (!phone) return null;
-  const d = phone.replace(/[^\d+]/g, "");
+  const d = toLatinDigits(phone).replace(/[^\d+]/g, "");
   return d.length >= 6 ? `tel:${d}` : null;
 }
 

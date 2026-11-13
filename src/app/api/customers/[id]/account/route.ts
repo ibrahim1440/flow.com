@@ -5,8 +5,8 @@ import { handleDomainError } from "@/lib/api-error";
 import { canEdit, hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
 import { seesAllSales, collectionWhere, managesNewClientExclusion, NOT_FOUND_MESSAGE, orderVisibilityWhere } from "@/lib/services/sales/scope";
 import {
-  Decimal, acceptedDocumentPerDeal, creditPosition, monthlyQuantities, orderRhythm, outstandingBalance,
-  salesLast12Months, statementOfAccount, usualItems, type OrderRow,
+  Decimal, acceptedDocumentPerDeal, monthlyQuantities, orderRhythm, outstandingBalance,
+  salesLast12Months, usualItems, type OrderRow,
   monthlyKg,
 } from "@/lib/services/customers/aggregates";
 import { deliveryLotsFor } from "@/lib/services/delivery-lots";
@@ -90,7 +90,7 @@ export async function GET(_request: Request, { params }: Params) {
           orderBy: { createdAt: "desc" },
           take: 500,
           select: {
-            id: true, orderNumber: true, createdAt: true, status: true, approvalStatus: true,
+            id: true, orderNumber: true, createdAt: true, status: true, paymentHold: true, approvalStatus: true,
             paymentStatus: true, vatInvoiceStatus: true, quotationNumber: true,
             items: {
               select: {
@@ -217,7 +217,7 @@ export async function GET(_request: Request, { params }: Params) {
     // ── Money (sales module): accepted documents of the deals in scope, and the APPROVED
     //    collections against those deals — all of them, whoever recorded them, exactly as the
     //    deal page's collectionSummary counts them. ──
-    let salesFigure = null, balance = null, statement = null, credit = null;
+    let salesFigure = null, balance = null, statement = null, credit = null, exposure = null;
     if (sales && deals && quotes) {
       const dealIds = deals.map((d) => d.id);
       const accepted = acceptedDocumentPerDeal(quotes.filter((q) => q.status === "ACCEPTED"));
@@ -250,53 +250,47 @@ export async function GET(_request: Request, { params }: Params) {
         lastPayment: last ? { amount: last.amountGross.toFixed(2), collectedAt: last.collectedAt, method: last.paymentMethod, orderNumber: last.order?.orderNumber ?? null } : null,
       };
 
-      // «كشف الحساب» / «أعمار الديون» (invoices tab): the same documents and approved payments,
-      // line by line — derived, nothing posted (aggregates.ts statementOfAccount). Terms run from
-      // the first delivery of an order made from the document, else from acceptance.
-      const acceptedIds = accepted.map((q) => q.id);
-      const links = acceptedIds.length
-        ? await prisma.opportunityOrder.findMany({
-            where: { quoteId: { in: acceptedIds } },
-            select: { quoteId: true, order: { select: { items: { select: { deliveries: { orderBy: { date: "asc" }, take: 1, select: { date: true } } } } } } },
-          })
-        : [];
-      const firstDelivery = new Map<string, Date>();
-      for (const l of links) {
-        for (const i of l.order.items) for (const d of i.deliveries) {
-          const cur = firstDelivery.get(l.quoteId!);
-          if (!cur || d.date < cur) firstDelivery.set(l.quoteId!, d.date);
-        }
-      }
-      const st = statementOfAccount(
-        accepted.map((q) => ({
-          opportunityId: q.opportunityId, dealTitle: q.opportunity?.title ?? "", quoteId: q.id, quoteNumber: q.quoteNumber, revision: q.revision,
-          at: q.acceptedAt ?? q.issuedAt ?? q.createdAt, grandTotal: new Decimal(q.grandTotal.toString()), firstDeliveryAt: firstDelivery.get(q.id) ?? null,
-        })),
-        approved.map((c) => ({ id: c.id, opportunityId: c.opportunityId ?? "", at: c.collectedAt, amountGross: new Decimal(c.amountGross.toString()), method: c.paymentMethod, orderNumber: c.order?.orderNumber ?? null, reference: c.referenceNumber })),
-        { termsDays: customer.paymentTermsDays, now },
-      );
-      const m2 = (d: Decimal) => d.toFixed(2);
+      // P1 ERR-02 (owner, 12 Nov 2026): «كم على العميل؟», «كشف الحساب», «أعمار الديون» and the credit limit read ONE
+      // source — the accounting AR (issued invoices and debit notes − receipts − credit notes, services/customers/
+      // exposure.ts), reconciled with /api/accounting/ar/customers/[id] — never the accepted quotations. Approved orders
+      // not yet invoiced are shown apart (not a debt; counted in the limit); accepted quotations not yet ordered are
+      // «عروض مقبولة» (not counted). The whole customer's figures: a rep reaches only the customers of their own book.
+      // Owner M6 = أ: a rep reads the customer's money only for a customer ASSIGNED to them (its account owner).
+      const { customerFiguresVisible } = await import("@/lib/services/sales/customer-access");
+      const figures = await customerFiguresVisible(user, id);
+      // Gate R2 (M6 strict): no money at all — not even the figure over the rep's own deals.
+      if (!figures) balance = null;
+      // Abu Fahd L2: nor the 12-month sales (the same money, hidden the same way).
+      if (!figures) salesFigure = null;
+      const { customerAr } = await import("@/lib/services/invoicing/ar");
+      const { customerExposure, exposureJson } = await import("@/lib/services/customers/exposure");
+      if (figures) {
+      const [arv, ex] = await Promise.all([customerAr(prisma, id), customerExposure(prisma, [id], now)]);
+      const e = ex.get(id)!;
+      exposure = exposureJson(e);
+      const m2 = (d: Decimal | { toFixed(n: number): string }) => d.toFixed(2);
       statement = {
+        basis: "LEDGER" as const,
         termsDays: customer.paymentTermsDays,
-        lines: st.lines.map((l) => ({ ...l, debit: m2(l.debit), credit: m2(l.credit), balance: m2(l.balance) })),
-        totals: { debit: m2(st.totals.debit), credit: m2(st.totals.credit), net: m2(st.totals.net), outstanding: m2(st.totals.outstanding), unapplied: m2(st.totals.unapplied) },
-        open: st.open.map((o) => ({ ...o, total: m2(o.total), paid: m2(o.paid), unpaid: m2(o.unpaid) })),
-        aging: Object.fromEntries(Object.entries(st.aging).map(([k, v]) => [k, m2(v)])),
+        lines: arv.statement.rows.map((r, i) => ({ key: `${r.kind}:${r.id}:${i}`, kind: r.kind, at: r.date, ref: r.ref, id: r.id, memo: r.memo ?? null, debit: m2(r.debit), credit: m2(r.credit), balance: m2(r.balance) })),
+        totals: { debit: m2(arv.statement.totalDebit), credit: m2(arv.statement.totalCredit), net: m2(arv.statement.closing), outstanding: m2(e.receivable), unapplied: m2(arv.aging.unappliedCredit) },
+        open: arv.open.map((d) => ({ id: d.id, kind: d.kind, number: d.number, total: m2(d.total), paid: m2(d.applied), unpaid: m2(d.open), dueAt: d.dueDate ?? d.issueDate, daysOverdue: d.daysOverdue })),
+        aging: { notDue: m2(arv.aging.current), d1_30: m2(arv.aging.d1_30), d31_60: m2(arv.aging.d31_60), d61_90: m2(arv.aging.d61_90), d90plus: m2(arv.aging.d90p), total: m2(arv.aging.totalOpen) },
         currency: "SAR",
       };
-      // The credit limit against the balance — only for a viewer whose balance is the customer's
-      // whole balance (sees every rep's deals). A rep's balance covers their own deals only, so
-      // "used / available" would be wrong for them; they get the limit alone.
-      const cp = all && customer.creditLimit != null ? creditPosition(new Decimal(customer.creditLimit.toString()), b.outstanding) : null;
-      credit = customer.creditLimit == null ? null : cp
-        ? { scope: "all", limit: m2(cp.limit), used: m2(cp.used), available: m2(cp.available), percent: cp.percent, over: cp.over }
-        : { scope: "own", limit: customer.creditLimit.toFixed(2), used: null, available: null, percent: null, over: null };
+      credit = e.limit == null ? null : {
+        scope: "all" as const, limit: m2(e.limit), used: m2(e.commitment), available: m2(e.available!), percent: e.usedPercent,
+        over: e.commitment.greaterThan(e.limit),
+      };
+      }
     }
 
     const rhythm = orders ? orderRhythm(asRows, now) : null;
     // The orders tab reads each order as the orders board does (lib/order-stage orderProgress):
     // its status when that decides, otherwise its production stage — computed, never stored.
     const pipelines = orderRows ? await orderPipelines(prisma, orderRows) : new Map();
+    // Gate R7 (F4): a short hold reads «ناقص — باقي Z ⃁» here too, as on the orders board.
+    const shorts = orderRows ? await (await import("@/lib/services/orders/payment-hold")).holdShorts(prisma as never, orderRows as never) : new Map<string, string>();
     // The customer's documents (customers module — this route's own gate): metadata only.
     const files = await prisma.customerFile.findMany({ where: { customerId: id }, orderBy: { createdAt: "desc" }, select: CUSTOMER_FILE_SELECT });
 
@@ -397,6 +391,7 @@ export async function GET(_request: Request, { params }: Params) {
         usualItems: orders ? usualItems(asRows, now) : null,
         unpricedOrders: orders && orderRows ? orderRows.filter((o) => o.opportunityLinks.length === 0).length : null,
         credit,
+        exposure,
       },
       statement,
       creditState,
@@ -447,6 +442,7 @@ export async function GET(_request: Request, { params }: Params) {
         paymentStatus: o.paymentStatus, vatInvoiceStatus: o.vatInvoiceStatus, quotationNumber: o.quotationNumber,
         itemCount: o.items.length, totalKg: Math.round(o.items.reduce((s, i) => s + i.quantityKg, 0) * 100) / 100,
         pipeline: (() => { const p = pipelines.get(o.id); return p ? { key: p.key, stage: p.stage, partDelivered: p.partDelivered } : null; })(),
+        paymentHold: o.paymentHold, paymentShort: shorts.get(o.id) ?? null,
       })) ?? null,
       collections: collections?.map((c) => ({ ...c, amountGross: c.amountGross.toFixed(2) })) ?? null,
       timeline: timeline.slice(0, 200),

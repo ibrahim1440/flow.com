@@ -90,7 +90,7 @@ export async function POST(request: Request) {
 
     // ── Duplicates within the file itself ──
     const seenPhones = new Map<string, number>();
-    const withinFile: { row: number; message: string }[] = [];
+    const withinFile: { row: number; message: string; messageAr: string }[] = [];
     parsed.rows.forEach((r, i) => {
       const phone = normalizePhone(r.phone);
       if (!phone) return;
@@ -99,6 +99,7 @@ export async function POST(request: Request) {
         withinFile.push({
           row: i + 2,
           message: `The same phone number appears on row ${first + 2} of this file.`,
+          messageAr: `نفس رقم الجوال موجود في الصف ${first + 2} من هالملف.`,
         });
       } else {
         seenPhones.set(phone, i);

@@ -86,7 +86,7 @@ export async function loadToday(now = new Date(), opts: { customerDetail: boolea
     prisma.order.findMany({
       where: { status: { notIn: TERMINAL }, ...mine },
       select: {
-        id: true, orderNumber: true, status: true, createdAt: true,
+        id: true, orderNumber: true, status: true, paymentHold: true, createdAt: true,
         customer: { select: { name: true, nameAr: true } },
         items: {
           select: {

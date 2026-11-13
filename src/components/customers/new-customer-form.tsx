@@ -26,7 +26,7 @@ function NewCustomerForm({ ar, onClose, onCreated, initialName }: { ar: boolean;
   const [f, setF] = useState({ ...blankContact(), name: initialName ?? "" });
   const [idf, setIdf] = useState<IdentityForm>(blankIdentity());
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<{ text: string; field?: string } | null>(null);
+  const [err, setErr] = useState<{ text: string; field?: string; own?: { id: string; name: string } | null } | null>(null);
   const set = (k: "name" | "nameAr" | "phone" | "email") => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
 
   async function save(e: React.FormEvent) {
@@ -36,7 +36,8 @@ function NewCustomerForm({ ar, onClose, onCreated, initialName }: { ar: boolean;
     try {
       const res = await fetch("/api/customers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...f, ...idf }) });
       const d = await res.json().catch(() => ({}));
-      if (!res.ok) { setErr({ text: localizeApiError(d, ar ? "ar" : "en") || (ar ? d.error : d.errorEn) || L("تعذّر الحفظ.", "Could not save."), field: d.field }); return; }
+      // P1 ERR-08: a match in the rep's OWN book is named, with «افتح العميل» (another rep's never is — SEC-06).
+      if (!res.ok) { setErr({ text: localizeApiError(d, ar ? "ar" : "en") || (ar ? d.error : d.errorEn) || L("تعذّر الحفظ.", "Could not save."), field: d.field, own: d.code === "DUPLICATE_CUSTOMER_OWN" && d.customer?.id ? d.customer : null }); return; }
       onCreated({ id: d.id, name: d.name, nameAr: d.nameAr ?? null, phone: d.phone ?? null, city: d.city ?? null });
     } catch {
       setErr({ text: L("تعذّر الاتصال — حاول مرة ثانية.", "Could not connect — try again.") });
@@ -54,7 +55,9 @@ function NewCustomerForm({ ar, onClose, onCreated, initialName }: { ar: boolean;
         <button type="button" className="hr-btn" onClick={onClose}>{L("إلغاء", "Cancel")}</button>
       </>}>
       <form id="new-customer-el" onSubmit={save} className="hr-form" noValidate>
-        {err ? <p className="hr-err is-wide" role="alert" style={{ gridColumn: "1 / -1", margin: 0 }} data-testid="cf-error">{err.text}</p> : null}
+        {err ? <p className="hr-err is-wide" role="alert" style={{ gridColumn: "1 / -1", margin: 0 }} data-testid="cf-error">{err.own
+          ? <>{ar ? <>«<bdi>{err.own.name}</bdi>» عميل عندك من قبل — </> : <>«<bdi>{err.own.name}</bdi>» is already your customer — </>}<a href={`/dashboard/customers/${encodeURIComponent(err.own.id)}`} data-testid="cf-open-own">{L("افتح العميل", "Open the customer")}</a></>
+          : err.text}</p> : null}
         <Field label={`${L("اسم العميل", "Customer name")} *`} wide>
           <input required autoFocus value={f.name} onChange={set("name")} className="hr-input" maxLength={200} data-testid="cf-name" />
         </Field>

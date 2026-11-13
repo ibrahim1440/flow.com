@@ -207,24 +207,25 @@ export function liveDocumentFigures(lines: LiveDocumentLineRow[]) {
  * no amount of Decimal arithmetic afterwards gets it back — which is the whole reason the
  * rest of this file is Decimal at all.
  */
+const FIELD_AR: Record<string, string> = { quantity: "الكمية", "unit price": "سعر الوحدة", discount: "الخصم", "tax rate": "نسبة الضريبة", "VAT-inclusive unit price": "السعر شامل الضريبة" };
 export function parseLineInputs(raw: unknown[]): LineInput[] {
   return raw.map((r, i) => {
     const l = (r ?? {}) as Record<string, unknown>;
     const dec = (v: unknown, field: string, fallback?: string): Decimal => {
       if (v === undefined || v === null || v === "") {
         if (fallback !== undefined) return new Decimal(fallback);
-        throw { _appCode: 400, message: `Line ${i + 1}: ${field} is required.` };
+        throw { _appCode: 400, message: `البند ${i + 1}: ${FIELD_AR[field] ?? field} مطلوب.`, errorEn: `Line ${i + 1}: ${field} is required.` };
       }
       // Finite decimals only: a NaN line passed every range check below and persisted NaN totals.
       const d = parseFiniteDecimal(v);
-      if (!d) throw { _appCode: 400, message: `Line ${i + 1}: ${field} is not a number.` };
+      if (!d) throw { _appCode: 400, message: `البند ${i + 1}: ${FIELD_AR[field] ?? field} لازم يكون رقم.`, errorEn: `Line ${i + 1}: ${field} is not a number.` };
       return d;
     };
 
     // «شامل؟»: the gross is typed (2 dp at most) and the net unit price derived from it — the request's unitPrice is not read.
     const inclusive = l.priceIncludesVat === true;
     const gross = inclusive ? dec(l.unitPriceGross, "VAT-inclusive unit price") : null;
-    if (gross && !gross.equals(gross.toDecimalPlaces(2))) throw { _appCode: 400, message: `Line ${i + 1}: the VAT-inclusive unit price has at most 2 decimals.` };
+    if (gross && !gross.equals(gross.toDecimalPlaces(2))) throw { _appCode: 400, message: `البند ${i + 1}: السعر شامل الضريبة بخانتين عشريتين على الأكثر.`, errorEn: `Line ${i + 1}: the VAT-inclusive unit price has at most 2 decimals.` };
     return toNetLine({
       productSkuId: typeof l.productSkuId === "string" && l.productSkuId ? l.productSkuId : null,
       description: typeof l.description === "string" ? l.description : null,
@@ -242,7 +243,7 @@ export function parseLineInputs(raw: unknown[]): LineInput[] {
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
-export type LineProblem = { index: number; code: string; message: string };
+export type LineProblem = { index: number; code: string; message: string; messageAr: string };
 
 /**
  * What a SKU needs to be for a quantity to make sense on it.
@@ -261,51 +262,53 @@ export type SkuFacts = {
 export function validateLines(lines: LineInput[], skus: Map<string, SkuFacts>): LineProblem[] {
   const problems: LineProblem[] = [];
   if (lines.length === 0) {
-    problems.push({ index: -1, code: "EMPTY", message: "A quotation needs at least one line." });
+    problems.push({ index: -1, code: "EMPTY", message: "A quotation needs at least one line.", messageAr: "عرض السعر يحتاج بند واحد على الأقل." });
     return problems;
   }
 
   lines.forEach((line, index) => {
-    const at = (code: string, message: string) => problems.push({ index, code, message });
+    // P1 ERR-05: every problem in Arabic too (the screen shows `messageAr`; `message` stays the English one).
+    const at = (code: string, message: string, ar: string) => problems.push({ index, code, message, messageAr: `البند ${index + 1}: ${ar}` });
 
     const hasSku = typeof line.productSkuId === "string" && line.productSkuId.length > 0;
     const hasText = typeof line.description === "string" && line.description.trim().length >= 2;
     if (!hasSku && !hasText) {
-      at("NO_SUBJECT", "Each line needs either a product or a description of what is being quoted.");
+      at("NO_SUBJECT", "Each line needs either a product or a description of what is being quoted.", "اختر صنف أو اكتب وصف للبند.");
     }
 
     if (line.quantity.lessThanOrEqualTo(0)) {
-      at("QTY", "Quantity must be greater than zero.");
+      at("QTY", "Quantity must be greater than zero.", "الكمية لازم تكون أكبر من صفر.");
     }
     if (line.unitPrice.isNegative()) {
-      at("PRICE", "A unit price cannot be negative.");
+      at("PRICE", "A unit price cannot be negative.", "سعر الوحدة ما يكون بالسالب.");
     }
     // ERR-14 (rep QA audit): a number the columns cannot hold was a 500 — refused here with a reason instead.
-    if (line.quantity.greaterThan(MAX_QUOTE_QTY)) at("QTY_TOO_LARGE", `Quantity is above ${MAX_QUOTE_QTY.toString()}.`);
-    if (line.unitPrice.greaterThan(MAX_QUOTE_PRICE)) at("PRICE_TOO_LARGE", `A unit price above ${MAX_QUOTE_PRICE.toString()} is refused.`);
+    if (line.quantity.greaterThan(MAX_QUOTE_QTY)) at("QTY_TOO_LARGE", `Quantity is above ${MAX_QUOTE_QTY.toString()}.`, `الكمية أكبر من ${MAX_QUOTE_QTY.toString()}.`);
+    if (line.unitPrice.greaterThan(MAX_QUOTE_PRICE)) at("PRICE_TOO_LARGE", `A unit price above ${MAX_QUOTE_PRICE.toString()} is refused.`, `سعر الوحدة فوق ${MAX_QUOTE_PRICE.toString()} ما يُقبل.`);
 
     const disc = line.discountPercent ?? ZERO;
     if (disc.isNegative() || disc.greaterThan(HUNDRED)) {
-      at("DISCOUNT_RANGE", "A discount must be between 0 and 100 percent.");
+      at("DISCOUNT_RANGE", "A discount must be between 0 and 100 percent.", "الخصم بين 0 و100٪.");
     } else if (disc.greaterThan(MAX_DISCOUNT_PERCENT)) {
       at(
         "DISCOUNT_CEILING",
         `A discount above ${MAX_DISCOUNT_PERCENT.toString()}% is refused. Correct the price instead.`,
+        `الخصم فوق ${MAX_DISCOUNT_PERCENT.toString()}٪ ما يُقبل — عدّل السعر بدلًا منه.`,
       );
     }
 
     const tax = line.taxRatePercent ?? ZERO;
     if (tax.isNegative() || tax.greaterThan(HUNDRED)) {
-      at("TAX_RANGE", "A tax rate must be between 0 and 100 percent.");
+      at("TAX_RANGE", "A tax rate must be between 0 and 100 percent.", "نسبة الضريبة بين 0 و100٪.");
     }
 
     if (hasSku) {
       const sku = skus.get(line.productSkuId as string);
       if (!sku) {
-        at("SKU_MISSING", "That product no longer exists.");
+        at("SKU_MISSING", "That product no longer exists.", "الصنف ما عاد موجود.");
       } else {
         if (!sku.isActive) {
-          at("SKU_INACTIVE", `"${sku.skuCode}" is inactive and cannot be quoted.`);
+          at("SKU_INACTIVE", `"${sku.skuCode}" is inactive and cannot be quoted.`, `الصنف «${sku.skuCode}» موقوف وما يدخل في عرض سعر.`);
         }
         // Discrete packs come in whole numbers. KG and GRAM lines may carry fractions.
         if (sku.unitOfMeasure === "UNIT" || sku.unitOfMeasure === "PIECE") {
@@ -313,6 +316,7 @@ export function validateLines(lines: LineInput[], skus: Map<string, SkuFacts>): 
             at(
               "SKU_FRACTION",
               `"${sku.skuCode}" is sold as whole packs, so ${line.quantity.toString()} cannot be quoted.`,
+              `الصنف «${sku.skuCode}» يُباع بالحبة — الكمية ${line.quantity.toString()} ما تصلح.`,
             );
           }
         }
@@ -594,7 +598,7 @@ export async function saveQuoteLines(
 
   const problems = validateLines(input.lines, skus);
   if (problems.length > 0) {
-    throw { _appCode: 400, message: problems[0].message, problems };
+    throw { _appCode: 400, message: problems[0].messageAr, errorAr: problems[0].messageAr, errorEn: problems[0].message, problems };
   }
 
   // «شامل؟»: a line typed VAT-inclusive is stored as its net line (the converter to an invoice copies the net).

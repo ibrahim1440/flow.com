@@ -15,6 +15,17 @@ export async function customerInScope(user: Viewer, customerId: string, db: Db =
   return !!row;
 }
 
+/**
+ * Owner M6 = أ (12 Nov 2026): may this viewer read the customer's MONEY (receivable, statement, credit used)? A scoped rep
+ * only for a customer ASSIGNED to them (its account owner) — never a pool customer, never another rep's customer reached
+ * through a deal of theirs; everyone who sees every customer, yes.
+ */
+export async function customerFiguresVisible(user: Viewer, customerId: string, db: Db = prisma): Promise<boolean> {
+  if (!customersScopedToOwner(user)) return true;
+  const row = await db.customer.findFirst({ where: { id: customerId, accountOwnerId: user.id }, select: { id: true } });
+  return !!row;
+}
+
 export async function orderInScope(user: Viewer, orderId: string, db: Db = prisma): Promise<boolean> {
   if (!customersScopedToOwner(user)) return true;
   const row = await db.order.findFirst({ where: { id: orderId, ...orderedByOrForWhere(user.id) }, select: { id: true } });

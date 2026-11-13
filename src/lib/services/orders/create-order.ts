@@ -108,6 +108,12 @@ export type NewOrderHeader = {
   branchId?: string | null;
   /** «القناة» (20261224090000): where the order came from, set by the flow that creates it; absent = not recorded (derived). */
   channel?: OrderChannel | null;
+  /**
+   * P1 ERR-02: the credit-limit check (customers/credit-limit.ts) — the order's value with VAT and who asks (an approved
+   * override of theirs is consumed by this order). Absent: the lines at the catalogue price, the owner asking. "SKIP": the
+   * caller has checked already in this transaction (a direct sale completing at once).
+   */
+  credit?: { amount?: import("@/lib/accounting/money").Decimal | null; actorId?: string | null; kind: import("@/lib/services/customers/credit-limit").CreditKind; quoteId?: string | null } | "SKIP";
 };
 
 /**
@@ -175,6 +181,20 @@ export async function createOrderWithNumber(
   // CUSTOMER_SALES_HOLD. Here, in the one order writer, so POST /api/orders and an accepted
   // quotation's conversion are both covered (a replayed conversion returns before reaching it).
   await assertSalesAllowed(db, header.customerId);
+  // P1 ERR-02 (owner 1أ): the credit limit blocks — 409 CREDIT_LIMIT unless an approved override covers the order.
+  let creditOverride: { overrideId: string } | null = null;
+  let creditActor: string | null = null;
+  if (header.credit !== "SKIP") {
+    const { assertCreditLimit } = await import("@/lib/services/customers/credit-limit");
+    const { linesValue } = await import("@/lib/services/customers/exposure");
+    let amount = header.credit?.amount ?? null;
+    if (amount == null) {
+      const skus = await db.productSKU.findMany({ where: { id: { in: lines.map((l) => l.productSkuId) } }, select: { id: true, price: true } });
+      amount = linesValue(lines.map((l) => ({ quantityUnits: l.quantityUnits, productSku: skus.find((k: { id: string; price: number }) => k.id === l.productSkuId) ?? null })));
+    }
+    creditActor = header.credit?.actorId ?? header.ownerId ?? null;
+    creditOverride = await assertCreditLimit(db as never, { customerId: header.customerId, amount, actorId: creditActor, kind: header.credit?.kind ?? "ORDER", quoteId: header.credit?.quoteId ?? null });
+  }
 
   // Before reading the maximum, not after: the point is that nobody else is between the
   // read and the write.
@@ -184,7 +204,7 @@ export async function createOrderWithNumber(
     const lastOrder = await db.order.findFirst({ orderBy: { orderNumber: "desc" } });
     const nextNumber = (lastOrder?.orderNumber || 0) + 1;
     try {
-      return await db.order.create({
+      const created = await db.order.create({
         data: {
           customerId: header.customerId,
           quotationNumber: header.quotationNumber ?? null,
@@ -209,6 +229,11 @@ export async function createOrderWithNumber(
           items: true,
         },
       });
+      if (creditOverride) {
+        const { consumeCreditOverride } = await import("@/lib/services/customers/credit-limit");
+        await consumeCreditOverride(db as never, creditOverride.overrideId, created.id, creditActor!);
+      }
+      return created;
     } catch (e: unknown) {
       const code = e && typeof e === "object" && "code" in e ? (e as { code: string }).code : null;
       if (code === "P2002" && attempt < 4) continue;

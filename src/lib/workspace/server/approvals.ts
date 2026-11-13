@@ -28,7 +28,7 @@ import { listApprovals as mktList } from "@/lib/marketing/server/approvals";
 import { parseDay } from "@/lib/hr/dates";
 import type { WsActor } from "./context";
 
-export type ApprovalType = "LEAVE" | "ADVANCE" | "DISCOUNT" | "SAMPLE" | "STAGE_MOVE" | "TAX_OVERRIDE" | "FINANCE" | "MARKETING";
+export type ApprovalType = "LEAVE" | "ADVANCE" | "DISCOUNT" | "SAMPLE" | "STAGE_MOVE" | "TAX_OVERRIDE" | "CREDIT_OVERRIDE" | "FINANCE" | "MARKETING";
 
 export type ApprovalItem = {
   key: string;
@@ -46,7 +46,7 @@ export type ApprovalItem = {
   facts: Record<string, unknown>;
   /** Problems the approver should see before deciding (overlaps, a balance going negative …). */
   warnings: { ar: string; en: string }[];
-  decide: { url: string; rejectNeedsReason: true; expected?: Record<string, string>; stepUp?: boolean };
+  decide: { url: string; rejectNeedsReason: true; approveNeedsReason?: true; expected?: Record<string, string>; stepUp?: boolean };
   /** The original document in its department. */
   openUrl: string;
   /** Approval ≠ the act: what approving does NOT do (advance: not paid out; discount: not issued). */
@@ -282,6 +282,66 @@ async function taxOverrideItems(actor: WsActor): Promise<ApprovalItem[]> {
   return out;
 }
 
+/** P1 ERR-02 (owner 1أ): «طلب فوق حد الائتمان» — decided by a holder of customers › sales_hold who is NOT the requester,
+ *  with a documented reason, at POST /api/customers/credit-overrides/[id]/decision. */
+async function creditOverrideItems(actor: WsActor): Promise<ApprovalItem[]> {
+  if (!hasSubPrivilege(actor.permissions, "customers", "sales_hold")) return [];
+  const rows = await prisma.creditLimitOverride.findMany({
+    where: { status: "PENDING", requestedById: { not: actor.id } }, orderBy: { requestedAt: "asc" }, take: 200,
+    select: { id: true, customerId: true, kind: true, amount: true, limitAt: true, commitmentAt: true, reason: true, requestedAt: true, customer: { select: { name: true, nameAr: true } }, requestedBy: { select: { name: true } } },
+  });
+  const { customerExposure } = await import("@/lib/services/customers/exposure");
+  const now = await customerExposure(prisma as never, [...new Set(rows.map((r) => r.customerId))]);
+  const KIND: Record<string, [string, string]> = { ORDER: ["طلب", "Order"], QUOTE_ORDER: ["طلب من عرض سعر", "Order from a quotation"], DIRECT_SALE: ["بيع مباشر", "Direct sale"] };
+  // Abu Fahd R2 N1: a request to continue a HELD order (its resume names /api/orders/[id]/payment-hold) is already in the
+  // customer's commitment — the card shows the one computation the rep's 409 shows (heldOrderCreditPosition), never the
+  // order twice; «هالطلب» is what is left unpaid of it.
+  const { resumeOf } = await import("@/lib/services/customers/credit-limit");
+  const { heldOrderCreditPosition } = await import("@/lib/services/orders/payment-hold");
+  // R4: the stored request's lines (item, qty, price, discount), read-only — the supervisor sees exactly what they approve.
+  const { overrideRequestLines } = await import("@/lib/services/customers/override-lines");
+  const held = new Map<string, NonNullable<Awaited<ReturnType<typeof heldOrderCreditPosition>>>>();
+  const released = new Set<string>();
+  const linesOf = new Map<string, Awaited<ReturnType<typeof overrideRequestLines>>>();
+  for (const r of rows) {
+    const resume = await resumeOf(prisma as never, r.id);
+    linesOf.set(r.id, await overrideRequestLines(prisma as never, resume));
+    const oid = resume?.path.match(/^\/api\/orders\/([^/]+)\/payment-hold$/)?.[1];
+    if (oid) {
+      const pos = await heldOrderCreditPosition(prisma as never, oid); if (pos) held.set(r.id, pos);
+      // Gate R6 G1: the held order was released (or cancelled) since — nothing to approve; the decision is refused.
+      const st = await prisma.order.findUnique({ where: { id: oid }, select: { paymentHold: true, status: true } });
+      if (!st || st.paymentHold !== "REJECTED" || st.status === "Cancelled") released.add(r.id);
+    }
+  }
+  return rows.map((r) => {
+    const e = now.get(r.customerId);
+    const h = held.get(r.id);
+    const used = h ? h.commitment.toFixed(2) : e ? e.commitment.toFixed(2) : r.commitmentAt.toString();
+    // Gate R5 B6: the card always shows the STORED request (its amount and kind — checked on the server when it was asked);
+    // what is derived now (a held order's remaining) is a warning when it differs, never the figure approved.
+    const orderAmount = new Prisma.Decimal(r.amount.toString()).toFixed(2);
+    const drift = h && !h.order.minus(orderAmount).abs().lessThan("0.01") ? h.order.toFixed(2) : null;
+    const total = (Number(used) + Number(orderAmount)).toFixed(2);
+    return {
+      key: `CREDIT_OVERRIDE:${r.id}`, type: "CREDIT_OVERRIDE" as const, id: r.id,
+      // Abu Fahd (friction 15): the customer is the subject — named once, not in the title too.
+      title: `فوق حد الائتمان · ${KIND[r.kind]?.[0] ?? r.kind}`, titleEn: `Over the credit limit · ${KIND[r.kind]?.[1] ?? r.kind}`,
+      requester: r.requestedBy.name, subject: r.customer.nameAr || r.customer.name, subjectEn: r.customer.name,
+      createdAt: iso(r.requestedAt),
+      facts: { customer: r.customer.nameAr || r.customer.name, kind: KIND[r.kind]?.[0] ?? r.kind, kindEn: KIND[r.kind]?.[1] ?? r.kind, amount: orderAmount, limit: (e?.limit ?? r.limitAt).toString(), used, total, excess: (Number(total) - Number((e?.limit ?? r.limitAt).toString())).toFixed(2), receivable: (h ? h.receivable : e?.receivable)?.toFixed(2) ?? null, approvedNotInvoiced: (h ? h.approvedNotInvoiced : e?.approvedNotInvoiced)?.toFixed(2) ?? null, overdue: e?.overdue.toFixed(2) ?? null, reason: r.reason, lines: linesOf.get(r.id) ?? [] },
+      warnings: [
+        ...(e && e.overdue.greaterThan(0) ? [{ ar: `على العميل متأخر سداد ${e.overdue.toFixed(2)} ⃁.`, en: `The customer has SAR ${e.overdue.toFixed(2)} overdue.` }] : []),
+        ...(released.has(r.id) ? [{ ar: "الطلب انفك — ما يحتاج اعتماد (ارفض الطلب).", en: "The order was released — nothing to approve (reject the request)." }] : []),
+        ...(drift ? [{ ar: `الباقي من الطلب الحين ${drift} ⃁ — يختلف عن المبلغ المطلوب ${orderAmount} ⃁ (تغيّرت الدفعات بعد الطلب).`, en: `What is left of the order now is SAR ${drift} — not the SAR ${orderAmount} requested (payments changed since).` }] : []),
+      ],
+      decide: { url: `/api/customers/credit-overrides/${encodeURIComponent(r.id)}/decision`, rejectNeedsReason: true as const, approveNeedsReason: true as const, stepUp: true },
+      openUrl: `/dashboard/customers/${encodeURIComponent(r.customerId)}`,
+      notice: { ar: "الاعتماد يسمح لطلب واحد للمندوب لهالعميل بحد المبلغ خلال 3 أيام — ما يغيّر حد الائتمان.", en: "Approving lets ONE order of the rep for this customer through, up to the amount, within 3 days — the limit itself does not change." },
+    };
+  });
+}
+
 // «للعميل من كل محصول عيّنة واحدة» (20261205090000_sample_approval): a customer's second sample of a coffee product
 // waits for the sales manager or the administrator (approvesSamples). Decided at POST /api/sales/samples/[id]/approval
 // (APPROVE, or REJECT = decline with the reason), which re-checks the duty and the state under the sample's lock.
@@ -392,7 +452,7 @@ async function marketingItems(actor: WsActor): Promise<ApprovalItem[]> {
 }
 
 const SOURCES: [ApprovalType, (a: WsActor) => Promise<ApprovalItem[]>][] = [
-  ["LEAVE", leaveItems], ["ADVANCE", advanceItems], ["DISCOUNT", async (a: WsActor) => [...(await discountItems(a)), ...(await directSaleDiscountItems(a)), ...(await draftDiscountItems(a))]], ["SAMPLE", sampleItems], ["STAGE_MOVE", stageMoveItems], ["TAX_OVERRIDE", taxOverrideItems], ["FINANCE", financeItems], ["MARKETING", marketingItems],
+  ["LEAVE", leaveItems], ["ADVANCE", advanceItems], ["DISCOUNT", async (a: WsActor) => [...(await discountItems(a)), ...(await directSaleDiscountItems(a)), ...(await draftDiscountItems(a))]], ["SAMPLE", sampleItems], ["STAGE_MOVE", stageMoveItems], ["TAX_OVERRIDE", taxOverrideItems], ["CREDIT_OVERRIDE", creditOverrideItems], ["FINANCE", financeItems], ["MARKETING", marketingItems],
 ];
 
 export async function myApprovals(actor: WsActor, only?: ApprovalType | null) {

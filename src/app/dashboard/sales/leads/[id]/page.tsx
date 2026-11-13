@@ -1,5 +1,6 @@
 "use client";
 
+import { OwnCustomerDialog, ownCustomerOf, type OwnCustomer } from "@/components/customers/own-customer-dialog";
 import { HrRoot } from "@/components/hr/ui";
 import { IdentityFields, blankIdentity, identityFrom, changedIdentityBody, nationalAddressLine, type IdentityForm } from "@/components/customers/identity-fields";
 import { registrationNoOf } from "@/lib/services/customers/customer-identity";
@@ -359,16 +360,20 @@ export default function LeadDetailPage() {
     } finally { setBusy(""); }
   }
 
-  async function convert() {
+  const [ownDup, setOwnDup] = useState<OwnCustomer | null>(null);
+  async function convert(linkToCustomerId?: string) {
     if (busy) return;
     setBusy("convert"); setError(""); setSuccess("");
     try {
       const res = await fetch(`/api/sales/leads/${params.id}/convert`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify(linkToCustomerId ? { linkToCustomerId } : {}),
       });
       const data = await res.json().catch(() => ({}));
+      // P1 ERR-08: the rep's own customer matches — open it or link the lead to it (Figma 2033:83).
+      if (!res.ok && ownCustomerOf(data)) { setOwnDup(ownCustomerOf(data)); return; }
+      setOwnDup(null);
       if (!res.ok) { setError(localizeApiError(data) ?? (ar ? "تعذّر التحويل." : "Could not convert.")); return; }
       setSuccess(data.replayed
         ? (ar ? "هذا العميل المحتمل محوَّل مسبقاً." : "This lead was already converted.")
@@ -428,7 +433,7 @@ export default function LeadDetailPage() {
               </Button>
             )}
             {canConvert && !converted && lead.status !== "UNQUALIFIED" && (
-              <Button onClick={convert} disabled={busy === "convert"} testId="convert-lead">
+              <Button onClick={() => void convert()} disabled={busy === "convert"} testId="convert-lead">
                 {busy === "convert" ? (ar ? "جارٍ التحويل…" : "Converting…") : (ar ? "تحويل إلى عميل" : "Convert to customer")}
               </Button>
             )}
@@ -437,6 +442,7 @@ export default function LeadDetailPage() {
       />
 
       {error && <Alert kind="error" onDismiss={() => setError("")}>{error}</Alert>}
+      {ownDup ? <OwnCustomerDialog ar={ar} customer={ownDup} onLink={() => convert(ownDup.id)} onClose={() => setOwnDup(null)} /> : null}
       {success && (
         <Alert kind="success" onDismiss={() => { setSuccess(""); setQualifiedDealId(null); }}>
           <span className="flex flex-wrap items-center gap-2">

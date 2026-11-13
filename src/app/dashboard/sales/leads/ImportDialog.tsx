@@ -23,8 +23,8 @@ import { useState } from "react";
 type Preview = {
   wouldImport: number;
   rowsRead: number;
-  problems: { row: number; column?: string; message: string }[];
-  duplicatesInFile: { row: number; message: string }[];
+  problems: { row: number; column?: string; message: string; messageAr?: string }[];
+  duplicatesInFile: { row: number; message: string; messageAr?: string }[];
   duplicatesInSystem: { row: number; companyName: string; matchesCompany: string | null }[];
   unknownColumns: string[];
 };
@@ -63,7 +63,7 @@ export default function ImportDialog({
         // A refused dry run still carries the row-level problems, and those are the useful
         // part: "the file is wrong" helps nobody, "row 14 has no contact name" does.
         setPreview(Array.isArray(data.problems) ? (data as Preview) : null);
-        setErr(localizeApiError(data) ?? (ar ? "تعذّرت قراءة الملف." : "Could not read that file."));
+        setErr(localizeApiError(data, ar ? "ar" : "en") ?? (ar ? "تعذّرت قراءة الملف." : "Could not read that file."));
       }
       return;
     }
@@ -75,7 +75,7 @@ export default function ImportDialog({
           : `Imported ${data.imported} of ${data.rowsRead} rows.`,
       );
     } else {
-      setErr(localizeApiError(data) ?? (ar ? "تعذّر الاستيراد." : "Could not import."));
+      setErr(localizeApiError(data, ar ? "ar" : "en") ?? (ar ? "تعذّر الاستيراد." : "Could not import."));
     }
   }
 
@@ -198,7 +198,7 @@ export default function ImportDialog({
                       <li key={i} className="text-oo-status-rejected">
                         {ar ? "صف " : "Row "}
                         {p.row}
-                        {p.column ? ` · ${p.column}` : ""} — {p.message}
+                        {p.column ? ` · ${p.column}` : ""} — {ar ? p.messageAr ?? p.message : p.message}
                       </li>
                     ))}
                   </ul>
@@ -214,7 +214,7 @@ export default function ImportDialog({
                     {preview.duplicatesInFile.slice(0, 30).map((d, i) => (
                       <li key={i} className="text-oo-status-hold">
                         {ar ? "صف " : "Row "}
-                        {d.row} — {d.message}
+                        {d.row} — {ar ? d.messageAr ?? d.message : d.message}
                       </li>
                     ))}
                   </ul>

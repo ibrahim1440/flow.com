@@ -1,5 +1,7 @@
 "use client";
 
+import { OwnCustomerDialog, ownCustomerOf, type OwnCustomer } from "@/components/customers/own-customer-dialog";
+import { displayPhone } from "@/lib/contact/phone";
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useRef } from "react";
@@ -81,7 +83,7 @@ function RowAction({
   if (lead.conversion) {
     // Still a link to the customer it became — removing the only route to the converted
     // customer would lose real functionality.
-    return <a href="/dashboard/customers" className="btn sm g">{ar ? "محوَّل — لا إجراء" : "Converted — no action"}</a>;
+    return <Link href="/dashboard/customers" className="btn sm g">{ar ? "محوَّل — لا إجراء" : "Converted — no action"}</Link>;
   }
   if (lead.status === "UNQUALIFIED") {
     return <span className="sm" style={{ whiteSpace: "nowrap" }}>{ar ? "غير مؤهَّل — لا تحويل" : "Unqualified — no convert"}</span>;
@@ -248,7 +250,8 @@ export default function LeadsPage() {
     setShowForm(true);
   }
 
-  async function convert(lead: Lead) {
+  const [ownDup, setOwnDup] = useState<{ lead: Lead; customer: OwnCustomer } | null>(null);
+  async function convert(lead: Lead, linkToCustomerId?: string) {
     if (converting) return;
     setConverting(lead.id);
     setError("");
@@ -256,9 +259,12 @@ export default function LeadsPage() {
       const res = await fetch(`/api/sales/leads/${lead.id}/convert`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify(linkToCustomerId ? { linkToCustomerId } : {}),
       });
       const data = await res.json().catch(() => ({}));
+      // P1 ERR-08: the rep's own customer matches — open it or link the lead to it (Figma 2033:83).
+      if (!res.ok && ownCustomerOf(data)) { setOwnDup({ lead, customer: ownCustomerOf(data)! }); return; }
+      setOwnDup(null);
       if (!res.ok) {
         setError(localizeApiError(data) ?? (lang === "ar" ? "تعذّر التحويل." : "Could not convert."));
         return;
@@ -324,6 +330,7 @@ export default function LeadsPage() {
 
   const notices = (
     <>
+      {ownDup ? <OwnCustomerDialog ar={lang === "ar"} customer={ownDup.customer} onLink={() => convert(ownDup.lead, ownDup.customer.id)} onClose={() => setOwnDup(null)} /> : null}
       {error && (
         <p className="notice er" role="alert" data-testid="alert-error" style={{ marginBottom: 16 }}>
           {error}<button type="button" onClick={() => setError("")} aria-label={ar ? "إغلاق" : "Dismiss"}>×</button>
@@ -515,7 +522,7 @@ export default function LeadsPage() {
                       <span className={`mny-pill ${PILL[lead.status] ?? "t-pr"}`} data-testid={`lead-status-${lead.id}`}>{label(STATUS_LABELS, lead.status)}</span>
                     </div>
                     <small>
-                      {[lead.contactName, lead.phone ? `\u2066${lead.phone}\u2069` : null, `${ar ? "من" : "from"} ${label(SOURCE_LABELS, lead.source)}`].filter(Boolean).join(" · ")}
+                      {[lead.contactName, lead.phone ? `\u2066${displayPhone(lead.phone)}\u2069` : null, `${ar ? "من" : "from"} ${label(SOURCE_LABELS, lead.source)}`].filter(Boolean).join(" · ")}
                     </small>
                   </div>
                   <div className={`spg-next${nx.late ? " late" : ""}`}>

@@ -3,6 +3,7 @@ import { settleProductionOrders } from "@/lib/services/production-schedule";
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { awaitingDiscountRefusal, isAwaitingDiscount } from "@/lib/services/orders/discount-hold";
+import { awaitingPaymentRefusal, isPaymentHeld } from "@/lib/services/orders/payment-hold";
 import { assertAdminRoleGate, forbidden, requireAuth } from "@/lib/auth-server";
 import { hasModuleAccess } from "@/lib/auth-shared";
 import { statusActionAccess } from "@/lib/services/orders/owner-access";
@@ -64,7 +65,7 @@ export async function POST(request: Request, { params }: Params) {
 
   const trimmedReason = typeof reason === "string" ? reason.trim() : "";
   // D10 gate H1: a direct sale waiting for its discount approval does not move (cancel aside).
-  if (action !== "cancel") { const h = await prisma.order.findUnique({ where: { id: id }, select: { discountApprovalStatus: true } }); if (isAwaitingDiscount(h?.discountApprovalStatus)) { const r = awaitingDiscountRefusal(); return NextResponse.json({ error: r.error, errorEn: r.errorEn, code: r.code }, { status: 409 }); } }
+  if (action !== "cancel") { const h = await prisma.order.findUnique({ where: { id: id }, select: { discountApprovalStatus: true, paymentHold: true } }); if (isAwaitingDiscount(h?.discountApprovalStatus) || isPaymentHeld(h?.paymentHold)) { const r = isAwaitingDiscount(h?.discountApprovalStatus) ? awaitingDiscountRefusal() : awaitingPaymentRefusal(h?.paymentHold); return NextResponse.json({ error: r.error, errorEn: r.errorEn, code: r.code }, { status: 409 }); } }
   if ((action === "hold" || action === "cancel") && !trimmedReason) {
     return NextResponse.json({ error: `reason is required for '${action}'.` }, { status: 400 });
   }
@@ -197,6 +198,8 @@ export async function POST(request: Request, { params }: Params) {
           message: "Order status changed before this action could be applied. Please reload and retry.",
         };
       }
+      // Gate R7 (G1 expiry): a cancelled held order leaves nothing to approve — its bound over-limit requests close.
+      if (newStatus === "Cancelled") await (await import("@/lib/services/orders/payment-hold")).closeRequestsBoundTo(tx as never, id, user.id);
       // «طلب مباشر» (gate M1): a cancelled order's value stops counting on its deal; an auto deal with nothing claimed
       // becomes LOST «تلقائي: إلغاء الطلب», one with money recorded keeps WON at the claimed amount.
       if (action === "cancel") await refreshDirectOrderDeal(tx, { orderId: id, actorId: user.id, change: "end" });

@@ -27,6 +27,9 @@ const NEEDS_PRODUCTION = new Set(["Needs Production", "Partially Available"]);
 
 export type StageOrder = {
   status: string;
+  /** Owner decision أ: a direct sale held for its payment's confirmation (PENDING) or after a rejected receipt — counted
+   *  with the held orders, in no production stage. */
+  paymentHold?: string | null;
   items: {
     productionStatus: string;
     preparationDecision: string | null;
@@ -42,7 +45,7 @@ export type StageOrder = {
  * otherwise the order is being packed / prepared from the shelf.
  */
 export function stageOf(o: StageOrder): Stage | "hold" {
-  if (statusOverride(o.status) === "hold") return "hold";
+  if (statusOverride(o.status) === "hold" || isHeldForPayment(o.paymentHold)) return "hold";
   if (APPROVAL.has(o.status)) return "approval";
   if (o.status === "Ready for Shipping") return "ready";
   const waitsForQc = (b: object) => { const st = (b as { status?: unknown }).status; return st === undefined || st === "Pending QC"; };
@@ -59,7 +62,7 @@ export function stageOf(o: StageOrder): Stage | "hold" {
  */
 export function stageCardOf(o: StageOrder): Stage | "hold" | null {
   const s = statusOverride(o.status);
-  if (s === "hold") return "hold";
+  if (s === "hold" || (!s && isHeldForPayment(o.paymentHold))) return "hold";
   if (s) return null;
   return stageOf(o);
 }
@@ -86,8 +89,13 @@ export function statusOverride(status: string): StatusOverride | null {
 /** The orders board's production stage (services/orders/pipeline.ts, `pipeline.key`). */
 export type ProductionKey = "roast" | "qc" | "pack" | "ready" | "restReady" | "partReady" | "done";
 export type ProgressTone = "warn" | "danger" | "ok" | "info";
+/** Owner decision أ: PENDING / REJECTED holds (services/orders/payment-hold.ts) — pure, for any reader. */
+export const isHeldForPayment = (h: string | null | undefined) => h === "PENDING" || h === "REJECTED";
+
 export type ProgressDisplay = {
-  key: StatusOverride | ProductionKey | "blocked";
+  key: StatusOverride | ProductionKey | "blocked" | "paymentHold" | "paymentRejected" | "paymentShort";
+  /** Abu Fahd R4 F4: «ناقص — باقي Z ⃁» — the amount left on a short hold. */
+  amount?: string;
   /** Translation key of the one text status. */
   label: TranslationKey;
   tone: ProgressTone;
@@ -116,9 +124,14 @@ const LINE_KEYS: readonly ProductionKey[] = ["roast", "qc", "pack", "ready", "do
  * rejected, completed), otherwise its production stage. Null when there is neither (an open order
  * without a computed stage).
  */
-export function orderProgress(o: { status: string; pipeline?: { key: string; partDelivered?: boolean } | null }): ProgressDisplay | null {
+export function orderProgress(o: { status: string; paymentHold?: string | null; paymentShort?: string | null; pipeline?: { key: string; partDelivered?: boolean } | null }): ProgressDisplay | null {
   const s = statusOverride(o.status);
   if (s) return { key: s, ...OVERRIDE[s], partDelivered: false };
+  // Owner decision أ: a held direct sale reads its hold, never a production stage («بانتظار التحميص»).
+  if (o.paymentHold === "PENDING") return { key: "paymentHold", label: "ordPaymentHold", tone: "warn", muted: false, partDelivered: false };
+  // Abu Fahd R4 F4: approved in part — «ناقص — باقي Z ⃁», as the order's chip says.
+  if (o.paymentHold === "REJECTED" && o.paymentShort && Number(o.paymentShort) > 0) return { key: "paymentShort", label: "ordPaymentShort", tone: "warn", muted: false, partDelivered: false, amount: o.paymentShort };
+  if (o.paymentHold === "REJECTED") return { key: "paymentRejected", label: "ordPaymentRejected", tone: "danger", muted: false, partDelivered: false };
   const k = o.pipeline?.key as ProductionKey | undefined;
   if (!k || !PRODUCTION[k]) return null;
   return { key: k, ...PRODUCTION[k], muted: false, partDelivered: !!o.pipeline?.partDelivered };
@@ -128,16 +141,21 @@ export function orderProgress(o: { status: string; pipeline?: { key: string; par
  * Where one line of an order stands, by the same rule. A line already blocked in data reads
  * «موقوف» first, so nothing is hidden although the UI no longer offers blocking.
  */
-export function lineProgress(orderStatus: string, line: { stage: number | null | undefined; blocked: boolean }): ProgressDisplay | null {
+export function lineProgress(orderStatus: string, line: { stage: number | null | undefined; blocked: boolean }, paymentHold?: string | null, paymentShort?: string | null): ProgressDisplay | null {
   if (line.blocked) return { key: "blocked", label: "ordBlockedTag", tone: "danger", muted: false, partDelivered: false };
   const s = statusOverride(orderStatus);
   if (s) return { key: s, ...OVERRIDE[s], partDelivered: false };
+  // Owner decision أ: a held direct sale's lines read the hold too (Abu Fahd H3), never «بانتظار التحميص».
+  if (paymentHold === "PENDING") return { key: "paymentHold", label: "ordPaymentHold", tone: "warn", muted: false, partDelivered: false };
+  if (paymentHold === "REJECTED" && paymentShort && Number(paymentShort) > 0) return { key: "paymentShort", label: "ordPaymentShort", tone: "warn", muted: false, partDelivered: false, amount: paymentShort };
+  if (paymentHold === "REJECTED") return { key: "paymentRejected", label: "ordPaymentRejected", tone: "danger", muted: false, partDelivered: false };
   const k = line.stage == null ? undefined : LINE_KEYS[Math.max(0, Math.min(4, line.stage))];
   return k ? { key: k, ...PRODUCTION[k], muted: false, partDelivered: false } : null;
 }
 
 /** The display's text in the viewer's language. */
 export function progressText(d: ProgressDisplay, t: (k: TranslationKey) => string): string {
+  if (d.amount) return `${t(d.label)} ${Number(d.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ⃁`;
   return d.partDelivered ? `${t("ordStagePartDelivered")} · ${t(d.label)}` : t(d.label);
 }
 

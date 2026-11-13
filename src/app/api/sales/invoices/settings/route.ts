@@ -42,7 +42,7 @@ export async function PUT(request: Request) {
       await tx.$queryRaw`SELECT "id" FROM "SystemConfig" WHERE "id" = 'singleton' FOR UPDATE`;
       const before = (await readInvoiceSettings(tx)).stored as Record<string, unknown>;
       const beforeAddr = (await readInvoiceSettings(tx)).address as Record<string, unknown>;
-      await tx.systemConfig.update({ where: { id: "singleton" }, data: parsed.data });
+      await tx.systemConfig.upsert({ where: { id: "singleton" }, create: { id: "singleton", ...parsed.data }, update: parsed.data });
       const after = await readInvoiceSettings(tx);
       const b = { ...before, ...beforeAddr }, a = { ...(after.stored as Record<string, unknown>), ...(after.address as Record<string, unknown>) };
       const changed = changedKeys(b, a);

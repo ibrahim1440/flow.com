@@ -84,9 +84,12 @@ export async function GET(request: Request) {
   const lots = await deliveryLotsFor(prisma, orders.flatMap((o) => o.items.flatMap((i) => i.deliveries.map((d) => d.id))));
   // Phase B: the orders board's roast → QC → pack → delivery bar, computed (additive field).
   const pipelines = await orderPipelines(prisma, orders);
+  // Abu Fahd R4 F4: a short hold reads «ناقص — باقي Z ⃁» on the list and the steps too.
+  const shorts = await (await import("@/lib/services/orders/payment-hold")).holdShorts(prisma as never, orders as never);
   return NextResponse.json(orders.map((o) => ({
     ...o,
     pipeline: pipelines.get(o.id) ?? null,
+    paymentShort: shorts.get(o.id) ?? null,
     items: o.items.map((i) => ({ ...i, deliveries: i.deliveries.map((d) => ({ ...d, lots: lots.get(d.id) ?? [] })) })),
   })));
 }

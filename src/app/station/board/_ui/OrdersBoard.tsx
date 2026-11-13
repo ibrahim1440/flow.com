@@ -204,11 +204,12 @@ function Card({ o, lang, L, now, movedAt }: { o: BoardOrder; lang: Lang; L: (ar:
         <span className="bd-src" data-testid="board-source">{src}</span>
         <span className="qty">{qty}</span>
       </div>
-      {isNew || showMoved || o.hold || o.preparingBy || o.partial || o.stage === "done" ? (
+      {isNew || showMoved || o.hold || o.confirmHold || o.preparingBy || o.partial || o.stage === "done" ? (
         <div className="bd-tags">
           {isNew ? <span className="bd-tag-new">{L("طلب جديد", "New order")}</span> : null}
           {showMoved ? <span className="bd-tag-moved">{L(`وصل قبل ${movedSec} ث`, `arrived ${movedSec} s ago`)}</span> : null}
           {o.hold ? <span className="bd-tag-hold">● {L("معلّق مؤقتًا", "On hold")}</span> : null}
+          {o.confirmHold ? <span className="bd-tag-hold" data-testid={`bd-confirm-hold-${o.orderNumber}`}>● {o.confirmHold === "REJECTED" ? L("رُفض الإيصال — لا تجهّزه", "Receipt rejected — do not prepare") : L("بانتظار تأكيد استلام المبلغ", "Awaiting the money's confirmation")}</span> : null}
           {o.preparingBy ? <span className="bd-tag-muted">{L(`مع ${o.preparingBy}`, `with ${o.preparingBy}`)}</span> : null}
           {o.partial ? <span className="bd-tag-muted">{L("جزئي", "Partial")}</span> : null}
           {o.stage === "done" ? <span className="bd-tag-muted">{L("وقت التسليم", "Delivered at")}</span> : null}

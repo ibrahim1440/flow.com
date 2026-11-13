@@ -1,5 +1,7 @@
 "use client";
 
+import { OwnCustomerDialog, ownCustomerOf, type OwnCustomer } from "@/components/customers/own-customer-dialog";
+import { displayPhone } from "@/lib/contact/phone";
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -51,6 +53,7 @@ export function LeadPane({
   const [lead, setLead] = useState<Lead | null>(null);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [ownDup, setOwnDup] = useState<OwnCustomer | null>(null);
   const [error, setError] = useState("");
   const [token, setToken] = useState(0);
   const head = useRef<HTMLHeadingElement | null>(null);
@@ -74,14 +77,17 @@ export function LeadPane({
   }, [onClose]);
   useEffect(() => { if (lead) head.current?.focus(); }, [lead?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function convert() {
+  async function convert(linkToCustomerId?: string) {
     if (busy || !lead) return;
     setBusy(true); setError("");
     try {
       const res = await fetch(`/api/sales/leads/${lead.id}/convert`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(linkToCustomerId ? { linkToCustomerId } : {}),
       });
       const data = await res.json().catch(() => ({}));
+      // P1 ERR-08: the rep's own customer matches — open it or link the lead to it (Figma 2033:83).
+      if (!res.ok && ownCustomerOf(data)) { setOwnDup(ownCustomerOf(data)); return; }
+      setOwnDup(null);
       if (!res.ok) { setError(localizeApiError(data) ?? (ar ? "تعذّر التحويل." : "Could not convert.")); return; }
       onChanged(data.replayed
         ? (ar ? "هذا العميل المحتمل محوَّل مسبقاً." : "This lead was already converted.")
@@ -91,6 +97,7 @@ export function LeadPane({
   }
 
   const name = lead ? (ar && lead.companyNameAr ? lead.companyNameAr : lead.companyName) : "";
+  const ownDupDialog = ownDup ? <OwnCustomerDialog ar={ar} customer={ownDup} onLink={() => convert(ownDup.id)} onClose={() => setOwnDup(null)} /> : null;
   const when = (v: string) => (Math.abs(daysFromToday(v)) <= 1 ? dueText(v, lang) : shortDate(v, lang));
   // The next commitment: the soonest open activity, else the lead's own follow-up date.
   const open = (lead?.activities ?? []).filter((a) => !a.completedAt && a.dueAt)
@@ -142,7 +149,7 @@ export function LeadPane({
             )}
             <dl className="props" style={{ marginBottom: 24 }}>
               <dt>{ar ? "جهة الاتصال" : "Contact"}</dt><dd>{lead.contactName}</dd>
-              {lead.phone && <><dt>{ar ? "الهاتف" : "Phone"}</dt><dd><bdi dir="ltr" className="n">{lead.phone}</bdi></dd></>}
+              {lead.phone && <><dt>{ar ? "الهاتف" : "Phone"}</dt><dd><bdi dir="ltr" className="n">{displayPhone(lead.phone)}</bdi></dd></>}
               <dt>{ar ? "المصدر" : "Source"}</dt>
               <dd>{pick(LEAD_SOURCE_LABELS, lead.source, lang)}{lead.sourceNote && <> · <bdi>{lead.sourceNote}</bdi></>}</dd>
               <dt>{ar ? "المالك" : "Owner"}</dt><dd>{lead.owner?.name ?? (ar ? "غير مُسنَد" : "Unassigned")}</dd>
@@ -172,8 +179,9 @@ export function LeadPane({
       </div>
       {lead && (convertible || canWrite) && (
         <div className="pane-f">
+          {ownDupDialog}
           {convertible && (
-            <button type="button" className="btn p" onClick={convert} disabled={busy} aria-busy={busy || undefined} data-testid="convert-lead">
+            <button type="button" className="btn p" onClick={() => void convert()} disabled={busy} aria-busy={busy || undefined} data-testid="convert-lead">
               {busy ? (ar ? "جارٍ التحويل…" : "Converting…") : (ar ? "تحويل إلى عميل" : "Convert to customer")}
             </button>
           )}

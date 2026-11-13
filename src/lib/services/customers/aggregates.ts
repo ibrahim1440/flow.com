@@ -388,9 +388,9 @@ export function statementOfAccount(
 }
 
 /**
- * The credit limit against what is owed. Displayed and warned about — never enforced: there is
- * no owner rule that refuses a quotation or an order over the limit (CRM.md backend
- * dependencies: "a field and enforcement rules"; only the field was decided).
+ * The credit limit against what is owed — the arithmetic only. Since P1 ERR-02 (owner 1أ, 12 Nov 2026) the limit BLOCKS
+ * a new order / direct sale / quotation conversion over it unless a supervisor approves: services/customers/credit-limit.ts
+ * on the one source of services/customers/exposure.ts (this helper is no longer the screens' basis).
  *   used       — the outstanding balance (`outstandingBalance`, VAT included);
  *   available  — limit − used, never below zero;
  *   percent    — used / limit, whole percent (null without a positive limit);

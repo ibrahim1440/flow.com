@@ -53,7 +53,7 @@ export async function PUT(request: Request) {
       await tx.systemConfig.upsert({ where: { id: "singleton" }, create: { id: "singleton" }, update: {} });
       await tx.$queryRaw`SELECT "id" FROM "SystemConfig" WHERE "id" = 'singleton' FOR UPDATE`;
       const before = taglineFromRow(await tx.systemConfig.findUnique({ where: { id: "singleton" }, select: SELECT }));
-      const after = taglineFromRow(await tx.systemConfig.update({ where: { id: "singleton" }, data: parsed.data, select: SELECT }));
+      const after = taglineFromRow(await tx.systemConfig.upsert({ where: { id: "singleton" }, create: { id: "singleton", ...parsed.data }, update: parsed.data, select: SELECT }));
       const b = { taglineAr: before.ar, taglineEn: before.en }, a = { taglineAr: after.ar, taglineEn: after.en };
       const changed = changedKeys(b, a);
       if (changed.length) {

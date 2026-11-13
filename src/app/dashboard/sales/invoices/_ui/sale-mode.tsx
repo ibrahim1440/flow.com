@@ -9,6 +9,7 @@
 //                        «أرسل» = POST /api/sales/sample-send (the samples to the warehouse — a repeat this year waits for a
 //                        manager —, the deal kept open, the zero invoice's request to the accountant).
 // Everything here renders ONLY in those modes; the manual invoice and the invoice from an order are untouched.
+import { creditRefusalOf, type CreditRefusal } from "@/components/credit/credit-ui";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { prepareReceipt } from "@/lib/files/receipt-prep";
@@ -170,15 +171,15 @@ export function SampleNotes({ lines, skus, facts }: { lines: EditLine[]; skus: M
 }
 
 export type ModeDone =
-  | { mode: "direct-sale"; orderId: string; orderNumber: number; opportunityId: string | null; invoiceId: string | null; pending: boolean; gross: string; payment: Payment; uploadError: string; receiptUploaded: boolean; deal: { id: string; title: string; joined: boolean } | null; dealTitle: string | null }
+  | { mode: "direct-sale"; orderId: string; orderNumber: number; opportunityId: string | null; invoiceId: string | null; pending: boolean; held: boolean; gross: string; payment: Payment; uploadError: string; receiptUploaded: boolean; deal: { id: string; title: string; joined: boolean } | null; dealTitle: string | null }
   | { mode: "sample"; invoiceId: string; opportunityId: string; pending: boolean; gross: string };
 
 /** «أرسل»: the direct sale or the sample send, under one request key per page; the receipt is a second request (D20). */
-export async function sendMode(mode: SaleMode, body: Record<string, unknown>, receipt: File | null, L: (a: string, e: string) => string): Promise<{ ok: true; done: ModeDone } | { ok: false; error: string }> {
+export async function sendMode(mode: SaleMode, body: Record<string, unknown>, receipt: File | null, L: (a: string, e: string) => string): Promise<{ ok: true; done: ModeDone } | { ok: false; error: string; credit?: CreditRefusal | null }> {
   const res = await fetch(mode === "sample" ? "/api/sales/sample-send" : "/api/sales/direct-sale", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
   if (!res) return { ok: false, error: L("تعذّر الاتصال.", "Could not connect.") };
   const b = await res.json().catch(() => ({}));
-  if (!res.ok) return { ok: false, error: localizeApiError(b) ?? b.error ?? L("ما انرسل — جرّب مرة ثانية.", "Not sent — try again.") };
+  if (!res.ok) return { ok: false, error: localizeApiError(b) ?? b.error ?? L("ما انرسل — جرّب مرة ثانية.", "Not sent — try again."), credit: creditRefusalOf(b) };
   if (mode === "sample") return { ok: true, done: { mode, invoiceId: b.invoice.id, opportunityId: b.opportunityId, pending: !!b.pendingApproval, gross: b.totals.gross } };
   let uploadError = "";
   if (body.payment === "BANK_TRANSFER" && receipt && b.payment?.collectionId) {
@@ -187,22 +188,26 @@ export async function sendMode(mode: SaleMode, body: Record<string, unknown>, re
     const up = await fetch(`/api/sales/collections/${b.payment.collectionId}/evidence`, { method: "POST", body: form }).catch(() => null);
     if (!up || !up.ok) uploadError = (up ? localizeApiError(await up.json().catch(() => ({}))) : null) ?? L("ما انرفع الإيصال — ارفعه من صفحة الصفقة.", "The receipt was not uploaded — attach it from the deal page.");
   }
-  return { ok: true, done: { mode, orderId: b.order.id, orderNumber: b.order.orderNumber, opportunityId: b.opportunityId, invoiceId: b.invoice?.id ?? null, pending: b.discountApproval === "PENDING", gross: b.totals.gross, payment: b.payment.method, uploadError, receiptUploaded: body.payment === "BANK_TRANSFER" && !!receipt && !!b.payment?.collectionId && !uploadError, deal: b.deal ?? null, dealTitle: typeof body.dealTitle === "string" ? body.dealTitle : null } };
+  return { ok: true, done: { mode, orderId: b.order.id, orderNumber: b.order.orderNumber, opportunityId: b.opportunityId, invoiceId: b.invoice?.id ?? null, pending: b.discountApproval === "PENDING", held: b.paymentHold === "PENDING", gross: b.totals.gross, payment: b.payment.method, uploadError, receiptUploaded: body.payment === "BANK_TRANSFER" && !!receipt && !!b.payment?.collectionId && !uploadError, deal: b.deal ?? null, dealTitle: typeof body.dealTitle === "string" ? body.dealTitle : null } };
 }
 
 export function DoneCard({ done }: { done: ModeDone }) {
   const { L } = useLang();
   const rows = done.mode === "direct-sale"
     ? [
-      [L("الطلب", "Order"), done.pending ? L(`#${done.orderNumber} · ينتظر موافقة المشرف على الخصم`, `#${done.orderNumber} · waits for the supervisor's discount approval`) : L(`#${done.orderNumber} · راح للتحضير`, `#${done.orderNumber} · sent to preparation`)],
+      [L("الطلب", "Order"), done.pending ? L(`#${done.orderNumber} · ينتظر موافقة المشرف على الخصم`, `#${done.orderNumber} · waits for the supervisor's discount approval`)
+        // Owner decision أ: paid now over the credit limit — held until the accountant confirms the money (never «راح للتحضير»).
+        : done.held ? L(`#${done.orderNumber} · بانتظار تأكيد استلام المبلغ — العميل فوق حد الائتمان، فما يتجهّز قبل تأكيد المحاسب`, `#${done.orderNumber} · awaiting payment confirmation — the customer is over the credit limit, so it is not prepared before the accountant confirms`)
+        : L(`#${done.orderNumber} · راح للتحضير`, `#${done.orderNumber} · sent to preparation`)],
       [L("الفاتورة", "Invoice"), done.pending ? L("تروح للمحاسب بعد الموافقة", "goes to the accountant after the approval") : L("مسودة · عند المحاسب يصدرها", "draft · with the accountant to issue")],
       [L("التحصيل", "Collection"), done.payment === "CREDIT" ? L("آجل", "On account") : done.pending ? L("ينسجل بعد الموافقة", "recorded after the approval")
         : done.payment === "BANK_TRANSFER" && !done.receiptUploaded ? L("تحويل بنكي · بدون إيصال — ارفعه من صفحة الصفقة", "Bank transfer · no receipt — upload it from the deal page")
         : done.payment === "BANK_TRANSFER" ? L("تحويل بنكي · ✓ الإيصال انرفع · ينتظر اعتماد المحاسب", "Bank transfer · ✓ receipt uploaded · awaiting the accountant")
         : L("ينتظر اعتماد المحاسب", "waits for the accountant")],
       // أبو فهد B2: where the sale landed — the open deal the rep chose, now won, or a new won deal.
+      // Abu Fahd R2 N8: a held sale's deal is won once the money is confirmed.
       [L("الصفقة", "Deal"), done.deal
-        ? (done.deal.joined ? L(`«${done.deal.title}» صارت رابحة`, `«${done.deal.title}» is now won`) : L("صفقة جديدة رابحة", "a new won deal"))
+        ? (done.deal.joined ? L(`«${done.deal.title}» صارت رابحة`, `«${done.deal.title}» is now won`) : L("صفقة جديدة رابحة", "a new won deal")) + (done.held ? L(" (بعد تأكيد المبلغ)", " (once the payment is confirmed)") : "")
         : done.pending ? (done.dealTitle ? L(`«${done.dealTitle}» تصير رابحة بعد الموافقة`, `«${done.dealTitle}» is won after the approval`) : L("صفقة جديدة رابحة بعد الموافقة", "a new won deal after the approval")) : "—"],
     ]
     : [
@@ -212,7 +217,8 @@ export function DoneCard({ done }: { done: ModeDone }) {
     ];
   return (
     <div className="acct-card inv-done" data-testid="invoice-mode-done" data-mode={done.mode}>
-      <h2 data-testid="invoice-mode-done-title">{done.mode === "sample" ? L("انرسلت العيّنة", "The sample was sent") : done.pending ? L("انرسل للمشرف يوافق", "Sent to your supervisor to approve") : L("انرسل البيع", "The sale was sent")}</h2>
+      <h2 data-testid="invoice-mode-done-title">{done.mode === "sample" ? L("انرسلت العيّنة", "The sample was sent") : done.pending ? L("انرسل للمشرف يوافق", "Sent to your supervisor to approve") : done.held ? L("انرسل البيع — بانتظار تأكيد المبلغ", "The sale was sent — awaiting payment confirmation") : L("انرسل البيع", "The sale was sent")}</h2>
+      {done.mode === "direct-sale" && done.held ? <p className="acct-hint is-warn" role="status" data-testid="invoice-mode-held">{L("الطلب موقوف: ما يتجهّز ولا يُشحن حتى يأكّد المحاسب استلام المبلغ. يوصلك إشعار.", "The order is held: it is not prepared or shipped until the accountant confirms the money. You'll be notified.")}</p> : null}
       <dl className="inv-totals">
         {rows.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}
         <div className="g"><dt>{L("الإجمالي شامل الضريبة · ⃁", "Total incl. VAT · SAR")}</dt><dd data-testid="invoice-mode-done-gross">{money(done.gross)}</dd></div>

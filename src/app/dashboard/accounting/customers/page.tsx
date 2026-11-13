@@ -4,6 +4,7 @@
 // tax invoice carries, the balance, what is overdue, the credit limit and the rep (read only) — without the customers
 // module. Per row: «كشف الحساب», «عرض سعر» (a quotation with no deal), «فاتورة». The accountant adds a customer and
 // corrects its invoice particulars; deals, activities, notes and the rep stay Sales'. Every rule is the API's.
+import { displayPhone } from "@/lib/contact/phone";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
@@ -83,7 +84,7 @@ function CustomersPage() {
               <tr key={c.id}>
                 <td><bdi>{c.nameAr || c.name}</bdi>{c.nameAr && c.nameAr !== c.name ? <span className="acct-hint"> · <bdi dir="ltr">{c.name}</bdi></span> : null}</td>
                 <td className="acct-code"><bdi dir="ltr">{c.vatNumber ?? "—"}</bdi></td><td className="acct-code"><bdi dir="ltr">{registrationNoOf(c) || "—"}</bdi></td>
-                <td>{c.city ?? "—"}</td><td><bdi dir="ltr">{c.phone ?? "—"}</bdi></td>
+                <td>{c.city ?? "—"}</td><td><bdi dir="ltr">{c.phone ? displayPhone(c.phone) : "—"}</bdi></td>
                 <td className="num">{money(c.balance)}</td><td className="num">{Number(c.overdue) > 0 ? <b>{money(c.overdue)}</b> : money(c.overdue, true) || "—"}</td>
                 <td className="num">{c.creditLimit ? money(c.creditLimit) : "—"}</td><td>{c.repName ?? <span className="acct-hint">{L("بدون مندوب", "No rep")}</span>}</td>
                 <td style={{ whiteSpace: "nowrap" }}>

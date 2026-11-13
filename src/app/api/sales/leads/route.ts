@@ -1,8 +1,9 @@
 import { parseLeadIdentity, leadCityFrom } from "@/lib/services/sales/lead-identity";
+import { emailField, phoneField, phoneSearchKey } from "@/lib/contact/phone";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
-import { handlePrismaError } from "@/lib/api-error";
+import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { normalizationFor, findDuplicateCandidates, normalizePhone } from "@/lib/services/sales/leads";
 import { customerInScope } from "@/lib/services/sales/customer-access";
@@ -42,7 +43,7 @@ export async function GET(request: Request) {
             OR: [
               { companyName: { contains: q, mode: "insensitive" as const } },
               { contactName: { contains: q, mode: "insensitive" as const } },
-              { phone: { contains: q } },
+              ...(phoneSearchKey(q) ? [{ phone: { contains: phoneSearchKey(q)! } }] : []),
               { city: { contains: q, mode: "insensitive" as const } },
             ],
           }
@@ -97,7 +98,8 @@ export async function GET(request: Request) {
       scope: seesAll ? "all" : "own",
     });
   } catch (err) {
-    return handlePrismaError(err);
+    // A coded refusal (P1 ERR-04: PHONE_INVALID / EMAIL_INVALID) keeps its 400; anything else as before.
+    return handleDomainError(err);
   }
 }
 
@@ -140,6 +142,9 @@ export async function POST(request: Request) {
   const ownerId = canAssign && typeof b.ownerId === "string" && b.ownerId ? b.ownerId : user.id;
 
   try {
+    // P1 ERR-04: one reader of the typed phone / e-mail (lib/contact/phone.ts) — stored canonical (+966…), or a coded 400.
+    const phone = phoneField(b.phone) ?? null;
+    const email = emailField(b.email) ?? null;
     if (canAssign && ownerId !== user.id) {
       const target = await prisma.employee.findUnique({ where: { id: ownerId }, select: { id: true, active: true } });
       if (!target || !target.active) {
@@ -156,19 +161,19 @@ export async function POST(request: Request) {
       }
     }
 
-    const norm = normalizationFor({ companyName, phone: b.phone as string | null });
+    const norm = normalizationFor({ companyName, phone });
 
     // Duplicates are reported, never merged and never silently blocked. Several buyers at
     // one café is the normal case; one handset appearing twice is worth a second look.
     const candidates = await findDuplicateCandidates(prisma, {
       companyName,
-      phone: b.phone as string | null,
+      phone,
     }, user);
     const strong = candidates.filter((c) => c.strong);
     // D17 (Abu Fahd): a shop met on a field round may already be a CUSTOMER — the same phone (normalised) stops the add
     // until confirmed. A customer outside the caller's book is reported without its name or id. The expression is EXACTLY
     // the one of "Customer_phone_last9_idx" (20261227090000) so the lookup uses the index; phoneKey is already the last 9 digits.
-    const phoneKey = fieldRoundItemId ? normalizePhone(b.phone as string | null) : null;
+    const phoneKey = fieldRoundItemId ? normalizePhone(phone) : null;
     if (phoneKey && b.acknowledgeDuplicate !== true) {
       const hits = await prisma.$queryRaw<{ id: string; name: string; nameAr: string | null }[]>`
         SELECT id, name, "nameAr" FROM "Customer"
@@ -204,8 +209,8 @@ export async function POST(request: Request) {
           companyName,
           companyNameAr: typeof b.companyNameAr === "string" ? b.companyNameAr.trim() || null : null,
           contactName: contactName || null,
-          phone: typeof b.phone === "string" ? b.phone.trim() || null : null,
-          email: typeof b.email === "string" ? b.email.trim() || null : null,
+          phone,
+          email,
           city: (typeof b.city === "string" ? b.city.trim() || null : null) ?? leadCityFrom(ident.data),
           ...ident.data,
           address: typeof b.address === "string" ? b.address.trim() || null : null,
@@ -230,6 +235,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ lead, weakDuplicates: candidates.filter((c) => !c.strong) }, { status: 201 });
   } catch (err) {
-    return handlePrismaError(err);
+    // A coded refusal (P1 ERR-04: PHONE_INVALID / EMAIL_INVALID) keeps its 400; anything else as before.
+    return handleDomainError(err);
   }
 }

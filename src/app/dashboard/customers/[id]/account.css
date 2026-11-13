@@ -258,3 +258,30 @@
 .d21 .acc-phone .acc-side-card, .d21 .acc-phone > .acc-card { margin-bottom: 12px }
 /* D16 «أضف لخطتي» on the phone page: one full-width button under the customer's line. */
 .acc-plan-row { display: flex; margin: 8px 0 4px } .acc-plan-row .btn { flex: 1; justify-content: center; min-height: 44px }
+
+/* P1 ERR-02 — «كم على العميل؟» (Figma 2033:3 at 390, 2033:110 at 1440; approved 12 Nov 2026): one source. */
+.d21 .acc-money { margin: 12px 0 16px; padding: 14px 16px }
+.d21 .acc-money-h { margin: 0 0 10px; font: 700 16px/26px var(--f-ui); color: var(--text-primary) }
+.d21 .acc-money-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; margin: 0 }
+.d21 .acc-money-grid > div { display: grid; gap: 2px; align-content: start; padding: 4px 14px; border-inline-start: 1px solid var(--border-subtle); min-width: 0 }
+.d21 .acc-money-grid > div:first-child { border-inline-start: 0; padding-inline-start: 0 }
+.d21 .acc-money-grid dt { font-size: 12.5px; color: var(--text-muted); margin: 0 }
+.d21 .acc-money-grid dd { margin: 0 }
+.d21 .acc-money-grid .big { font: 700 24px/1.3 var(--f-num); color: var(--text-primary) }
+.d21 .acc-money-grid .mid { font: 700 18px/1.4 var(--f-num); color: var(--text-primary) }
+.d21 .acc-money-grid .big.acc-warn, .d21 .acc-money-grid .mid.acc-warn { color: var(--status-warning) }
+.d21 .acc-money-grid .mid.acc-bad { color: var(--status-danger) }
+.d21 .acc-money-grid .cur { font-size: .8em; font-weight: 600 }
+.d21 .acc-money-grid .d { font-size: 12px; color: var(--text-muted); line-height: 18px }
+.d21 .acc-money-bar { height: 6px; border-radius: 3px; background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle); overflow: hidden; margin: 4px 0 2px }
+.d21 .acc-money-bar i { display: block; height: 100%; background: var(--action-primary) }
+.d21 .acc-money-limit.is-near .acc-money-bar i { background: var(--status-warning) }
+.d21 .acc-money-limit.is-over .acc-money-bar i { background: var(--status-danger) }
+.d21 .acc-money-limit.is-over .mid { color: var(--status-danger) }
+.d21 .acc-money-quotes { margin: 10px 0 0; font-size: 12.5px; color: var(--text-secondary) }
+.d21 .acc-money-stm { margin-top: 10px }
+/* 390: one column — the receivable first, then overdue, the orders box, the limit (Figma 2033:3). */
+.d21 .acc-money.is-ph .acc-money-grid { grid-template-columns: 1fr; gap: 12px }
+.d21 .acc-money.is-ph .acc-money-grid > div { border-inline-start: 0; padding: 0 }
+.d21 .acc-money.is-ph .acc-money-orders { padding: 10px 12px; border-radius: 8px; background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle) }
+@media (max-width: 1100px) { .d21 .acc-money:not(.is-ph) .acc-money-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 12px } .d21 .acc-money:not(.is-ph) .acc-money-grid > div:nth-child(3) { border-inline-start: 0; padding-inline-start: 0 } }

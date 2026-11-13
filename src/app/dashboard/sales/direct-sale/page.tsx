@@ -9,6 +9,7 @@
 //   ✓ انرسلت       the order, the deal, the invoice at the accountant; «أرسل للعميل» opens WhatsApp on the rep's phone
 // The rep never issues the invoice (decision 9): «إرسال» only raises it to the accountant.
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CreditLimitDialog, creditRefusalOf, type CreditRefusal } from "@/components/credit/credit-ui";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api, useLang } from "../_components/ui";
@@ -64,6 +65,9 @@ function DirectSale() {
   const [opts, setOpts] = useState<Options | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [creditRefusal, setCreditRefusal] = useState<CreditRefusal | null>(null);
+  // Abu Fahd M1: the refused sale, kept with the approval request so the rep resumes it with one tap.
+  const [creditBody, setCreditBody] = useState<Record<string, unknown> | null>(null);
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [newCustomer, setNewCustomer] = useState(false);
   const [qty, setQty] = useState<Record<string, number>>({});
@@ -148,10 +152,8 @@ function DirectSale() {
     if (!customer || !priced || !payment || busy) return;
     setBusy(true); setError("");
     const bank = payment === "BANK_TRANSFER";
-    const r = await api<Done & { code?: string }>("/api/sales/direct-sale", {
-      method: "POST",
-      body: { customerId: customer.id, lines, requestKey: key.current, discountPercent: discountNum || undefined, payment, reference: bank ? reference.trim() || undefined : undefined },
-    });
+    const saleBody = { customerId: customer.id, lines, requestKey: key.current, discountPercent: discountNum || undefined, payment, reference: bank ? reference.trim() || undefined : undefined };
+    const r = await api<Done & { code?: string }>("/api/sales/direct-sale", { method: "POST", body: saleBody });
     if (r.ok) {
       // The receipt is a second request on purpose (the CollectionsPanel pattern): multipart, and a failed upload never
       // undoes the sale or its collection — the rep is told and attaches it again from the deal page.
@@ -171,6 +173,9 @@ function DirectSale() {
       return;
     }
     setBusy(false);
+    // P1 ERR-02: over the credit limit — the figures and «اطلب اعتماد المشرف» (Figma 2033:28).
+    const cr = creditRefusalOf(r.data);
+    if (cr) { setCreditBody(saleBody); setCreditRefusal(cr); return; }
     setError(r.data.error ?? L("ما انرسل — جرّب مرة ثانية.", "Not sent — try again."));
   }
 
@@ -184,6 +189,8 @@ function DirectSale() {
 
   if (step === 4 && done && customer) {
     const waiting = done.discountApproval === "PENDING";
+    // Owner decision أ: a paid-now sale over the credit limit waits for the accountant before preparation.
+    const held = (done as { paymentHold?: string | null }).paymentHold === "PENDING";
     const bankDone = done.payment.method === "BANK_TRANSFER" && !waiting;
     // No receipt with the transfer (none chosen, or its upload failed): say so, and send the rep to the deal page.
     const noReceipt = bankDone && !done.uploaded && !uploadError;
@@ -201,8 +208,8 @@ function DirectSale() {
           <h1>{waiting ? L("انرسل للمشرف", "Sent to your supervisor") : L("انرسلت", "Sent")}</h1>
           <p className="ds-mut"><bdi>#{done.order.orderNumber}</bdi> · <bdi>{nameOf(customer)}</bdi> · {money(done.totals.gross)}</p>
           <dl className="ds-card ds-kv">
-            <div><dt>{L("الطلب", "Order")}</dt><dd className={waiting ? "ds-warn" : undefined} data-testid="ds-done-order">{waiting ? L(`بانتظار موافقة الخصم (${Number(done.totals.discountPercent)}٪)`, `Waiting for the discount approval (${Number(done.totals.discountPercent)}%)`) : L("انسوّى · يتجهز ويوصل من المحمصة", "Created · prepared and shipped from the roastery")}</dd></div>
-            <div><dt>{L("الصفقة", "Deal")}</dt><dd className={waiting ? undefined : "ds-good"}>{waiting ? L("تنقفل رابحة بعد الموافقة", "Won once approved") : L("رابحة", "Won")}</dd></div>
+            <div><dt>{L("الطلب", "Order")}</dt><dd className={waiting || held ? "ds-warn" : undefined} data-testid="ds-done-order">{waiting ? L(`بانتظار موافقة الخصم (${Number(done.totals.discountPercent)}٪)`, `Waiting for the discount approval (${Number(done.totals.discountPercent)}%)`) : held ? L("بانتظار تأكيد استلام المبلغ · العميل فوق حد الائتمان، فما يتجهّز قبل تأكيد المحاسب", "Awaiting payment confirmation · the customer is over the credit limit, so it is not prepared before the accountant confirms") : L("انسوّى · يتجهز ويوصل من المحمصة", "Created · prepared and shipped from the roastery")}</dd></div>
+            <div><dt>{L("الصفقة", "Deal")}</dt><dd className={waiting || held ? undefined : "ds-good"}>{waiting ? L("تنقفل رابحة بعد الموافقة", "Won once approved") : held ? L("رابحة (بعد تأكيد المبلغ)", "Won (once the payment is confirmed)") : L("رابحة", "Won")}</dd></div>
             <div><dt>{L("الدفع", "Payment")}</dt><dd className={noReceipt || (bankDone && uploadError) ? "ds-warn" : undefined} data-testid="ds-done-payment">{done.payment.method === "CREDIT" ? L("آجل على حساب العميل", "On account") : waiting ? L(`${payAr(done.payment.method)} · ينسجل بعد الموافقة`, "Recorded once approved") : noReceipt ? L("تحويل بنكي · ارفع الإيصال من صفحة الصفقة", "Bank transfer · upload the receipt from the deal page") : bankDone && uploadError ? L("تحويل بنكي · ما انرفع الإيصال", "Bank transfer · the receipt did not upload") : bankDone && done.uploaded ? L("تحويل بنكي · ✓ الإيصال انرفع · ينتظر اعتماد المحاسب", "Bank transfer · ✓ receipt uploaded · awaiting the accountant") : L(`${payAr(done.payment.method)} · ينتظر اعتماد المحاسب`, `${payEn(done.payment.method)} · awaiting the accountant`)}</dd></div>
             <div><dt>{L("الفاتورة", "Invoice")}</dt><dd className="ds-warn">{waiting ? L("تروح للمحاسب بعد الموافقة", "Goes to the accountant once approved") : L("عند المحاسب يصدرها", "With the accountant to issue")}</dd></div>
           </dl>
@@ -245,6 +252,7 @@ function DirectSale() {
       </header>
       <div className="ds-steps" aria-hidden>{[1, 2, 3].map((i) => <i key={i} className={i <= step ? "on" : ""} />)}</div>
       {error ? <p className="notice er" role="alert" data-testid="ds-error">{error}</p> : null}
+      {creditRefusal && customer ? <CreditLimitDialog ar={ar} customerId={customer.id} kind="DIRECT_SALE" credit={creditRefusal} onClose={() => setCreditRefusal(null)} resume={creditBody ? { path: "/api/sales/direct-sale", body: creditBody } : undefined} /> : null}
 
       {step === 1 ? (
         <section className="ds-body" aria-label={L("العميل", "Customer")}>

@@ -61,7 +61,7 @@ export async function PUT(request: Request) {
       await tx.systemConfig.upsert({ where: { id: "singleton" }, create: { id: "singleton" }, update: {} });
       await tx.$queryRaw`SELECT "id" FROM "SystemConfig" WHERE "id" = 'singleton' FOR UPDATE`;
       const before = invoicingFromRow(await tx.systemConfig.findUnique({ where: { id: "singleton" } }));
-      const after = invoicingFromRow(await tx.systemConfig.update({ where: { id: "singleton" }, data: parsed.data }));
+      const after = invoicingFromRow(await tx.systemConfig.upsert({ where: { id: "singleton" }, create: { id: "singleton", ...parsed.data }, update: parsed.data }));
       const b = { defaultVatPercent: before.defaultVatPercent, sampleVatAlertSar: before.sampleVatAlertSar }, a = { defaultVatPercent: after.defaultVatPercent, sampleVatAlertSar: after.sampleVatAlertSar };
       const changed = changedKeys(b, a);
       if (changed.length) {

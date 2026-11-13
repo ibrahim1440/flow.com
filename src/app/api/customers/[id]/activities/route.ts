@@ -50,7 +50,9 @@ export async function POST(request: Request, { params }: Params) {
     const result = await prisma.$transaction(async (tx) => {
       const writer = { id: user.id, permissions: user.permissions };
       const logged = await logCustomerActivity(tx, writer, id, a);
-      const planned = next ? await logCustomerActivity(tx, writer, id, next) : null;
+      // P1 ERR-03: the reminder of a result recorded on a deal belongs to that deal — it becomes the deal's next follow-up
+      // (syncDealNextFollowUp), never a customer-level reminder the deal does not see.
+      const planned = next ? await logCustomerActivity(tx, writer, id, { ...next, opportunityId: a.opportunityId }) : null;
       return { ...logged, nextActivityId: planned?.activity.id ?? null };
     }, TX_OPTS);
     return NextResponse.json(result, { status: 201 });

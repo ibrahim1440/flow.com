@@ -1,7 +1,7 @@
 "use client";
 
 import { TaxOverridePanel } from "@/components/sales/tax-override-panel";
-import { CustomerCreditNotice } from "@/components/credit/credit-ui";
+import { CreditLimitDialog, CustomerCreditNotice, creditRefusalOf, type CreditRefusal } from "@/components/credit/credit-ui";
 import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useMemo, useRef, use } from "react";
 import Link from "next/link";
@@ -647,14 +647,14 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
     </>
   );
 
-  const addLine = editable && (!phone || phoneEdit) ? (
+  const addLine = editable && (!phone || phoneEdit || (quote.status === "DRAFT" && quote.lines.length === 0 && lines.length > 0)) ? (
     <button
       type="button"
       className={phone ? "lk-inline" : "btn q-addline"}
       onClick={() => { focusLine.current = lines.length; setLines([...lines, emptyLine(defaultVat)]); setDirty(true); }}
       data-testid="add-line"
     >
-      {phone ? null : <Plus size={16} aria-hidden />}{ar ? "إضافة بند" : "Add line"}
+      {phone ? null : <Plus size={16} aria-hidden />}{/* Abu Fahd (friction 14): «ثاني» only once the first line is filled. */}{phone && quote.status === "DRAFT" && lines.some((l) => !!l.productSkuId || !!l.description?.trim()) ? (ar ? "＋ أضف صنف ثاني" : "＋ Add another item") : phone ? (ar ? "＋ أضف صنف" : "＋ Add an item") : ar ? "إضافة بند" : "Add line"}
     </button>
   ) : null;
 
@@ -1050,9 +1050,24 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   // ── Phone (390): the facts line, lines as rows, figures as label/value rows, the band, and
   //    the frame's sticky bar. Functions the 390 frames leave to the desktop stay under «⋯». ──
   if (phone) {
-    const editingHere = editable && phoneEdit;
-    const primary = issueBtn ?? orderBtn ?? acceptBtn ?? (!rejectBtn ? reviseBtn : null);
-    const secondary = editingHere ? saveBtn : (rejectBtn ?? collectionLink);
+    // P1 UXM-01 (approved Figma 2033:39): a saved draft with no lines opens in edit mode with one full-width «＋ أضف صنف»;
+    // once a line is added the main button is «حفظ وإصدار» (save, then issue — the issue keeps every rule).
+    const firstDraft = editable && quote.status === "DRAFT" && quote.lines.length === 0;
+    const editingHere = editable && (phoneEdit || firstDraft);
+    const addFirstBtn = firstDraft && lines.length === 0 ? (
+      <button type="button" className="btn p q-addfirst" data-testid="add-first-line"
+        onClick={() => { focusLine.current = 0; setLines([emptyLine(defaultVat)]); setDirty(true); }}>
+        {ar ? "＋ أضف صنف" : "＋ Add an item"}
+      </button>
+    ) : null;
+    const saveIssueBtn = firstDraft && lines.length > 0 && can.write ? (
+      <button type="button" className="btn p" disabled={busy || issueBlocked} data-testid="save-and-issue"
+        onClick={async () => { if (await save()) await transition("ISSUED"); }}>
+        {ar ? "حفظ وإصدار" : "Save and issue"}
+      </button>
+    ) : null;
+    const primary = addFirstBtn ?? saveIssueBtn ?? issueBtn ?? orderBtn ?? acceptBtn ?? (!rejectBtn ? reviseBtn : null);
+    const secondary = firstDraft ? null : editingHere ? saveBtn : (rejectBtn ?? collectionLink);
     const moreItems: React.ReactNode[] = [];
     if (editable && !phoneEdit) moreItems.push(
       <button key="edit" type="button" role="menuitem" data-testid="phone-edit-lines" onClick={() => { setMore(false); setPhoneEdit(true); }}>
@@ -1103,7 +1118,12 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         {/* Quotes v2: the phone shows where the quotation is too; its buttons stay in the sticky bar. */}
         {!editable && quote.status !== "DRAFT" ? progressBlock(false) : null}
         {linesHeader}
-        {phoneRows.length === 0 ? emptyLines : editingHere ? (
+        {phoneRows.length === 0 && firstDraft ? (
+          <div className="q-emptyfirst" data-testid="quote-empty-first">
+            <b>{ar ? "ما فيه بنود بعد" : "No items yet"}</b>
+            <span>{ar ? "أضف أول صنف — تقدر تعدّل الكمية والسعر بعدها." : "Add the first item — you can change the quantity and price after."}</span>
+          </div>
+        ) : phoneRows.length === 0 ? emptyLines : editingHere ? (
           <>
             {/* Quotes v2 (Figma «٧ · جوال — تحرير العرض»): each line a card with the same fields as the desktop columns. */}
             <div className="q-pcards" data-testid="quote-lines-phone-edit">
@@ -1357,6 +1377,7 @@ function OrderDialog({
   const [held, setHeld] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [creditRefusal, setCreditRefusal] = useState<CreditRefusal | null>(null);
 
   return (
     <Modal
@@ -1372,12 +1393,14 @@ function OrderDialog({
             onClick={async () => {
               setBusy(true);
               setErr("");
-              const res = await api<{ message: string; orderNumber: number; replayed: boolean }>(
+              const res = await api<{ message: string; messageEn?: string; orderNumber: number; replayed: boolean }>(
                 `/api/sales/quotes/${quoteId}/create-order`,
                 { method: "POST", body: { notes } },
               );
               setBusy(false);
-              if (res.ok) onDone(res.data.message ?? (ar ? "أُنشئ الطلب." : "Order created."));
+              if (res.ok) onDone((ar ? res.data.message : res.data.messageEn ?? res.data.message) ?? (ar ? "أُنشئ الطلب." : "Order created."));
+              // P1 ERR-02: over the credit limit — the figures and «اطلب اعتماد المشرف» (Figma 2033:28).
+              else if (creditRefusalOf(res.data)) setCreditRefusal(creditRefusalOf(res.data));
               else setErr(res.data.error ?? "");
             }}
           >
@@ -1387,6 +1410,7 @@ function OrderDialog({
       }
     >
       {err && <p className="notice er" role="alert">{err}</p>}
+      {creditRefusal && customerId ? <CreditLimitDialog ar={ar} customerId={customerId} kind="QUOTE_ORDER" credit={creditRefusal} onClose={() => setCreditRefusal(null)} resume={{ path: `/api/sales/quotes/${quoteId}/create-order`, body: { notes } }} /> : null}
       <CustomerCreditNotice customerId={customerId} ar={ar} onHold={setHeld} testId="order-credit" />
       <p className="lbl" style={{ fontWeight: 400, margin: 0 }}>
         {ar

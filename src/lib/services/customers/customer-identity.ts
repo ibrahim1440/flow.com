@@ -121,6 +121,13 @@ export const DUPLICATE_CUSTOMER = {
   errorEn: "This customer is already registered — ask your supervisor to assign it to you.",
 } as const;
 
+/** P1 ERR-08: the match is a customer in the caller's OWN book — open it (or link the lead to it); no supervisor needed. */
+export const DUPLICATE_CUSTOMER_OWN = {
+  code: "DUPLICATE_CUSTOMER_OWN",
+  error: "العميل موجود في دفترك — افتحه.",
+  errorEn: "This customer is already in your book — open it.",
+} as const;
+
 /**
  * «السجل التجاري / الرقم الموحد» — ONE field (owner decision, 5 Nov 2026): to the owner the CR and the unified number
  * are the same registration. The body key `registrationNo` (10 digits after normalising Arabic / Persian digits, spaces

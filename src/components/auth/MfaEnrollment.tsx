@@ -95,7 +95,7 @@ export function MfaEnrollment({ lang, onEnrolled }: { lang: "ar" | "en"; onEnrol
       ) : status.enrolled ? (
         <div className="hr-stack">
         <dl className="hr-kv">
-          {status.enrolledAt && <div><dt>{t.enrolledAt}</dt><dd><bdi dir="ltr" className="hr-num">{new Date(status.enrolledAt).toLocaleDateString(lang === "ar" ? "ar-SA-u-nu-latn" : "en-GB")}</bdi></dd></div>}
+          {status.enrolledAt && <div><dt>{t.enrolledAt}</dt><dd><bdi dir="ltr" className="hr-num">{new Date(status.enrolledAt).toLocaleDateString(lang === "ar" ? "ar-SA-u-ca-gregory-nu-latn" : "en-GB")}</bdi></dd></div>}
           <div><dt>{t.remaining}</dt><dd className="hr-num">{status.recoveryCodesRemaining}</dd></div>
         </dl>
           <p className="hr-caption" style={{ margin: 0 }}>{t.lost}</p>

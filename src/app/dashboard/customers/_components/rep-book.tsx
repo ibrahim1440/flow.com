@@ -7,6 +7,7 @@
  * a rep needs on any customer (call, order, quotation, sample). Figures are «يومي»'s own book (GET /api/sales/my-day →
  * `book`, see my-book.tsx), so a number here and on «يومي» are the same customers.
  */
+import { displayPhone } from "@/lib/contact/phone";
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Ico } from "@/components/shell/icons";
@@ -151,7 +152,7 @@ export function RepBook({
                       {r?.tier === "VIP" ? <span className="mny-pill t-sa">VIP</span> : null}
                       {s ? <span className={`mny-pill ${TONE[s.tone] ?? "t-pr"}`} data-testid={`customer-status-${c.id}`}>{s.text}</span> : null}
                     </div>
-                    <small>{c.address?.split("\n")[0] || (c.phone ? <bdi dir="ltr">{c.phone}</bdi> : "—")}</small>
+                    <small>{c.address?.split("\n")[0] || (c.phone ? <bdi dir="ltr">{displayPhone(c.phone)}</bdi> : "—")}</small>
                   </div>
                   <div className="spg-amt" style={{ justifyItems: "start" }}>
                     <span>{L("كم يطلب شهريًا", "Per month")}</span>

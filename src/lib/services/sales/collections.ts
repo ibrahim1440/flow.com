@@ -8,6 +8,7 @@ import { resyncDealAccountantReceipts, syncAccountantReceiptEvents } from "./acc
 import { defaultCollectionBranch, parseBranchId } from "@/lib/accounting/locations";
 import { receiptSelfConfirmAllowed } from "./receipt-four-eyes";
 import { recomputeFlagsForCollection } from "@/lib/services/orders/order-flags";
+import { holdOnCollectionRejected, releaseOnCollectionApproved } from "@/lib/services/orders/payment-hold";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -339,12 +340,18 @@ export async function submitCollection(tx: Tx, input: SubmitInput): Promise<Subm
   // The ceiling itself is unchanged; only its wording, which used to call submission
   // capacity "outstanding" and so reported a number that was not the unpaid balance.
   if (input.amountGross.greaterThan(summary.availableToSubmitGross)) {
+    // Gate R5 R5: the refusal in Arabic (the rep's language), and when the deal's order is held for a remaining amount,
+    // where that money goes instead — «سجّل الباقي» on the held order.
+    const avail = summary.availableToSubmitGross.toFixed(2), unpaid = summary.unpaidGross.toFixed(2);
+    const heldOrder = await tx.order.findFirst({ where: { paymentHold: "REJECTED", opportunityLinks: { some: { opportunityId: input.opportunityId } } }, select: { orderNumber: true } });
+    const hint = heldOrder && !input.orderId ? ` الطلب #${heldOrder.orderNumber} موقوف بباقي مبلغ — سجّل الباقي من «سجّل الباقي» على الطلب نفسه.` : "";
+    const hintEn = heldOrder && !input.orderId ? ` Order #${heldOrder.orderNumber} is held for a remaining amount — record it with «Record the rest» on the order itself.` : "";
     throw {
       _appCode: 409,
-      message:
-        `Only ${summary.availableToSubmitGross.toFixed(2)} ${summary.document.currency} may still be ` +
-        `submitted on this deal (unpaid balance ${summary.unpaidGross.toFixed(2)}, less what is already ` +
-        "awaiting verification). Overpayment is not recorded here.",
+      code: "COLLECTION_CEILING",
+      message: `المتاح للتسجيل على هالصفقة ${avail} ⃁ بس (الباقي غير المدفوع ${unpaid} ⃁ ناقص اللي ينتظر تأكيد المحاسب) — ما تنسجّل زيادة على المبلغ.${hint}`,
+      errorEn: `Only ${avail} ${summary.document.currency} may still be submitted on this deal (unpaid balance ${unpaid}, less what is already awaiting verification). Overpayment is not recorded here.${hintEn}`,
+      available: avail,
     };
   }
 
@@ -396,6 +403,8 @@ export async function submitCollection(tx: Tx, input: SubmitInput): Promise<Subm
 
 export type DecisionResult = {
   status: CollectionStatusValue;
+  /** Owner decision أ: the held direct sale this approval released (the caller starts its preparation). */
+  releasedOrderId?: string | null;
   replayed: boolean;
   collectionEventId: string | null;
   /** Commission actually posted by this decision, per employee. Empty on a replay. */
@@ -504,6 +513,10 @@ export async function approveCollection(
   input: { collectionId: string; actorId: string; confirm?: ConfirmFields },
 ): Promise<DecisionResult> {
   const row = await lockCollection(tx, input.collectionId);
+  // Owner أ on top-ups: a top-up's approval releases its held order — lock that order FIRST, before the receipt number
+  // and the posting take their locks, so two top-ups of one order approved at once queue here instead of deadlocking.
+  const top = await tx.salesCollection.findUnique({ where: { id: input.collectionId }, select: { holdOrderId: true } });
+  if (top?.holdOrderId) await tx.$queryRaw`SELECT "id" FROM "Order" WHERE "id" = ${top.holdOrderId} FOR UPDATE`;
 
   if (row.status === "APPROVED") {
     // A replayed approval. Behind the lock, so the first one has finished: report what it
@@ -597,8 +610,11 @@ export async function approveCollection(
   await emitCollectionStatus(tx, row.id, "PENDING_VERIFICATION", "APPROVED", input.actorId);
   // P1-5: the orders this money touches update their «الدفع» flag (order-flags.ts).
   await recomputeFlagsForCollection(tx, row.id);
+  // Owner decision أ: a paid-now direct sale held over the credit limit is released to preparation by this approval.
+  const releasedOrderId = await releaseOnCollectionApproved(tx, row.id, input.actorId);
 
   return {
+    releasedOrderId,
     status: "APPROVED",
     replayed: false,
     collectionEventId: event?.id ?? null,
@@ -650,6 +666,8 @@ export async function rejectCollection(
   });
 
   await emitCollectionStatus(tx, input.collectionId, row.status, "REJECTED", input.actorId);
+  // Owner decision أ: the held sale stays held — «رُفض الإيصال».
+  await holdOnCollectionRejected(tx, input.collectionId, input.actorId, reason, input.reasonCode ?? null);
   return { status: "REJECTED", replayed: false, collectionEventId: null, commission: [] };
 }
 

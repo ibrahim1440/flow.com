@@ -1,7 +1,7 @@
 "use client";
 
 import { localizeApiError } from "@/lib/i18n/api-errors";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Camera, Paperclip, Plus, Upload } from "lucide-react";
 import {
@@ -41,6 +41,8 @@ export type CollectionRow = {
   submittedAt: string;
   decidedAt: string | null;
   decisionReason: string | null;
+  /** RETURN_FOR_CORRECTION: «رجع لك» (Abu Fahd friction 12 — one word everywhere) with «صحّحه». */
+  decisionReasonCode?: string | null;
   reversedAt: string | null;
   reversalReason: string | null;
   submittedBy: { id: string; name: string } | null;
@@ -113,9 +115,16 @@ const UNAVAILABLE: Record<string, { ar: string; en: string }> = {
 };
 
 export function CollectionsPanel({
-  dealId, ar, lang, summary, rows, action, onChanged,
+  dealId, ar, lang, summary, rows, action, onChanged, heldOrder = null, dealOrders = [], collectFor = null,
 }: {
   dealId: string;
+  /** Owner أ (the manual-collection trap): the deal's order held for its money — paid only from the order. Abu Fahd R4
+   *  F2: when it waits for the accountant (the sale's collection, or a top-up) nothing is asked of the rep. */
+  heldOrder?: { id: string; orderNumber: number; paymentHold?: string | null; topUpPending?: boolean; short?: string | null; needsRep?: boolean } | null;
+  /** Abu Fahd R4 F1: the deal's orders — «لأي طلب؟» when there is more than one (held ones listed, not choosable). */
+  dealOrders?: { id: string; orderNumber: number; held: boolean }[];
+  /** «سجّل تحصيل» from a normal order's panel: open the form on that order. */
+  collectFor?: string | null;
   ar: boolean;
   lang: "ar" | "en";
   summary: Summary;
@@ -166,6 +175,15 @@ export function CollectionsPanel({
   // D19 (owner-approved Figma 1988:2): «متى استلمته؟» — اليوم / أمس / تاريخ ثاني (a date field only for the last).
   const [dateChoice, setDateChoice] = useState<"today" | "yesterday" | "other">("today");
   const [file, setFile] = useState<File | null>(null);
+  // P1 ERR-01: the receipt is checked the moment it is chosen (JPEG / PNG / PDF, not empty, 5 MB; another photo becomes a
+  // JPEG) — a refused file is said under the field and never sent.
+  const [fileErr, setFileErr] = useState("");
+  async function chooseFile(f: File | null) {
+    setFileErr(""); setFile(null);
+    if (!f) return;
+    const ready = await prepareReceipt(f);
+    if (ready.ok) setFile(ready.file); else setFileErr(ar ? ready.ar : ready.en);
+  }
   /**
    * One key per opened form, not per click.
    *
@@ -174,6 +192,10 @@ export function CollectionsPanel({
    * on the same row the first attempt may already have created.
    */
   const [key, setKey] = useState("");
+  const payable = dealOrders.filter((o) => !o.held);
+  const pickOrder = dealOrders.length > 1;
+  const [orderChoice, setOrderChoice] = useState("");
+  const autoOpened = useRef(false);
 
   const label = (m: Record<string, { en: string; ar: string }>, k: string) =>
     ar ? (m[k]?.ar ?? k) : (m[k]?.en ?? k);
@@ -189,8 +211,14 @@ export function CollectionsPanel({
     setDateChoice("today");
     setMethod("BANK_TRANSFER");
     setKey(`col-${dealId}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
+    // One order: as before (the server's default). Several: the chosen one (the order panel's, else the first payable).
+    setOrderChoice(!pickOrder ? "" : collectFor && payable.some((o) => o.id === collectFor) ? collectFor : payable[0]?.id ?? "");
     setOpen(true);
   }
+  // «سجّل تحصيل» from a normal order's panel opens the form here, on that order (once).
+  useEffect(() => {
+    if (!autoOpened.current && collectFor && action.available && summary.document && payable.some((o) => o.id === collectFor)) { autoOpened.current = true; start(); }
+  });
 
   async function submit() {
     if (busy) return;
@@ -207,6 +235,8 @@ export function CollectionsPanel({
         referenceNumber: reference.trim() || null,
         note: note.trim() || null,
         idempotencyKey: key,
+        // Abu Fahd R4 F1: the order chosen explicitly (the server pays a held order only from the order itself).
+        ...(orderChoice ? { orderId: orderChoice } : {}),
       },
     });
     if (!res.ok) {
@@ -224,16 +254,18 @@ export function CollectionsPanel({
       const up = await fetch(`/api/sales/collections/${res.data.collectionId}/evidence`, {
         method: "POST",
         body: form,
-      });
-      if (!up.ok) {
-        const data = await up.json().catch(() => ({}));
+      }).catch(() => null);
+      if (!up || !up.ok) {
+        const data = up ? await up.json().catch(() => ({})) : {};
         setBusy(false);
         setOpen(false);
         onChanged();
-        setError(
-          (ar ? "سُجِّل التحصيل، لكن تعذّر رفع المرفق: " : "The collection was recorded, but the attachment failed: ") +
-            (localizeApiError(data) ?? ""),
-        );
+        // P1 ERR-01 (approved Figma 2033:95): the failure is said ON the collection's row — the dialog is closed, so an
+        // error inside it was never seen — with «أرفق الإيصال» right there.
+        setLaterMsg({
+          id: res.data.collectionId, ok: false,
+          text: (ar ? "الإيصال ما انرفع — التحصيل انحفظ بدون إيصال. " : "The receipt did not upload — the collection was saved without it. ") + (localizeApiError(data) ?? (ar ? "تعذّر الاتصال." : "Could not connect.")),
+        });
         return;
       }
     }
@@ -272,13 +304,32 @@ export function CollectionsPanel({
             <b className="v"><Money value={summary.unpaidGross} currency={doc.currency} strong /></b>
             {Number(summary.pendingGross) > 0 ? <span className="s">{ar ? "منها " : "of which "}<Money value={summary.pendingGross} currency={doc.currency} />{ar ? " بانتظار التحقق" : " awaiting verification"}</span> : null}
           </div>
-          {action.available && (
-            <button type="button" className="col-record" onClick={start} data-testid="record-collection">
-              <Plus size={18} aria-hidden />{ar ? "سجّل تحصيل من العميل" : "Record a payment from the customer"}
-            </button>
+          {!action.available && heldOrder && payable.length === 0 && heldOrder.needsRep === false
+            // Nothing left to record on the deal (the rest is recorded and waits): say so — the button is not there.
+            ? <span className="col-record" style={{ opacity: 0.75, cursor: "default" }} data-testid="record-collection-waiting">{ar ? "بانتظار اعتماد المحاسب للباقي" : "Waiting for the accountant to approve the rest"}</span>
+            : null}
+          {action.available && (heldOrder && payable.length === 0
+            // The held order's money goes through «سجّل الباقي» on the order — the button takes the rep there; while it
+            // waits for the accountant (F2) there is nothing to press.
+            ? heldOrder.needsRep === false
+              ? <span className="col-record" style={{ opacity: 0.75, cursor: "default" }} data-testid="record-collection-waiting">{ar ? "بانتظار اعتماد المحاسب للباقي" : "Waiting for the accountant to approve the rest"}</span>
+              : <Link className="col-record" href={`/dashboard/orders?order=${encodeURIComponent(heldOrder.id)}`} data-testid="record-collection-held">
+                  <Plus size={18} aria-hidden />{heldOrder.short || heldOrder.needsRep === undefined ? (ar ? `سجّل الباقي من الطلب #${heldOrder.orderNumber}` : `Record the rest from order #${heldOrder.orderNumber}`) : (ar ? `افتح الطلب #${heldOrder.orderNumber}` : `Open order #${heldOrder.orderNumber}`)}
+                </Link>
+            : <button type="button" className="col-record" onClick={start} data-testid="record-collection">
+                <Plus size={18} aria-hidden />{ar ? "سجّل تحصيل من العميل" : "Record a payment from the customer"}
+              </button>
           )}
         </div>
       )}
+      {heldOrder ? (
+        <p className="notice" data-testid="collection-held-banner" style={{ marginBottom: 12 }}>
+          {heldOrder.needsRep === false
+            ? (ar ? "فيه طلب موقوف بانتظار اعتماد المحاسب للمبلغ — ما عليك شي الحين. " : "An order is held until the accountant approves its money — nothing for you now. ")
+            : (ar ? "فيه طلب موقوف بانتظار المبلغ — سجّل الباقي من الطلب. " : "An order is held for its money — record the rest from the order. ")}
+          <Link href={`/dashboard/orders?order=${encodeURIComponent(heldOrder.id)}`} data-testid="collection-held-link">{ar ? `افتح الطلب #${heldOrder.orderNumber}` : `Open order #${heldOrder.orderNumber}`}</Link>
+        </p>
+      ) : null}
 
       {/* Why the button is not there, whenever the person can act on the reason (NOTHING_OUTSTANDING
           is excluded: the state already says the deal is fully collected). */}
@@ -325,7 +376,9 @@ export function CollectionsPanel({
                   <li key={r.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--border-subtle)", fontSize: 13.5 }}>
                     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 12 }}>
                       <span>
-                        {label(STATUS_LABEL, r.status)}
+                        {r.status === "REJECTED" && r.decisionReasonCode === "RETURN_FOR_CORRECTION"
+                          ? <>{ar ? "رجع لك" : "Back to you"} · <Link href="/dashboard/sales/collections" data-testid={`deal-collection-fix-${r.id}`}>{ar ? "صحّحه" : "Fix it"}</Link></>
+                          : label(STATUS_LABEL, r.status)}
                         <span style={{ color: "var(--text-muted)" }}>
                           {" · "}{label(METHOD_LABEL, r.paymentMethod)}{" · "}<Num>{formatDay(r.collectedAt)}</Num>
                         </span>
@@ -413,7 +466,7 @@ export function CollectionsPanel({
           wide
           footer={
             <div className="col-foot">
-              <Button disabled={busy || !okAmount || !collectedAt} onClick={submit} testId="confirm-collection">
+              <Button disabled={busy || !okAmount || !collectedAt || (pickOrder && !orderChoice)} onClick={submit} testId="confirm-collection">
                 {busy ? "…" : (ar ? "سجّل التحصيل" : "Record the collection")}
               </Button>
               <Button variant="secondary" onClick={() => setOpen(false)}>{ar ? "إلغاء" : "Cancel"}</Button>
@@ -432,6 +485,20 @@ export function CollectionsPanel({
               {Number(summary.pendingGross) > 0 ? <small>{ar ? " · بعد خصم ما ينتظر التحقق" : " · after what awaits verification"}</small> : null}</span>
             <small>{ar ? "مقابل عرض " : "Against quotation "}<bdi dir="ltr"><Num>{doc.quoteNumber}</Num></bdi></small>
           </div>
+
+          {pickOrder ? (
+            <div className="col-field" data-testid="collection-order-pick" style={{ marginBottom: 12 }}>
+              <label htmlFor="col-order" className="col-l">{ar ? "لأي طلب؟" : "For which order?"} <span className="req">*</span></label>
+              <select id="col-order" className="hr-input" value={orderChoice} onChange={(e) => setOrderChoice(e.target.value)} data-testid="collection-order">
+                {dealOrders.map((o) => (
+                  <option key={o.id} value={o.id} disabled={o.held}>{o.held ? (ar ? `#${o.orderNumber} — موقوف، سجّل الباقي من الطلب` : `#${o.orderNumber} — held, record the rest from the order`) : `#${o.orderNumber}`}</option>
+                ))}
+              </select>
+              {dealOrders.filter((o) => o.held).map((o) => (
+                <p key={o.id} className="col-hint" data-testid={`collection-order-held-${o.orderNumber}`}>{ar ? `الطلب #${o.orderNumber} موقوف — ` : `Order #${o.orderNumber} is held — `}<Link href={`/dashboard/orders?order=${encodeURIComponent(o.id)}`}>{ar ? "سجّل الباقي من الطلب" : "record the rest from the order"}</Link></p>
+              ))}
+            </div>
+          ) : null}
 
           <div className="col-grid">
             <div className="col-field">
@@ -503,9 +570,11 @@ export function CollectionsPanel({
                     type="file"
                     accept="application/pdf,image/jpeg,image/png"
                     className="sr-only"
-                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                    onChange={(e) => void chooseFile(e.target.files?.[0] ?? null)}
+                    data-testid="collection-file"
                   />
                 </label>
+                {fileErr ? <span className="col-later-err" role="alert" data-testid="collection-file-error">{fileErr}</span> : null}
               </Field>
             </div>
             <Field id="col-note" label={ar ? "ملاحظات" : "Notes"}>

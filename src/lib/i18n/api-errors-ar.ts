@@ -766,6 +766,7 @@ export const API_ERROR_TEMPLATES_AR: ReadonlyArray<readonly [string, string]> = 
   ["\"${f}\" is maintained by the system and cannot be set from an order edit.", "«{0}» يحدّده النظام ولا يُعدَّل من تعديل الطلب."],
   ["\"${item.productSku!.skuCode}\" has no bill of materials, so its production needs cannot be derived.", "«{0}» بلا قائمة مواد، فلا يُحسب احتياج إنتاجه."],
   ["\"${row.email}\" is not an email address.", "«{0}» ليس بريدًا إلكترونيًا."],
+  ["\"${row.phone}\" is not a phone number.", "«{0}» مو رقم جوال صحيح."],
   ["\"${row.nextFollowUpAt}\" is not a date. Use YYYY-MM-DD.", "«{0}» ليس تاريخًا. استخدم YYYY-MM-DD."],
   ["\"${row.source}\" is not a known source. Use one of: ${SOURCES.join(\", \")}.", "«{0}» مصدر غير معروف. استخدم أحد: {1}."],
   ["\"${sku.skuCode}\" is inactive and cannot be sampled.", "«{0}» موقوف ولا تُرسل منه عينة."],

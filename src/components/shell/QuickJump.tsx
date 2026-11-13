@@ -1,5 +1,6 @@
 "use client";
 
+import { displayPhone } from "@/lib/contact/phone";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Ico } from "./icons";
@@ -261,7 +262,7 @@ export function QuickJump({ lang, userId, pages, actions, pick, onClose, canCrea
                     <li key={r.key} role="option" id={`d21-pal-${r.key}`} aria-selected={active}>
                       <a href={href} {...common} data-testid={h ? `pal-hit-${h.kind}-${h.id}` : `pal-recent-${r.key}`} onClick={(e) => { e.preventDefault(); go(r); }}>
                         {icon}
-                        <span><b><bdi>{name}</bdi>{h?.tier ? <em className={`d21-pal-st d21-pal-tier is-${h.tier.toLowerCase()}`} data-testid={`pal-tier-${h.id}`}>{TIER_WORD[h.tier][ar ? 0 : 1]}</em> : null}{word ? <em className="d21-pal-st">{word}</em> : null}</b>{sub || h?.phone ? <small>{sub ? <bdi>{sub}</bdi> : null}{sub && h?.phone ? " · " : null}{h?.phone ? <bdi dir="ltr">{h.phone}</bdi> : null}</small> : null}</span>
+                        <span><b><bdi>{name}</bdi>{h?.tier ? <em className={`d21-pal-st d21-pal-tier is-${h.tier.toLowerCase()}`} data-testid={`pal-tier-${h.id}`}>{TIER_WORD[h.tier][ar ? 0 : 1]}</em> : null}{word ? <em className="d21-pal-st">{word}</em> : null}</b>{sub || h?.phone ? <small>{sub ? <bdi>{sub}</bdi> : null}{sub && h?.phone ? " · " : null}{h?.phone ? <bdi dir="ltr">{displayPhone(h.phone)}</bdi> : null}</small> : null}</span>
                         {active ? <small className="d21-pal-hint" aria-hidden>{pick ? L("Enter يختار", "Enter picks") : L("Enter يفتح", "Enter opens")}</small> : null}
                       </a>
                     </li>

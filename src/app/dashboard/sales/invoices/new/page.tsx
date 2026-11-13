@@ -19,6 +19,7 @@ import { useTerm } from "@/components/chrome";
 import { useAccountantView } from "../../../accounting/_ui/qoyod-pages";
 import { PartyCard } from "@/components/forms/QoyodForm";
 import { UNASSIGNED_LOCATION, useLocations } from "../../../accounting/_ui/locations";
+import { CreditLimitDialog, type CreditRefusal } from "@/components/credit/credit-ui";
 import { DirectDealPicker, DoneCard, ModeBadge, PaymentSection, SampleDealPicker, samplePaidText, SampleNotes, effectiveDiscounts, isSaleMode, lineForSku, modeLine, sendMode, useModeData, type ModeDone, type SaleMode } from "../_ui/sale-mode";
 
 type Customer = { id: string; name: string; nameAr: string | null; vatNumber: string | null; commercialRegNo: string | null; city: string | null; address: string | null; paymentTermsDays: number | null;
@@ -210,6 +211,13 @@ function Manual({ initialQ, mode = null, initialCustomerId, opportunityId }: { i
   const modeGross = totals.priced ? Number(totals.priced.grandTotal.toFixed(2)) : 0;
   // A second sample of a product this year (the same rule SampleNotes shows): its «أرسل» says where it goes.
   const repeatSample = mode === "sample" && !!md.facts && lines.some((l) => { const s = md.skus.find((x) => x.id === l.productSkuId); return !!s?.productId && md.facts!.sampledProducts.some((p) => p.productId === s.productId); });
+  // Abu Fahd (friction 1 / 9): what is left of the customer's credit limit, once the customer is chosen (only when the rep
+  // may see the figures — the exposure answers 404 otherwise, and the strip stays hidden), and whether «أرسل» will hold
+  // the sale (cash / card over the limit, owner decision أ) — said BEFORE sending.
+  const expo = useApi<{ limit: string | null; available: string | null }>(mode === "direct-sale" && customer ? `/api/customers/${encodeURIComponent(customer.id)}/exposure` : null);
+  const room = expo.data?.limit != null && expo.data.available != null ? Math.max(0, Number(expo.data.available)) : null;
+  const overLimit = room != null && modeGross > room;
+  const willHold = mode === "direct-sale" && overLimit && !needsApproval && (payment === "CASH" || payment === "CARD");
   const modeReady = !!mode && !!customer && totals.ok && lines.length > 0 && lines.every((l) => !!l.productSkuId) && (mode === "sample" || !!payment);
   const sendSale = async () => {
     setTried(true);
@@ -226,8 +234,14 @@ function Manual({ initialQ, mode = null, initialCustomerId, opportunityId }: { i
     setSending(true);
     const r = await sendMode(mode, body, payment === "BANK_TRANSFER" ? receipt : null, L);
     setSending(false);
-    if (r.ok) setDone(r.done); else w.setError(r.error);
+    if (r.ok) setDone(r.done);
+    // P1 ERR-02: over the credit limit — the figures and «اطلب اعتماد المشرف» (Figma 2033:28), not a bare error line.
+    else if (r.credit && mode === "direct-sale") { setCreditBody(body); setCreditRefusal(r.credit); }
+    else w.setError(r.error);
   };
+  const [creditRefusal, setCreditRefusal] = useState<CreditRefusal | null>(null);
+  // Abu Fahd M1: the refused sale, kept with the approval request so the rep resumes it with one tap.
+  const [creditBody, setCreditBody] = useState<Record<string, unknown> | null>(null);
   const [confirm, setConfirm] = useState<null | "issue" | "print" | "pdf">(null);
   const payload = () => ({ customerId: customer!.id, family, buyer, supplyDate, paymentTermsDays: terms || undefined, notes, lines, requestKey: key,
     ...(branchId ? { branchId: branchId === UNASSIGNED_LOCATION ? null : branchId } : {}) });
@@ -267,6 +281,7 @@ function Manual({ initialQ, mode = null, initialCustomerId, opportunityId }: { i
     <InvShell title={L("فاتورة مبيعات جديدة", "New sales invoice")} testId="invoice-new" bare={simple}>
       {mode ? <ModeBadge mode={mode} lockTax={lockTax} gross={modeGross} /> : null}
       <Msg error={w.error ?? (mode ? md.error : null)} />
+      {creditRefusal && customer ? <CreditLimitDialog ar={isAr} customerId={customer.id} kind="DIRECT_SALE" credit={creditRefusal} onClose={() => setCreditRefusal(null)} resume={creditBody ? { path: "/api/sales/direct-sale", body: creditBody } : undefined} /> : null}
       <div className="acct-card">
         <h2>{L("العميل", "Customer")}</h2>
         {customer ? (
@@ -370,12 +385,22 @@ function Manual({ initialQ, mode = null, initialCustomerId, opportunityId }: { i
           {mode ? (
             <div className="acct-foot inv-mode-foot" data-testid="invoice-mode-foot">
               {/* أبو فهد (B4 / wording): what «أرسل» does, as the state really is — never a line that contradicts it. */}
-              <span className="acct-hint" data-testid="invoice-mode-foot-text">{mode === "sample"
+              {mode === "direct-sale" && room != null && customer ? <span className={`acct-hint${overLimit ? " is-warn" : ""}`} data-testid="invoice-mode-limit">{L(`باقي من حد ${customer.nameAr || customer.name}: `, `Left on ${customer.name}'s limit: `)}<bdi className="hr-num">{money(room.toFixed(2))}</bdi> {L("⃁", "SAR")}</span> : null}
+              <span className={`acct-hint${willHold ? " is-warn" : ""}`} data-testid="invoice-mode-foot-text">{mode === "sample"
                 ? (modeGross > 0
                   ? <>{L("لما تضغط «أرسل»: تنسوّى شحنة العيّنة وتروح للتحضير · ", "On «Send»: the sample goes to preparation · ")}{samplePaidText(modeGross, L)}</>
                   : L("لما تضغط «أرسل»: تنسوّى شحنة العيّنة وتروح للتحضير · الفاتورة بصفر تروح للمحاسب يصدرها · ما فيه دفع", "On «Send»: the sample goes to preparation · the zero invoice goes to the accountant to issue · no payment"))
                 : needsApproval
                   ? L("لما تضغط «أرسل»: يروح لمشرفك يوافق — بعدها الطلب للتحضير والفاتورة للمحاسب", "On «Send»: it goes to your supervisor — then the order to preparation and the invoice to the accountant")
+                  : willHold
+                    // Abu Fahd R2 P5: «هالطلب يتجاوز الحد» when only this order goes over what is left.
+                    ? (room != null && room > 0
+                      ? L("لما تضغط «أرسل»: ينسوّى الطلب، بس هالطلب يتجاوز الحد المتبقي — يوقف «بانتظار تأكيد استلام المبلغ» لين يأكّد المحاسب، بعدها يروح للتحضير", "On «Send»: the order is created, but this order goes over what is left of the limit — it is held «awaiting payment confirmation» until the accountant confirms, then it goes to preparation")
+                      : L("لما تضغط «أرسل»: ينسوّى الطلب، بس العميل فوق حد الائتمان — يوقف «بانتظار تأكيد استلام المبلغ» لين يأكّد المحاسب، بعدها يروح للتحضير", "On «Send»: the order is created, but the customer is over the credit limit — it is held «awaiting payment confirmation» until the accountant confirms, then it goes to preparation"))
+                  : payment === "CREDIT" && overLimit
+                    ? (room != null && room > 0
+                      ? L("لما تضغط «أرسل»: هالطلب يتجاوز الحد المتبقي — بيطلب منك اعتماد المشرف قبل ما ينسوّى", "On «Send»: this order goes over what is left of the limit — it will ask for a supervisor's approval first")
+                      : L("لما تضغط «أرسل»: العميل فوق حد الائتمان — بيطلب منك اعتماد المشرف قبل ما ينسوّى", "On «Send»: the customer is over the credit limit — it will ask for a supervisor's approval first"))
                   : payment === "CREDIT"
                     ? L("لما تضغط «أرسل»: ينسوّى الطلب ويروح للتحضير · تروح الفاتورة للمحاسب يصدرها · ما ينسجل تحصيل — الفاتورة تنتظر الدفع", "On «Send»: the order goes to preparation · the invoice goes to the accountant to issue · no collection is recorded — the invoice waits for payment")
                     : L("لما تضغط «أرسل»: ينسوّى الطلب ويروح للتحضير · تروح الفاتورة للمحاسب يصدرها · ينسجل التحصيل", "On «Send»: the order goes to preparation · the invoice goes to the accountant to issue · the collection is recorded")}</span>

@@ -444,7 +444,7 @@ function RepBoard({ ar, data, month, lang, onMonth, can }: { ar: boolean; data: 
     { icon: "deal", tone: "t-ok", label: ar ? "صفقات كسبتها" : "Deals won", value: String(t.won), sub: ar ? `بقيمة ${whole(t.wonValue)} ${sar}` : `worth ${whole(t.wonValue)} ${sar}` },
     { icon: "trend", tone: "t-pr", label: ar ? "نسبة الكسب" : "Win rate", value: t.winRatePercent === null ? "—" : `${whole(t.winRatePercent)}%`, sub: closed ? (ar ? `${t.won} كسبت من ${closed} انقفلت` : `${t.won} of ${closed} closed`) : (ar ? "ما انقفلت صفقات هالشهر" : "No deal closed yet") },
     { icon: "quote", tone: "t-sa", label: ar ? "عروض الأسعار" : "Quotations", value: String(t.quotesIssued), sub: ar ? `انقبل منها ${t.quotesAccepted}` : `${t.quotesAccepted} accepted`, href: "/dashboard/sales/quotes" },
-    { icon: "wallet", tone: "t-in", label: ar ? "صفقات مفتوحة" : "Open deals", value: String(t.openCount), sub: ar ? `بقيمة ${whole(t.openValue)} ${sar}` : `worth ${whole(t.openValue)} ${sar}`, href: "/dashboard/sales/deals" },
+    { icon: "wallet", tone: "t-in", label: ar ? "صفقات مفتوحة" : "Open deals", value: String(t.openCount), sub: ar ? `بقيمة ${whole(t.openValue)} ${sar}` : `worth ${whole(t.openValue)} ${sar}`, href: "/dashboard/sales/pipeline" },
   ];
   const trend = data.trend.slice(-6);
   const top = Math.max(1, ...trend.map((m) => Math.max(Number(m.netCollected), Number(m.target ?? 0))));
@@ -500,7 +500,7 @@ function RepBoard({ ar, data, month, lang, onMonth, can }: { ar: boolean; data: 
           </section>
           <section className="mny-card" aria-labelledby="pf-stages-h">
             <div className="mny-h"><div><h2 id="pf-stages-h">{ar ? "صفقاتي المفتوحة" : "My open deals"}</h2><small>{ar ? "حسب المرحلة" : "By stage"}</small></div>
-              {can("/dashboard/sales/deals") ? <Link className="mny-lk" href="/dashboard/sales/deals">{ar ? "افتح الصفقات" : "Open deals"}<Ico name="chev" small style={{ transform: ar ? "scaleX(-1)" : undefined }} /></Link> : null}</div>
+              {can("/dashboard/sales/pipeline") ? <Link className="mny-lk" href="/dashboard/sales/pipeline">{ar ? "افتح الصفقات" : "Open deals"}<Ico name="chev" small style={{ transform: ar ? "scaleX(-1)" : undefined }} /></Link> : null}</div>
             {stages.length ? stages.map((s) => (
               <div key={s.stageId} className="mny-st">
                 <span className="mny-st-h"><b>{ar ? s.nameAr : s.nameEn}</b><span className="num">{deals(s.count)} · {whole(s.value)} {sar}</span></span>

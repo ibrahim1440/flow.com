@@ -79,8 +79,11 @@ export async function GET(request: Request) {
     counts.returned = returned;
     counts.rejected = (counts.rejectedAll ?? 0) - returned;
     delete counts.rejectedAll;
+    // Abu Fahd R2 P3: a pending receipt that pays a held direct sale says which order its confirmation releases.
+    const { heldOrderNumbersFor } = await import("@/lib/services/orders/payment-hold");
+    const releases = await heldOrderNumbersFor(prisma as never, rows.filter((r) => r.status === "PENDING_VERIFICATION").map((r) => r.id));
     return NextResponse.json({
-      view,
+      view, releases,
       rows: rows.map((r) => {
         const age = r.status === "PENDING_VERIFICATION" ? businessDaysBetween(r.submittedAt, now) : null;
         const self = r.submittedBy.id === user.id;

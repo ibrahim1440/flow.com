@@ -221,7 +221,10 @@ export async function copyAndCorrect(tx: Tx, input: { collectionId: string; acto
   };
   const r = old.source === "ACCOUNTANT"
     ? old.invoiceId ? await recordAccountantReceipt(tx, { ...base, invoiceId: old.invoiceId }) : await recordOpeningReceipt(tx, { ...base, customerId: old.customerId! })
-    : await submitCollection(tx, { ...base, opportunityId: old.opportunityId!, currency: old.currency });
+    : await submitCollection(tx, { ...base, opportunityId: old.opportunityId!, currency: old.currency, ...(old.holdOrderId ? { orderId: old.holdOrderId } : await correctionTarget(tx, old)) });
+  // Owner أ on top-ups: the correction of a returned TOP-UP keeps its server-side link to the held order (from the row,
+  // never the client), so its approval still counts toward releasing the hold.
+  if (!r.replayed && old.holdOrderId) await tx.salesCollection.update({ where: { id: r.collectionId }, data: { holdOrderId: old.holdOrderId } });
   if (!r.replayed && old.evidence.length) {
     await tx.collectionEvidence.createMany({
       data: old.evidence.map((v) => ({ collectionId: r.collectionId, filename: v.filename, mimeType: v.mimeType, byteSize: v.byteSize, checksum: v.checksum, content: v.content, uploadedById: input.actorId })),
@@ -241,4 +244,18 @@ export async function depositAccounts(tx: Pick<Tx, "account" | "accountRole">) {
   const byMethod: Record<string, string | null> = {};
   for (const m of PAYMENT_METHODS) byMethod[m] = by.get(m === "CASH" ? "CASH" : m === "POS_CARD" ? "CARD_CLEARING" : "BANK") ?? null;
   return { accounts, byMethod };
+}
+
+/**
+ * Gate R6 G3: a correction is a new collection on the deal — the trap rule applies to it too (owner أ): while the deal has
+ * a held order, an unrelated returned collection is corrected only onto a non-held order (its own, when it names one), else
+ * refused with ORDER_PAYMENT_HELD. The held sale's own «نسخ وتصحيح» chain and a top-up's correction keep working.
+ */
+async function correctionTarget(tx: Tx, old: { id: string; opportunityId: string | null }): Promise<{ orderId?: string }> {
+  if (!old.opportunityId) return {};
+  const { saleOrderOfChain, assertDealCollectionAllowed } = await import("@/lib/services/orders/payment-hold");
+  if (await saleOrderOfChain(tx as never, old.id)) return {};
+  // The returned row's order was the deal's default, never a choice: like an unnamed collection on the deal's form.
+  await assertDealCollectionAllowed(tx as never, old.opportunityId, undefined);
+  return {};
 }

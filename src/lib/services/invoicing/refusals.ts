@@ -70,6 +70,11 @@ export function sinvDbRefusal(message: string): AccountingError | null {
 
 /** The routes' error answer: invoicing / accounting refusals coded, a database guard mapped, else the shared handling. */
 export function invError(err: unknown): NextResponse {
+  // A coded domain refusal (e.g. P1's 409 CREDIT_LIMIT with its figures) keeps its code and payload.
+  if (err && typeof err === "object" && !(err instanceof Error) && "_appCode" in err && (err as { code?: string }).code) {
+    const e = err as { _appCode: number; code: string; message?: string; errorAr?: string; errorEn?: string; credit?: unknown };
+    return NextResponse.json({ error: e.message ?? e.errorAr, errorAr: e.errorAr ?? e.message, errorEn: e.errorEn, code: e.code, ...(e.credit ? { credit: e.credit } : {}) }, { status: e._appCode });
+  }
   if (err instanceof AccountingError) return NextResponse.json({ ...accountingErrorJson(err), ...(err as AccountingError & { extra?: object }).extra }, { status: err.status });
   const msg = err instanceof Error ? `${err.message} ${JSON.stringify((err as { cause?: unknown }).cause ?? "")}` : String(err);
   const db = sinvDbRefusal(msg);

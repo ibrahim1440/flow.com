@@ -310,7 +310,7 @@ export function ActivityDialog({ ar, customerId, customerName, customerNames, de
         {reminderAt && canRemind && !isTask ? (
           <p className="hr-help is-wide" style={{ gridColumn: "1 / -1", margin: 0 }} data-testid="activity-remind-line">
             {L("ينحفظ النشاط إنه صار، وينضاف تذكير «متابعة» في ", "The activity is saved as done, and a follow-up reminder is added for ")}
-            <bdi>{new Date(reminderAt).toLocaleString(ar ? "ar-SA-u-nu-latn" : "en-GB", { weekday: "long", day: "numeric", month: "long", hour: "numeric", minute: "2-digit", timeZone: "Asia/Riyadh" })}</bdi>
+            <bdi>{new Date(reminderAt).toLocaleString(ar ? "ar-SA-u-ca-gregory-nu-latn" : "en-GB", { weekday: "long", day: "numeric", month: "long", hour: "numeric", minute: "2-digit", timeZone: "Asia/Riyadh" })}</bdi>
             {L(" — يطلع في «مهام اليوم» وفي صفحة العميل.", " — it shows in «Today's tasks» and on the customer page.")}
           </p>
         ) : null}
@@ -449,7 +449,7 @@ export function DetailsDialog({ ar, customer, canOwner, canCredit, onClose, onDo
         <Field label={L("شروط الدفع (أيام)", "Payment terms (days)")}>
           <input className="hr-input" dir="ltr" inputMode="numeric" value={f.paymentTermsDays} onChange={set("paymentTermsDays")} disabled={!canCredit} data-testid="details-terms" />
         </Field>
-        <Field label={L("حد الائتمان (ريال)", "Credit limit (SAR)")} help={L("تجاوزه يظهر تحذيرًا أحمر؛ إيقاف البيع قرار يدوي.", "Going over it shows a red warning; holding sales is a manual decision.")}>
+        <Field label={L("حد الائتمان (ريال)", "Credit limit (SAR)")} help={L("تجاوز الحد يوقف الطلبات الجديدة إلا باعتماد المشرف. 0 = دفع مقدم فقط. فاضي = بدون حد.", "Going over the limit blocks new orders unless a supervisor approves. 0 = prepaid only. Empty = no limit.")}>
           <input className="hr-input" dir="ltr" inputMode="decimal" value={f.creditLimit} onChange={set("creditLimit")} disabled={!canCredit} data-testid="details-credit" />
         </Field>
         <Field label={L("مدة الإيقاف الافتراضية (أيام)", "Default hold duration (days)")} help={L("تقترحها نافذة «إيقاف البيع»؛ فارغة = 14 يومًا.", "Proposed by the «Hold sales» dialog; empty = 14 days.")}>

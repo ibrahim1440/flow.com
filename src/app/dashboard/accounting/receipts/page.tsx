@@ -28,7 +28,7 @@ type Row = {
   ageDays: number | null; tone: "ok" | "amber" | "red" | null;
   can: { confirm: boolean; reject: boolean; reverse: boolean; selfRecorded: boolean };
 };
-type List = { view: string; rows: Row[]; counts: Record<string, number>; totals: Record<string, string>; can: { confirm: boolean; reject: boolean; reverse: boolean; record: boolean; editVoucher: boolean; allowSelfApproval: boolean } };
+type List = { view: string; releases?: Record<string, number>; rows: Row[]; counts: Record<string, number>; totals: Record<string, string>; can: { confirm: boolean; reject: boolean; reverse: boolean; record: boolean; editVoucher: boolean; allowSelfApproval: boolean } };
 type Detail = {
   receipt: Row & { arApplications: { id: string; amount: string; appliedDate: string; invoice: { id: string; number: string | null } }[]; evidence: { id: string; filename: string }[]; order: { orderNumber: number } | null };
   open: { id: string; number: string; issueDate: string; dueDate: string | null; total: string; open: string; ofOrder: boolean; own: boolean }[];
@@ -117,7 +117,7 @@ function Receipts() {
                     <td className="acct-hide-m">{L(METHOD[r.paymentMethod]?.[0] ?? r.paymentMethod, METHOD[r.paymentMethod]?.[1] ?? r.paymentMethod)}</td>
                     <td className="acct-hide-m hr-num">{day(r.collectedAt)}</td>
                     <td className="acct-hide-m">{r.submittedBy.name}</td>
-                    <td>{view === "pending" ? <AgeChip r={r} /> : <StatusChip r={r} />}</td>
+                    <td>{view === "pending" ? <AgeChip r={r} /> : <StatusChip r={r} />}{list.data?.releases?.[r.id] ? <span className="hr-dot tone-warning" data-testid={`rct-releases-${r.id}`}><span>{L(`يفك الطلب #${list.data.releases[r.id]}`, `Releases order #${list.data.releases[r.id]}`)}</span></span> : null}</td>
                     <td><Btn size="sm" variant={r.can.confirm ? "primary" : "ghost"} onClick={() => setOpenId(r.id)} data-testid={`rct-open-${r.id}`}>{r.can.confirm ? L("مراجعة", "Review") : L("عرض", "View")}</Btn></td>
                   </tr>
                 ))}

@@ -3,6 +3,7 @@
 // without the customers module (deals, activities, notes and the rep's book stay Sales'). They may add a customer and
 // correct its invoice particulars (names, VAT, CR, city, address, phone, e-mail); never deals, notes or the rep.
 //   read:  accounting module + accounting › ar;   write: the same, at edit access to accounting.
+import { phoneSearchKey } from "@/lib/contact/phone";
 import { prisma } from "@/lib/db";
 import { canEdit, hasModuleAccess, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 import { parseEmailAddress } from "@/lib/automation/email-mode";
@@ -73,7 +74,7 @@ const SELECT = { id: true, name: true, nameAr: true, vatNumber: true, commercial
 /** Every customer with its receivables (balance, overdue) — the accountant's list. */
 export async function listAccountingCustomers(q: string | null) {
   const term = (q ?? "").trim().slice(0, 80);
-  const where = term ? { OR: [{ name: { contains: term, mode: "insensitive" as const } }, { nameAr: { contains: term, mode: "insensitive" as const } }, { vatNumber: { contains: term } }, { phone: { contains: term } }] } : {};
+  const where = term ? { OR: [{ name: { contains: term, mode: "insensitive" as const } }, { nameAr: { contains: term, mode: "insensitive" as const } }, { vatNumber: { contains: term } }, ...(phoneSearchKey(term) ? [{ phone: { contains: phoneSearchKey(term)! } }] : [])] } : {};
   const [customers, aging] = await Promise.all([
     prisma.customer.findMany({ where, orderBy: { name: "asc" }, take: 1000, select: SELECT }),
     agingReport(prisma, null),

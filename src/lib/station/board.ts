@@ -134,6 +134,9 @@ export type BoardOrder = {
   createdAt: string;
   /** On «سُلّم اليوم»: the last delivery. */
   deliveredAt: string | null;
+  /** Owner decision أ: a direct sale held until the accountant confirms the money taken at the sale (PENDING) or whose
+   *  receipt was rejected — «بانتظار تأكيد استلام المبلغ»; it is not prepared before. The state only. */
+  confirmHold: "PENDING" | "REJECTED" | null;
 };
 
 export type BoardAnswer = { orders: BoardOrder[]; columns: BoardStage[]; version: string; serverTime: string };

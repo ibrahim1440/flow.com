@@ -570,6 +570,13 @@ export async function updateDraft(id: string, patch: DraftPatch, ctx: AuditConte
       next: { lines: parsed ? parsed.lines : doc.lines, paymentTermsDays: data.paymentTermsDays !== undefined ? (data.paymentTermsDays as number | null) : doc.paymentTermsDays },
       actor: editor.actor ?? { id: ctx.actorId, permissions: null },
     }) : null;
+    // P1 gate R1 B1: a direct sale's draft edited by the rep (withdrawn, re-priced) whose new prices raise what the order
+    // commits meets the credit limit on the order's new remaining value — measured before and after the lines change. The
+    // accountant pricing / issuing an order's invoice (editor.canIssue), or any other order's invoice, is not refused here.
+    const { orderRemaining } = await import("@/lib/services/customers/exposure");
+    const saleOrder = parsed && doc.kind === "INVOICE" && doc.orderId && !editor.canIssue
+      ? await tx.order.findUnique({ where: { id: doc.orderId }, select: { channel: true } }) : null;
+    const creditBefore = saleOrder?.channel === "DIRECT_SALE" ? await orderRemaining(tx, doc.orderId!) : null;
     if (parsed) {
       let lines = parsed.lines;
       if (doc.kind !== "INVOICE") lines = noteLinesFrom(doc, lines);
@@ -583,6 +590,15 @@ export async function updateDraft(id: string, patch: DraftPatch, ctx: AuditConte
       Object.assign(data, totalsData(priced));
     }
     const after = await tx.salesInvoice.update({ where: { id }, data, include: { lines: { orderBy: LINE_ORDER } } });
+    if (creditBefore && doc.orderId) {
+      const creditAfter = await orderRemaining(tx, doc.orderId);
+      if (creditAfter.greaterThan(creditBefore)) {
+        const o = await tx.order.findUnique({ where: { id: doc.orderId }, select: { customerId: true } });
+        const { assertCreditLimit, consumeCreditOverride } = await import("@/lib/services/customers/credit-limit");
+        const ov = await assertCreditLimit(tx, { customerId: o?.customerId ?? doc.customerId, amount: creditAfter, actorId: ctx.actorId, kind: "DIRECT_SALE", exceptOrderId: doc.orderId });
+        if (ov) await consumeCreditOverride(tx, ov.overrideId, doc.orderId, ctx.actorId);
+      }
+    }
     if (requested) {
       const diff = correctionDiff({ header: headerOf(doc), lines: doc.lines.map((l) => ({ ...l })) }, { header: headerOf(after), lines: after.lines.map((l) => ({ ...l })) });
       if (diff) await writeRequestEvent(tx, { invoiceId: id, kind: "EDITED_BY_ACCOUNTANT", actorId: ctx.actorId, diff });

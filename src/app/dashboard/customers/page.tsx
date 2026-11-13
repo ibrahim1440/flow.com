@@ -1,5 +1,7 @@
 "use client";
 
+import { displayPhone } from "@/lib/contact/phone";
+import { phoneSearchKey } from "@/lib/contact/phone";
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useMemo, useRef } from "react";
@@ -371,7 +373,7 @@ export default function CustomersPage() {
     return base.filter((c) =>
       c.name.toLowerCase().includes(q) ||
       (c.nameAr && c.nameAr.includes(q)) ||
-      (c.phone && c.phone.includes(q)) ||
+      (c.phone && !!phoneSearchKey(q) && (phoneSearchKey(c.phone) ?? "").includes(phoneSearchKey(q)!)) ||
       (c.email && c.email.toLowerCase().includes(q))
     );
   }, [customers, search, lateOnly, lateIds, noOwnerOnly, bookOn, bookFilter, myBook, bookById]);
@@ -523,7 +525,7 @@ export default function CustomersPage() {
           <>
             <div className="lbl" style={{ margin: "8px 0 12px" }}>{L("التفاصيل", "Details")}</div>
             <dl className="props" style={{ marginBottom: 24 }}>
-              <dt>{t("customerPhone")}</dt><dd>{selected.phone ? <bdi dir="ltr" className="n">{selected.phone}</bdi> : "—"}</dd>
+              <dt>{t("customerPhone")}</dt><dd>{selected.phone ? <bdi dir="ltr" className="n">{displayPhone(selected.phone)}</bdi> : "—"}</dd>
               <dt>{t("customerEmail")}</dt><dd>{selected.email ? <bdi dir="ltr" style={{ overflowWrap: "anywhere" }}>{selected.email}</bdi> : "—"}</dd>
               <dt>{t("customerAddress")}</dt><dd style={{ whiteSpace: "pre-line" }}>{selected.address || "—"}</dd>
               <dt>{L("الطلبات", "Orders")}</dt><dd><span className="n">{selected._count.orders}</span></dd>
@@ -664,7 +666,7 @@ export default function CustomersPage() {
                       </div>
                       <span className="sm cu-orders">{num(c._count.orders)} {L("طلب", c._count.orders === 1 ? "order" : "orders")}</span>
                       <div className="r2">
-                        <span style={{ flex: 1, minWidth: 0 }}>{c.phone ? <bdi dir="ltr" className="n">{c.phone}</bdi> : (otherName(c) ?? "—")}</span>
+                        <span style={{ flex: 1, minWidth: 0 }}>{c.phone ? <bdi dir="ltr" className="n">{displayPhone(c.phone)}</bdi> : (otherName(c) ?? "—")}</span>
                         {!salesView && c._count.roastPreferences > 0 && <span>{num(c._count.roastPreferences)} {t("customerProfilesLabel")}</span>}
                         {c.whatsappOptOut && <span className="flag wa">{L("بلا واتساب", "No WhatsApp")}</span>}
                       </div>
@@ -737,7 +739,7 @@ export default function CustomersPage() {
                             {badges[c.id] && <span className="cu-badges-cell" data-testid={`customer-credit-${c.id}`}><CreditBadges ar={ar} s={badges[c.id]} compact /></span>}
                           </td>
                           {bookOn && myBook ? <td>{statusCell(c.id)}</td> : null}
-                          <td>{c.phone ? <bdi dir="ltr" className="n">{c.phone}</bdi> : <span className="sm">—</span>}</td>
+                          <td>{c.phone ? <bdi dir="ltr" className="n">{displayPhone(c.phone)}</bdi> : <span className="sm">—</span>}</td>
                           <td className="xl">{c.email ? <bdi dir="ltr" style={{ color: "var(--text-secondary)" }}>{c.email}</bdi> : <span className="sm">—</span>}</td>
                           <td className="num">{c._count.orders}</td>
                           {qoyod ? <>

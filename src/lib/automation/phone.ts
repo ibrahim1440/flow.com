@@ -58,6 +58,8 @@ export function normalizePhoneForWhatsApp(raw: string | null | undefined): Phone
 /** For display: 9665XXXXXXXX → +966 5X XXX XXXX. Anything else is shown with a "+". */
 export function formatPhone(phone: string | null | undefined): string {
   if (!phone) return "";
-  const m = /^966(5\d)(\d{3})(\d{4})$/.exec(phone);
-  return m ? `+966 ${m[1]} ${m[2]} ${m[3]}` : `+${phone}`;
+  // P1 ERR-04: a stored +966… (the canonical form) is shown once with its «+», never «++».
+  const bare = phone.startsWith("+") ? phone.slice(1) : phone;
+  const m = /^966(5\d)(\d{3})(\d{4})$/.exec(bare);
+  return m ? `+966 ${m[1]} ${m[2]} ${m[3]}` : `+${bare}`;
 }

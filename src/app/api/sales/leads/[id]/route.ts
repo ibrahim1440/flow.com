@@ -1,4 +1,5 @@
 import { parseLeadIdentity, leadCityFrom } from "@/lib/services/sales/lead-identity";
+import { emailField, phoneField } from "@/lib/contact/phone";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
@@ -78,7 +79,7 @@ export async function PATCH(request: Request, { params }: Params) {
   try {
     const existing = await prisma.lead.findUnique({
       where: { id },
-      select: { id: true, ownerId: true, status: true, companyName: true, phone: true },
+      select: { id: true, ownerId: true, status: true, companyName: true, phone: true, email: true },
     });
     if (!existing) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });
 
@@ -128,8 +129,10 @@ export async function PATCH(request: Request, { params }: Params) {
       if (c) data.city = c;
     }
     str("companyNameAr");
-    str("phone");
-    str("email");
+    // P1 ERR-04: the shared reader — canonical (+966…), cleared with "", a coded 400 when invalid.
+    // Read only when CHANGED: an older stored value that fails the rules never blocks saving the other fields.
+    if (b.phone !== undefined && (typeof b.phone !== "string" || b.phone.trim() !== (existing.phone ?? ""))) data.phone = phoneField(b.phone) ?? null;
+    if (b.email !== undefined && (typeof b.email !== "string" || b.email.trim().toLowerCase() !== (existing.email ?? "").toLowerCase())) data.email = emailField(b.email) ?? null;
     str("city");
     str("address");
     str("sourceNote");
@@ -183,7 +186,8 @@ export async function PATCH(request: Request, { params }: Params) {
         data,
         normalizationFor({
           companyName: (data.companyName as string) ?? existing.companyName,
-          phone: (data.phone as string | null) ?? existing.phone,
+          // P1 ERR-04: a phone cleared to null clears the key (it used to recompute it from the OLD phone).
+          phone: data.phone !== undefined ? (data.phone as string | null) : existing.phone,
         }),
       );
     }

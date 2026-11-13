@@ -5,6 +5,7 @@
 // Every field is optional and nullable: an empty string clears it. None has a default and none
 // is inferred; the account page shows «غير محدد» until an administrator enters it.
 
+import { parseEmail, parsePhone } from "@/lib/contact/phone";
 import { parseFiniteDecimal, roundMoney, type Decimal } from "../commissions/engine";
 
 export const SEGMENTS = ["WHOLESALE", "RETAIL", "CAFE", "DISTRIBUTOR", "OTHER"] as const;
@@ -153,12 +154,18 @@ export function parseContact(b: Record<string, unknown>, partial = false): Parse
     if (v === "\u0000bad" || v === "\u0000long") return fail(`${k} must be text up to ${max} characters.`, "قيمة غير صالحة.");
     if (v !== undefined) out[k] = v;
   }
-  if (out.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(out.email)) return fail("That email address is not valid.", "البريد الإلكتروني غير صالح.");
-  if (out.phone && !/^[+\d][\d\s()-]{5,}$/.test(digitsOnlyKeepPlus(out.phone))) return fail("That phone number is not valid.", "رقم الهاتف غير صالح.");
-  if (out.phone) out.phone = digitsOnlyKeepPlus(out.phone);
+  // P1 ERR-04: the shared reader (lib/contact/phone.ts) — stored canonical (+966…, lower-cased e-mail).
+  if (out.email) {
+    const e = parseEmail(out.email);
+    if (!e.ok) return fail(e.en, e.ar);
+    out.email = e.email;
+  }
+  if (out.phone) {
+    const p = parsePhone(out.phone);
+    if (!p.ok) return fail(p.en, p.ar);
+    out.phone = p.phone;
+  }
   return { ok: true, data: out };
 }
 
-function digitsOnlyKeepPlus(s: string) {
-  return arabicDigits(s).trim();
-}
+

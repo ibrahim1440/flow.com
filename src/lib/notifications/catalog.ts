@@ -196,6 +196,37 @@ export const EVENTS: NotificationEventDef[] = [
       link: f.decision === "APPROVE" && f.receiptDealId ? `/dashboard/sales/deals/${enc(s(f.receiptDealId))}#collections` : `/dashboard/sales/direct-sale?order=${enc(s(f.orderId))}`,
     }),
   },
+  // P1 «fake cash» hold (owner أ, 20261231100000_direct_sale_payment_hold): a cash / card direct sale let through OVER the
+  // credit limit waits for the accountant to verify its collection before preparation; the rep learns the decision.
+  {
+    key: "sales.payment_hold_pending", category: "finance", severity: "warning",
+    label: { ar: "بيع مباشر بانتظار تأكيد استلام المبلغ", en: "A direct sale awaits confirmation of its payment" },
+    recipients: [{ perm: [{ module: "commissions", sub: "collection_verify" }] }], requires: [MOD("commissions"), MOD("sales")],
+    trigger: "createDirectSale — a cash / card sale over the customer's credit limit (services/orders/payment-hold.ts)",
+    render: (f) => ({
+      titleAr: `الطلب ${s(f.orderNumber)} موقوف بانتظار تأكيد استلام المبلغ`,
+      titleEn: `Order ${s(f.orderNumber)} is held until its payment is confirmed`,
+      bodyAr: [s(f.customerName), s(f.amount), "العميل فوق حد الائتمان — أكّد التحصيل ليبدأ التجهيز"].filter(Boolean).join(" · "),
+      bodyEn: [s(f.customerName), s(f.amount), "The customer is over the credit limit — verify the collection to release preparation"].filter(Boolean).join(" · "),
+      link: "/dashboard/sales/collections",
+    }),
+  },
+  {
+    key: "sales.payment_hold_decided", category: "sales", severity: "info",
+    label: { ar: "تأكّد استلام مبلغ بيعك المباشر أو رُفض الإيصال", en: "Your direct sale's payment confirmed / receipt rejected" },
+    recipients: [{ person: "orderOwner" }], requires: [MOD("sales")],
+    trigger: "approve / reject the held sale's collection (services/orders/payment-hold.ts)",
+    render: (f) => ({
+      severity: f.decision === "APPROVE" ? "success" : "warning",
+      // Abu Fahd R2 N2: a receipt RETURNED for correction says what to do — correct it and the order moves by itself.
+      // Abu Fahd R3 A3: a SHORT approval (part of the money approved) says what to do — record the rest from the order.
+      titleAr: f.decision === "APPROVE" ? `تأكّد استلام المبلغ — الطلب ${s(f.orderNumber)} راح للتجهيز` : f.short ? `انعتمد جزء من مبلغ الطلب ${s(f.orderNumber)} — باقي ${s(f.short)} ⃁` : f.returned ? `المحاسب رجّع إيصال الطلب ${s(f.orderNumber)}` : `رُفض الإيصال — الطلب ${s(f.orderNumber)} موقوف`,
+      titleEn: f.decision === "APPROVE" ? `Payment confirmed — order ${s(f.orderNumber)} went to preparation` : f.short ? `Part of order ${s(f.orderNumber)}'s payment approved — SAR ${s(f.short)} left` : f.returned ? `The accountant returned the receipt of order ${s(f.orderNumber)}` : `Receipt rejected — order ${s(f.orderNumber)} is held`,
+      bodyAr: f.decision === "APPROVE" ? "" : f.short ? `انعتمد ${s(f.paid)} من ${s(f.gross)} ⃁ — سجّل الباقي ${s(f.short)} ⃁ من الطلب ويتحرك لحاله` : f.returned ? `المحاسب رجّع الإيصال: ${s(f.reason)} — صحّحه من «التحصيلات» ويتحرك الطلب لحاله` : [s(f.reason), "ما يتحرك إلا إذا رجع العميل تحت الحد أو اعتمد المشرف تجاوز الحد"].filter(Boolean).join(" — "),
+      bodyEn: f.decision === "APPROVE" ? "" : f.short ? `${s(f.paid)} of SAR ${s(f.gross)} approved — record the remaining SAR ${s(f.short)} from the order and it moves by itself` : f.returned ? `The accountant returned the receipt: ${s(f.reason)} — correct it from «Collections» and the order moves by itself` : [s(f.reason), "It moves only once the customer is within the limit or a supervisor approves going over it"].filter(Boolean).join(" — "),
+      link: `/dashboard/orders?order=${enc(s(f.orderId))}`,
+    }),
+  },
   // P0 SEC-02 / C4 (20261230090000_p0_rep_security): a direct sale's or sample's invoice draft edited above the discount
   // threshold waits for the same approvers, in the same inbox; the editor learns the decision.
   {
@@ -432,6 +463,34 @@ export const EVENTS: NotificationEventDef[] = [
       bodyAr: [f.days ? `${s(f.days)} يومًا` : "", s(f.reason)].filter(Boolean).join(" · "),
       bodyEn: [f.days ? `${s(f.days)} days` : "", s(f.reason)].filter(Boolean).join(" · "),
       link: `/dashboard/customers/${enc(s(f.customerId))}`,
+    }),
+  },
+  // P1 ERR-02 (owner 1أ): «اطلب اعتماد المشرف» on an order over the customer's credit limit.
+  {
+    key: "customers.credit_override_pending", category: "sales", severity: "warning",
+    label: { ar: "طلب تجاوز حد ائتمان ينتظر اعتمادك", en: "A credit-limit override awaits your approval" },
+    recipients: [{ perm: [{ module: "customers", sub: "sales_hold" }] }], requires: [MOD("customers")],
+    trigger: "POST /api/customers/[id]/credit/override (requestCreditOverride)",
+    render: (f) => ({
+      titleAr: `اعتمادك مطلوب: طلب فوق حد الائتمان · ${s(f.customerName)}`,
+      titleEn: `Your approval is needed: an order over the credit limit · ${s(f.customerName)}`,
+      bodyAr: [`${s(f.amount)} ⃁`, s(f.reason)].filter(Boolean).join(" · "), bodyEn: [`SAR ${s(f.amount)}`, s(f.reason)].filter(Boolean).join(" · "),
+      link: "/dashboard/workspace/approvals",
+    }),
+  },
+  {
+    key: "customers.credit_override_decided", category: "sales", severity: "info",
+    label: { ar: "تقرر طلب تجاوز حد الائتمان", en: "Your credit-limit override request was decided" },
+    recipients: [{ person: "requester" }], requires: [MOD("customers")],
+    trigger: "POST /api/customers/credit-overrides/[id]/decision (decideCreditOverride)",
+    render: (f) => ({
+      severity: f.decision === "APPROVE" ? "success" : "warning",
+      // Gate R7: closed by the system (the held order was released) — never «انرفض»: nobody refused it.
+      titleAr: f.decision === "APPROVE" ? "اعتمد المشرف الطلب فوق الحد — كمّل الطلب خلال 3 أيام" : f.system ? "انقفل تلقائيًا — الطلب انفك" : "انرفض طلب تجاوز حد الائتمان",
+      titleEn: f.decision === "APPROVE" ? "The supervisor approved the order over the limit — place it within 3 days" : f.system ? "Closed automatically — the order was released" : "The credit-limit override was refused",
+      bodyAr: f.system ? "الطلب انفك قبل قرار المشرف — ما يحتاج اعتماد." : s(f.note), bodyEn: f.system ? "The order was released before the supervisor decided — nothing to approve." : s(f.note),
+      // Abu Fahd M1 / H2: an approval of a request the rep can resume opens it — one tap («كمّل») — not the customer page.
+      link: f.resumable ? `/dashboard/sales/credit-resume/${enc(s(f.requestId))}` : `/dashboard/customers/${enc(s(f.customerId))}`,
     }),
   },
   {

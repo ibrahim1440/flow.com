@@ -1,5 +1,6 @@
 "use client";
 
+import { displayPhone } from "@/lib/contact/phone";
 import { use, useEffect, useState } from "react";
 import { useD21Phone, useD21Title } from "@/components/shell/page-context";
 import { BRAND_PRIMARY_SRC, BRAND_PRIMARY_VIEWBOX } from "@/components/brand/BrandMark";
@@ -85,7 +86,7 @@ function DeliveryNoteDoc({ ids, lang }: { ids: string; lang: DocLang }) {
   const sellerName = (ar ? s.nameAr || s.nameEn : s.nameEn || s.nameAr) || null;
   const sellerLines = [
     (ar ? s.addressAr || s.addressEn : s.addressEn || s.addressAr) && <bdi key="a">{ar ? s.addressAr || s.addressEn : s.addressEn || s.addressAr}</bdi>,
-    s.phone && <>{L("الهاتف ", "Phone ")}<bdi dir="ltr" className="n">{s.phone}</bdi></>,
+    s.phone && <>{L("الهاتف ", "Phone ")}<bdi dir="ltr" className="n">{displayPhone(s.phone)}</bdi></>,
     s.crNumber && <>{L("السجل التجاري ", "CR ")}<bdi dir="ltr" className="n">{s.crNumber}</bdi></>,
   ].filter(Boolean);
   const c = data.customer;
@@ -99,11 +100,11 @@ function DeliveryNoteDoc({ ids, lang }: { ids: string; lang: DocLang }) {
   ];
   const metaEnd: DocRow[] = [{ label: L("العميل", "Customer"), value: <bdi>{customerName}</bdi>, testId: "dn-customer" }];
   if (place) metaEnd.push({ label: L("العنوان", "Address"), value: <bdi>{place}</bdi>, testId: "dn-address" });
-  if (c.phone) metaEnd.push({ label: L("الجوال", "Phone"), value: <bdi dir="ltr">{c.phone}</bdi>, testId: "dn-phone" });
+  if (c.phone) metaEnd.push({ label: L("الجوال", "Phone"), value: <bdi dir="ltr">{displayPhone(c.phone)}</bdi>, testId: "dn-phone" });
   if (c.contact) {
     metaEnd.push({
       label: L("جهة الاتصال", "Contact"),
-      value: <><bdi>{c.contact.name}</bdi>{c.contact.role ? <> · <bdi>{c.contact.role}</bdi></> : null}{c.contact.phone ? <> · <bdi dir="ltr">{c.contact.phone}</bdi></> : null}</>,
+      value: <><bdi>{c.contact.name}</bdi>{c.contact.role ? <> · <bdi>{c.contact.role}</bdi></> : null}{c.contact.phone ? <> · <bdi dir="ltr">{displayPhone(c.contact.phone)}</bdi></> : null}</>,
       testId: "dn-contact",
     });
   }

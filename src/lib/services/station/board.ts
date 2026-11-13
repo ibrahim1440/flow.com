@@ -11,6 +11,7 @@
 // payment or invoice field. The order number, its source, quantities, stage and times only.
 import { opsOrderWhere } from "@/lib/services/sales/scope";
 import { createHash } from "node:crypto";
+import { heldForConfirmation } from "@/lib/services/orders/held-for-confirmation";
 import type { Prisma } from "@/generated/prisma/client";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
@@ -72,7 +73,7 @@ export async function boardSnapshot(now = new Date(), orderWhere: Prisma.OrderWh
     orderBy: { orderNumber: "asc" },
   });
   const ids = rows.map((o) => o.id);
-  const [pipelines, handed, claims, directSales] = await Promise.all([
+  const [pipelines, handed, claims, directSales, held] = await Promise.all([
     orderPipelines(prisma, rows),
     ids.length ? prisma.preparationPick.groupBy({ by: ["orderId"], where: { orderId: { in: ids }, status: "HANDED_OFF" }, _sum: { units: true } }) : [],
     ids.length ? prisma.workItemClaim.findMany({ where: { stationType: "PACKAGING", itemType: "Order", itemId: { in: ids }, status: "ACTIVE" }, select: { itemId: true, status: true, expiresAt: true, claimedByName: true } }) : [],
@@ -81,6 +82,7 @@ export async function boardSnapshot(now = new Date(), orderWhere: Prisma.OrderWh
       const unknown = rows.filter((o) => !o.channel).map((o) => o.id);
       return unknown.length ? prisma.hrAuditLog.findMany({ where: { action: "DIRECT_SALE_CREATED", entityType: "Order", entityId: { in: unknown } }, select: { entityId: true } }) : [];
     })(),
+    heldForConfirmation(ids),
   ]);
   const handedBy = new Map(handed.map((h) => [h.orderId, h._sum.units ?? 0]));
   const direct = new Set(directSales.map((d) => d.entityId));
@@ -114,6 +116,7 @@ export async function boardSnapshot(now = new Date(), orderWhere: Prisma.OrderWh
       orderNumber: o.orderNumber,
       stage,
       hold: o.status === "On Hold",
+      confirmHold: held.get(o.id) ?? null,
       source,
       repName: source === "SALES" ? o.owner?.name ?? null : null,
       units,

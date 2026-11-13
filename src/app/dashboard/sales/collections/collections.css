@@ -98,3 +98,5 @@
 .c-noreceipt-f .n { font-variant-numeric: tabular-nums }
 .c-noreceipt-f:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }
 .c-noreceipt-done { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; padding: 10px 14px; border-radius: 10px; background: var(--status-success-tint, #ebf1ea); color: var(--status-success); font-weight: 600 }
+/* P1 ERR-10 / ERR-01: a file's problem right under its field, in the danger colour. */
+.d21 .c-field-err { font-size: 12.5px; line-height: 20px; color: var(--status-danger) }

@@ -1,4 +1,5 @@
 import { NextResponse } from "@/lib/api-response";
+import { phoneField } from "@/lib/contact/phone";
 import { hash } from "bcryptjs";
 import { verifySecret } from "@/lib/auth/sign-in";
 import { prisma } from "@/lib/db";
@@ -42,7 +43,10 @@ export async function PATCH(request: Request) {
     const { phoneNumber, preferredLanguage, whatsappLanguage, home } = body;
 
     const update: Record<string, unknown> = {};
-    if (phoneNumber !== undefined) update.phoneNumber = phoneNumber || null;
+    // P1 ERR-04: the shared reader (it used to store anything, unchecked).
+    if (phoneNumber !== undefined) {
+      try { update.phoneNumber = phoneField(phoneNumber) ?? null; } catch (e) { const x = e as { message: string; errorEn: string; code: string }; return NextResponse.json({ error: x.message, errorEn: x.errorEn, code: x.code, field: "phoneNumber" }, { status: 400 }); }
+    }
     if (preferredLanguage === "ar" || preferredLanguage === "en") {
       update.preferredLanguage = preferredLanguage;
     }

@@ -5,15 +5,18 @@
 // تُفوتر» (customers/aggregates.ts outstandingBalance). One implementation, so the two screens cannot disagree.
 import type { PrismaClient } from "@/generated/prisma/client";
 import { Decimal, acceptedDocumentPerDeal, outstandingBalance } from "./aggregates";
-import { invoiceCreditFigures } from "@/lib/services/invoicing/ar";
 
 type Db = Pick<PrismaClient, "salesInvoice" | "salesCollection" | "quote" | "arApplication">;
 
-/** The AR balance owed, or null when the viewer may not read invoices or the customer has no issued invoice. */
-export async function arBalanceOwed(db: Db, customerId: string, canReadInvoices: boolean, now: Date): Promise<Decimal | null> {
-  if (!canReadInvoices) return null;
-  if ((await db.salesInvoice.count({ where: { customerId, status: "ISSUED" } })) === 0) return null;
-  return (await invoiceCreditFigures(db as never, [customerId], now)).get(customerId)?.outstanding ?? null;
+/**
+ * P1 ERR-02 (owner, 12 Nov 2026): the balance OWED is ONE figure for every viewer of the customer — the receivable of
+ * ./exposure.ts (the accounting AR: issued invoices − receipts − credit notes), whether or not an invoice was issued yet
+ * and whether or not the viewer reads invoices (the amount, not the documents). `canReadInvoices` is kept for callers.
+ */
+export async function arBalanceOwed(db: Db, customerId: string, _canReadInvoices: boolean, now: Date): Promise<Decimal | null> {
+  const { customerExposure } = await import("./exposure");
+  const e = (await customerExposure(db as never, [customerId], now)).get(customerId);
+  return e ? new Decimal(e.receivable.toString()) : null;
 }
 
 export type CustomerBalance = {

@@ -1,4 +1,5 @@
 import { NextResponse } from "@/lib/api-response";
+import { phoneField } from "@/lib/contact/phone";
 import { prisma } from "@/lib/db";
 import { requireAnyModule, requireEdit } from "@/lib/auth-server";
 import { handleDomainError, handlePrismaError } from "@/lib/api-error";
@@ -109,7 +110,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     // before / after. A value sent unchanged (the dialog posts the whole form) is not a change.
     const current = await prisma.customer.findUnique({
       where: { id },
-      select: { accountOwnerId: true, creditLimit: true, paymentTermsDays: true, priceList: true, defaultHoldDays: true, reorderIntervalDays: true, email: true, emailOptOut: true, whatsappOptOut: true },
+      select: { accountOwnerId: true, creditLimit: true, paymentTermsDays: true, priceList: true, defaultHoldDays: true, reorderIntervalDays: true, email: true, emailOptOut: true, whatsappOptOut: true, phone: true },
     });
     if (!current) return NextResponse.json({ error: "Not found" }, { status: 404 });
     // Batch 25: the e-mail automated messages go to — one valid address (lower-cased), or none. Checked only when it
@@ -122,6 +123,12 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       const parsed = parseEmailAddress(sentEmail);
       if (!parsed) return NextResponse.json({ error: "اكتب إيميل واحد صحيح، مثل orders@example.com", errorEn: "Enter one valid e-mail address.", code: "INVALID_EMAIL", field: "email" }, { status: 400 });
       email = parsed;
+    }
+    // P1 ERR-04: the phone through the shared reader, only when it CHANGES (like the e-mail above).
+    const phoneChanged = body.phone !== undefined && (typeof body.phone !== "string" || body.phone.trim() !== (current.phone ?? ""));
+    let newPhone: string | null = null;
+    if (phoneChanged) {
+      try { newPhone = phoneField(body.phone) ?? null; } catch (e) { const x = e as { message: string; errorEn: string; code: string }; return NextResponse.json({ error: x.message, errorEn: x.errorEn, code: x.code, field: "phone" }, { status: 400 }); }
     }
     const optOutChanged = body.emailOptOut !== undefined && body.emailOptOut !== current.emailOptOut;
     // Owner rep · manager · admin (owner decision 31 Oct 2026): a rep scoped to their own book edits the e-mail of
@@ -142,7 +149,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       data: {
         ...(body.name !== undefined && { name: body.name.trim() }),
         ...(body.nameAr !== undefined && { nameAr: body.nameAr.trim() || null }),
-        ...(body.phone !== undefined && { phone: body.phone.trim() || null }),
+        ...(phoneChanged && { phone: newPhone }),
         ...(emailChanged && { email }),
         ...(consent ? consent.data : {}),
         ...(body.address !== undefined && { address: body.address.trim() || null }),

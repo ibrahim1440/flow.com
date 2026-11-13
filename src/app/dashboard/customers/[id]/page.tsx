@@ -1,5 +1,6 @@
 "use client";
 
+import { displayPhone } from "@/lib/contact/phone";
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -165,7 +166,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
       const res = await api<Account>(`/api/customers/${id}/account`);
       if (cancelled) return;
       if (res.ok) { setData(res.data); setError(""); }
-      else setError(res.status === 404 ? L("العميل غير موجود.", "Customer not found.") : res.status === 403 ? L("لا تملك صلاحية عرض حساب العميل.", "You do not have access to customer accounts.") : (res.data.error ?? L("تعذّر تحميل الحساب.", "Could not load the account.")));
+      else setError(res.status === 404 ? L("هذا العميل مو ضمن عملائك، أو ما هو موجود.", "This customer is not one of yours, or does not exist.") : res.status === 403 ? L("لا تملك صلاحية عرض حساب العميل.", "You do not have access to customer accounts.") : (res.data.error ?? L("تعذّر تحميل الحساب.", "Could not load the account.")));
       setLoading(false);
     })();
     return () => { cancelled = true; };
@@ -360,8 +361,8 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   const monthKg = m.kgPerMonth ?? null;
   const delta = sales?.changePercent;
   const unpricedNote = sections.sales && m.unpricedOrders != null && m.unpricedOrders > 0 ? (ar
-    ? `المبيعات والرصيد محسوبة من عروض الأسعار المقبولة والدفعات المعتمدة؛ ${m.unpricedOrders} من طلبات العميل بلا عرض سعر ولا قيمة لها في النظام.`
-    : `Sales and balance come from accepted quotations and approved payments; ${m.unpricedOrders} of the customer's orders have no quotation and carry no value in the system.`) : undefined;
+    ? `المبيعات محسوبة من عروض الأسعار المقبولة؛ ${m.unpricedOrders} من طلبات العميل بلا عرض سعر.`
+    : `Sales come from accepted quotations; ${m.unpricedOrders} of the customer's orders have no quotation.`) : undefined;
   // «مبيعات 12 شهرًا» comes from accepted quotations; with none and orders that carry no quotation, a «0» would be
   // wrong next to «26 طلب» (council fix round 1, P0-9): the tile says why there is no figure instead.
   const salesUnknown = !!sales && Number(sales.net) === 0 && (m.unpricedOrders ?? 0) > 0;
@@ -374,31 +375,83 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
       </> : sales ? <>
         <dd className="mid n">{whole(sales.net)}</dd>
         <dd className="d">{cur} · {L("من العروض المقبولة", "from accepted quotations")}{delta != null && <> · <span className={`delta ${delta >= 0 ? "up" : "down"}`}>{delta >= 0 ? "▲" : "▼"} <span className="n">{Math.abs(delta)}%</span></span></>}</dd>
-      </> : <><dd className="mid">—</dd><dd className="d">{noAccess(L("المبيعات", "sales"))}</dd></>}
+      </> : sections.sales && !m.exposure ? <><dd className="mid">—</dd><dd className="d" data-testid="metric-sales-hidden">{L("يظهر للمندوب المسؤول عن العميل", "Shown to the customer's assigned rep")}</dd></> : <><dd className="mid">—</dd><dd className="d">{noAccess(L("المبيعات", "sales"))}</dd></>}
     </div>
   );
+  // Gate R1: a balance in the customer's favour is «رصيد دائن 500.00», never a bare −500.00.
+  const owed = (v: string) => (Number(v) < 0
+    ? <span data-credit-balance="">{L("رصيد دائن ", "Credit balance ")}{money2(String(-Number(v)))}</span>
+    : <>{money2(v)}</>);
   const bal = m.balance;
   const balFig = (
     <div data-testid="metric-balance">
       {/* The balance owed is the receivables ledger's once the customer is invoiced; until then the tile
           says what it is: accepted quotations not yet invoiced or paid (council gate S5). */}
-      <dt className="lbl">{bal?.ar ? L("الرصيد المستحق", "Balance due") : L("عروض مقبولة لم تُفوتر", "Accepted, not invoiced")}</dt>
-      {bal ? <>
-        <dd className={`mid n${Number(bal.ar?.outstanding ?? bal.outstanding) > 0 ? " acc-warn" : ""}`}>{whole(bal.ar?.outstanding ?? bal.outstanding)}</dd>
-        {bal.ar ? <dd className="d">{L("عروض مقبولة لم تُفوتر: ", "Accepted, not invoiced: ")}<span className="n">{whole(bal.outstanding)}</span></dd> : null}
+      {/* P1 ERR-02: «عليه» is the receivable of the one source (the accounting AR), never the accepted quotations. */}
+      <dt className="lbl">{L("المستحق فعليًا", "Actually owed")}</dt>
+      {sections.sales && !m.exposure ? <>
+        {/* Owner M6: the customer's money is shown to the rep it is ASSIGNED to (and to those who see every customer). */}
+        <dd className="mid">—</dd><dd className="d" data-testid="metric-balance-hidden">{L("يظهر للمندوب المسؤول عن العميل", "Shown to the customer's assigned rep")}</dd>
+      </> : bal ? <>
+        <dd className={`mid n${Number(m.exposure?.receivable ?? bal.ar?.outstanding ?? 0) > 0 ? " acc-warn" : ""}`}>{Number(m.exposure?.receivable ?? 0) < 0 ? owed(m.exposure!.receivable) : whole(m.exposure?.receivable ?? bal.ar?.outstanding ?? "0")}</dd>
         <dd className="d">{bal.lastPayment
           ? (bal.lastPayment.orderNumber != null
             ? (ar ? <>الطلب <bdi className="id">#{bal.lastPayment.orderNumber}</bdi> · بعد دفعة <span className="n">{whole(bal.lastPayment.amount)}</span></>
               : <><bdi className="id">#{bal.lastPayment.orderNumber}</bdi> · after a <span className="n">{whole(bal.lastPayment.amount)}</span> payment</>)
             : (ar ? <>آخر دفعة <span className="n">{whole(bal.lastPayment.amount)}</span> · {shortDate(bal.lastPayment.collectedAt, lang)}</>
               : <>Last payment <span className="n">{whole(bal.lastPayment.amount)}</span> · {shortDate(bal.lastPayment.collectedAt, lang)}</>))
-          : bal.documents === 0 ? L("لا عروض مقبولة", "No accepted quotations") : L("لا دفعات معتمدة بعد", "No approved payments yet")}</dd>
+          : L("لا دفعات معتمدة بعد", "No approved payments yet")}</dd>
       </> : <><dd className="mid">—</dd><dd className="d">{noAccess(L("المبيعات", "sales"))}</dd></>}
     </div>
   );
   // Whole days on the viewer's calendar (as every other date on the page), not the server's.
   const lastDays = m.lastOrder ? Math.max(0, -daysFromToday(m.lastOrder.createdAt)) : 0;
   const credit = m.credit;
+  // ── «كم على العميل؟» (P1 ERR-02, Figma 2033:3 at 390 / 2033:110 at 1440, approved 12 Nov 2026): ONE source — the
+  //    accounting AR (issued invoices − approved collections − credit notes), what of it is overdue, approved orders not
+  //    yet invoiced (not a debt; counted in the limit) and the limit used; accepted quotations not ordered apart. ──
+  const ex = m.exposure ?? null;
+  const zeroLimit = !!ex && ex.limit != null && Number(ex.limit) === 0;
+  const usedTone = ex && ex.limit != null ? (Number(ex.commitment) > Number(ex.limit) ? " is-over" : (ex.usedPercent ?? 0) >= 80 ? " is-near" : "") : "";
+  const moneyCard = !ex ? null : (
+    <section className={`acc-card acc-money${phone ? " is-ph" : ""}`} data-testid="customer-money" aria-label={L("كم على العميل؟", "What the customer owes")}>
+      {phone ? <h2 className="acc-money-h">{L("كم على العميل؟", "What the customer owes")}</h2> : null}
+      <dl className="acc-money-grid">
+        <div data-testid="money-receivable"><dt>{L("المستحق فعليًا", "Actually owed")}</dt>
+          <dd className={`big n${Number(ex.receivable) > 0 ? " acc-warn" : ""}`}>{owed(ex.receivable)} <span className="cur">{L("⃁", "SAR")}</span></dd>
+          <dd className="d">{phone
+            ? (ar ? <>فواتير صادرة <span className="n">{money2(ex.invoiced)}</span> − تحصيلات معتمدة <span className="n">{money2(ex.collected)}</span> − إشعارات دائنة <span className="n">{money2(ex.credited)}</span></>
+              : <>Issued invoices <span className="n">{money2(ex.invoiced)}</span> − approved collections <span className="n">{money2(ex.collected)}</span> − credit notes <span className="n">{money2(ex.credited)}</span></>)
+            : L("فواتير صادرة − تحصيلات − إشعارات", "Issued invoices − collections − credit notes")}</dd>
+          {/* Abu Fahd R2 N5: a credit balance from cash taken for orders not invoiced yet is not money the shop owes back. */}
+          {Number(ex.receivable) < 0 && Number(ex.approvedNotInvoiced) > 0
+            ? <dd className="d" data-testid="money-prepaid-note">{L("دفعات مقدّمة لطلبات ما انفوترت بعد", "Payments ahead for orders not invoiced yet")}</dd> : null}</div>
+        <div data-testid="money-overdue"><dt>{L("منها متأخر", "Of which overdue")}</dt>
+          <dd className={`mid n${Number(ex.overdue) > 0 ? " acc-bad" : ""}`}>{money2(ex.overdue)} <span className="cur">{L("⃁", "SAR")}</span></dd>
+          {!phone ? <dd className="d">{L("حسب تاريخ استحقاق كل فاتورة", "By each invoice's due date")}</dd> : null}</div>
+        <div className="acc-money-orders" data-testid="money-orders"><dt>{L("طلبات معتمدة لم تُفوتر", "Approved orders not invoiced")}</dt>
+          <dd className="mid n">{money2(ex.approvedNotInvoiced)} <span className="cur">{L("⃁", "SAR")}</span></dd>
+          <dd className="d">{phone ? L("ما هي دين — تصير دين لما تنصدر فاتورتها. تُحسب في حد الائتمان.", "Not a debt — it becomes one when its invoice is issued. Counted in the credit limit.") : L("ما هي دين — تُحسب في حد الائتمان", "Not a debt — counted in the credit limit")}</dd></div>
+        <div className={`acc-money-limit${usedTone}`} data-testid="money-limit">
+          {zeroLimit ? <>
+            {/* Gate R1 M4: a zero limit is «prepaid only» — no percent next to «متجاوز». */}
+            <dt>{L("حد الائتمان", "Credit limit")}</dt>
+            <dd className="mid" data-testid="money-zero-limit">{L("حد صفر — دفع مقدم فقط", "Zero limit — prepaid only")}</dd>
+            <dd className="d">{L("أي طلب آجل يحتاج اعتماد المشرف", "Any order on account needs a supervisor's approval")}</dd>
+          </> : ex.limit != null ? <>
+            <dt>{L("المستخدم من الحد", "Used of the limit")}</dt>
+            <dd className="mid n">{ar ? <>{money2(ex.commitment)} / {money2(ex.limit)} <span className="cur">⃁</span></> : <>{money2(ex.commitment)} / {money2(ex.limit)} <span className="cur">SAR</span></>}</dd>
+            <dd className="acc-money-bar" aria-hidden><i style={{ width: `${Math.max(0, Math.min(100, ex.usedPercent ?? 0))}%` }} /></dd>
+            <dd className="d"><span className="n" data-testid="money-used-percent">{ex.usedPercent ?? 0}%</span>{Number(ex.commitment) > Number(ex.limit) ? <> · {L("متجاوز", "exceeded")}</> : null}</dd>
+          </> : <><dt>{L("حد الائتمان", "Credit limit")}</dt><dd className="mid">{L("غير محدد", "Not set")}</dd><dd className="d">{L("ما فيه حد — ما يوقف الطلبات", "No limit — orders are not stopped")}</dd></>}
+        </div>
+      </dl>
+      {ex.acceptedQuoteCount > 0 ? <p className="acc-money-quotes" data-testid="money-accepted-quotes">{ar
+        ? <>عروض مقبولة لم تصر طلبات ({ex.acceptedQuoteCount}): <span className="n">{money2(ex.acceptedQuotes)}</span> ⃁ — ما تُحسب في الحد</>
+        : <>Accepted quotations not ordered ({ex.acceptedQuoteCount}): SAR <span className="n">{money2(ex.acceptedQuotes)}</span> — not counted in the limit</>}</p> : null}
+      {phone ? <button type="button" className="lk-inline acc-money-stm" onClick={() => setTab("invoices")} data-testid="money-statement">{L("كشف الحساب", "Statement of account")}</button> : null}
+    </section>
+  );
   // ── The facts row (batch 24 WP-A §3): آخر تواصل · يطلب عادةً · آخر طلب · عليه ──
   const contact = lastContact(data.timeline.flatMap((e) => (e.kind === "activity" ? [e.activity] : [])));
   const contactDays = contact?.completedAt ? Math.max(0, -daysFromToday(contact.completedAt)) : null;
@@ -638,7 +691,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
         {(can.edit || can.editContact) && <button type="button" className="lk-inline" onClick={() => setDialog({ contact: null })} data-testid="add-contact">+ {L("إضافة", "Add")}</button>}
       </div>
       {c.contacts.length === 0 ? (
-        <p className="acc-muted" style={{ margin: 0 }}>{L("لا جهات اتصال مسجلة.", "No contacts recorded.")}{c.phone && <> {L("هاتف العميل:", "Customer phone:")} {telHref(c.phone) ? <a href={telHref(c.phone)!} dir="ltr" className="n">{c.phone}</a> : <bdi dir="ltr" className="n">{c.phone}</bdi>}</>}</p>
+        <p className="acc-muted" style={{ margin: 0 }}>{L("لا جهات اتصال مسجلة.", "No contacts recorded.")}{c.phone && <> {L("هاتف العميل:", "Customer phone:")} {telHref(c.phone) ? <a href={telHref(c.phone)!} dir="ltr" className="n">{displayPhone(c.phone)}</a> : <bdi dir="ltr" className="n">{displayPhone(c.phone)}</bdi>}</>}</p>
       ) : (
         <ul className="acc-contacts">
           {c.contacts.map((p) => (
@@ -646,7 +699,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
               <span className="av" aria-hidden>{initials(p.name).slice(0, 1)}</span>
               <div className="acc-contact-main">
                 {can.edit || can.editContact ? <button type="button" className="acc-contact-name" onClick={() => setDialog({ contact: p })}>{p.name}</button> : <div className="acc-contact-name">{p.name}</div>}
-                {(p.phone || p.email) && <div className="acc-contact-sub">{p.phone ? <a href={`tel:${p.phone.replace(/\s/g, "")}`} dir="ltr" className="n">{p.phone}</a> : <a href={`mailto:${p.email}`} dir="ltr">{p.email}</a>}</div>}
+                {(p.phone || p.email) && <div className="acc-contact-sub">{p.phone ? <a href={`tel:${p.phone.replace(/\s/g, "")}`} dir="ltr" className="n">{displayPhone(p.phone)}</a> : <a href={`mailto:${p.email}`} dir="ltr">{p.email}</a>}</div>}
               </div>
               {p.role && <span className="acc-contact-role">{p.role}</span>}
               {p.phone && telHref(p.phone) ? <a className="acc-ic" href={telHref(p.phone)!} aria-label={ar ? `اتصال بـ ${p.name}` : `Call ${p.name}`}><Ico name="phone" small /></a> : null}
@@ -788,28 +841,28 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   // ── «كشف الحساب» and «أعمار الديون» (sales section) ──
   const stm = data.statement;
   const money = (v: string) => <span className="n">{money2(v)}</span>;
+  // P1 ERR-02: the accounting AR itself (the same figures as /api/accounting/ar/customers/[id]) — no longer the quotations.
+  const KIND: Record<string, [string, string]> = { INVOICE: ["فاتورة", "Invoice"], DEBIT_NOTE: ["إشعار مدين", "Debit note"], CREDIT_NOTE: ["إشعار دائن", "Credit note"], RECEIPT: ["تحصيل", "Receipt"], RECEIPT_REVERSED: ["عكس تحصيل", "Receipt reversed"], OPENING: ["رصيد افتتاحي", "Opening balance"] };
+  const docLink = (kind: string, id: string, ref: string) => (kind === "INVOICE" || kind === "DEBIT_NOTE" || kind === "CREDIT_NOTE")
+    ? <Link href={`/dashboard/sales/invoices/${id}`}><bdi className="id">{ref}</bdi></Link> : <bdi className="id">{ref}</bdi>;
   const statementBlock = !stm ? null : (
     <section data-testid="statement" className="acc-tabsec" style={{ marginTop: 22 }}>
       <div className="bh"><h2 className="bt">{L("كشف الحساب", "Statement of account")}</h2>
-        <span className="sub">{L("من عروض الأسعار المقبولة والدفعات المعتمدة · ليس قيدًا محاسبيًا", "From accepted quotations and approved payments · not an accounting ledger")}</span></div>
+        <span className="sub">{L("من الفواتير الصادرة والتحصيلات المعتمدة والإشعارات — نفس ذمم المحاسبة", "From issued invoices, approved collections and notes — the same as the accounting receivables")}</span></div>
       <dl className="metrics acc-metrics acc-stm-sum" data-testid="statement-totals">
-        <div><dt className="lbl">{L("المستحق بالعروض", "Agreed (quotations)")}</dt><dd className="mid n">{money2(stm.totals.debit)}</dd><dd className="d">{cur} · {L("شامل الضريبة", "VAT included")}</dd></div>
-        <div><dt className="lbl">{L("المدفوع المعتمد", "Approved payments")}</dt><dd className="mid n">{money2(stm.totals.credit)}</dd><dd className="d">{cur}</dd></div>
-        <div><dt className="lbl">{L("المتبقي من العروض المقبولة", "Left to pay on accepted quotations")}</dt><dd className={`mid n${Number(stm.totals.outstanding) > 0 ? " acc-warn" : ""}`} data-testid="statement-outstanding">{money2(stm.totals.outstanding)}</dd>
-          <dd className="d">{Number(stm.totals.unapplied) > 0 ? (ar ? <>ورصيد دائن <span className="n">{money2(stm.totals.unapplied)}</span> لم يُطبَّق</> : <>and SAR <span className="n">{money2(stm.totals.unapplied)}</span> unapplied credit</>) : cur}</dd></div>
+        <div><dt className="lbl">{L("فواتير وإشعارات مدينة", "Invoices and debit notes")}</dt><dd className="mid n">{money2(stm.totals.debit)}</dd><dd className="d">{cur} · {L("شامل الضريبة", "VAT included")}</dd></div>
+        <div><dt className="lbl">{L("تحصيلات وإشعارات دائنة", "Collections and credit notes")}</dt><dd className="mid n">{money2(stm.totals.credit)}</dd><dd className="d">{cur}</dd></div>
+        <div><dt className="lbl">{L("المستحق فعليًا", "Actually owed")}</dt><dd className={`mid n${Number(stm.totals.outstanding) > 0 ? " acc-warn" : ""}`} data-testid="statement-outstanding">{owed(stm.totals.outstanding)}</dd>
+          <dd className="d">{Number(stm.totals.unapplied) > 0 ? (ar ? <>بعد رصيد دائن <span className="n">{money2(stm.totals.unapplied)}</span> لم يُطبَّق</> : <>after SAR <span className="n">{money2(stm.totals.unapplied)}</span> unapplied credit</>) : cur}</dd></div>
         <div data-testid="statement-credit"><dt className="lbl">{L("حد الائتمان", "Credit limit")}</dt>
           {credit ? <><dd className="mid n">{money2(credit.limit)}</dd>
-            <dd className="d">{credit.scope === "all"
-              ? (credit.over ? <span className="acc-warn">{ar ? <>متجاوز · مستخدم <span className="n">{credit.percent}%</span></> : <>Exceeded · <span className="n">{credit.percent}%</span> used</>}</span>
-                : (ar ? <>المتاح <span className="n">{money2(credit.available)}</span> · مستخدم <span className="n">{credit.percent ?? 0}%</span></> : <>Available <span className="n">{money2(credit.available)}</span> · <span className="n">{credit.percent ?? 0}%</span> used</>))
-              : L("الاستخدام يظهر لمن يرى صفقات الفريق", "Usage is shown to viewers of the whole team's deals")}</dd></>
+            <dd className="d">{credit.over ? <span className="acc-warn">{ar ? <>متجاوز · مستخدم <span className="n">{credit.percent}%</span></> : <>Exceeded · <span className="n">{credit.percent}%</span> used</>}</span>
+              : (ar ? <>المتاح <span className="n">{money2(credit.available ?? "0")}</span> · مستخدم <span className="n">{credit.percent ?? 0}%</span></> : <>Available <span className="n">{money2(credit.available ?? "0")}</span> · <span className="n">{credit.percent ?? 0}%</span> used</>)}</dd></>
             : <><dd className="mid">—</dd><dd className="d">{L("غير محدد", "Not set")}</dd></>}</div>
       </dl>
 
       <div className="lbl" style={{ margin: "22px 0 6px" }}>{L("أعمار الديون", "Aging")}
-        <span className="acc-muted" style={{ fontWeight: 400 }}> · {stm.termsDays != null
-          ? (ar ? `الاستحقاق بعد ${dayCount(stm.termsDays, lang)} من التسليم، أو من قبول العرض قبل التسليم` : `Due ${dayCount(stm.termsDays, lang)} after delivery, or after acceptance before any delivery`)
-          : L("شروط الدفع غير محددة: يُستحق عند التسليم أو قبول العرض", "No payment terms set: due at delivery or acceptance")}</span></div>
+        <span className="acc-muted" style={{ fontWeight: 400 }}> · {L("حسب تاريخ استحقاق كل فاتورة", "By each invoice's due date")}</span></div>
       <dl className="acc-aging" data-testid="aging">
         {AGING_KEYS.map((k) => (
           <div key={k} data-testid={`aging-${k}`} className={k !== "notDue" && Number(stm.aging[k]) > 0 ? "late" : undefined}>
@@ -819,28 +872,25 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
       </dl>
       {stm.open.length > 0 && (
         <div className="acc-scroll" style={{ marginTop: 10 }}><table className="t dense" data-testid="open-documents">
-          <thead><tr><th>{L("العرض", "Quotation")}</th><th>{L("الصفقة", "Deal")}</th><th className="num">{L("الإجمالي", "Total")}</th><th className="num">{L("المدفوع", "Paid")}</th><th className="num">{L("المتبقي", "Unpaid")}</th><th>{L("الاستحقاق", "Due")}</th><th>{L("العمر", "Age")}</th></tr></thead>
+          <thead><tr><th>{L("المستند", "Document")}</th><th className="num">{L("الإجمالي", "Total")}</th><th className="num">{L("المدفوع", "Paid")}</th><th className="num">{L("المتبقي", "Unpaid")}</th><th>{L("الاستحقاق", "Due")}</th><th>{L("العمر", "Age")}</th></tr></thead>
           <tbody>{stm.open.map((o) => (
-            <tr key={o.quoteId}><td><Link href={`/dashboard/sales/quotes/${o.quoteId}`}><bdi className="id">{o.quoteNumber}</bdi></Link></td><td><bdi>{o.dealTitle}</bdi></td>
+            <tr key={o.id}><td>{lx({ ar: KIND[o.kind]?.[0] ?? o.kind, en: KIND[o.kind]?.[1] ?? o.kind })} {docLink(o.kind, o.id, o.number)}</td>
               <td className="num">{money(o.total)}</td><td className="num">{money(o.paid)}</td><td className="num"><b>{money(o.unpaid)}</b></td>
-              <td>{shortDate(o.dueAt, lang)} <span className="acc-muted">· {o.basis === "delivery" ? L("من التسليم", "from delivery") : L("من القبول", "from acceptance")}</span></td>
+              <td>{shortDate(o.dueAt, lang)}</td>
               <td>{o.daysOverdue > 0 ? <span className="st er">{ar ? `متأخر ${dayCount(o.daysOverdue, lang)}` : `${dayCount(o.daysOverdue, lang)} overdue`}</span> : <span className="st">{lx(AGING_LABELS.notDue)}</span>}</td></tr>
           ))}</tbody></table></div>
       )}
 
       <div className="lbl" style={{ margin: "22px 0 6px" }}>{L("الحركات", "Entries")}</div>
-      {stm.lines.length === 0 ? empty(L("لا عروض مقبولة ولا دفعات معتمدة بعد.", "No accepted quotations or approved payments yet.")) : (
+      {stm.lines.length === 0 ? empty(L("لا فواتير صادرة ولا تحصيلات معتمدة بعد.", "No issued invoices or approved collections yet.")) : (
         <div className="acc-scroll"><table className="t dense" data-testid="statement-lines">
-          <thead><tr><th>{L("التاريخ", "Date")}</th><th>{L("البيان", "Description")}</th><th>{L("الصفقة", "Deal")}</th><th className="num">{L("مدين", "Debit")}</th><th className="num">{L("دائن", "Credit")}</th><th className="num">{L("الرصيد", "Balance")}</th></tr></thead>
+          <thead><tr><th>{L("التاريخ", "Date")}</th><th>{L("البيان", "Description")}</th><th className="num">{L("مدين", "Debit")}</th><th className="num">{L("دائن", "Credit")}</th><th className="num">{L("الرصيد", "Balance")}</th></tr></thead>
           <tbody>{stm.lines.map((l) => (
             <tr key={l.key} data-kind={l.kind}><td>{shortDate(l.at, lang)}</td>
-              <td>{l.kind === "document"
-                ? <>{L("عرض مقبول", "Accepted quotation")} <Link href={`/dashboard/sales/quotes/${l.quoteId}`}><bdi className="id">{l.quoteNumber}</bdi></Link></>
-                : <>{L("دفعة", "Payment")} · {lx(METHOD[l.method ?? ""], l.method ?? "")}{l.orderNumber != null && <> · <bdi className="id">#{l.orderNumber}</bdi></>}{l.reference && <span className="acc-muted"> · <bdi>{l.reference}</bdi></span>}</>}</td>
-              <td><bdi>{l.dealTitle}</bdi></td>
+              <td>{lx({ ar: KIND[l.kind]?.[0] ?? l.kind, en: KIND[l.kind]?.[1] ?? l.kind })} {docLink(l.kind, l.id, l.ref)}{l.memo ? <span className="acc-muted"> · {lx(METHOD[l.memo], l.memo)}</span> : null}</td>
               <td className="num">{Number(l.debit) ? money(l.debit) : ""}</td><td className="num">{Number(l.credit) ? money(l.credit) : ""}</td><td className="num">{money(l.balance)}</td></tr>
           ))}</tbody>
-          <tfoot><tr><td colSpan={3}><b>{L("الإجمالي", "Total")}</b></td><td className="num"><b>{money(stm.totals.debit)}</b></td><td className="num"><b>{money(stm.totals.credit)}</b></td><td className="num"><b>{money(stm.totals.net)}</b></td></tr></tfoot>
+          <tfoot><tr><td colSpan={2}><b>{L("الإجمالي", "Total")}</b></td><td className="num"><b>{money(stm.totals.debit)}</b></td><td className="num"><b>{money(stm.totals.credit)}</b></td><td className="num"><b>{money(stm.totals.net)}</b></td></tr></tfoot>
         </table></div>
       )}
     </section>
@@ -1033,10 +1083,11 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
       <HrRoot>
         <div className="pg acc acc-phone" data-testid="customer-account">
           {noticeEl}
-          {(subline || tierPill) && <p className="acc-subline">{tierPill}{tierPill && subline ? " " : null}{subline}{dialPhone ? <> · {tel ? <a href={tel} className="acc-tel n" dir="ltr" data-testid="account-phone">{dialPhone}</a> : <bdi className="n" dir="ltr">{dialPhone}</bdi>}</> : null}</p>}
+          {(subline || tierPill) && <p className="acc-subline">{tierPill}{tierPill && subline ? " " : null}{subline}{dialPhone ? <> · {tel ? <a href={tel} className="acc-tel n" dir="ltr" data-testid="account-phone">{displayPhone(dialPhone)}</a> : <bdi className="n" dir="ltr">{displayPhone(dialPhone)}</bdi>}</> : null}</p>}
           {creditBand}
           {planBtn ? <div className="acc-plan-row">{planBtn}</div> : null}
           {strip}
+          {moneyCard}
           {sections.sales && (
             <section data-testid="open-deal" className="acc-ph-deal">
               <div className="bh" style={{ marginBottom: 8 }}><h2 className="bt">{L("الصفقة المفتوحة", "Open deal")}</h2>
@@ -1088,7 +1139,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
             <h1 data-testid="account-name">{name}{tierPill}{creditBadges ? <span className="acc-credit-badges" data-testid="account-credit-badges">{creditBadges}</span> : null}</h1>
             <div className="meta">
               {metaParts.map((t, i) => <span key={i} className="acc-meta-item">{i > 0 && <i aria-hidden />}<span>{t}</span></span>)}
-              {dialPhone && <span className="acc-meta-item"><i aria-hidden />{tel ? <a href={tel} className="acc-tel n" dir="ltr" data-testid="account-phone" onClick={() => { if (mayLog) setDialog({ activity: "CALL" }); }}>{dialPhone}</a> : <bdi className="n" dir="ltr">{dialPhone}</bdi>}</span>}
+              {dialPhone && <span className="acc-meta-item"><i aria-hidden />{tel ? <a href={tel} className="acc-tel n" dir="ltr" data-testid="account-phone" onClick={() => { if (mayLog) setDialog({ activity: "CALL" }); }}>{displayPhone(dialPhone)}</a> : <bdi className="n" dir="ltr">{displayPhone(dialPhone)}</bdi>}</span>}
               {c.commercialRegNo && <span className="acc-meta-item">{metaParts.length > 0 && <i aria-hidden />}<span className="id" data-testid="account-cr">CR-{c.commercialRegNo}</span></span>}
             </div>
           </div>
@@ -1111,6 +1162,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
 
         {creditBand}
         {strip}
+        {moneyCard}
         {qoyod ? (
           <>
             <dl className="metrics acc-metrics" data-testid="account-ar-tiles">

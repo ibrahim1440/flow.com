@@ -51,7 +51,7 @@ export async function PUT(request: Request) {
       await tx.systemConfig.upsert({ where: { id: "singleton" }, create: { id: "singleton" }, update: {} });
       await tx.$queryRaw`SELECT "id" FROM "SystemConfig" WHERE "id" = 'singleton' FOR UPDATE`;
       const before = qcFromRow(await tx.systemConfig.findUnique({ where: { id: "singleton" } }));
-      const after = qcFromRow(await tx.systemConfig.update({ where: { id: "singleton" }, data: parsed.data }));
+      const after = qcFromRow(await tx.systemConfig.upsert({ where: { id: "singleton" }, create: { id: "singleton", ...parsed.data }, update: parsed.data }));
       const b = { qcMinEvaluators: before.minEvaluators }, a = { qcMinEvaluators: after.minEvaluators };
       const changed = changedKeys(b, a);
       if (changed.length) {

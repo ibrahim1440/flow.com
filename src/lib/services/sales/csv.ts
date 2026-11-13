@@ -1,3 +1,4 @@
+import { parseEmail, parsePhone } from "@/lib/contact/phone";
 /**
  * CSV for the lead list: reading what a salesperson exported from a phone, and writing
  * something a spreadsheet will open without executing it.
@@ -92,6 +93,8 @@ export function parseCsv(text: string): string[][] {
  * way out, where the danger actually is.
  */
 export function neutralizeCsvCell(value: string): string {
+  // P1 ERR-04: a canonical phone (+ then digits only) is data, not a formula — exported as stored.
+  if (/^\+\d{8,15}$/.test(value)) return value;
   return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
 }
 
@@ -137,7 +140,8 @@ export const LEAD_IMPORT_COLUMNS = [
 
 export type LeadImportRow = Partial<Record<(typeof LEAD_IMPORT_COLUMNS)[number], string>>;
 
-export type ImportProblem = { row: number; column?: string; message: string };
+/** P1 ERR-05: `messageAr` — the import dialog shows it on the Arabic screen. */
+export type ImportProblem = { row: number; column?: string; message: string; messageAr?: string };
 
 const SOURCES = ["WALK_IN", "REFERRAL", "PHONE", "SOCIAL", "EXHIBITION", "WEBSITE", "OTHER"];
 
@@ -212,7 +216,7 @@ export function parseLeadCsv(text: string): ParsedImport {
   const grid = parseCsv(text).filter((r) => r.some((c) => c.trim() !== ""));
 
   if (grid.length === 0) {
-    return { rows: [], problems: [{ row: 0, message: "The file is empty." }], rowsSeen: 0, unknownColumns: [] };
+    return { rows: [], problems: [{ row: 0, message: "The file is empty.", messageAr: "الملف فاضي." }], rowsSeen: 0, unknownColumns: [] };
   }
 
   const headerRow = grid[0];
@@ -229,6 +233,7 @@ export function parseLeadCsv(text: string): ParsedImport {
       message:
         "The file needs a companyName column. Recognised headings are: " +
         LEAD_IMPORT_COLUMNS.join(", ") + ".",
+      messageAr: "الملف يحتاج عمود companyName (اسم المنشأة). الأعمدة المعروفة: " + LEAD_IMPORT_COLUMNS.join("، ") + ".",
     });
     return { rows: [], problems, rowsSeen: Math.max(0, grid.length - 1), unknownColumns };
   }
@@ -238,6 +243,7 @@ export function parseLeadCsv(text: string): ParsedImport {
     problems.push({
       row: 0,
       message: `This file has ${body.length} rows; ${MAX_IMPORT_ROWS} is the most one import may carry. Split it.`,
+      messageAr: `الملف فيه ${body.length} صف، والحد ${MAX_IMPORT_ROWS} صف للاستيراد الواحد — قسّمه.`,
     });
     return { rows: [], problems, rowsSeen: body.length, unknownColumns };
   }
@@ -253,11 +259,11 @@ export function parseLeadCsv(text: string): ParsedImport {
     });
 
     if (!row.companyName || row.companyName.length < 2) {
-      problems.push({ row: rowNumber, column: "companyName", message: "A company name is required." });
+      problems.push({ row: rowNumber, column: "companyName", message: "A company name is required.", messageAr: "اسم المنشأة مطلوب." });
       return;
     }
     if (!row.contactName || row.contactName.length < 2) {
-      problems.push({ row: rowNumber, column: "contactName", message: "A contact name is required." });
+      problems.push({ row: rowNumber, column: "contactName", message: "A contact name is required.", messageAr: "اسم الشخص المسؤول مطلوب." });
       return;
     }
     if (row.source) {
@@ -267,14 +273,28 @@ export function parseLeadCsv(text: string): ParsedImport {
           row: rowNumber,
           column: "source",
           message: `"${row.source}" is not a known source. Use one of: ${SOURCES.join(", ")}.`,
+          messageAr: `المصدر «${row.source}» غير معروف. المسموح: ${SOURCES.join("، ")}.`,
         });
         return;
       }
       row.source = up;
     }
-    if (row.email && !/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(row.email)) {
-      problems.push({ row: rowNumber, column: "email", message: `"${row.email}" is not an email address.` });
-      return;
+    if (row.email) {
+      const em = parseEmail(row.email);
+      if (!em.ok) {
+        problems.push({ row: rowNumber, column: "email", message: `"${row.email}" is not an email address.`, messageAr: `«${row.email}» مو بريد إلكتروني صحيح.` });
+        return;
+      }
+      row.email = em.email;
+    }
+    // P1 ERR-04: the phone through the shared reader, stored canonical (+966…).
+    if (row.phone) {
+      const ph = parsePhone(row.phone);
+      if (!ph.ok) {
+        problems.push({ row: rowNumber, column: "phone", message: `"${row.phone}" is not a phone number.`, messageAr: `«${row.phone}» مو رقم جوال صحيح.` });
+        return;
+      }
+      row.phone = ph.phone;
     }
     if (row.nextFollowUpAt) {
       const d = new Date(row.nextFollowUpAt);
@@ -283,6 +303,7 @@ export function parseLeadCsv(text: string): ParsedImport {
           row: rowNumber,
           column: "nextFollowUpAt",
           message: `"${row.nextFollowUpAt}" is not a date. Use YYYY-MM-DD.`,
+          messageAr: `«${row.nextFollowUpAt}» مو تاريخ. اكتبه بالشكل YYYY-MM-DD.`,
         });
         return;
       }

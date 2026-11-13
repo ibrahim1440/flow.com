@@ -1,7 +1,7 @@
 // Credit warnings, grace and the sales hold — the database side (feat/credit-hold).
 //
 // Reads the rows the pure rules in ./credit.ts judge, and writes their results:
-//   * loadCreditFlags     — the customer's WHOLE balance and aging (every deal, whoever owns it):
+//   * loadCreditFlags     — P1 ERR-02: the commitment of ./exposure.ts (accounting AR + approved orders not invoiced) and the overdue invoices; formerly:
 //                           the same accepted quotations, approved collections and first
 //                           deliveries as GET /api/customers/[id]/account, through the same
 //                           statementOfAccount — so the badge and «أعمار الديون» never disagree;
@@ -21,7 +21,7 @@
 // in the customer's credit log.
 
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
-import { Decimal, acceptedDocumentPerDeal, statementOfAccount } from "./aggregates";
+import { Decimal } from "./aggregates";
 import {
   creditFlags, creditWarning, activeGrace, graceHistory, graceUntil, holdBasis, holdEnds, holdVerdict, salesHoldRefusal,
   BASIS_REASON_AR, BASIS_REASON_EN, FALLBACK_HOLD_DAYS,
@@ -42,66 +42,24 @@ const HOLD_SELECT = {
 export async function loadCreditFlags(db: Db, customerIds: string[], now: Date): Promise<Map<string, CreditFlags & { termsDays: number | null }>> {
   const out = new Map<string, CreditFlags & { termsDays: number | null }>();
   if (customerIds.length === 0) return out;
-  const customers = await db.customer.findMany({ where: { id: { in: customerIds } }, select: { id: true, creditLimit: true, paymentTermsDays: true } });
-  // Sales invoicing A2: where accounting is active, the outstanding balance is the customer's invoice open balance
-  // (issued invoices and debit notes − credit notes − receipts) and «متأخر السداد» counts from each invoice's due
-  // date. Otherwise (accounting not active) the figures below are unchanged: accepted quotations, approved
-  // collections, first deliveries — backward compatible.
-  const acct = await db.accountingSettings.findUnique({ where: { id: "singleton" }, select: { accountingActive: true } });
-  if (acct?.accountingActive) {
-    // Loaded on demand: this module is imported by pure catalogues that never open a database.
-    const { invoiceCreditFigures } = await import("@/lib/services/invoicing/ar");
-    const figures = await invoiceCreditFigures(db, customers.map((c) => c.id), now);
-    for (const c of customers) {
-      const f = figures.get(c.id)!;
-      const limit = c.creditLimit == null ? null : new Decimal(c.creditLimit.toString());
-      out.set(c.id, { ...creditFlags(limit, new Decimal(f.outstanding.toString()), f.open.map((o) => ({ unpaid: new Decimal(o.unpaid.toString()), daysOverdue: o.daysOverdue }))), termsDays: c.paymentTermsDays });
-    }
-    return out;
-  }
-  const quotes = await db.quote.findMany({
-    where: { status: "ACCEPTED", opportunity: { customerId: { in: customerIds } } },
-    select: {
-      id: true, quoteNumber: true, revision: true, opportunityId: true, acceptedAt: true, issuedAt: true, createdAt: true, grandTotal: true,
-      opportunity: { select: { customerId: true, title: true } },
-    },
-  });
-  const accepted = acceptedDocumentPerDeal(quotes);
-  const dealIds = [...new Set(accepted.map((q) => q.opportunityId))];
-  const acceptedIds = accepted.map((q) => q.id);
-  const [approved, links] = await Promise.all([
-    dealIds.length
-      ? db.salesCollection.findMany({ where: { opportunityId: { in: dealIds }, status: "APPROVED" }, select: { id: true, opportunityId: true, amountGross: true, collectedAt: true, paymentMethod: true } })
-      : Promise.resolve([]),
-    acceptedIds.length
-      ? db.opportunityOrder.findMany({
-          where: { quoteId: { in: acceptedIds } },
-          select: { quoteId: true, order: { select: { items: { select: { deliveries: { orderBy: { date: "asc" }, take: 1, select: { date: true } } } } } } },
-        })
-      : Promise.resolve([]),
+  // P1 ERR-02 (owner, 12 Nov 2026): ONE basis for every screen — the commitment of ./exposure.ts (the accounting AR:
+  // issued invoices − receipts − credit notes, plus approved orders not yet invoiced) against the limit, and «متأخر
+  // السداد» from each invoice's due date. No longer the accepted quotations, and no longer depending on whether
+  // accounting is active. Loaded on demand: this module is imported by pure catalogues that never open a database.
+  const { customerExposure } = await import("./exposure");
+  const { invoiceCreditFigures } = await import("@/lib/services/invoicing/ar");
+  const [customers, exposure, figures] = await Promise.all([
+    db.customer.findMany({ where: { id: { in: customerIds } }, select: { id: true, paymentTermsDays: true } }),
+    customerExposure(db, customerIds, now),
+    invoiceCreditFigures(db, customerIds, now),
   ]);
-  const firstDelivery = new Map<string, Date>();
-  for (const l of links) {
-    for (const i of l.order.items) for (const d of i.deliveries) {
-      const cur = firstDelivery.get(l.quoteId!);
-      if (!cur || d.date < cur) firstDelivery.set(l.quoteId!, d.date);
-    }
-  }
   for (const c of customers) {
-    const docs = accepted.filter((q) => q.opportunity?.customerId === c.id);
-    const deals = new Set(docs.map((d) => d.opportunityId));
-    const st = statementOfAccount(
-      docs.map((q) => ({
-        opportunityId: q.opportunityId, dealTitle: q.opportunity?.title ?? "", quoteId: q.id, quoteNumber: q.quoteNumber, revision: q.revision,
-        at: q.acceptedAt ?? q.issuedAt ?? q.createdAt, grandTotal: new Decimal(q.grandTotal.toString()), firstDeliveryAt: firstDelivery.get(q.id) ?? null,
-      })),
-      approved.filter((p) => !!p.opportunityId && deals.has(p.opportunityId)).map((p) => ({
-        id: p.id, opportunityId: p.opportunityId ?? "", at: p.collectedAt, amountGross: new Decimal(p.amountGross.toString()), method: p.paymentMethod, orderNumber: null, reference: null,
-      })),
-      { termsDays: c.paymentTermsDays, now },
-    );
-    const limit = c.creditLimit == null ? null : new Decimal(c.creditLimit.toString());
-    out.set(c.id, { ...creditFlags(limit, st.totals.outstanding, st.open), termsDays: c.paymentTermsDays });
+    const e = exposure.get(c.id)!;
+    const f = figures.get(c.id)!;
+    out.set(c.id, {
+      ...creditFlags(e.limit == null ? null : new Decimal(e.limit.toString()), new Decimal(e.commitment.toString()), f.open.map((o) => ({ unpaid: new Decimal(o.unpaid.toString()), daysOverdue: o.daysOverdue }))),
+      termsDays: c.paymentTermsDays,
+    });
   }
   return out;
 }

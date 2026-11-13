@@ -133,6 +133,11 @@ export async function POST(request: Request, { params }: Params) {
       if (action === "return") return rejectCollection(tx, { collectionId: id, actorId: user.id, reason, reasonCode: "RETURN_FOR_CORRECTION" });
       return reverseCollection(tx, { collectionId: id, actorId: user.id, reason });
     }, TX_OPTS);
+    // Owner decision أ: a held direct sale released by this approval starts its preparation (as any order does).
+    if (result.releasedOrderId) {
+      const { autoPrepareOrder } = await import("@/lib/services/orders/preparation");
+      await autoPrepareOrder(result.releasedOrderId, "order_created", { id: user.id, name: user.name });
+    }
 
     // The deal's figures after the decision, so the screen does not have to refetch and
     // cannot briefly show the previous total. An accountant's receipt has no deal.

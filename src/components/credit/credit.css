@@ -17,3 +17,7 @@
 /* The badges keep their own width beside the sentence; on a phone they take a line of their own. */
 .d21 .callout.cr-callout > .cr-badges { flex: 0 0 auto; }
 .d21 .callout.ph.cr-callout > .cr-badges { flex: 1 1 100%; }
+/* P1 ERR-02 — «الطلب يتجاوز حد الائتمان» (Figma 2033:28). */
+[data-hr-root] .cr-limit { gap: 10px; line-height: 24px; }
+[data-hr-root] .cr-limit .cr-excess { color: var(--hr-danger, var(--status-danger)); }
+[data-hr-root] .cr-limit-sum { font-size: 15px; }

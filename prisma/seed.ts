@@ -56,6 +56,8 @@ function createClient() {
 const prisma = createClient();
 
 async function main() {
+  // Abu Fahd setup note: the settings singleton every settings screen reads and writes (defaults from the schema).
+  await prisma.systemConfig.upsert({ where: { id: "singleton" }, create: { id: "singleton" }, update: {} });
   // Employees — Secure Version B credentials, PINs supplied by the environment. Display names
   // are role descriptions, not people's names (this file ships in the public build).
   //

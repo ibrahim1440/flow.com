@@ -139,7 +139,7 @@ export async function GET(_request: Request, { params }: Params) {
       select: {
         id: true, status: true, amountGross: true, amountTax: true, amountNet: true,
         currency: true, paymentMethod: true, collectedAt: true, referenceNumber: true,
-        submittedAt: true, decidedAt: true, decisionReason: true,
+        submittedAt: true, decidedAt: true, decisionReason: true, decisionReasonCode: true,
         reversedAt: true, reversalReason: true,
         submittedBy: { select: { id: true, name: true } },
         decidedBy: { select: { id: true, name: true } },
@@ -171,9 +171,15 @@ export async function GET(_request: Request, { params }: Params) {
 
     // The customer panel's «الرصيد المستحق» (release item I-44): the customer file's own figure, over the deals
     // the viewer sees (services/customers/balance.ts) — AR once invoiced, else accepted quotations not invoiced.
-    const balance = deal.customer
+    let balance = deal.customer
       ? await customerBalance(prisma, deal.customer.id, seesAllSales(user.permissions) ? {} : { ownerId: user.id }, canViewInvoices(user.permissions), new Date())
       : null;
+    // Owner M6 = أ: the customer's receivable only for a customer assigned to the viewer (a rep's deal on another rep's or
+    // a pool customer shows no money).
+    if (balance && deal.customer) {
+      const { customerFiguresVisible } = await import("@/lib/services/sales/customer-access");
+      if (!(await customerFiguresVisible(user, deal.customer.id))) balance = null;
+    }
 
     // «المطلوب منك الآن» (pipeline v2 §2.5): computed HERE, on the server, from the deal as just read — the page
     // renders it and never decides on its own. my-day computes the same function from its own query.
@@ -232,6 +238,9 @@ export async function GET(_request: Request, { params }: Params) {
       // R3-L1: a recorder reads no net basis and no commission rows.
       collections: seesCollectionNet(user.permissions) ? collections : collections.map(redactCollectionRow),
       collectionSummary: seesCollectionNet(user.permissions) ? serialiseSummary(summary) : { ...serialiseSummary(summary), approvedNet: null },
+      // Owner أ (the manual-collection trap): the deal's order held for its money — the panel says so and sends «سجّل
+      // تحصيل» to the order's «سجّل الباقي» (POST /api/sales/collections refuses it, 409 ORDER_PAYMENT_HELD).
+      ...(await dealHoldState(id)),
       // The verdict, not the ingredients. The panel used to be handed a privilege flag and
       // left to work the rest out, which is how a reviewer whose role predated the privilege
       // got a blank space instead of a reason.
@@ -414,4 +423,28 @@ export async function PATCH(request: Request, { params }: Params) {
   } catch (err) {
     return handleDomainError(err);
   }
+}
+
+
+/**
+ * Owner أ (the trap) + Abu Fahd R4 F1/F2: the deal's orders for «لأي طلب؟» (held ones listed, not payable here), and its
+ * held order's state — the rep has something to do («سجّل الباقي» / open it), or it waits for the accountant (the sale's
+ * collection, or a top-up recorded): then nothing is asked of the rep.
+ */
+async function dealHoldState(opportunityId: string) {
+  const { heldOrdersOfDeal, holdShorts } = await import("@/lib/services/orders/payment-hold");
+  const links = await prisma.opportunityOrder.findMany({ where: { opportunityId, order: { status: { not: "Cancelled" } } }, orderBy: { createdAt: "asc" }, select: { order: { select: { id: true, orderNumber: true, paymentHold: true } } } });
+  const held = await heldOrdersOfDeal(prisma as never, opportunityId);
+  const h = held[0] ?? null;
+  let heldOrder: { id: string; orderNumber: number; paymentHold: string | null; topUpPending: boolean; short: string | null; needsRep: boolean } | null = null;
+  if (h) {
+    const o = links.find((l) => l.order.id === h.id)?.order ?? (await prisma.order.findUnique({ where: { id: h.id }, select: { id: true, orderNumber: true, paymentHold: true } }))!;
+    const topUpPending = (await prisma.salesCollection.count({ where: { holdOrderId: h.id, status: "PENDING_VERIFICATION" } })) > 0;
+    const short = (await holdShorts(prisma as never, [o])).get(h.id) ?? null;
+    heldOrder = { id: h.id, orderNumber: h.orderNumber, paymentHold: o.paymentHold, topUpPending, short, needsRep: o.paymentHold === "REJECTED" && !topUpPending };
+  }
+  return {
+    heldOrder,
+    dealOrders: links.map((l) => ({ id: l.order.id, orderNumber: l.order.orderNumber, held: l.order.paymentHold === "PENDING" || l.order.paymentHold === "REJECTED" })),
+  };
 }

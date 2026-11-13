@@ -1,8 +1,9 @@
 "use client";
 
+import { displayPhone, waDigits } from "@/lib/contact/phone";
 import { useState, useEffect, useRef, use } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Plus } from "lucide-react";
 import {
   useLang, pick, Alert, Spinner, Button, Field, TextInput, Select, TextArea, Modal, api,
@@ -177,8 +178,12 @@ const ACTIVITY_LABELS: Record<string, { en: string; ar: string }> = {
   EMAIL: { en: "Email", ar: "بريد" },
 };
 
+type HeldOrder = { id: string; orderNumber: number; paymentHold: string | null; topUpPending: boolean; short: string | null; needsRep: boolean };
+
 export default function DealDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  // Abu Fahd R4 F1: «سجّل تحصيل» from a normal order's panel lands here with ?collect=<orderId> — the form opens on it.
+  const collectFor = useSearchParams().get("collect");
   const lang = useLang();
   const ar = lang === "ar";
 
@@ -189,6 +194,8 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   const [collections, setCollections] = useState<CollectionRow[]>([]);
   const meId = useUser()?.id ?? null;
   const [collectionSummary, setCollectionSummary] = useState<Summary | null>(null);
+  const [heldOrder, setHeldOrder] = useState<HeldOrder | null>(null);
+  const [dealOrders, setDealOrders] = useState<{ id: string; orderNumber: number; held: boolean }[]>([]);
   // The server's verdict on whether this person may record a collection here, and if not
   // why. Not derived on the client: see `collectionAction` in services/sales/collections.
   const [collectionAction, setCollectionAction] =
@@ -238,7 +245,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
     (async () => {
       const res = await api<{
         deal: Deal; stages: Stage[]; actors: Record<string, string>; can: Can;
-        collections: CollectionRow[]; collectionSummary: Summary;
+        collections: CollectionRow[]; collectionSummary: Summary; heldOrder?: HeldOrder | null; dealOrders?: { id: string; orderNumber: number; held: boolean }[];
         collectionAction: { available: boolean; reason: string };
         sampledProductIds?: string[];
         nextStep?: DealNextStep; pendingMove?: typeof pendingMove; rejectedMove?: typeof rejectedMove;
@@ -264,6 +271,8 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
         setMoveDirect(!!(res.data.can as Can & { moveDirectly?: boolean }).moveDirectly);
         setCollections(res.data.collections ?? []);
         setCollectionSummary(res.data.collectionSummary ?? null);
+        setHeldOrder(res.data.heldOrder ?? null);
+        setDealOrders(res.data.dealOrders ?? []);
         setCollectionAction(res.data.collectionAction ?? { available: false, reason: "NO_PRIVILEGE" });
         setError("");
       } else {
@@ -645,7 +654,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   const collectionsHere = !!collectionSummary && (!!collectionSummary.document || collections.length > 0);
   const collectionsPanel = collectionSummary ? (
     <div style={{ marginBottom: 32 }}>
-      <CollectionsPanel dealId={id} ar={ar} lang={lang} summary={collectionSummary} rows={collections}
+      <CollectionsPanel dealId={id} ar={ar} lang={lang} summary={collectionSummary} rows={collections} heldOrder={heldOrder} dealOrders={dealOrders} collectFor={collectFor}
         action={collectionAction} onChanged={reload} />
     </div>
   ) : null;
@@ -802,7 +811,11 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   ) : (
     <div className={`pv2-now${deal.outcome === "WON" ? " won" : ""}`} data-testid="now-card">
       <span className="k">{ar ? "المطلوب منك الآن" : "What you need to do now"}</span>
-      <h2 data-testid="now-title">{ns.requiredNow[0] ? L2(ns.requiredNow[0]) : receiptDue ? (ar ? "ارفع إيصال التحويل" : "Upload the transfer receipt") : (ar ? "لا شيء مطلوب منك الآن" : "Nothing for you now")}</h2>
+      {/* Abu Fahd R4 F2: a held order that needs the rep is never «لا شيء مطلوب منك الآن». */}
+      <h2 data-testid="now-title">{ns.requiredNow[0] ? L2(ns.requiredNow[0]) : heldOrder?.needsRep ? (heldOrder.short ? (ar ? `سجّل الباقي من الطلب #${heldOrder.orderNumber}` : `Record the rest from order #${heldOrder.orderNumber}`) : (ar ? `الطلب #${heldOrder.orderNumber} موقوف بانتظار المبلغ` : `Order #${heldOrder.orderNumber} is held for its money`)) : receiptDue ? (ar ? "ارفع إيصال التحويل" : "Upload the transfer receipt") : (ar ? "لا شيء مطلوب منك الآن" : "Nothing for you now")}</h2>
+      {!ns.requiredNow[0] && heldOrder?.needsRep ? (
+        <div className="acts"><Link className="btn p" href={`/dashboard/orders?order=${encodeURIComponent(heldOrder.id)}`} data-testid="now-held-go">{heldOrder.short ? (ar ? `سجّل الباقي (${Number(heldOrder.short).toFixed(2)} ⃁)` : `Record the rest (SAR ${Number(heldOrder.short).toFixed(2)})`) : (ar ? `افتح الطلب #${heldOrder.orderNumber}` : `Open order #${heldOrder.orderNumber}`)}</Link></div>
+      ) : null}
       {nowDetail() ? <p>{nowDetail()}</p> : null}
       {!ns.requiredNow[0] && receiptDue ? <p data-testid="now-receipt-due">{ar ? "التحويل البنكي مسجّل بدون إيصال — ارفعه عشان يعتمده المحاسب أسرع." : "The bank transfer is recorded without its receipt — upload it so the accountant can approve sooner."}</p> : null}
       {autoLine}
@@ -1118,12 +1131,12 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
         <>
           <div className="pv2-ct">
             <span className="av" aria-hidden>{contact.name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("")}</span>
-            <span className="tx"><b>{contact.name}</b>{contact.phone ? <span><bdi dir="ltr" className="n">{contact.phone}</bdi></span> : null}</span>
+            <span className="tx"><b>{contact.name}</b>{contact.phone ? <span><bdi dir="ltr" className="n">{displayPhone(contact.phone)}</bdi></span> : null}</span>
           </div>
           {contact.phone && (
             <div className="pv2-ct-acts">
-              <a className="btn sm" href={`tel:${digits(contact.phone)}`}><Ico name="phone" small />{ar ? "اتصال" : "Call"}</a>
-              <a className="btn sm" href={`https://wa.me/${digits(contact.phone)}`} target="_blank" rel="noreferrer"><Ico name="chat" small />{ar ? "واتساب" : "WhatsApp"}</a>
+              <a className="btn sm" href={`tel:${contact.phone.trim().startsWith("+") ? "+" : ""}${digits(contact.phone)}`}><Ico name="phone" small />{ar ? "اتصال" : "Call"}</a>
+              <a className="btn sm" href={`https://wa.me/${waDigits(contact.phone) ?? digits(contact.phone)}`} target="_blank" rel="noreferrer"><Ico name="chat" small />{ar ? "واتساب" : "WhatsApp"}</a>
             </div>
           )}
         </>

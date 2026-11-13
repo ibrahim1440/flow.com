@@ -19,6 +19,7 @@
 // Scope (owner decisions D3 / 5): a scoped rep sells only to a customer in their own book that HAS an account owner. A
 // pool customer is the supervisor's: hidden from the rep's list and refused like any customer outside the book (404),
 // even with orders › unassigned_customers — a direct sale opens a deal and an invoice, which that order deliberately does not.
+import { phoneSearchKey } from "@/lib/contact/phone";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
@@ -27,6 +28,7 @@ import { setAuditContext, type AuditContext } from "@/lib/accounting/audit";
 import { emitAutomationEvent } from "@/lib/automation/emit";
 import { resolveOrderLines, createOrderWithNumber, type RawOrderLine } from "@/lib/services/orders/create-order";
 import { autoPrepareOrder } from "@/lib/services/orders/preparation";
+import { holdForPayment, overLimitAtSale } from "@/lib/services/orders/payment-hold";
 import { draftFromOrderIn } from "@/lib/services/invoicing/service";
 import { requestInvoiceIn } from "@/lib/services/invoicing/requests";
 import { DEFAULT_VAT_RATE } from "@/lib/services/invoicing/pricing";
@@ -175,9 +177,8 @@ export async function assertDirectSaleCustomer(db: Db, actor: DirectSaleActor, c
  *  SKUs (active, with a list price). */
 export async function directSaleOptions(actor: DirectSaleActor, q: string, onlyId?: string | null) {
   const term = q.trim().slice(0, 80);
-  const digits = term.replace(/\D/g, "");
   const scoped = customersScopedToOwner(actor);
-  const nameMatch = term ? { OR: [{ name: { contains: term, mode: "insensitive" as const } }, { nameAr: { contains: term, mode: "insensitive" as const } }, ...(digits.length >= 3 ? [{ phone: { contains: digits } }] : [])] } : {};
+  const nameMatch = term ? { OR: [{ name: { contains: term, mode: "insensitive" as const } }, { nameAr: { contains: term, mode: "insensitive" as const } }, ...(phoneSearchKey(term) ? [{ phone: { contains: phoneSearchKey(term)! } }] : [])] } : {};
   const [customers, products] = await Promise.all([
     prisma.customer.findMany({
       where: { AND: [onlyId ? { id: onlyId } : nameMatch, scoped ? { AND: [ownedCustomerWhere(actor.id), { accountOwnerId: { not: null } }] } : {}] },
@@ -220,6 +221,9 @@ export type DirectSaleResult = {
   invoice: { id: string; requested: boolean; warnings: unknown[] } | null;
   totals: { net: string; tax: string; gross: string; discountPercent: string };
   payment: { method: PaymentChoice; collectionId: string | null };
+  /** Owner decision أ: PENDING — a paid-now sale over the customer's credit limit, held until the accountant verifies its
+   *  collection («بانتظار تأكيد استلام المبلغ»); REJECTED — its receipt was rejected. */
+  paymentHold?: "PENDING" | "REJECTED" | null;
 };
 
 /** What the sale's own audit row says (written in the sale's transaction): its key, payment and note — and, for a sale
@@ -277,6 +281,10 @@ async function completeSale(tx: Tx, input: { orderId: string; orderNumber: numbe
   await assertDirectSaleCustomer(tx, rep, order.customerId);
   // Gate M3: the credit hold is checked again when the sale completes (approval / resubmit come later than «إرسال»).
   await assertSalesAllowed(tx, order.customerId, input.now);
+  // P1 ERR-02: the credit limit is checked at «أرسل» (createDirectSale → createOrderWithNumber, on the sale's value with
+  // VAT after its discount). While a sale waits for its discount approval it COUNTS at that value in every other order's
+  // check (exposure.ts, gate R1 B2), so its approval at the same value needs no new check; a resubmit that raises the
+  // value is checked in resubmitDirectSale.
   // «order.created» (automation: e.g. an «order received» WhatsApp) only once it is a sale — never while it waits for its
   // discount approval (gate round 3).
   await emitAutomationEvent(tx, { eventType: "order.created", subjectType: "Order", subjectId: orderId, actorId: rep.id });
@@ -346,12 +354,13 @@ async function saleDeal(tx: Tx, orderId: string): Promise<DirectSaleResult["deal
 
 /** A replayed key: the sale as it stands now. */
 async function describeSale(tx: Tx, orderId: string, method: PaymentChoice, repId: string, key: string): Promise<DirectSaleResult> {
-  const o = await tx.order.findUniqueOrThrow({ where: { id: orderId }, select: { id: true, orderNumber: true, status: true, discountApprovalStatus: true, requestedDiscountPercent: true, opportunityLinks: { select: { opportunityId: true }, take: 1 } } });
+  const o = await tx.order.findUniqueOrThrow({ where: { id: orderId }, select: { id: true, orderNumber: true, status: true, paymentHold: true, discountApprovalStatus: true, requestedDiscountPercent: true, opportunityLinks: { select: { opportunityId: true }, take: 1 } } });
   const inv = await tx.salesInvoice.findUnique({ where: { requestKey: key }, select: { id: true, requestedAt: true, taxTotal: true, grandTotal: true, lineExtensionTotal: true } });
   const pending = o.discountApprovalStatus === "PENDING" || o.discountApprovalStatus === "REJECTED";
   const priced = inv ? null : await priceSale(tx, orderId, new Prisma.Decimal((o.requestedDiscountPercent ?? 0).toString()), (await saleRecord(tx, orderId))?.terms ?? null);
   return {
     replayed: true, order: { id: o.id, orderNumber: o.orderNumber, status: o.status },
+    paymentHold: o.paymentHold === "PENDING" || o.paymentHold === "REJECTED" ? o.paymentHold : null,
     discountApproval: pending ? "PENDING" : o.discountApprovalStatus === "APPROVED" ? "APPROVED" : "NONE",
     opportunityId: o.opportunityLinks[0]?.opportunityId ?? null,
     deal: await saleDeal(tx, orderId),
@@ -423,7 +432,13 @@ export async function createDirectSale(
     }
     const resolved = await resolveOrderLines(tx, priced.lines.map((l) => ({ productSkuId: l.productSkuId, quantityUnits: l.quantityUnits })));
     const note = typeof input.note === "string" ? input.note.trim().slice(0, 1000) || null : null;
-    const order = await createOrderWithNumber(tx, { customerId, notes: ["بيع مباشر", note].filter(Boolean).join(" — "), ownerId: actor.id, channel: "DIRECT_SALE" }, resolved, false);
+    // P1 ERR-02: the credit limit at «أرسل», on the sale's value with VAT (a sale that waits for its discount approval is
+    // checked again when it completes).
+    // Owner Q1 = أ (12 Nov 2026): a sale PAID at the time of sale — cash or card, recorded right now as its collection —
+    // adds no receivable and is exempt from the block. Decided here from the payment the server records (a sale that waits
+    // for its discount approval records nothing yet, so it is checked; a bank transfer is not confirmed: checked).
+    const paidNow = (method === "CASH" || method === "CARD") && !needsApproval;
+    const order = await createOrderWithNumber(tx, { customerId, notes: ["بيع مباشر", note].filter(Boolean).join(" — "), ownerId: actor.id, channel: "DIRECT_SALE", credit: paidNow ? "SKIP" : { amount: new Prisma.Decimal(priced.gross) as never, actorId: actor.id, kind: "DIRECT_SALE" } }, resolved, false);
     if (needsApproval) {
       // Gate H1: the legacy pre-preparation status — the automatic preparation never runs from it, and every other order
       // path refuses the order while it waits (services/orders/discount-hold.ts).
@@ -446,15 +461,23 @@ export async function createDirectSale(
         totals: { net: priced.net, tax: priced.tax, gross: priced.gross, discountPercent: priced.discountPercent }, payment: { method, collectionId: null },
       } satisfies DirectSaleResult;
     }
+    // Owner decision أ (the «fake cash» risk): a paid-now sale the limit would have refused is HELD until the accountant
+    // verifies its collection (services/orders/payment-hold.ts). Decided before the sale writes its invoice / collection.
+    const over = paidNow && await overLimitAtSale(tx, customerId, order.id, priced.gross, now);
     const done = await completeSale(tx, { orderId: order.id, orderNumber: order.orderNumber, customerId, rep: actor, key, discountPercent, method, reference, note, ctx, now, terms });
+    if (over) {
+      await holdForPayment(tx, { id: order.id, orderNumber: order.orderNumber, customerId, gross: done.priced.gross, actor, collectionId: done.collectionId });
+      order.status = "Waiting Approval";
+    }
     return {
+      paymentHold: over ? "PENDING" : null,
       replayed: false, order: { id: order.id, orderNumber: order.orderNumber, status: order.status }, discountApproval: "NONE", opportunityId: done.opportunityId, deal: await saleDeal(tx, order.id), invoice: done.invoice,
       totals: { net: done.priced.net, tax: done.priced.tax, gross: done.priced.gross, discountPercent: done.priced.discountPercent }, payment: { method, collectionId: done.collectionId },
     } satisfies DirectSaleResult;
   }, TX_OPTS);
 
   // Preparation, as for every order — but not while the sale waits for its discount approval (it is not a sale yet).
-  if (!result.replayed && result.discountApproval !== "PENDING") {
+  if (!result.replayed && result.discountApproval !== "PENDING" && !result.paymentHold) {
     const prepared = await autoPrepareOrder(result.order.id, "order_created", { id: actor.id, name: actor.name });
     if (prepared?.order?.status) result.order.status = prepared.order.status;
   }
@@ -546,6 +569,20 @@ export async function resubmitDirectSale(input: { orderId: string; discountPerce
       terms = { lines: t.terms, header: sale.terms.header };
     } else {
       ({ percent, needsApproval } = parseDiscount(input.discountPercent, await discountThreshold(tx), mayApproveDiscount(input.actor.permissions)));
+    }
+    // Gate R1 B2: a resubmit at a lower discount RAISES the sale's value — the credit limit is checked on the new value
+    // (the order itself not counted twice); the value it was counted at while it waited is the previous request.
+    {
+      const before = await tx.order.findUniqueOrThrow({ where: { id: o.id }, select: { requestedDiscountPercent: true } });
+      const was = new Prisma.Decimal((await pricePendingSale(tx, o.id, new Prisma.Decimal((before.requestedDiscountPercent ?? 0).toString()))).gross);
+      const now2 = terms
+        ? new Prisma.Decimal((await priceTerms(tx, terms.lines, await discountThreshold(tx))).quote.gross)
+        : new Prisma.Decimal((await pricePendingSale(tx, o.id, percent)).gross);
+      if (now2.greaterThan(was)) {
+        const { assertCreditLimit, consumeCreditOverride } = await import("@/lib/services/customers/credit-limit");
+        const ov = await assertCreditLimit(tx, { customerId: o.customerId, amount: now2 as never, actorId: input.actor.id, kind: "DIRECT_SALE", exceptOrderId: o.id, now });
+        if (ov) await consumeCreditOverride(tx, ov.overrideId, o.id, input.actor.id, now);
+      }
     }
     if (needsApproval) {
       await tx.order.update({ where: { id: o.id }, data: { discountApprovalStatus: "PENDING", requestedDiscountPercent: percent.toFixed(2) } });

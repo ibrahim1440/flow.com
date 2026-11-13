@@ -1,6 +1,7 @@
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 import { recomputeOrderFlags } from "@/lib/services/orders/order-flags";
 import { resolveOrderLines, createOrderWithNumber } from "@/lib/services/orders/create-order";
+import { Decimal } from "@/lib/accounting/money";
 import { autoPrepareOrder } from "@/lib/services/orders/preparation";
 import { ownerForConvertedOrder } from "@/lib/services/orders/owner-access";
 
@@ -109,7 +110,7 @@ export async function createOrderFromQuote(
   const quote = await tx.quote.findUniqueOrThrow({
     where: { id: input.quoteId },
     select: {
-      id: true, quoteNumber: true, customerId: true, opportunityId: true, issuedAt: true,
+      id: true, quoteNumber: true, customerId: true, opportunityId: true, issuedAt: true, grandTotal: true,
       // The deal's owner (the sales rep) becomes the order's owner; `owner.active` decides the
       // fallback to the converting user (ownerForConvertedOrder).
       opportunity: { select: { id: true, customerId: true, ownerId: true, owner: { select: { active: true } } } },
@@ -170,6 +171,8 @@ export async function createOrderFromQuote(
       // The quotation's owner — the rep who made the sale — owns the order, falling back to
       // whoever converted it when that account is no longer active (fix/order-owner).
       ownerId: ownerForConvertedOrder(quote.opportunity ?? { ownerId: null }, input.actorId),
+      // P1 ERR-02: the credit limit on the quotation's total (VAT included); the one converting asks.
+      credit: { amount: new Decimal(quote.grandTotal.toString()), actorId: input.actorId, kind: "QUOTE_ORDER", quoteId: quote.id },
     },
     resolved,
   );

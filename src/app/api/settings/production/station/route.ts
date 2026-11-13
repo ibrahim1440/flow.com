@@ -47,7 +47,7 @@ export async function PUT(request: Request) {
       await tx.systemConfig.upsert({ where: { id: "singleton" }, create: { id: "singleton" }, update: {} });
       await tx.$queryRaw`SELECT "id" FROM "SystemConfig" WHERE "id" = 'singleton' FOR UPDATE`;
       const before = stationFromRow(await tx.systemConfig.findUnique({ where: { id: "singleton" }, select: { stationLotScanRequired: true } }));
-      const after = stationFromRow(await tx.systemConfig.update({ where: { id: "singleton" }, data: parsed.data, select: { stationLotScanRequired: true } }));
+      const after = stationFromRow(await tx.systemConfig.upsert({ where: { id: "singleton" }, create: { id: "singleton", ...parsed.data }, update: parsed.data, select: { stationLotScanRequired: true } }));
       const b = { stationLotScanRequired: before.lotScanRequired }, a = { stationLotScanRequired: after.lotScanRequired };
       const changed = changedKeys(b, a);
       if (changed.length) {

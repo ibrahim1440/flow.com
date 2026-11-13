@@ -1,4 +1,5 @@
 import { findDuplicateCustomerIn } from "@/lib/services/customers/duplicates-core";
+import { last9 } from "@/lib/contact/phone";
 import type { Permissions } from "@/lib/auth-shared";
 import { seesAllSales } from "./scope";
 import { addressFromNational, DUPLICATE_CUSTOMER } from "@/lib/services/customers/customer-identity";
@@ -45,10 +46,8 @@ export function normalizeCompany(raw: string): string {
  * finds none of them equal.
  */
 export function normalizePhone(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const digits = raw.replace(/\D+/g, "");
-  if (digits.length < 7) return null;
-  return digits.slice(-9);
+  // P1 ERR-04: the shared key (Arabic-Indic digits read as digits — they used to give no key and skip the duplicate check).
+  return typeof raw === "string" ? last9(raw) : null;
 }
 
 export type DuplicateCandidate = {
@@ -195,7 +194,8 @@ export async function convertLead(
       name: full.companyName, nameAr: full.companyNameAr,
       vatNumber: full.vatNumber, commercialRegNo: full.commercialRegNo, unifiedNumber: full.unifiedNumber,
     });
-    if (dup) throw { _appCode: 409, message: DUPLICATE_CUSTOMER.error, errorEn: DUPLICATE_CUSTOMER.errorEn, code: DUPLICATE_CUSTOMER.code, field: dup.by };
+    // `_customerId` stays on the server: the route says which customer only when it is in the caller's own book (ERR-08).
+    if (dup) throw { _appCode: 409, message: DUPLICATE_CUSTOMER.error, errorEn: DUPLICATE_CUSTOMER.errorEn, code: DUPLICATE_CUSTOMER.code, field: dup.by, _customerId: dup.id };
     // The address and city come only from a COMPLETE national address (gate M1); otherwise the lead's own.
     const fromNational = addressFromNational(full);
     const customer = await tx.customer.create({

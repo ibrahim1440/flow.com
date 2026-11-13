@@ -19,11 +19,11 @@ import { opsDbRefusal } from "@/lib/accounting/ops/refusals";
  */
 export function handleDomainError(err: unknown): NextResponse {
   if (err && typeof err === "object" && "_appCode" in err) {
-    const e = err as { _appCode: number; message?: string; errorEn?: string; errorAr?: string; code?: string; problems?: unknown; location?: unknown };
+    const e = err as { _appCode: number; message?: string; errorEn?: string; errorAr?: string; code?: string; problems?: unknown; location?: unknown; credit?: unknown; orderId?: unknown; orderNumber?: unknown };
     const status = Number.isInteger(e._appCode) && e._appCode >= 400 && e._appCode < 600 ? e._appCode : 400;
     // A coded refusal (e.g. REAUTH_REQUIRED, IDENTITY_NOT_VERIFIED) keeps its code, so the client can act on it.
     // DEF-08/09: an English refusal also carries its Arabic (`errorAr`) when it is known.
-    return NextResponse.json(withArabicError({ error: e.message ?? "Refused.", ...(e.errorEn ? { errorEn: e.errorEn } : {}), ...(e.errorAr ? { errorAr: e.errorAr } : {}), ...(e.code ? { code: e.code } : {}), ...(Array.isArray(e.problems) ? { problems: e.problems } : {}), ...(e.location && typeof e.location === "object" ? { location: e.location } : {}) }), { status });
+    return NextResponse.json(withArabicError({ error: e.message ?? "Refused.", ...(e.errorEn ? { errorEn: e.errorEn } : {}), ...(e.errorAr ? { errorAr: e.errorAr } : {}), ...(e.code ? { code: e.code } : {}), ...(Array.isArray(e.problems) ? { problems: e.problems } : {}), ...(e.location && typeof e.location === "object" ? { location: e.location } : {}), ...(e.credit && typeof e.credit === "object" ? { credit: e.credit } : {}), ...(e.code === "ORDER_PAYMENT_HELD" && typeof e.orderId === "string" ? { orderId: e.orderId, orderNumber: e.orderNumber } : {}) }), { status });
   }
   return handlePrismaError(err);
 }
@@ -55,6 +55,10 @@ export function handlePrismaError(err: unknown): NextResponse {
   // a refusal by the database, never a crash — 409 with its code. Nothing was written.
   if (/Commission payout recording is frozen at the database/.test(msg)) {
     return NextResponse.json({ error: "تسجيل صرف العمولات موقوف في قاعدة البيانات؛ لا يُسجَّل أي صرف حتى يُرفع الإيقاف.", errorEn: "Commission payout recording is frozen at the database. No payout can be recorded until the freeze is lifted.", code: "COMMISSION_PAYOUT_FROZEN" }, { status: 409 });
+  }
+  // Owner decision أ (20261231100000_direct_sale_payment_hold): Order_payment_hold_guard refused moving a held order.
+  if (/ORDER_AWAITING_PAYMENT/.test(msg)) {
+    return NextResponse.json({ error: "الطلب بيع مباشر بانتظار تأكيد استلام المبلغ من المحاسب — ما يتجهّز ولا يُشحن قبله.", errorEn: "This direct sale is waiting for the accountant to confirm its payment — it is not prepared or dispatched before that.", code: "ORDER_AWAITING_PAYMENT" }, { status: 409 });
   }
   if (/LEDGER: manual journals are disabled \(Phase 1\)/.test(msg)) {
     return NextResponse.json({ error: MANUAL_JOURNALS_DISABLED_AR, errorEn: MANUAL_JOURNALS_DISABLED_EN, code: MANUAL_JOURNALS_DISABLED }, { status: 409 });
