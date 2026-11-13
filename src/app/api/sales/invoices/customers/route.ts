@@ -1,5 +1,6 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
+import { phoneSearchKey } from "@/lib/contact/phone";
 import { forbidden, requireAuth } from "@/lib/auth-server";
 import { canCreateInvoices, canViewInvoices } from "@/lib/services/invoicing/access";
 import { scopedCustomerIds } from "@/lib/services/invoicing/http";
@@ -8,6 +9,8 @@ import { invError } from "@/lib/services/invoicing/refusals";
 /**
  * GET /api/sales/invoices/customers?q= — the invoice editor's customer picker: the buyer particulars an invoice
  * prefills (name, VAT number, CR, city, address, payment terms). Invoices viewers / creators, in their scope.
+ * P2 ERR-16: also by phone, on its last digits (0550000000 finds +966550000000) — as the leads search and Ctrl K — and, for
+ * the few stored values the phone cleanup could not read, on the text as typed.
  */
 export async function GET(request: Request) {
   const { user, error } = await requireAuth();
@@ -21,7 +24,7 @@ export async function GET(request: Request) {
     const scope = await scopedCustomerIds(user);
     if (id && scope && !scope.includes(id)) return NextResponse.json({ items: [] });
     const rows = await prisma.customer.findMany({
-      where: { ...(id ? { id } : scope ? { id: { in: scope } } : {}), ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { nameAr: { contains: q } }, { vatNumber: { contains: q } }] } : {}) },
+      where: { ...(id ? { id } : scope ? { id: { in: scope } } : {}), ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { nameAr: { contains: q } }, { vatNumber: { contains: q } }, ...(phoneSearchKey(q) ? [{ phone: { contains: phoneSearchKey(q)! } }, { phone: { contains: q } }] : [])] } : {}) },
       orderBy: { name: "asc" }, take: 50,
       select: { id: true, name: true, nameAr: true, vatNumber: true, commercialRegNo: true, city: true, address: true, phone: true, paymentTermsDays: true, unifiedNumber: true, nationalBuildingNo: true, nationalStreet: true, nationalDistrict: true, nationalCity: true, nationalPostalCode: true, nationalAdditionalNo: true },
     });

@@ -8,6 +8,7 @@
  * «met» and the celebration follow collected only. Two cards: «عمولة مستحقة · على اللي انحصّل» and «عند العملاء» (sheet E
  * on a phone, a 440 side panel on a desktop). Tapping collected opens its breakdown (F).
  */
+import { percentOf, wholePercentLabel } from "@/lib/format/figures";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Ico } from "@/components/shell/icons";
@@ -15,7 +16,7 @@ import { useTrap } from "@/components/shell/QuickJump";
 import { days, monthName, n, telHref, waNumber, type Lang } from "./text";
 
 type Bonus = { kind: "FIXED" | "DISCRETIONARY"; amount: string | null } | null;
-export type OwedCustomer = { customerId: string; name: string; nameAr: string | null; phone: string | null; net: string; gross: string; fullNet: string; sharePct: number; invoices: number; oldestDays: number };
+export type OwedCustomer = { customerId: string; name: string; nameAr: string | null; phone: string | null; net: string; gross: string; fullNet: string; sharePct: number; invoices: number; oldestDays: number; overdueDays?: number };
 export type BandTarget = {
   month: string; target: string | null; achieved: string; percent: string | null; met: boolean | null; daysLeft: number;
   commissionVisible: boolean; accrued: string | null;
@@ -147,8 +148,8 @@ export function SalesBand({ t, lang, who, phone, ro, viewerId, onLog, weekGoals 
   // The owner (8 Nov): the end label is the stage's percent only — no bonus text (the line below says the bonus).
   const endLabel = top ? (ar ? "+150%" : "150%+") : `${stage.to}%`;
   const aria = ar
-    ? `المحصّل ${pc(n(bar.collectedPct, 0))} من الهدف، المرحلة ${stage.index + 1} من 4`
-    : `Collected ${n(bar.collectedPct, 0)}% of the target, stage ${stage.index + 1} of 4`;
+    ? `المحصّل ${pc(wholePercentLabel(percentOf(t.achieved, target), true))} من الهدف، المرحلة ${stage.index + 1} من 4`
+    : `Collected ${wholePercentLabel(percentOf(t.achieved, target), false)}% of the target, stage ${stage.index + 1} of 4`;
 
   return (
     <>
@@ -166,7 +167,7 @@ export function SalesBand({ t, lang, who, phone, ro, viewerId, onLog, weekGoals 
               <span className="md-sb-chev" aria-hidden>›</span>
             </span>
           </button>
-          <bdi className="num md-sb-pct" dir="ltr" data-testid="md-target-pct">{n(bar.collectedPct, 0)}%</bdi>
+          <bdi className="num md-sb-pct" dir="ltr" data-testid="md-target-pct">{wholePercentLabel(percentOf(t.achieved, target), ar)}%</bdi>
         </div>
 
         {celebrate && stage.index >= 1 ? (

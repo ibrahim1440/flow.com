@@ -7,7 +7,7 @@ import { awaitingDiscountRefusal, isAwaitingDiscount } from "@/lib/services/orde
 import { awaitingPaymentRefusal, isPaymentHeld } from "@/lib/services/orders/payment-hold";
 import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
-import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
+import { canSeeCustomerContact, CUSTOMER_NAME_SELECT, fullCustomer } from "@/lib/auth/customer-detail";
 import { appendOrderActivity, lockOrderLifecycleResources } from "@/lib/services/order-operations";
 import {
   assertStructuralEditAllowed,
@@ -301,7 +301,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       return tx.order.findUnique({
         where: { id },
         include: {
-          customer: canSeeCustomerContact(user.permissions) ? true : { select: CUSTOMER_NAME_SELECT },
+          customer: canSeeCustomerContact(user.permissions) ? fullCustomer(user) : { select: CUSTOMER_NAME_SELECT },
           items: true,
         },
       });

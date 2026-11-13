@@ -1,4 +1,5 @@
 import { NextResponse } from "@/lib/api-response";
+import { assertNotPast, sameRiyadhDay } from "@/lib/dates/not-past";
 import { lastClosedQuote } from "@/lib/services/sales/deal-amount";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
@@ -8,6 +9,10 @@ import { seesAllSales, collectionWhere, NOT_FOUND_MESSAGE } from "@/lib/services
 import { collectionSummary, collectionAction } from "@/lib/services/sales/collections";
 import { serialiseSummary } from "@/app/api/sales/collections/route";
 import { parseFiniteDecimal } from "@/lib/services/commissions/engine";
+import { Prisma } from "@/generated/prisma/client";
+
+/** P2 ERR-14: the largest expected value a deal takes (1 billion SAR). */
+const MAX_DEAL_AMOUNT = new Prisma.Decimal("1000000000");
 import { discountApprovalState } from "@/lib/services/sales/quotes";
 import { discountThreshold } from "@/lib/services/sales/quote-settings";
 import { approvesSamples, sampleApprovalState } from "@/lib/services/sales/sample-rules";
@@ -302,7 +307,7 @@ export async function PATCH(request: Request, { params }: Params) {
   try {
     const existing = await prisma.opportunity.findUnique({
       where: { id },
-      select: { id: true, ownerId: true, outcome: true },
+      select: { id: true, ownerId: true, outcome: true, nextFollowUpAt: true },
     });
     if (!existing) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });
 
@@ -332,7 +337,9 @@ export async function PATCH(request: Request, { params }: Params) {
       const d = parseFiniteDecimal(b.amount);
       if (!d) throw { _appCode: 400, message: "The expected value is not a number." };
       if (d.isNegative()) throw { _appCode: 400, message: "The expected value cannot be negative." };
-      data.amount = d;
+      // P2 ERR-14: an upper bound (the column is Decimal(18,2); a larger number used to reach the database as a 500).
+      if (d.greaterThan(MAX_DEAL_AMOUNT)) throw { _appCode: 400, code: "AMOUNT_TOO_LARGE", message: "The expected value is above the largest allowed.", errorAr: `أكبر قيمة مسموحة للصفقة ${Number(MAX_DEAL_AMOUNT).toLocaleString("en-US")} ر.س.` };
+      data.amount = d.toDecimalPlaces(2);
     }
     if (b.probability !== undefined) {
       const p = Number(b.probability);
@@ -352,11 +359,16 @@ export async function PATCH(request: Request, { params }: Params) {
     // activity (`deal-follow-up:<id>`) — scheduling again moves it — and the column is computed from what is open.
     // The field is still accepted for one release, routed through the same helper.
     let followUp: { dueAt: Date | null } | null = null;
+    let unchangedFollowUp = false;
     if (b.nextFollowUpAt === null) followUp = { dueAt: null };
     else if (typeof b.nextFollowUpAt === "string" && b.nextFollowUpAt) {
       const d = new Date(b.nextFollowUpAt);
       if (Number.isNaN(d.getTime())) throw { _appCode: 400, message: "nextFollowUpAt is not a date." };
-      followUp = { dueAt: d };
+      assertNotPast(d, existing.nextFollowUpAt, "موعد المتابعة", "follow-up date"); // P2 ERR-15
+      // Gate B2: the same Riyadh day sent back is no change — the stored follow-up (and its time) stays as it is.
+      // Only a DATE (YYYY-MM-DD, what the edit dialog sent) on the same Riyadh day is «unchanged»; a full time is a choice.
+      if (!(/^\d{4}-\d{2}-\d{2}$/.test(b.nextFollowUpAt) && sameRiyadhDay(d, existing.nextFollowUpAt))) followUp = { dueAt: d };
+      else unchangedFollowUp = true;
     }
     const followUpSubject = typeof b.followUpSubject === "string" ? b.followUpSubject.slice(0, 200) : null;
     if (typeof b.customerId === "string" && b.customerId) {
@@ -389,12 +401,17 @@ export async function PATCH(request: Request, { params }: Params) {
       };
     }
 
-    if (Object.keys(data).length === 0 && !followUp) {
+    if (Object.keys(data).length === 0 && !followUp && !unchangedFollowUp) {
       return NextResponse.json({ error: "Nothing to change." }, { status: 400 });
     }
 
     const deal = await prisma.$transaction(async (tx) => {
       if (Object.keys(data).length > 0) await tx.opportunity.update({ where: { id }, data });
+      // P2 SUSP-01: the deal's open follow-ups and reminders move with it to the new owner — left with the old one they
+      // answered «الصفقة غير موجودة» (the deal is no longer theirs) and could never be closed.
+      if (data.ownerId) {
+        await tx.activity.updateMany({ where: { opportunityId: id, completedAt: null, ownerId: existing.ownerId }, data: { ownerId: data.ownerId as string } });
+      }
       if (followUp) {
         await scheduleDealFollowUp(tx, { opportunityId: id, ownerId: (data.ownerId as string | undefined) ?? existing.ownerId, dueAt: followUp.dueAt, subject: followUpSubject });
       }

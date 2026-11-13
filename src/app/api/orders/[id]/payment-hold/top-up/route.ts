@@ -1,3 +1,4 @@
+import { latinNumberText } from "@/lib/numbers/typed-number";
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { privilegedGate, requireAuth } from "@/lib/auth-server";
@@ -35,7 +36,7 @@ export async function POST(request: Request, { params }: Params) {
 
   const idempotencyKey = typeof b.idempotencyKey === "string" ? b.idempotencyKey.trim() : "";
   if (idempotencyKey.length < 8 || idempotencyKey.length > 128) return NextResponse.json({ error: "idempotencyKey must be 8–128 characters.", code: "BAD_INPUT" }, { status: 400 });
-  const raw = String(b.amountGross ?? "").trim();
+  const raw = latinNumberText(String(b.amountGross ?? "")); // P2 ERR-17
   if (!AMOUNT_PATTERN.test(raw) || !(Number(raw) > 0)) return NextResponse.json({ error: "اكتب المبلغ (رقم موجب بخانتين عشريتين على الأكثر).", errorEn: "amountGross must be a positive amount with at most two decimal places.", code: "AMOUNT_INVALID", field: "amountGross" }, { status: 400 });
   const collectedAt = typeof b.collectedAt === "string" && b.collectedAt ? new Date(b.collectedAt) : new Date();
   if (Number.isNaN(collectedAt.getTime()) || collectedAt.getTime() > Date.now() + 24 * 3600_000) return NextResponse.json({ error: "تاريخ التحصيل غير صالح أو في المستقبل.", errorEn: "collectedAt is not a past date.", code: "BAD_INPUT" }, { status: 400 });

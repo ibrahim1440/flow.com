@@ -1,5 +1,7 @@
 "use client";
 
+import { percentOf, wholePercentLabel } from "@/lib/format/figures";
+import { halalas } from "@/lib/format/money";
 import { useState, useEffect } from "react";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../../user-context";
@@ -457,6 +459,9 @@ const ACCRUAL_WORD: Record<string, [string, string, string]> = {
 function TargetAndCommission({ ar, data, day }: { ar: boolean; data: Payload; day: DayTarget | null }) {
   const sar = ar ? "⃁" : "SAR";
   const whole = (v: string | number | null | undefined) => (v === null || v === undefined ? "—" : Math.round(Number(v)).toLocaleString("en-US"));
+  // P2 UXM-21: what was collected and what the commission is keep their halalas (the target, the percent and the
+  // estimates stay whole — they are goals, not amounts collected).
+  const money = (v: string | number | null | undefined) => halalas(v);
   const p = data.progress;
   const pct = p?.percent ? Math.max(0, Math.min(100, Number(p.percent))) : 0;
   const bonus = data.target && Number(data.target.bonusAmount) > 0 ? data.target.bonusAmount : null;
@@ -474,8 +479,8 @@ function TargetAndCommission({ ar, data, day }: { ar: boolean; data: Payload; da
             <>
               <div className="mny-stats">
                 <span className="mny-stat"><small>{ar ? "الهدف" : "Target"}</small><b className="num" data-testid="mc-target">{whole(p.target)}</b><span>{sar}</span></span>
-                <span className="mny-stat"><small>{ar ? "حصّلت" : "Collected"}</small><b className="num" style={{ color: "var(--status-success)" }} data-testid="mc-collected">{whole(p.achieved)}</b><span>{sar} · {whole(p.percent)}%</span></span>
-                <span className="mny-stat"><small>{p.met ? (ar ? "فوق الهدف" : "Above") : (ar ? "باقي" : "Left")}</small><b className="num" style={{ color: p.met ? "var(--status-success)" : "var(--status-warning)" }} data-testid="mc-remaining">{p.met ? "✓" : whole(p.remaining)}</b><span>{p.met ? "" : sar}{!p.met && day?.daysLeft !== undefined ? (ar ? ` · ${day.daysLeft} يوم` : ` · ${day.daysLeft} days`) : ""}</span></span>
+                <span className="mny-stat"><small>{ar ? "حصّلت" : "Collected"}</small><b className="num" style={{ color: "var(--status-success)" }} data-testid="mc-collected">{money(p.achieved)}</b><span>{sar} · {wholePercentLabel(percentOf(p.achieved, p.target) ?? p.percent, ar)}%</span></span>
+                <span className="mny-stat"><small>{p.met ? (ar ? "فوق الهدف" : "Above") : (ar ? "باقي" : "Left")}</small><b className="num" style={{ color: p.met ? "var(--status-success)" : "var(--status-warning)" }} data-testid="mc-remaining">{p.met ? "✓" : money(p.remaining)}</b><span>{p.met ? "" : sar}{!p.met && day?.daysLeft !== undefined ? (ar ? ` · ${day.daysLeft} يوم` : ` · ${day.daysLeft} days`) : ""}</span></span>
               </div>
               <span className="mny-bar ok" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${pct}%` }} /></span>
               {bonus ? <p className="mny-note pr"><Ico name="flag" small />{ar ? `لو وصلت الهدف لك مكافأة ${whole(bonus)} ${sar} — تسجّلها الإدارة بعد نهاية الشهر` : `Reach the target for a ${whole(bonus)} ${sar} bonus — recorded by management after the month`}</p> : null}
@@ -485,9 +490,9 @@ function TargetAndCommission({ ar, data, day }: { ar: boolean; data: Payload; da
         <section className="mny-card" aria-labelledby="mc-com-h">
           <div className="mny-h"><div><h2 id="mc-com-h">{ar ? "عمولتي هالشهر" : "My commission this month"}</h2><small>{ar ? "تنحسب بعد ما تعتمد المالية التحصيل" : "Counted once finance approves a collection"}</small></div></div>
           <div className="mny-tiles">
-            <span className="mny-tile" data-testid="mc-accrued"><small>{ar ? "مستحقة لك" : "Owed to you"}</small><b className="num">{whole(data.statement.accrued)}</b><small>{sar}</small></span>
-            <span className="mny-tile"><small>{ar ? "انصرفت" : "Paid"}</small><b className="num">{whole(data.statement.paid)}</b><small>{sar}</small></span>
-            <span className="mny-tile ok" data-testid="outstanding-tile"><small>{ar ? "باقي لك" : "Left to you"}</small><b className="num">{whole(data.statement.outstanding)}</b><small>{sar}</small></span>
+            <span className="mny-tile" data-testid="mc-accrued"><small>{ar ? "مستحقة لك" : "Owed to you"}</small><b className="num">{money(data.statement.accrued)}</b><small>{sar}</small></span>
+            <span className="mny-tile"><small>{ar ? "انصرفت" : "Paid"}</small><b className="num">{money(data.statement.paid)}</b><small>{sar}</small></span>
+            <span className="mny-tile ok" data-testid="outstanding-tile"><small>{ar ? "باقي لك" : "Left to you"}</small><b className="num">{money(data.statement.outstanding)}</b><small>{sar}</small></span>
           </div>
           {day?.estimate ? <p className="mny-note"><Ico name="trend" small />{ar ? `لو وصلت الهدف تصير عمولتك تقريبًا ${whole(day.estimate)} ${sar}` : `At the target, about ${whole(day.estimate)} ${sar}`}</p> : null}
           <p className="mny-note" data-testid="mc-when"><Ico name="clock" small />{ar ? "متى تنصرف؟ بعد ما تعتمدها المالية، وتتحول هنا إلى «انصرفت»." : "When is it paid? After finance approves it; it then shows here as «Paid»."}</p>
@@ -498,10 +503,10 @@ function TargetAndCommission({ ar, data, day }: { ar: boolean; data: Payload; da
           <div className="mny-h"><div><h2 id="mc-how-h">{ar ? "كيف انحسبت عمولتك؟" : "How was it computed?"}</h2><small>{ar ? "نفس الحساب لكل تحصيل" : "The same for each collection"}</small></div></div>
           {same("sharePercent") && same("effectiveRatePercent") ? (
             <div className="mny-eq">
-              <span><small>{ar ? "حصّلت بدون الضريبة" : "Collected before VAT"}</small><b className="num">{whole(live.reduce((s, a) => s + net(a), 0))}</b></span><i>×</i>
+              <span><small>{ar ? "حصّلت بدون الضريبة" : "Collected before VAT"}</small><b className="num">{money(live.reduce((s, a) => s + net(a), 0))}</b></span><i>×</i>
               <span><small>{ar ? "حصتك من الصفقات" : "Your share"}</small><b className="num">{pctText(live[0].sharePercent)}</b></span><i>×</i>
               <span><small>{ar ? "نسبتك" : "Your rate"}</small><b className="num">{pctText(live[0].effectiveRatePercent)}</b></span><i>=</i>
-              <span className="ok"><small>{ar ? "عمولتك" : "Commission"}</small><b className="num">{whole(live.reduce((s, a) => s + Number(a.amount), 0))} {sar}</b></span>
+              <span className="ok"><small>{ar ? "عمولتك" : "Commission"}</small><b className="num">{money(live.reduce((s, a) => s + Number(a.amount), 0))} {sar}</b></span>
             </div>
           ) : <p className="mny-note">{ar ? "التحصيل بدون الضريبة × حصتك من الصفقة × نسبتك = العمولة. النسبة أو الحصة تختلف بين التحصيلات — شوف كل تحصيل تحت." : "Collected before VAT × your share × your rate = commission. They differ between collections — see each below."}</p>}
         </section>
@@ -518,8 +523,8 @@ function TargetAndCommission({ ar, data, day }: { ar: boolean; data: Payload; da
                   <tr key={a.id}>
                     <td>{day2(a.collectionEvent.collectedAt)}</td>
                     <td><bdi>{a.collectionEvent.customer?.name ?? (ar ? "بدون عميل" : "No customer")}</bdi></td>
-                    <td className="n num">{whole(net(a))} {sar}</td>
-                    <td className="ok num">{whole(a.amount)} {sar}</td>
+                    <td className="n num">{money(net(a))} {sar}</td>
+                    <td className="ok num">{money(a.amount)} {sar}</td>
                     <td><span className={`mny-pill ${w[2]}`}>{ar ? w[0] : w[1]}</span></td>
                   </tr>
                 );

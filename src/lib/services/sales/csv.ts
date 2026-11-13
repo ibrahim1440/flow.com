@@ -262,8 +262,10 @@ export function parseLeadCsv(text: string): ParsedImport {
       problems.push({ row: rowNumber, column: "companyName", message: "A company name is required.", messageAr: "اسم المنشأة مطلوب." });
       return;
     }
-    if (!row.contactName || row.contactName.length < 2) {
-      problems.push({ row: rowNumber, column: "contactName", message: "A contact name is required.", messageAr: "اسم الشخص المسؤول مطلوب." });
+    // P2 SUSP-07: the contact person is optional, as on the manual form (Lead.contactName is nullable) — only a name that
+    // is there but too short to be one is refused.
+    if (row.contactName && row.contactName.length < 2) {
+      problems.push({ row: rowNumber, column: "contactName", message: "The contact name is too short.", messageAr: "اسم الشخص المسؤول قصير — اكتبه كامل أو اتركه فاضي." });
       return;
     }
     if (row.source) {

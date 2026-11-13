@@ -10,7 +10,8 @@ export const OWNER_CONTACT_FIELDS = ["phone", "email", "address", "city"] as con
  * address — each change with a reason, customer-identity.ts) and that reason. Name, credit, terms, owner, tier, opt-outs
  * stay refused.
  */
-export const OWNER_ALLOWED_KEYS: readonly string[] = [...OWNER_CONTACT_FIELDS, ...IDENTITY_FIELDS, "reason"];
+// P2 ERR-06: `expectedUpdatedAt` is the stale-copy check, not a field (lib/http/stale-record.ts).
+export const OWNER_ALLOWED_KEYS: readonly string[] = [...OWNER_CONTACT_FIELDS, ...IDENTITY_FIELDS, "reason", "expectedUpdatedAt", "baseline"]; // the version + the values the form was loaded with (P2 ERR-06, gate E1)
 
 type Viewer = { id: string; permissions: Permissions | Record<string, unknown> };
 

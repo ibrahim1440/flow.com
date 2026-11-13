@@ -11,6 +11,7 @@
 //                          of the leads API, sales › lead_write), then «خلصت الجولة».
 //   · RepeatingCard      — «خطتي ← المتكرر»: each weekly rule with «عدّل» (from next week) and «وقّفه».
 //   · InvitesCard        — a colleague's meeting this rep was invited to, with «حطها في خطتي» (owner decision b: by hand).
+import { latinNumberText } from "@/lib/numbers/typed-number";
 import { roundFailedCount, roundLastSent, roundOpenValue, roundPending, trackRoundSave, type SaveEnd } from "./round-cache";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -194,7 +195,7 @@ function Stepper({ ar, value, max, onChange, testId }: { ar: boolean; value: num
   return (
     <span className="kp-step" role="group" data-testid={testId}>
       <button type="button" onClick={() => onChange(Math.min(max, value + 1))} aria-label={ar ? "زيد" : "More"} data-testid={`${testId}-plus`}>+</button>
-      <input className="num" inputMode="numeric" value={String(value)} onChange={(e) => { const n = Number(e.target.value.replace(/\D/g, "")); onChange(Number.isFinite(n) ? Math.min(max, n) : 0); }} aria-label={ar ? "العدد" : "Number"} data-testid={`${testId}-value`} />
+      <input className="num" inputMode="numeric" value={String(value)} onChange={(e) => { const n = Number(latinNumberText(e.target.value).replace(/\D/g, "")); onChange(Number.isFinite(n) ? Math.min(max, n) : 0); }} aria-label={ar ? "العدد" : "Number"} data-testid={`${testId}-value`} />
       <button type="button" onClick={() => onChange(Math.max(0, value - 1))} aria-label={ar ? "نقّص" : "Fewer"}>−</button>
     </span>
   );

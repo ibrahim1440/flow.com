@@ -1,4 +1,5 @@
 import { hasModuleAccess, type Permissions } from "@/lib/auth-shared";
+import { managesNewClientExclusion } from "@/lib/services/sales/scope";
 
 /**
  * Who may see identifiable customer information on the dashboards (owner decision F4, 18 Oct
@@ -62,4 +63,26 @@ export function anonymousOrder(o: { items: { productionStatus: string; deliveryS
     totalKg: Math.round(o.items.reduce((s, i) => s + i.quantityKg, 0) * 10) / 10,
     items: o.items.map((i) => ({ productionStatus: i.productionStatus, deliveryStatus: i.deliveryStatus, quantityKg: i.quantityKg })),
   };
+}
+
+/**
+ * P2 SEC-08: «مستثنى من عمولة العميل الجديد» (the flag, its reason, who set it and when) and the opening
+ * «commissionPriorOrders» decide somebody's commission — only managesNewClientExclusion sees them (services/sales/
+ * scope.ts). Every full customer read (`include`/`true`) omits them for everyone else, in the query itself.
+ */
+export const NEW_CLIENT_OMIT = {
+  newClientCommissionExcluded: true, newClientExclusionReason: true, newClientExclusionById: true,
+  newClientExclusionAt: true, commissionPriorOrders: true,
+} as const;
+
+type Viewer = { permissions: Permissions | Record<string, unknown>; role?: string | null };
+/** The Prisma `omit` for a full customer read by this viewer (undefined = sees the commission fields). */
+export function newClientOmit(user: Viewer): typeof NEW_CLIENT_OMIT | undefined {
+  return managesNewClientExclusion(user.permissions, user.role ?? null) ? undefined : NEW_CLIENT_OMIT;
+}
+/** A full customer relation (`customer: true` / `{ include }`) with the commission fields omitted where needed. */
+export function fullCustomer<T extends object>(user: Viewer, args?: T): (T & { omit?: typeof NEW_CLIENT_OMIT }) | true {
+  const omit = newClientOmit(user);
+  if (!omit) return args ?? true;
+  return { ...(args ?? ({} as T)), omit };
 }

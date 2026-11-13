@@ -32,7 +32,7 @@ import {
 import { emitAutomationEvent } from "@/lib/automation/emit";
 import { draftOnDelivery } from "@/lib/services/invoicing/service";
 import { emitDeliveryProgress } from "@/lib/services/orders/progress-events";
-import { canSeeCustomerContact, CUSTOMER_DELIVERY_SELECT } from "@/lib/auth/customer-detail";
+import { canSeeCustomerContact, CUSTOMER_DELIVERY_SELECT, fullCustomer } from "@/lib/auth/customer-detail";
 import { settlePicksOnDelivery } from "@/lib/services/station/prep-settle";
 
 export async function GET() {
@@ -47,7 +47,7 @@ export async function GET() {
     orderBy: { date: "desc" },
     take: 500,
     include: {
-      orderItem: { include: { order: { include: { customer: customerContact ? true : { select: CUSTOMER_DELIVERY_SELECT } } } } },
+      orderItem: { include: { order: { include: { customer: customerContact ? fullCustomer(user) : { select: CUSTOMER_DELIVERY_SELECT } } } } },
     },
   });
   // Phase D: each row also carries `lots` — its DeliveryLine rows, or for a delivery recorded

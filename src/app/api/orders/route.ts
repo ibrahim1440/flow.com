@@ -6,7 +6,7 @@ import { handleDomainError } from "@/lib/api-error";
 // second copy here is exactly the shape of defect the packaging rework was spent closing.
 import { resolveOrderLines, createOrderWithNumber } from "@/lib/services/orders/create-order";
 import { emitAutomationEvent } from "@/lib/automation/emit";
-import { canSeeCustomerContact, CUSTOMER_OPERATIONS_SELECT } from "@/lib/auth/customer-detail";
+import { canSeeCustomerContact, CUSTOMER_OPERATIONS_SELECT, fullCustomer } from "@/lib/auth/customer-detail";
 import { deliveryLotsFor } from "@/lib/services/delivery-lots";
 import { autoPrepareOrder } from "@/lib/services/orders/preparation";
 import { orderPipelines } from "@/lib/services/orders/pipeline";
@@ -43,7 +43,7 @@ export async function GET(request: Request) {
     orderBy: { createdAt: "desc" },
     take: 500,
     include: {
-      customer: customerContact ? { include: { roastPreferences: true } } : { select: CUSTOMER_OPERATIONS_SELECT },
+      customer: customerContact ? fullCustomer(user, { include: { roastPreferences: true } }) : { select: CUSTOMER_OPERATIONS_SELECT },
       items: {
         include: {
           // Batches without their QC records. This list is loaded by four screens —

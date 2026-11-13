@@ -116,3 +116,48 @@ export async function withLostQuoteValue<T extends { id: string; amount: { toStr
   // Decimal arithmetic downstream accepts the decimal string (`a.plus("1150.00")`).
   return rows.map((r) => { const c = closed.get(r.id); return c ? { ...r, amount: c.grandTotal as unknown as T["amount"] } : r; });
 }
+
+/**
+ * P2 SUSP-05 (owner decision أ): «صفقات كسبتها» on the performance dashboard is BEFORE VAT, like every other figure there.
+ * `Opportunity.amount` is VAT-inclusive (a quotation's grand total, a direct sale's gross), so the won value is rebuilt by
+ * the same rule as syncDealAmount, on net figures:
+ *   the ACCEPTED quotation (highest revision), else the latest ISSUED one → its grand total − its tax total;
+ *   + each live direct order of the deal → its invoices' taxable total (not cancelled), else its stored gross when no
+ *     invoice exists yet (rare: the order was not invoiced) its stored gross − its stored tax (gate B3);
+ *   a deal with neither keeps its typed amount (a hand-typed expected value carries no VAT breakdown).
+ * Returns opportunityId → net (a decimal string).
+ */
+export async function dealNetValues(db: Pick<Tx, "quote" | "opportunityOrder" | "salesInvoice">, rows: { id: string; amount: { toString(): string } }[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!rows.length) return out;
+  const ids = rows.map((r) => r.id);
+  const quotes = await db.quote.findMany({
+    where: { opportunityId: { in: ids }, status: { in: ["ACCEPTED", "ISSUED"] } },
+    orderBy: [{ revision: "desc" }],
+    select: { opportunityId: true, status: true, revision: true, issuedAt: true, grandTotal: true, taxTotal: true },
+  });
+  const direct = await db.opportunityOrder.findMany({
+    where: { opportunityId: { in: ids }, quoteId: null, directGross: { not: null }, order: { status: { notIn: DEAD } } },
+    select: { opportunityId: true, orderId: true, directGross: true, directTax: true },
+  });
+  const invoices = direct.length ? await db.salesInvoice.findMany({
+    where: { orderId: { in: direct.map((d) => d.orderId) }, kind: "INVOICE", status: { not: "CANCELLED" } },
+    select: { orderId: true, taxableTotal: true },
+  }) : [];
+  for (const r of rows) {
+    const qs = quotes.filter((q) => q.opportunityId === r.id);
+    const accepted = qs.filter((q) => q.status === "ACCEPTED").sort((a, b) => b.revision - a.revision)[0];
+    const issued = qs.filter((q) => q.status === "ISSUED").sort((a, b) => (b.issuedAt?.getTime() ?? 0) - (a.issuedAt?.getTime() ?? 0) || b.revision - a.revision)[0];
+    const q = accepted ?? issued;
+    const ds = direct.filter((d) => d.opportunityId === r.id);
+    if (!q && !ds.length) { out.set(r.id, (cents(r.amount) / 100).toFixed(2)); continue; }
+    let total = q ? cents(q.grandTotal) - cents(q.taxTotal) : 0;
+    for (const d of ds) {
+      const inv = invoices.filter((i) => i.orderId === d.orderId);
+      // Gate B3: no invoice yet → the stored gross LESS its stored tax (before VAT, like every other figure here).
+      total += inv.length ? inv.reduce((t, i) => t + cents(i.taxableTotal), 0) : cents(d.directGross) - cents(d.directTax ?? 0);
+    }
+    out.set(r.id, (total / 100).toFixed(2));
+  }
+  return out;
+}

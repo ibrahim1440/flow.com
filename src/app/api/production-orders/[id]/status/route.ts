@@ -1,6 +1,6 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
-import { requireSub } from "@/lib/auth-server";
+import { requireSub, requireModule } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { appendOrderActivity, REASON_MAX_LENGTH } from "@/lib/services/order-operations";
 import {
@@ -38,6 +38,9 @@ export async function POST(request: Request, { params }: Params) {
   // batch; releasing and closing are governed by the one that starts production. Both are
   // existing keys — a new sub-privilege key would read as false for every employee whose
   // stored permissions predate it, locking out even an admin.
+  // P2 SEC-10: the production module first — a visitor gets 401 before the body is read.
+  const signedIn = await requireModule("production");
+  if (signedIn.error) return signedIn.error;
   let body: unknown;
   try {
     body = await request.json();

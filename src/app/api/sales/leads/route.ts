@@ -1,4 +1,5 @@
 import { parseLeadIdentity, leadCityFrom } from "@/lib/services/sales/lead-identity";
+import { isPastDay, pastDateRefusal } from "@/lib/dates/not-past";
 import { emailField, phoneField, phoneSearchKey } from "@/lib/contact/phone";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
@@ -43,7 +44,8 @@ export async function GET(request: Request) {
             OR: [
               { companyName: { contains: q, mode: "insensitive" as const } },
               { contactName: { contains: q, mode: "insensitive" as const } },
-              ...(phoneSearchKey(q) ? [{ phone: { contains: phoneSearchKey(q)! } }] : []),
+              // P2 ERR-16: the last digits (canonical +966… numbers), and the raw text for a value the phone cleanup could not read.
+              ...(phoneSearchKey(q) ? [{ phone: { contains: phoneSearchKey(q)! } }, { phone: { contains: q } }] : []),
               { city: { contains: q, mode: "insensitive" as const } },
             ],
           }
@@ -198,6 +200,11 @@ export async function POST(request: Request) {
     const followUp = typeof b.nextFollowUpAt === "string" && b.nextFollowUpAt ? new Date(b.nextFollowUpAt) : null;
     if (followUp && Number.isNaN(followUp.getTime())) {
       return NextResponse.json({ error: "موعد المتابعة غير صالح.", errorEn: "nextFollowUpAt is not a date." }, { status: 400 });
+    }
+    // P2 ERR-15: a new lead's first follow-up is today or later.
+    if (followUp && isPastDay(followUp)) {
+      const r = pastDateRefusal("موعد المتابعة", "follow-up date");
+      return NextResponse.json({ error: r.errorAr, errorEn: r.errorEn, code: r.code, field: "nextFollowUpAt" }, { status: 400 });
     }
 
     // With a first follow-up, the promise is a TASK activity in the same transaction — the lead's

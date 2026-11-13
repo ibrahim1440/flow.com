@@ -190,7 +190,7 @@ export async function POST(request: Request) {
           data: toInsert.map((r) => ({
             companyName: r.companyName!,
             companyNameAr: r.companyNameAr ?? null,
-            contactName: r.contactName!,
+            contactName: r.contactName ?? null,
             phone: r.phone ?? null,
             email: r.email ?? null,
             city: r.city ?? null,

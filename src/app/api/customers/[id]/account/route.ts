@@ -64,14 +64,14 @@ export async function GET(_request: Request, { params }: Params) {
       where: { id },
       select: {
         id: true, name: true, nameAr: true, phone: true, email: true, address: true,
-        whatsappOptOut: true, emailOptOut: true, createdAt: true,
+        whatsappOptOut: true, emailOptOut: true, createdAt: true, updatedAt: true, // P2 ERR-06: the stale-copy check
         commercialRegNo: true, vatNumber: true, segment: true, city: true, priceList: true,
         paymentTermsDays: true, creditLimit: true, defaultHoldDays: true,
         // Soon batch round 2: the buyer identity and national address.
         unifiedNumber: true, nationalBuildingNo: true, nationalStreet: true, nationalDistrict: true, nationalCity: true,
         nationalPostalCode: true, nationalAdditionalNo: true, nationalShortAddress: true,
         accountOwner: { select: { id: true, name: true } },
-        contacts: { orderBy: [{ position: "asc" }, { createdAt: "asc" }], select: { id: true, name: true, role: true, phone: true, email: true, position: true } },
+        contacts: { orderBy: [{ position: "asc" }, { createdAt: "asc" }], select: { id: true, name: true, role: true, phone: true, email: true, position: true, updatedAt: true } },
         roastPreferences: {
           orderBy: { createdAt: "asc" },
           include: { greenBean: { select: { id: true, beanType: true, serialNumber: true } } },

@@ -5,6 +5,7 @@
 // depending on the client would also make it uncompilable on its own, which is exactly how
 // the worked examples below get asserted without a database. The runtime path is a real
 // node_modules entry that resolves identically inside Next.js and in plain Node.
+import { normalizeTypedNumber } from "@/lib/numbers/typed-number";
 import { Decimal } from "@prisma/client/runtime/client";
 
 /** Re-exported so a caller constructs the same Decimal this engine computes with. */
@@ -44,7 +45,9 @@ const HUNDRED = D(100);
  * stores it, so it would persist as an amount. Nothing else is restricted: precision and size
  * stay whatever the caller already allowed.
  */
-export function parseFiniteDecimal(v: unknown): Decimal | null {
+export function parseFiniteDecimal(v0: unknown): Decimal | null {
+  // P2 ERR-17: the one reading of a typed number (Arabic-Indic digits, «٫», thousands commas) before Decimal sees it.
+  const v = normalizeTypedNumber(v0);
   if (typeof v === "string" && /^[+-]?0[xbo]/i.test(v)) return null;
   let d: Decimal;
   try {

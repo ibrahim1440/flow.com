@@ -45,9 +45,11 @@ export async function markLeadContacted(tx: Tx, leadId: string): Promise<boolean
  */
 export async function fulfilPlannedContacts(
   tx: Tx,
-  input: { ownerId: string; type?: string | null; leadId?: string | null; opportunityId?: string | null; customerId?: string | null; exceptId?: string | null; now?: Date },
+  input: { ownerId: string; type?: string | null; outcome?: string | null; leadId?: string | null; opportunityId?: string | null; customerId?: string | null; exceptId?: string | null; now?: Date },
 ): Promise<number> {
   if (input.type === "NOTE") return 0;
+  // P2 SUSP-02: an attempt that did not reach the customer («ما ردّ») keeps the promise open — the follow-up is still to do.
+  if (input.outcome === "NO_ANSWER") return 0;
   const on = [
     ...(input.leadId ? [{ leadId: input.leadId }] : []),
     ...(input.opportunityId ? [{ opportunityId: input.opportunityId }] : []),

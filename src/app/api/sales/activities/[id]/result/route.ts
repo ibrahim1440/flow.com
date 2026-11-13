@@ -5,7 +5,7 @@ import { handleDomainError } from "@/lib/api-error";
 import { ACTIVITY_OUTCOMES } from "@/lib/services/sales/qualification";
 import { parseActivity, logLeadOrDealActivity, logCustomerActivity, mayLogActivity } from "@/lib/services/sales/activity-log";
 import { suggestNextStep, syncFollowUps } from "@/lib/services/sales/follow-through";
-import { NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
+import { NOT_FOUND_MESSAGE, seesAllSales } from "@/lib/services/sales/scope";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -59,6 +59,18 @@ export async function POST(request: Request, { params }: Params) {
       if (planned.completedAt) return { replayed: true, activityId: null, nextActivityId: null, qualification: null };
       if (!mayLogActivity(user.permissions, !planned.leadId && !planned.opportunityId)) throw { _appCode: 403, message: "Recording a result needs the right to log activities." };
 
+      // P2 SUSP-01: a reminder of a deal (or lead) that has since gone to a colleague — it used to fail with «الصفقة غير
+      // موجودة» and stay open for ever. It is closed (it is no longer this rep's promise) and the answer says why.
+      if (!seesAllSales(user.permissions) && (planned.opportunityId || planned.leadId)) {
+        const stillMine = planned.opportunityId
+          ? !!(await tx.opportunity.findFirst({ where: { id: planned.opportunityId, ownerId: user.id }, select: { id: true } }))
+          : !!(await tx.lead.findFirst({ where: { id: planned.leadId!, ownerId: user.id }, select: { id: true } }));
+        if (!stillMine) {
+          await tx.activity.updateMany({ where: { id, completedAt: null }, data: { completedAt: new Date() } });
+          return { replayed: false, reassigned: true as const, activityId: null, nextActivityId: null, qualification: null };
+        }
+      }
+
       // The result keeps the planned channel (a visit's result is a visit); a reminder (TASK) is a call.
       const type = planned.type === "TASK" || planned.type === "NOTE" ? "CALL" : planned.type;
       const parsed = parseActivity({
@@ -92,6 +104,10 @@ export async function POST(request: Request, { params }: Params) {
         qualification: "qualification" in logged ? logged.qualification : null,
       };
     }, TX_OPTS);
+    if ("reassigned" in result && result.reassigned) {
+      const ar = "هذي المتابعة صارت عند زميل (انتقلت الصفقة له) — شلناها من قائمتك.";
+      return NextResponse.json({ error: ar, errorAr: ar, errorEn: "This follow-up now belongs to a colleague (the deal moved to them) — it was taken off your list.", code: "FOLLOW_UP_REASSIGNED", closed: true }, { status: 409 });
+    }
     return NextResponse.json({ ...result, suggestion: suggestNextStep(outcome) });
   } catch (err) {
     return handleDomainError(err);

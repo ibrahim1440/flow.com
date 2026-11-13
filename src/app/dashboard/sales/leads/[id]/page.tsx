@@ -1,5 +1,6 @@
 "use client";
 
+import { baselineOf } from "@/lib/http/stale-record";
 import { OwnCustomerDialog, ownCustomerOf, type OwnCustomer } from "@/components/customers/own-customer-dialog";
 import { HrRoot } from "@/components/hr/ui";
 import { IdentityFields, blankIdentity, identityFrom, changedIdentityBody, nationalAddressLine, type IdentityForm } from "@/components/customers/identity-fields";
@@ -208,7 +209,10 @@ export default function LeadDetailPage() {
       const res = await fetch(`/api/sales/leads/${params.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, ...changedIdentityBody(idf, lead) }),
+        // P2 ERR-06: the copy this form was loaded from — a change made in another tab since is refused (409), never overwritten.
+        // Gate E1: always with the values it was loaded with — a colleague's change to another field is merged; the same
+        // field changed on both sides is a 409.
+        body: JSON.stringify(((x) => ({ ...x, expectedUpdatedAt: lead?.updatedAt, baseline: baselineOf(lead as unknown as Record<string, unknown>, x) }))({ ...form, ...changedIdentityBody(idf, lead) })),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { setError(localizeApiError(data) ?? (ar ? data.error : data.errorEn ?? data.error) ?? (ar ? "تعذّر الحفظ." : "Could not save.")); return; }
@@ -240,6 +244,8 @@ export default function LeadDetailPage() {
         body: JSON.stringify({
           type: logType, subject: logSubject.trim(), outcome: logOutcome,
           body: logBody.trim() || null, leadId: params.id,
+          // P2 SUSP-06: what is logged here already happened (it has a result) — it is completed, never left open.
+          ...(logOutcome ? { completed: true } : {}),
           // The qualification answers ride with a qualifying outcome only.
           ...(QUALIFYING.has(logOutcome) ? { qualification: qualificationPayload(qualDraft) } : {}),
         }),
@@ -331,10 +337,14 @@ export default function LeadDetailPage() {
           return { ok: false, error: localizeApiError(d) };
         },
         setFollowUpDate: async (iso) => {
+          // Gate E1: the task just recorded has already moved the lead (its follow-up is recomputed from what is open),
+          // so this step takes the lead's CURRENT version — not the copy the page opened with — and writes over it.
+          const fresh = await fetch(`/api/sales/leads/${params.id}`).then((x) => (x.ok ? x.json() : null)).catch(() => null) as { lead?: { updatedAt?: string; nextFollowUpAt?: string | null } } | null;
+          const cur = fresh?.lead ?? lead;
           const r = await fetch(`/api/sales/leads/${params.id}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ nextFollowUpAt: iso }),
+            body: JSON.stringify({ nextFollowUpAt: iso, expectedUpdatedAt: cur?.updatedAt, baseline: { nextFollowUpAt: cur?.nextFollowUpAt ?? null } }),
           });
           if (r.ok) return { ok: true };
           const d = await r.json().catch(() => ({}));

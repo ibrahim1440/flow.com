@@ -53,7 +53,9 @@ export function statusOf(r: BookRow, ar: boolean): { text: string; tone: string 
   return base;
 }
 
-export function useMyBook(enabled: boolean): MyBook | null {
+/** `version`: P2 ERR-13 — read again whenever the customer list changes (a customer added or removed), so the book's
+ *  counts never stay behind the list's («10» beside «الكل · 7» after an add). */
+export function useMyBook(enabled: boolean, version: unknown = 0): MyBook | null {
   const [data, setData] = useState<MyBook | null>(null);
   useEffect(() => {
     if (!enabled) return;
@@ -62,7 +64,7 @@ export function useMyBook(enabled: boolean): MyBook | null {
       .then((j: MyBook | null) => { if (!off && j && Array.isArray(j.book)) setData({ book: j.book, tiers: j.tiers }); })
       .catch(() => undefined);
     return () => { off = true; };
-  }, [enabled]);
+  }, [enabled, version]);
   return data;
 }
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { baselineOf } from "@/lib/http/stale-record";
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select } from "@/components/ui/Select";
 import { useEffect, useState } from "react";
@@ -406,6 +407,9 @@ export function DetailsDialog({ ar, customer, canOwner, canCredit, onClose, onDo
     const body: Record<string, unknown> = { ...rest, ...(legacyAddress ? { address, city } : {}), ...changedIdentityBody(idf, customer), ...(idChanged.length ? { reason } : {}) };
     if (whatsappOptOut !== customer.whatsappOptOut) body.whatsappOptOut = whatsappOptOut;
     if (emailOptOut !== (customer.emailOptOut ?? false)) body.emailOptOut = emailOptOut;
+    // P2 ERR-06 (gate E1): always the version and the values this form was loaded with (merged / 409 on a clash).
+    body.baseline = baselineOf(customer as unknown as Record<string, unknown>, body);
+    body.expectedUpdatedAt = customer.updatedAt;
     const res = await api<{ field?: string }>(`/api/customers/${customer.id}`, { method: "PUT", body });
     setBusy(false);
     if (res.ok) return onDone();
@@ -468,6 +472,11 @@ export function DetailsDialog({ ar, customer, canOwner, canCredit, onClose, onDo
   );
 }
 
+/** P2 ERR-06 (gate E1): a save carries the version and the values its form was loaded with. */
+function versioned<T extends Record<string, unknown>>(record: { updatedAt?: string | null } | null, body: T) {
+  return record?.updatedAt ? { ...body, expectedUpdatedAt: record.updatedAt, baseline: baselineOf(record as unknown as Record<string, unknown>, body) } : body;
+}
+
 // ── A contact ─────────────────────────────────────────────────────────────────────────────
 export function ContactDialog({ ar, customerId, contact, canDelete = true, onClose, onDone }: {
   ar: boolean; customerId: string; contact: Contact | null; canDelete?: boolean; onClose: () => void; onDone: () => void;
@@ -483,7 +492,7 @@ export function ContactDialog({ ar, customerId, contact, canDelete = true, onClo
     if (!f.name.trim() || busy) return;
     setBusy(true); setErr("");
     const res = contact
-      ? await api(`/api/customers/${customerId}/contacts/${contact.id}`, { method: "PUT", body: f })
+      ? await api(`/api/customers/${customerId}/contacts/${contact.id}`, { method: "PUT", body: versioned(contact, f) })
       : await api(`/api/customers/${customerId}/contacts`, { method: "POST", body: f });
     setBusy(false);
     if (res.ok) onDone(); else setErr(errorOf(res.data as never, ar, L("تعذّر الحفظ.", "Could not save.")));
@@ -535,7 +544,7 @@ export function OwnerContactDialog({ ar, customer, onClose, onDone }: {
     setBusy(true); setErr("");
     // Only the «مسلّمات» that changed are sent (each change needs the reason).
     const { address, city, ...contact } = f;
-    const res = await api(`/api/customers/${customer.id}`, { method: "PUT", body: { ...contact, ...(legacyAddress ? { address, city } : {}), ...changedIdentityBody(idf, customer), ...(idChanged.length ? { reason } : {}) } });
+    const res = await api(`/api/customers/${customer.id}`, { method: "PUT", body: versioned(customer, { ...contact, ...(legacyAddress ? { address, city } : {}), ...changedIdentityBody(idf, customer), ...(idChanged.length ? { reason } : {}) }) });
     setBusy(false);
     if (res.ok) onDone(); else setErr(errorOf(res.data as never, ar, L("تعذّر الحفظ.", "Could not save.")));
   }

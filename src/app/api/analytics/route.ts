@@ -2,7 +2,7 @@ import { NextResponse } from "@/lib/api-response";
 import { readQcSettings } from "@/lib/services/settings/sections";
 import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
-import { anonymousOrder, canSeeCustomerDetail } from "@/lib/auth/customer-detail";
+import { anonymousOrder, canSeeCustomerDetail, fullCustomer } from "@/lib/auth/customer-detail";
 import { orderVisibilityWhere } from "@/lib/services/sales/scope";
 
 function isoWeekStart(date: Date): string {
@@ -97,7 +97,7 @@ export async function GET() {
       where: { status: "Pending QC" },
       include: {
         greenBean: true,
-        orderItem: { include: { order: { include: { customer: true } } } },
+        orderItem: { include: { order: { include: { customer: fullCustomer(user) } } } },
         qcRecords: { select: { id: true, decision: true } },
       },
       orderBy: { qcDeadline: "asc" },

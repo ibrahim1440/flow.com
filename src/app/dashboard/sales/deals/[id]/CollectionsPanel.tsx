@@ -9,7 +9,7 @@ import {
   Money, Num, ROW_ACTION, api, formatDay, num, moneyText,
 } from "../../_components/ui";
 import { RIYAL } from "@/lib/money/riyal";
-import { amountForServer, amountValue, cleanAmount, parsePastedAmount } from "@/lib/money/amount-input";
+import { amountForServer, amountValue, cleanAmount, hasMinusSign, parsePastedAmount } from "@/lib/money/amount-input";
 import { useUser } from "../../../user-context";
 import { prepareReceipt } from "@/lib/files/receipt-prep";
 import { hasSubPrivilege } from "@/lib/auth-shared";
@@ -168,6 +168,7 @@ export function CollectionsPanel({
   const [error, setError] = useState("");
   const [amount, setAmount] = useState("");
   const [pasteBad, setPasteBad] = useState(false);
+  const [minusBad, setMinusBad] = useState(false);
   const [method, setMethod] = useState<string>("BANK_TRANSFER");
   const [reference, setReference] = useState("");
   const [note, setNote] = useState("");
@@ -505,7 +506,7 @@ export function CollectionsPanel({
               <label htmlFor="col-amount" className="col-l">{ar ? "كم استلمت؟ (شامل الضريبة)" : "How much did you receive? (incl. tax)"} <span className="req">*</span></label>
               <div className={`col-amount${over ? " bad" : ""}`} dir="ltr">
                 <span className="col-cur" aria-hidden>{RIYAL}</span>
-                <input id="col-amount" value={amount} onChange={(e) => { setPasteBad(false); setAmount(cleanAmount(e.target.value)); }} inputMode="decimal" autoComplete="off"
+                <input id="col-amount" value={amount} onChange={(e) => { setPasteBad(false); if (hasMinusSign(e.target.value)) { setMinusBad(true); return; } setMinusBad(false); setAmount(cleanAmount(e.target.value)); }} inputMode="decimal" autoComplete="off"
                   onPaste={(e) => {
                     // A paste is taken only when it is one clean figure; otherwise it is refused and the field kept (gate L2).
                     e.preventDefault();
@@ -519,11 +520,13 @@ export function CollectionsPanel({
                   placeholder="0.00" aria-describedby="col-amount-hint" aria-invalid={over || undefined} />
               </div>
               <div className="col-quick">
-                <button type="button" onClick={() => { setPasteBad(false); setAmount(Number(summary.availableToSubmitGross).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })); }} data-testid="collection-full">
+                <button type="button" onClick={() => { setPasteBad(false); setMinusBad(false); setAmount(Number(summary.availableToSubmitGross).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })); }} data-testid="collection-full">
                   {ar ? "المبلغ كامل · " : "Full amount · "}<Money value={summary.availableToSubmitGross} currency={doc.currency} />
                 </button>
               </div>
-              {pasteBad
+              {minusBad
+                ? <p className="col-err" role="alert" data-testid="collection-minus">{ar ? "المبلغ ما يكون بالسالب — اكتب المبلغ اللي استلمته. الاسترجاع عند المحاسب." : "The amount can't be negative — type what you received. Refunds are the accountant's."}</p>
+                : pasteBad
                 ? <p className="col-err" role="alert" data-testid="collection-paste-bad">{ar ? "الصيغة غير صحيحة — الصق رقم فقط، مثل 1,500.50" : "Not a valid amount — paste a number only, e.g. 1,500.50"}</p>
                 : over
                 ? <p className="col-err" role="alert" data-testid="collection-over">{ar ? "أكثر من المتبقي (" : "More than what remains ("}<Money value={summary.availableToSubmitGross} currency={doc.currency} />{ar ? "). عدّل المبلغ." : "). Change the amount."}</p>

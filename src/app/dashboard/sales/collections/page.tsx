@@ -1,5 +1,6 @@
 "use client";
 
+import { halalas } from "@/lib/format/money";
 import { prepareReceipt } from "@/lib/files/receipt-prep";
 import { useState, useEffect, type ReactNode } from "react";
 import Link from "next/link";
@@ -864,7 +865,8 @@ export default function CollectionsPage() {
   if (!isFinance) {
     const returned = rows.filter((r) => r.status === "REJECTED" && r.decisionReasonCode === "RETURN_FOR_CORRECTION" && !r.correctedBy);
     const returnedSum = returned.reduce((a, r) => a + Number(r.amountGross), 0);
-    const whole = (v: string | number) => Math.round(Number(v)).toLocaleString("en-US");
+    // P2 UXM-21: money collected or invoiced keeps its halalas.
+    const whole = (v: string | number) => halalas(v);
     const word = (r: Collection): [string, string] =>
       r.status === "PENDING_VERIFICATION" ? [ar ? "بانتظار المالية" : "Awaiting finance", "t-wa"]
         : r.status === "APPROVED" ? [ar ? "معتمد" : "Approved", "t-ok"]

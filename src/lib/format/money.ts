@@ -19,3 +19,14 @@ export function formatMoney(raw: string, places = 2): string {
   const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return `${negative ? "-" : ""}${grouped}${places > 0 ? "." + frac : ""}`;
 }
+
+/**
+ * P2 UXM-21: an amount that is collected or invoiced, always with its halalas — «266.80», never «267» (a commission of
+ * 2.32 is not «2»). Grouped, two places; «—» for nothing.
+ */
+export function halalas(v: string | number | null | undefined): string {
+  if (v === null || v === undefined || v === "") return "—";
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return formatMoney((Math.round(n * 100) / 100).toFixed(2));
+}

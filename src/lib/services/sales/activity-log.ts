@@ -9,6 +9,7 @@
 //   * a TASK needs a due date; the outcome is one of ACTIVITY_OUTCOMES;
 //   * on a LEAD, a qualifying outcome runs the qualification and NOT_INTERESTED marks the lead, in the
 //     same transaction (the lead is locked first — see `lockLeadForAutomation`).
+import { assertNotPast } from "@/lib/dates/not-past";
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 import { hasModuleAccess, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 import {
@@ -51,6 +52,8 @@ export function parseActivity(b: ActivityInput, opts: { maxSubject?: number; lea
   if (typeof b.dueAt === "string" && b.dueAt) {
     dueAt = new Date(b.dueAt);
     if (Number.isNaN(dueAt.getTime())) throw bad("dueAt is not a date.");
+    // P2 ERR-15: a date typed for something still to do (a planned call, a reminder, a task) is today or later.
+    if (b.completed !== true) assertNotPast(dueAt, null, "موعد المتابعة", "follow-up date");
   } else if (b.dueAt instanceof Date) dueAt = b.dueAt;
   if (type === "TASK" && !dueAt) throw bad("A task needs a due date.");
   const qualification = parseQualificationInput(b.qualification);
@@ -106,7 +109,7 @@ export async function logLeadOrDealActivity(tx: Tx, actor: ActivityActor, a: Par
   // the planned contacts it fulfils from staying open as a second copy of the same promise.
   if (a.completed) {
     if (a.leadId && (CONTACT_TYPES as readonly string[]).includes(a.type)) await markLeadContacted(tx, a.leadId);
-    await fulfilPlannedContacts(tx, { ownerId: actor.id, type: a.type, leadId: a.leadId, opportunityId: a.opportunityId, exceptId: activity.id });
+    await fulfilPlannedContacts(tx, { ownerId: actor.id, type: a.type, outcome: a.outcome, leadId: a.leadId, opportunityId: a.opportunityId, exceptId: activity.id });
   }
   let qualification = null;
   if (a.leadId && qualifies(a.outcome)) {
@@ -138,7 +141,7 @@ export async function logCustomerActivity(tx: Tx, actor: ActivityActor, customer
     },
     select: { id: true, type: true, subject: true, outcome: true, dueAt: true, completedAt: true, createdAt: true, customerId: true, opportunityId: true },
   });
-  if (a.completed) await fulfilPlannedContacts(tx, { ownerId: actor.id, type: a.type, customerId, opportunityId: a.opportunityId, exceptId: activity.id });
+  if (a.completed) await fulfilPlannedContacts(tx, { ownerId: actor.id, type: a.type, outcome: a.outcome, customerId, opportunityId: a.opportunityId, exceptId: activity.id });
   if (a.opportunityId) await syncDealNextFollowUp(tx, a.opportunityId);
   return { activity };
 }

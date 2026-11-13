@@ -1,3 +1,4 @@
+import { requireEdit } from "@/lib/auth-server";
 import { NextResponse } from "@/lib/api-response";
 import { POST as packV2 } from "../pack/route";
 
@@ -31,6 +32,9 @@ type Params = { params: Promise<{ id: string }> };
  * complete package is.
  */
 export async function POST(request: Request, ctx: Params) {
+  // P2 SEC-10: the packing editor first (the forwarded V2 route's own gate) — a visitor gets 401 before the body is read.
+  const signedIn = await requireEdit("packaging");
+  if (signedIn.error) return signedIn.error;
   let body: unknown;
   try {
     body = await request.json();

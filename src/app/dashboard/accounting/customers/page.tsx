@@ -4,6 +4,7 @@
 // tax invoice carries, the balance, what is overdue, the credit limit and the rep (read only) — without the customers
 // module. Per row: «كشف الحساب», «عرض سعر» (a quotation with no deal), «فاتورة». The accountant adds a customer and
 // corrects its invoice particulars; deals, activities, notes and the rep stay Sales'. Every rule is the API's.
+import { baselineOf } from "@/lib/http/stale-record";
 import { displayPhone } from "@/lib/contact/phone";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -16,6 +17,7 @@ import { registrationNoOf } from "@/lib/services/customers/customer-identity";
 type Row = {
   id: string; name: string; nameAr: string | null; vatNumber: string | null; commercialRegNo: string | null; unifiedNumber?: string | null; city: string | null; address: string | null;
   phone: string | null; email: string | null; creditLimit: string | null; paymentTermsDays: number | null; repName: string | null; balance: string; overdue: string;
+  updatedAt: string;
 };
 // «السجل التجاري / الرقم الموحد» is ONE field (owner decision, 5 Nov 2026): `registrationNo`, stored by the server in
 // its column (7… → unified number, else CR).
@@ -24,6 +26,10 @@ const blank: Form = { name: "", nameAr: "", vatNumber: "", registrationNo: "", c
 /** Soon batch round 3 (gate L5): the registration numbers — a change of one needs a reason (server: 400 REASON_REQUIRED). */
 const IDENTITY: (keyof Form)[] = ["vatNumber", "registrationNo"];
 /** The edit body: every field, except the merged number when it is unchanged (a legacy customer may hold both). */
+// P2 ERR-06 (gate E1): the version and the values this row was loaded with — a colleague's change since is merged, a
+// clash on the same field is refused (409), never overwritten.
+const withVersion = (row: Row | undefined, body: Record<string, unknown>) =>
+  row ? { ...body, expectedUpdatedAt: row.updatedAt, baseline: baselineOf(row as unknown as Record<string, unknown>, body) } : body;
 const editBody = (form: Form, orig: Form | undefined) => {
   const { registrationNo, ...rest } = form;
   return orig && registrationNo.trim() === orig.registrationNo.trim() ? rest : form;
@@ -39,7 +45,7 @@ function CustomersPage() {
   const [q, setQ] = useState("");
   const api = useApi<{ rows: Row[]; can: { write: boolean } }>(`/api/accounting/customers?q=${encodeURIComponent(q)}`);
   const w = useWrite();
-  const [edit, setEdit] = useState<{ id: string | null; form: Form; orig?: Form; reason?: string } | null>(null);
+  const [edit, setEdit] = useState<{ id: string | null; form: Form; orig?: Form; reason?: string; row?: Row } | null>(null);
   const identityChanged = !!edit?.id && !!edit.orig && IDENTITY.some((k) => edit.form[k].trim() !== edit.orig![k].trim());
   const rows = useMemo(() => api.data?.rows ?? [], [api.data]);
   const can = api.data?.can.write ?? false;
@@ -53,7 +59,7 @@ function CustomersPage() {
   const save = async () => {
     if (!edit) return;
     const r = edit.id
-      ? await w.run("save", `/api/accounting/customers/${edit.id}`, "PATCH", { ...editBody(edit.form, edit.orig), ...(identityChanged ? { reason: edit.reason ?? "" } : {}) }, L("حُفظت بيانات العميل.", "Saved."))
+      ? await w.run("save", `/api/accounting/customers/${edit.id}`, "PATCH", withVersion(edit.row, { ...editBody(edit.form, edit.orig), ...(identityChanged ? { reason: edit.reason ?? "" } : {}) }), L("حُفظت بيانات العميل.", "Saved."))
       : await w.run("save", "/api/accounting/customers", "POST", edit.form, L("أُضيف العميل.", "Customer added."));
     if (r) { setEdit(null); api.reload(); }
   };
@@ -91,7 +97,7 @@ function CustomersPage() {
                   <Link className="hr-btn is-sm" href={`/dashboard/sales/receivables/${c.id}`}>{L("كشف الحساب", "Statement")}</Link>{" "}
                   <button type="button" className="hr-btn is-sm" disabled={!!w.busy} onClick={() => quote(c)} data-testid={`acust-quote-${c.id}`}>{L("عرض سعر", "Quotation")}</button>{" "}
                   <Link className="hr-btn is-sm" href={`/dashboard/sales/invoices/new?q=${encodeURIComponent(c.nameAr || c.name)}`}>{L("فاتورة", "Invoice")}</Link>{" "}
-                  {can ? <button type="button" className="hr-btn is-sm" onClick={() => { const form = { name: c.name, nameAr: c.nameAr ?? "", vatNumber: c.vatNumber ?? "", registrationNo: registrationNoOf(c), city: c.city ?? "", address: c.address ?? "", phone: c.phone ?? "", email: c.email ?? "" }; setEdit({ id: c.id, form, orig: form, reason: "" }); }} data-testid={`acust-edit-${c.id}`}>{L("تعديل", "Edit")}</button> : null}
+                  {can ? <button type="button" className="hr-btn is-sm" onClick={() => { const form = { name: c.name, nameAr: c.nameAr ?? "", vatNumber: c.vatNumber ?? "", registrationNo: registrationNoOf(c), city: c.city ?? "", address: c.address ?? "", phone: c.phone ?? "", email: c.email ?? "" }; setEdit({ id: c.id, form, orig: form, reason: "", row: c }); }} data-testid={`acust-edit-${c.id}`}>{L("تعديل", "Edit")}</button> : null}
                 </td>
               </tr>
             ))}</tbody>

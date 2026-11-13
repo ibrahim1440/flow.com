@@ -1,4 +1,6 @@
 import { parseLeadIdentity, leadCityFrom } from "@/lib/services/sales/lead-identity";
+import { mergeAgainst, staleRefusal, versionRequired } from "@/lib/http/stale-record";
+import { assertNotPast, sameRiyadhDay } from "@/lib/dates/not-past";
 import { emailField, phoneField } from "@/lib/contact/phone";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
@@ -77,16 +79,20 @@ export async function PATCH(request: Request, { params }: Params) {
   const b = (body ?? {}) as Record<string, unknown>;
 
   try {
-    const existing = await prisma.lead.findUnique({
-      where: { id },
-      select: { id: true, ownerId: true, status: true, companyName: true, phone: true, email: true },
-    });
+    // The full row: the field-level merge (gate E1) compares every field the form sends.
+    const existing = await prisma.lead.findUnique({ where: { id } });
     if (!existing) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });
 
     const canAssign = seesAllSales(user.permissions);
     if (!canAssign && existing.ownerId !== user.id) {
       return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });
     }
+    // P2 ERR-06 (gate E1): the form's version is required from the screens; a lead changed since the form opened merges
+    // field by field — a field changed on both sides is a 409 naming it, nothing written.
+    const noVersion = versionRequired(request, b.expectedUpdatedAt);
+    if (noVersion) throw noVersion;
+    const merged = mergeAgainst(b, { expected: b.expectedUpdatedAt, baseline: b.baseline, current: existing as unknown as Record<string, unknown> & { updatedAt: Date } });
+    if (!merged.ok) throw merged.refusal;
     if (existing.status === "CONVERTED") {
       return NextResponse.json(
         {
@@ -99,6 +105,8 @@ export async function PATCH(request: Request, { params }: Params) {
     }
 
     const data: Record<string, unknown> = {};
+    // A field sent with the value already stored (the same Riyadh day for the follow-up) is a no-op, not «nothing to change».
+    let unchangedSent = false;
     const str = (key: string, min = 0) => {
       if (typeof b[key] !== "string") return;
       const v = (b[key] as string).trim();
@@ -158,7 +166,11 @@ export async function PATCH(request: Request, { params }: Params) {
     } else if (typeof b.nextFollowUpAt === "string" && b.nextFollowUpAt) {
       const d = new Date(b.nextFollowUpAt);
       if (Number.isNaN(d.getTime())) throw { _appCode: 400, message: "That follow-up date is not a date." };
-      data.nextFollowUpAt = d;
+      assertNotPast(d, existing.nextFollowUpAt, "موعد المتابعة", "follow-up date"); // P2 ERR-15
+      // Gate B2: the same Riyadh day sent back is no change — the stored follow-up (and its time) stays as it is.
+      // Only a DATE (YYYY-MM-DD, what an edit form sends) on the same Riyadh day is «unchanged»; a full time is a choice.
+      if (!(/^\d{4}-\d{2}-\d{2}$/.test(b.nextFollowUpAt) && sameRiyadhDay(d, existing.nextFollowUpAt))) data.nextFollowUpAt = d;
+      else unchangedSent = true;
     }
 
     // Reassignment is its own privilege, checked here and not inferred from the body.
@@ -175,6 +187,10 @@ export async function PATCH(request: Request, { params }: Params) {
     }
 
     if (Object.keys(data).length === 0) {
+      // Everything the form sent was already changed by someone else and left alone by this form: nothing to write.
+      if (merged.dropped.length || unchangedSent) {
+        return NextResponse.json({ lead: { id: existing.id, companyName: existing.companyName, contactName: existing.contactName, phone: existing.phone, status: existing.status, ownerId: existing.ownerId, nextFollowUpAt: existing.nextFollowUpAt }, duplicates: [], merged: merged.dropped });
+      }
       return NextResponse.json({ error: "Nothing to change." }, { status: 400 });
     }
 
@@ -192,9 +208,12 @@ export async function PATCH(request: Request, { params }: Params) {
       );
     }
 
-    const lead = await prisma.lead.update({
+    // Atomic (gate E1): written only if the lead is still the version read above — a concurrent save that won first
+    // makes this one a 409 rather than a silent overwrite.
+    const written = await prisma.lead.updateMany({ where: { id, updatedAt: existing.updatedAt }, data });
+    if (written.count === 0) throw staleRefusal(existing.updatedAt);
+    const lead = await prisma.lead.findUniqueOrThrow({
       where: { id },
-      data,
       select: {
         id: true, companyName: true, contactName: true, phone: true, status: true,
         ownerId: true, nextFollowUpAt: true,

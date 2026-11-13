@@ -89,7 +89,10 @@ export function RepBook({
         <div className="spg-top">
           <div>
             <h1>{L("العملاء", "Customers")}</h1>
-            <p data-testid="customers-total">{L(`${customers.length} عملاء في دفترك`, `${customers.length} in your book`)}{needCount > 0 ? L(` · ${needCount} يحتاجون انتباهك`, ` · ${needCount} need attention`) : ""}</p>
+            <p data-testid="customers-total">{/* P2 ERR-13: one count per word — «دفترك» is the customers you own (the same book as «يومي» and the
+                chips); the list also shows the customers you reach through your deals and orders, counted apart. */}
+              {L(`${book.book.length} ${book.book.length === 1 ? "عميل" : "عملاء"} في دفترك`, `${book.book.length} in your book`)}
+              {customers.length > book.book.length ? L(` · و${customers.length - book.book.length} من صفقاتك وطلباتك`, ` · and ${customers.length - book.book.length} through your deals and orders`) : ""}{needCount > 0 ? L(` · ${needCount} يحتاجون انتباهك`, ` · ${needCount} need attention`) : ""}</p>
           </div>
           <div className="act">{addButton}</div>
         </div>
@@ -97,7 +100,7 @@ export function RepBook({
       <SalesJourney current="customers" ar={ar} />
 
       <div className="mny-chips" role="group" aria-label={L("صفّ القائمة حسب", "Filter the list by")} data-testid="my-book">
-        <button type="button" aria-pressed={!filter} onClick={() => onFilter(null)} data-testid="book-chip-all">{L("الكل", "All")} · {book.book.length}</button>
+        <button type="button" aria-pressed={!filter} onClick={() => onFilter(null)} data-testid="book-chip-all">{L("الكل", "All")} · {customers.length}</button>
         {CHIPS.map((k) => {
           const on = filter === k.f;
           return (

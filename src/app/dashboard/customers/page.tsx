@@ -1,5 +1,6 @@
 "use client";
 
+import { baselineOf } from "@/lib/http/stale-record";
 import { displayPhone } from "@/lib/contact/phone";
 import { phoneSearchKey } from "@/lib/contact/phone";
 import { localizeApiError } from "@/lib/i18n/api-errors";
@@ -109,7 +110,8 @@ export default function CustomersPage() {
   const listUrl = "/api/customers";
   // «لوحة دفتري» (owner-approved Figma, 3 Nov 2026): the rep's own book — counts and tiers that filter the list (`?f=`).
   const bookOn = salesView && scopedRep;
-  const myBook = useMyBook(bookOn);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const myBook = useMyBook(bookOn, customers.length);
   const bookById = useMemo(() => new Map((myBook?.book ?? []).map((r) => [r.id, r])), [myBook]);
   const [bookFilter, setBookFilterState] = useState<BookFilter | null>(null);
   // `?f=` (from «يومي»'s «انتبه لعملائك» or a reload) is read once on the client; a filter link opens «عملائي» itself.
@@ -129,7 +131,6 @@ export default function CustomersPage() {
     } catch { /* address unchanged */ }
   };
 
-  const [customers, setCustomers] = useState<Customer[]>([]);
   // feat/credit-hold: the red badges («متجاوز حد الائتمان», «متأخر السداد …», «البيع موقوف», «مهلة سماح حتى …»).
   type Badge = { overLimit: boolean; overdueDays: number; graceUntil: string | null; hold: { endsAt: string | null; untilPaid: boolean } | null };
   const [badges, setBadges] = useState<Record<string, Badge>>({});
@@ -256,7 +257,8 @@ export default function CustomersPage() {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       // An edit here keeps to the contact record (the «مسلّمات» are changed on the customer page, with a reason).
-      body: JSON.stringify({ name: customerForm.name, nameAr: customerForm.nameAr, phone: customerForm.phone, email: customerForm.email, address: customerForm.address, whatsappOptOut: customerForm.whatsappOptOut }),
+      // P2 ERR-06 (gate E1): with the version and the values this form was loaded with — merged, or 409 on a clash.
+      body: JSON.stringify(((x) => ({ ...x, expectedUpdatedAt: (editingCustomer as { updatedAt?: string }).updatedAt, baseline: baselineOf(editingCustomer as unknown as Record<string, unknown>, x) }))({ name: customerForm.name, nameAr: customerForm.nameAr, phone: customerForm.phone, email: customerForm.email, address: customerForm.address, whatsappOptOut: customerForm.whatsappOptOut })),
     });
     setSavingCustomer(false);
     if (!res.ok) { const d = await res.json(); showToast(localizeApiError(d) || t("error"), "err"); return; }

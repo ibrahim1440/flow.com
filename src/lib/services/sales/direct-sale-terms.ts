@@ -12,6 +12,7 @@
 //     1 − lineNet ÷ (list price × units) — so a price typed below the list is a discount like any other. The sale waits
 //     when any line's effective discount is above the threshold and the rep cannot approve it; above DISCOUNT_MAX it is
 //     refused (no approval passes the ceiling).
+import { latinNumberText, normalizeTypedNumber } from "@/lib/numbers/typed-number";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { DEFAULT_VAT_RATE, EXEMPTION_REASONS, parseLines, priceInvoice, type RawLine } from "@/lib/services/invoicing/pricing";
@@ -69,7 +70,7 @@ const refuse = (status: number, code: string, ar: string, en: string, extra: Rec
 const CATS = ["S", "Z", "E", "O"] as const;
 const money2 = (v: unknown): string | null => {
   if (v === undefined || v === null || v === "") return null;
-  const n = typeof v === "number" ? v : Number(String(v).replace(/[,\s]/g, "").replace("٫", "."));
+  const n = typeof v === "number" ? v : Number(latinNumberText(String(v))); // P2 ERR-17: the one reading
   return Number.isFinite(n) ? String(n) : "x";
 };
 
@@ -103,7 +104,7 @@ export function parseLineTerms(raw: unknown, list: Map<string, { price: number }
     if (!id) throw refuse(400, "LINE_INVALID", `البند ${i + 1}: اختر الصنف.`, `Line ${i + 1}: choose the product.`, { index: i });
     if (seen.has(id)) throw refuse(400, "DUPLICATE_SKU", `البند ${i + 1}: الصنف مكرر — زِد الكمية في بنده بدل ما تكرره.`, `Line ${i + 1}: the product is repeated — raise the quantity on its line instead.`, { index: i });
     seen.add(id);
-    const units = Number(l.quantityUnits ?? l.quantity);
+    const units = Number(normalizeTypedNumber(l.quantityUnits ?? l.quantity)); // P2 ERR-17
     if (!Number.isInteger(units) || units <= 0 || units > 100000) throw refuse(400, "QTY_INVALID", `البند ${i + 1}: الكمية لازم رقم صحيح أكبر من صفر.`, `Line ${i + 1}: the quantity must be a whole number above zero.`, { index: i });
     const sku = list.get(id);
     const price = money2(l.unitPrice);

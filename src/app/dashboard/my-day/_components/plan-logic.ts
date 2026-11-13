@@ -1,6 +1,7 @@
 // D16 «خطتي» — the plain logic of the plan screens (no React, no CSS), shared by khitati.tsx and plan-week.tsx and unit-
 // tested (tests/sales/unit/plan-d16.test.ts): the working week's days, the day strip and its labels, a time's label, and
 // «خطّط أسبوعك»'s suggestions and days.
+import { halalas } from "@/lib/format/money";
 import { addDays, dayName, dayNum, MONTH_AR, wd, weekOf } from "./plan-dates";
 
 export type AMetric = "VISITS" | "CALLS" | "QUOTES" | "COLLECTION" | "SAMPLES";
@@ -31,7 +32,7 @@ export function timeLabel(hhmm: string, ar: boolean): string {
 export type WeekSource = {
   callList: { customerId: string | null; name: string; nameAr: string | null; reason: { code: string; daysLate?: number; intervalDays?: number; days?: number | null } }[];
   contracts: { customerId: string; customerName: string; daysLeft: number }[];
-  owed: { customerId: string; name: string; nameAr: string | null; net: string; oldestDays: number }[];
+  owed: { customerId: string; name: string; nameAr: string | null; net: string; oldestDays: number; overdueDays?: number }[];
 };
 export type Group = "late" | "owed" | "contract" | "quiet" | "added";
 export type Sug = { id: string; name: string; why: string; group: Group; kind: AMetric; pick: boolean };
@@ -55,9 +56,12 @@ export function suggestionsOf(src: WeekSource, ar: boolean): Sug[] {
     push({ id: c.customerId ?? "", name: nm(c), group: "late", kind: "CALLS", pick: true,
       why: r.code === "LATE" ? (ar ? `يطلب كل ${r.intervalDays} يوم · متأخر ${r.daysLate} يوم` : `Orders every ${r.intervalDays}d · ${r.daysLate}d late`) : ar ? `يطلب كل ${r.intervalDays} يوم · حان موعده` : `Orders every ${r.intervalDays}d · due now` });
   }
-  for (const o of [...src.owed].sort((a, b) => b.oldestDays - a.oldestDays).slice(0, 6)) {
-    push({ id: o.customerId, name: nm(o), group: "owed", kind: "COLLECTION", pick: o.oldestDays >= 30,
-      why: ar ? `${Number(o.net).toLocaleString("en-US", { maximumFractionDigits: 0 })} ⃁ · أقدم فاتورة قبل ${o.oldestDays} يوم` : `SAR ${Number(o.net).toLocaleString("en-US", { maximumFractionDigits: 0 })} · oldest ${o.oldestDays}d` });
+  // P2 SUSP-04: «عليهم تحصيل متأخر» is the customers with an invoice PAST ITS DUE DATE — an invoice issued today is not late.
+  const late = src.owed.filter((o) => (o.overdueDays ?? 0) > 0).sort((a, b) => (b.overdueDays ?? 0) - (a.overdueDays ?? 0));
+  for (const o of late.slice(0, 6)) {
+    const d = o.overdueDays ?? 0;
+    push({ id: o.customerId, name: nm(o), group: "owed", kind: "COLLECTION", pick: d >= 30,
+      why: ar ? `${halalas(o.net)} ⃁ · متأخر ${d} يوم عن الاستحقاق` : `SAR ${halalas(o.net)} · ${d}d past due` });
   }
   for (const c of src.contracts.slice(0, 6)) {
     push({ id: c.customerId, name: c.customerName, group: "contract", kind: "VISITS", pick: false, why: ar ? `العقد يخلص بعد ${c.daysLeft} يوم` : `Contract ends in ${c.daysLeft}d` });

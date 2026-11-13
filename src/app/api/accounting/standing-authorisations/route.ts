@@ -1,5 +1,5 @@
 import { NextResponse } from "@/lib/api-response";
-import { requireModule } from "@/lib/auth-server";
+import { requireModule, requireAuth } from "@/lib/auth-server";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { acctError, jsonBody } from "@/lib/accounting/http";
 import { auditFromRequest } from "@/lib/accounting/audit";
@@ -30,6 +30,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  // P2 SEC-10: the session first — a visitor gets 401 before any input is read or looked up.
+  const signedIn = await requireAuth();
+  if (signedIn.error) return signedIn.error;
   const body = await jsonBody(request).catch(() => ({} as Record<string, unknown>));
   if (!isRegisterWide(body.register)) return NextResponse.json({ error: "السجل غير معروف", errorEn: "register is DEFERRAL_RECOGNITION or DEPRECIATION", code: "BAD_INPUT" }, { status: 400 });
   const { user, error } = await requireRegisterWrite(REGISTER_SUB[body.register], { duties: ["journal_post"] });

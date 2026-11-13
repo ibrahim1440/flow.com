@@ -112,6 +112,8 @@ export type DocRow = {
   id: string; kind: string; status: string; number: string | null; customerId: string;
   customerName: string | null; customerNameAr: string | null; customerPhone: string | null;
   issueDate: string | null; taxableTotal: string; grandTotal: string;
+  /** P2 SUSP-04: when it falls due (null = no due date recorded — never counted as late). */
+  dueDate?: string | null;
   /** Σ APPLIED ArApplications on the document (receipts and credit notes). */
   applied: string;
   /** Its issued credit notes' part still unapplied anywhere (net of notes, never counted twice with an application). */
@@ -148,6 +150,8 @@ export type OwedCustomer = {
   /** The customer's whole open amount before VAT, and the rep's share of it in percent (whole number) — < 100 = shared. */
   fullNet: string; sharePct: number;
   invoices: number; oldestDays: number;
+  /** P2 SUSP-04: days past the due date of its most overdue open invoice; 0 = nothing past due yet. */
+  overdueDays: number;
 };
 
 /**
@@ -157,7 +161,7 @@ export type OwedCustomer = {
  */
 /** `monthNet`: the part of `net` on invoices issued this month (D13: «كل الأشهر · منها X من هالشهر»). */
 export function owedOf(docs: DocRow[], today: string, employeeId: string): { net: string; gross: string; invoices: number; monthNet: string; customers: OwedCustomer[] } {
-  type Acc = { c: Omit<OwedCustomer, "net" | "gross" | "fullNet" | "sharePct" | "oldestDays">; net: Decimal; gross: Decimal; full: Decimal; oldest: string };
+  type Acc = { c: Omit<OwedCustomer, "net" | "gross" | "fullNet" | "sharePct" | "oldestDays" | "overdueDays">; net: Decimal; gross: Decimal; full: Decimal; oldest: string; oldestDue: string | null };
   const by = new Map<string, Acc>();
   let net = ZERO, gross = ZERO, count = 0, monthNet = ZERO;
   for (const d of docs) {
@@ -172,9 +176,11 @@ export function owedOf(docs: DocRow[], today: string, employeeId: string): { net
     const gr = roundMoney(open.times(share).dividedBy(100));
     net = net.plus(n); gross = gross.plus(gr); count++;
     if (d.inMonth) monthNet = monthNet.plus(n);
-    const a = by.get(d.customerId) ?? { c: { customerId: d.customerId, name: d.customerName ?? "", nameAr: d.customerNameAr, phone: d.customerPhone, invoices: 0 }, net: ZERO, gross: ZERO, full: ZERO, oldest: d.issueDate ?? today };
+    const a = by.get(d.customerId) ?? { c: { customerId: d.customerId, name: d.customerName ?? "", nameAr: d.customerNameAr, phone: d.customerPhone, invoices: 0 }, net: ZERO, gross: ZERO, full: ZERO, oldest: d.issueDate ?? today, oldestDue: null };
     a.net = a.net.plus(n); a.gross = a.gross.plus(gr); a.full = a.full.plus(fullNet); a.c.invoices++;
     if (d.issueDate && d.issueDate < a.oldest) a.oldest = d.issueDate;
+    const due = d.dueDate ? String(d.dueDate).slice(0, 10) : null;
+    if (due && (a.oldestDue === null || due < a.oldestDue)) a.oldestDue = due;
     by.set(d.customerId, a);
   }
   const days = (from: string) => Math.max(0, Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000));
@@ -183,6 +189,7 @@ export function owedOf(docs: DocRow[], today: string, employeeId: string): { net
       ...a.c, net: roundMoney(a.net).toFixed(2), gross: roundMoney(a.gross).toFixed(2), fullNet: roundMoney(a.full).toFixed(2),
       sharePct: a.full.isZero() ? 100 : Math.min(100, Math.round(Number(a.net.times(100).dividedBy(a.full)))),
       oldestDays: days(a.oldest),
+      overdueDays: a.oldestDue && a.oldestDue < today ? days(a.oldestDue) : 0,
     }))
     .sort((x, y) => y.oldestDays - x.oldestDays || Number(y.net) - Number(x.net));
   return { net: roundMoney(net).toFixed(2), gross: roundMoney(gross).toFixed(2), invoices: count, monthNet: roundMoney(monthNet).toFixed(2), customers };

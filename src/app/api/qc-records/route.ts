@@ -1,7 +1,7 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
-import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
+import { canSeeCustomerContact, CUSTOMER_NAME_SELECT, fullCustomer } from "@/lib/auth/customer-detail";
 
 export async function GET() {
   const { user, error } = await requireSub("qc", "view_records");
@@ -18,7 +18,7 @@ export async function GET() {
         include: {
           orderItem: {
             include: {
-              order: { include: { customer: customerContact ? true : { select: CUSTOMER_NAME_SELECT } } },
+              order: { include: { customer: customerContact ? fullCustomer(user) : { select: CUSTOMER_NAME_SELECT } } },
             },
           },
         },

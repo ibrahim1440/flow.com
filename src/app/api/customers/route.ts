@@ -9,7 +9,7 @@ import { addressFromNational, DUPLICATE_CUSTOMER, DUPLICATE_CUSTOMER_OWN, expand
 import { customerInScope } from "@/lib/services/sales/customer-access";
 import { findDuplicateCustomer } from "@/lib/services/customers/duplicates";
 import { handlePrismaError } from "@/lib/api-error";
-import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
+import { canSeeCustomerContact, CUSTOMER_NAME_SELECT, newClientOmit } from "@/lib/auth/customer-detail";
 import { customerVisibilityWhere, customersScopedToOwner } from "@/lib/services/sales/scope";
 
 export async function GET(request?: Request) {
@@ -32,7 +32,7 @@ export async function GET(request?: Request) {
   // F4 / review F-1: orders:view alone (production, dispatch) lists customers by name for the
   // order screens; the contact record (phone, email, address, opt-out) is the customers module's.
   const customers = canSeeCustomerContact(user.permissions)
-    ? await prisma.customer.findMany({ where, orderBy: { name: "asc" }, take: 200, include: related })
+    ? await prisma.customer.findMany({ where, orderBy: { name: "asc" }, take: 200, include: related, omit: newClientOmit(user) })
     : await prisma.customer.findMany({ where, orderBy: { name: "asc" }, take: 200, select: { ...CUSTOMER_NAME_SELECT, ...related } });
   return NextResponse.json(customers);
 }
@@ -114,6 +114,8 @@ export async function POST(request: Request) {
         // registering without customers › edit is always the account owner.
         ...(repRegistration || customersScopedToOwner(user) ? { accountOwnerId: user.id } : {}),
       },
+      // P2 SEC-08 (gate B1): the answer carries the commission fields only to who manages the exclusion.
+      omit: newClientOmit(user),
     });
     return NextResponse.json(customer, { status: 201 });
   } catch (err) {

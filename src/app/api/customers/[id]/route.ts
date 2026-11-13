@@ -1,10 +1,11 @@
 import { NextResponse } from "@/lib/api-response";
+import { mergeAgainst, staleRefusal, versionRequired } from "@/lib/http/stale-record";
 import { phoneField } from "@/lib/contact/phone";
 import { prisma } from "@/lib/db";
 import { requireAnyModule, requireEdit } from "@/lib/auth-server";
 import { handleDomainError, handlePrismaError } from "@/lib/api-error";
 import { emailConsentChange } from "@/lib/services/customers/email-consent";
-import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
+import { canSeeCustomerContact, CUSTOMER_NAME_SELECT, newClientOmit } from "@/lib/auth/customer-detail";
 import { parseAccountFields } from "@/lib/services/customers/fields";
 import { deleteCustomerFileBlobs } from "@/lib/services/customers/files";
 import { customerInScope } from "@/lib/services/sales/customer-access";
@@ -32,7 +33,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   };
   // F4 / review F-1: without the customers module, the name and roast targets only.
   const customer = canSeeCustomerContact(user.permissions)
-    ? await prisma.customer.findUnique({ where: { id }, include: related })
+    ? await prisma.customer.findUnique({ where: { id }, include: related, omit: newClientOmit(user) })
     : await prisma.customer.findUnique({ where: { id }, select: { ...CUSTOMER_NAME_SELECT, ...related } });
   if (!customer) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json(customer);
@@ -45,7 +46,16 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   if (error) return error;
   if (!(await customerInScope(user, id))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   try {
-    const rawBody = await request.json() as Record<string, unknown>;
+    const rawBody = (await request.json() ?? {}) as Record<string, unknown>;
+    // P2 ERR-06 (gate E1): the screens send the version they were loaded with; a customer changed since merges field by
+    // field (a field changed on both sides → 409 naming it, nothing written). The fields the form did not change are
+    // dropped here, before anything reads the body.
+    const noVersion = versionRequired(request, rawBody.expectedUpdatedAt);
+    if (noVersion) return handleDomainError(noVersion);
+    const stored = await prisma.customer.findUnique({ where: { id } });
+    if (!stored) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    const merged = mergeAgainst(rawBody, { expected: rawBody.expectedUpdatedAt, baseline: rawBody.baseline, current: stored as unknown as Record<string, unknown> & { updatedAt: Date } });
+    if (!merged.ok) return handleDomainError(merged.refusal);
     // «السجل التجاري / الرقم الموحد» is one field (owner decision, 5 Nov 2026): `registrationNo` lands in its column
     // and clears the other (a change of either needs the reason below).
     const expanded = expandRegistrationNo(rawBody ?? {});
@@ -110,7 +120,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     // before / after. A value sent unchanged (the dialog posts the whole form) is not a change.
     const current = await prisma.customer.findUnique({
       where: { id },
-      select: { accountOwnerId: true, creditLimit: true, paymentTermsDays: true, priceList: true, defaultHoldDays: true, reorderIntervalDays: true, email: true, emailOptOut: true, whatsappOptOut: true, phone: true },
+      select: { accountOwnerId: true, creditLimit: true, paymentTermsDays: true, priceList: true, defaultHoldDays: true, reorderIntervalDays: true, email: true, emailOptOut: true, whatsappOptOut: true, phone: true, updatedAt: true },
     });
     if (!current) return NextResponse.json({ error: "Not found" }, { status: 404 });
     // Batch 25: the e-mail automated messages go to — one valid address (lower-cased), or none. Checked only when it
@@ -144,8 +154,10 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
      // «يستقبل إيميلات» goes through the one consent rule (a customer's own opt-out is turned back on by a manager with a
      // reason, from the «الرسائل» card — this form carries no reason, so such a change is refused here).
      const consent = optOutChanged ? await emailConsentChange(tx, { customerId: id, turningOn: !body.emailOptOut, actor: user, reason: null }) : null;
-     const updated = await tx.customer.update({
-      where: { id },
+     // Atomic (gate E1): written only if the customer is still the version read at the top — a concurrent save that won
+     // first makes this one a 409, never a silent overwrite.
+     const written = await tx.customer.updateMany({
+      where: { id, updatedAt: stored.updatedAt },
       data: {
         ...(body.name !== undefined && { name: body.name.trim() }),
         ...(body.nameAr !== undefined && { nameAr: body.nameAr.trim() || null }),
@@ -159,6 +171,9 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         ...(derivedAddress ?? {}),
       },
      });
+     if (written.count === 0) throw staleRefusal(stored.updatedAt);
+     // P2 SEC-08 (gate B1): the answer carries the commission fields only to who manages the exclusion.
+     const updated = await tx.customer.findUniqueOrThrow({ where: { id }, omit: newClientOmit(user) });
      // The address / city recomputed from the national address are logged with the change (gate M1).
      const addrNorm = (x: string | null | undefined) => (x == null || x === "" ? null : x);
      const addrChanges = derivedAddress

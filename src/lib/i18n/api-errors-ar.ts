@@ -271,6 +271,7 @@ export const API_ERRORS_AR: Readonly<Record<string, string>> = {
   "The end date must be after the start date.": "تاريخ النهاية بعد تاريخ البداية.",
   "The expected value cannot be negative.": "القيمة المتوقعة لا تكون سالبة.",
   "The expected value is not a number.": "القيمة المتوقعة ليست رقمًا.",
+  "The expected value is above the largest allowed.": "أكبر قيمة مسموحة للصفقة 1,000,000,000 ر.س.",
   "The file is empty.": "الملف فارغ.",
   "The note is longer than 1000 characters.": "الملاحظة أطول من 1000 حرف.",
   "The person who recorded a collection cannot be the one who decides it.": "من سجّل التحصيل لا يقرّر فيه.",

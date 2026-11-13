@@ -1,7 +1,7 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
-import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
+import { canSeeCustomerContact, CUSTOMER_NAME_SELECT, fullCustomer } from "@/lib/auth/customer-detail";
 import { withDeliveryLots } from "@/lib/services/delivery-lots";
 import { customersScopedToOwner, orderVisibilityWhere } from "@/lib/services/sales/scope";
 
@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   if (error) return error;
   // F4 / review F-1: the history export carries the customer's name; the contact record only for
   // holders of the customers module. (The history page's export columns use the name only.)
-  const customer = canSeeCustomerContact(user.permissions) ? (true as const) : { select: CUSTOMER_NAME_SELECT };
+  const customer = canSeeCustomerContact(user.permissions) ? fullCustomer(user) : { select: CUSTOMER_NAME_SELECT };
 
   const { searchParams } = new URL(request.url);
   const type = searchParams.get("type") || "orders";

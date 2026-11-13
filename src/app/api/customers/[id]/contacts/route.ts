@@ -9,7 +9,7 @@ import { writeSettingsAudit } from "@/lib/services/settings/audit";
 
 type Params = { params: Promise<{ id: string }> };
 
-const SELECT = { id: true, name: true, role: true, phone: true, email: true, position: true } as const;
+const SELECT = { id: true, name: true, role: true, phone: true, email: true, position: true, updatedAt: true } as const;
 
 /**
  * GET /api/customers/[id]/contacts — the people at a customer («جهات الاتصال»).

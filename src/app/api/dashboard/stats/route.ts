@@ -2,7 +2,7 @@ import { NextResponse } from "@/lib/api-response";
 import { readQcSettings } from "@/lib/services/settings/sections";
 import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
-import { anonymousOrder, canSeeCustomerDetail } from "@/lib/auth/customer-detail";
+import { anonymousOrder, canSeeCustomerDetail, fullCustomer } from "@/lib/auth/customer-detail";
 import { orderVisibilityWhere } from "@/lib/services/sales/scope";
 
 function getDateFilter(timeframe: string): { gte: Date } | undefined {
@@ -116,7 +116,7 @@ export async function GET(request: Request) {
       where: { status: "Pending QC", ...(Object.keys(mine).length ? { orderItem: { order: mine } } : {}) },
       include: {
         greenBean: true,
-        orderItem: { include: { order: { include: { customer: true } } } },
+        orderItem: { include: { order: { include: { customer: fullCustomer(user) } } } },
         qcRecords: { select: { id: true, decision: true } },
       },
       orderBy: { qcDeadline: "asc" },

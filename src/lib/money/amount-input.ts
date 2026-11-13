@@ -23,6 +23,15 @@ function latinise(raw: string): string {
   return s;
 }
 
+/**
+ * P2 ERR-18: a minus sign (ASCII «-», «−», «‐», «–») in what was typed. cleanAmount drops any symbol, so «-5» used to
+ * become «5» without a word — the field now refuses the keystroke and says why (an amount received is never negative;
+ * a refund is the accountant's).
+ */
+export function hasMinusSign(raw: string): boolean {
+  return /[-\u2212\u2010\u2013]/.test(raw);
+}
+
 export function cleanAmount(raw: string): string {
   let s = latinise(raw).replace(/[^0-9.,]/g, "");
   const dot = s.indexOf(".");

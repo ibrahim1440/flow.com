@@ -20,7 +20,7 @@ import {
   REASON_MAX_LENGTH,
 } from "@/lib/services/order-operations";
 import { emitAutomationEvent } from "@/lib/automation/emit";
-import { canSeeCustomerContact, CUSTOMER_OPERATIONS_SELECT } from "@/lib/auth/customer-detail";
+import { canSeeCustomerContact, CUSTOMER_OPERATIONS_SELECT, fullCustomer } from "@/lib/auth/customer-detail";
 import { nextRoastBatchNumber } from "@/lib/services/batch-number";
 import { resolveExpectedLot, resolveGreenLot } from "@/lib/services/green-source";
 import { otherCoffeeCheck } from "@/lib/services/scan-lookup";
@@ -185,7 +185,7 @@ export async function GET(request: Request) {
         include: {
           order: {
             include: {
-              customer: customerContact ? { include: { roastPreferences: true } } : { select: CUSTOMER_OPERATIONS_SELECT },
+              customer: customerContact ? fullCustomer(user, { include: { roastPreferences: true } }) : { select: CUSTOMER_OPERATIONS_SELECT },
             },
           },
           // Which coffee an order-backed batch is. A stock batch carries productId

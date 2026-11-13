@@ -1,7 +1,8 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireEdit } from "@/lib/auth-server";
-import { handlePrismaError } from "@/lib/api-error";
+import { handleDomainError, handlePrismaError } from "@/lib/api-error";
+import { mergeAgainst, staleRefusal, versionRequired } from "@/lib/http/stale-record";
 import { parseContact } from "@/lib/services/customers/fields";
 import { customerInScope } from "@/lib/services/sales/customer-access";
 import { requireContactEditor } from "@/lib/services/customers/owner-contact";
@@ -9,7 +10,7 @@ import { writeSettingsAudit } from "@/lib/services/settings/audit";
 
 type Params = { params: Promise<{ id: string; contactId: string }> };
 
-const SELECT = { id: true, name: true, role: true, phone: true, email: true, position: true } as const;
+const SELECT = { id: true, name: true, role: true, phone: true, email: true, position: true, updatedAt: true } as const;
 
 /**
  * PUT /api/customers/[id]/contacts/[contactId] — correct a contact. Keys left out of the body
@@ -28,6 +29,13 @@ export async function PUT(request: Request, { params }: Params) {
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 }); }
   const b = (body ?? {}) as Record<string, unknown>;
+  // P2 ERR-06 (gate E1): the version the form was loaded with — required from the screens; merged field by field.
+  const noVersion = versionRequired(request, b.expectedUpdatedAt);
+  if (noVersion) return handleDomainError(noVersion);
+  const stored = await prisma.customerContact.findFirst({ where: { id: contactId, customerId: id } });
+  if (!stored) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const merged = mergeAgainst(b, { expected: b.expectedUpdatedAt, baseline: b.baseline, current: stored as unknown as Record<string, unknown> & { updatedAt: Date } });
+  if (!merged.ok) return handleDomainError(merged.refusal);
   const parsed = parseContact(b, true);
   if (!parsed.ok) return NextResponse.json({ error: parsed.errorAr, errorEn: parsed.error }, { status: 400 });
   let position: number | undefined;
@@ -38,13 +46,13 @@ export async function PUT(request: Request, { params }: Params) {
     position = b.position as number;
   }
   try {
-    const existing = await prisma.customerContact.findFirst({ where: { id: contactId, customerId: id }, select: { id: true } });
-    if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    const contact = await prisma.customerContact.update({
-      where: { id: contactId },
+    // Atomic (gate E1): only over the version read above.
+    const written = await prisma.customerContact.updateMany({
+      where: { id: contactId, customerId: id, updatedAt: stored.updatedAt },
       data: { ...parsed.data, ...(position !== undefined ? { position } : {}) },
-      select: SELECT,
     });
+    if (written.count === 0) return handleDomainError(staleRefusal(stored.updatedAt));
+    const contact = await prisma.customerContact.findUniqueOrThrow({ where: { id: contactId }, select: SELECT });
     if (kind === "owner") {
       await writeSettingsAudit(prisma, {
         section: "organisation", action: "SETTINGS_UPDATED", entityType: "Customer", entityId: id, changed: ["contact"],

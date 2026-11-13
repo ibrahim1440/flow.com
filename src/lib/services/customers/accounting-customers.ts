@@ -12,6 +12,7 @@ import { agingReport } from "@/lib/services/invoicing/ar";
 import { isKsaVatNumber, normDigits } from "@/lib/services/invoicing/pricing";
 import { describeIdentityChanges, expandRegistrationNo, identityChanges, parseChangeReason, parseNationalFields } from "./customer-identity";
 import { findDuplicateCustomer } from "./duplicates";
+import { mergeAgainst, staleRefusal } from "@/lib/http/stale-record";
 import { writeSettingsAudit } from "@/lib/services/settings/audit";
 
 export const canReadAccountingCustomers = (p: Permissions) => hasModuleAccess(p, "accounting") && hasSubPrivilege(p, "accounting", "ar");
@@ -69,7 +70,7 @@ export function parseParticulars(input: Record<string, unknown>, create: boolean
   return out;
 }
 
-const SELECT = { id: true, name: true, nameAr: true, vatNumber: true, commercialRegNo: true, unifiedNumber: true, city: true, address: true, phone: true, email: true, creditLimit: true, paymentTermsDays: true, accountOwner: { select: { name: true } } } as const;
+const SELECT = { id: true, name: true, nameAr: true, vatNumber: true, commercialRegNo: true, unifiedNumber: true, city: true, address: true, phone: true, email: true, creditLimit: true, paymentTermsDays: true, updatedAt: true, accountOwner: { select: { name: true } } } as const;
 
 /** Every customer with its receivables (balance, overdue) — the accountant's list. */
 export async function listAccountingCustomers(q: string | null) {
@@ -86,6 +87,7 @@ export async function listAccountingCustomers(q: string | null) {
       id: c.id, name: c.name, nameAr: c.nameAr, vatNumber: c.vatNumber, commercialRegNo: c.commercialRegNo, unifiedNumber: c.unifiedNumber, city: c.city, address: c.address, phone: c.phone, email: c.email,
       creditLimit: c.creditLimit?.toFixed(2) ?? null, paymentTermsDays: c.paymentTermsDays, repName: c.accountOwner?.name ?? null,
       balance: a ? a.balance.toFixed(2) : "0.00", overdue: a ? a.overdue.toFixed(2) : "0.00",
+      updatedAt: c.updatedAt.toISOString(), // P2 ERR-06 (gate E1): the version the edit form sends back
     };
   });
 }
@@ -112,6 +114,11 @@ export async function createAccountingCustomer(body: Record<string, unknown>, ac
 export async function updateAccountingCustomer(id: string, body: Record<string, unknown>, actor: string | { id: string; name?: string | null }) {
   const actorId = typeof actor === "string" ? actor : actor.id;
   const actorName = typeof actor === "string" ? null : actor.name ?? null;
+  // P2 ERR-06 (gate E1): changed since the form opened → merged field by field; a field changed on both sides → 409.
+  const stored = await prisma.customer.findUnique({ where: { id } });
+  if (!stored) throw refuse(404, "NOT_FOUND", "العميل غير موجود.", "Customer not found.");
+  const merged = mergeAgainst(body, { expected: body.expectedUpdatedAt, baseline: body.baseline, current: stored as unknown as Record<string, unknown> & { updatedAt: Date } });
+  if (!merged.ok) throw merged.refusal;
   const data = parseParticulars(body, false);
   if (Object.keys(data).length === 0) throw refuse(400, "NOTHING", "ما فيه شي يتعدل.", "Nothing to change.");
   const current = await prisma.customer.findUnique({ where: { id }, select: { vatNumber: true, commercialRegNo: true, unifiedNumber: true } });
@@ -129,7 +136,10 @@ export async function updateAccountingCustomer(id: string, body: Record<string, 
   return prisma.$transaction(async (tx) => {
     const before = await tx.customer.findUnique({ where: { id }, select: { name: true, nameAr: true, vatNumber: true, commercialRegNo: true, unifiedNumber: true, city: true, address: true, phone: true, email: true } });
     if (!before) throw refuse(404, "NOT_FOUND", "العميل غير موجود.", "Customer not found.");
-    const c = await tx.customer.update({ where: { id }, data, select: { id: true, name: true } });
+    // Atomic (gate E1): only over the version read above.
+    const w = await tx.customer.updateMany({ where: { id, updatedAt: stored.updatedAt }, data });
+    if (w.count === 0) throw staleRefusal(stored.updatedAt);
+    const c = await tx.customer.findUniqueOrThrow({ where: { id }, select: { id: true, name: true } });
     await audit(tx, { action: "ACCOUNTING_CUSTOMER_UPDATED", entityType: "Customer", entityId: id, actorId, before, after: data, reason: identity.length ? reason : null });
     if (identity.length) {
       await tx.activity.create({

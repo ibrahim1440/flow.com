@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useUser } from "../../user-context";
 import { hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
+import { isSalesRep, type Viewer } from "@/lib/nav/registry";
 import { Dot, PageHeader, type Tone } from "@/components/ops/ui";
 import { api } from "../../sales/_components/ui";
 import { LinkTabs } from "../../_components/tools-ui";
@@ -280,7 +281,12 @@ export function AutomationHeader({ lang, actions, ruleCount, conn, children }: {
   const ar = lang === "ar";
   const pathname = usePathname() ?? "";
   const [own, setOwn] = useState<Connection | null>(null);
-  const wantsOwn = conn === undefined;
+  // Fix round 2: a manager / rep without the automation module reads the log and the archive only.
+  const { canView } = useAutomationAbilities();
+  const viewer = useUser();
+  // P2 ERR-20: the connection and the channel settings are the automation module's — without it nothing is asked (they
+  // answered 403 in the background), and the strip is not drawn.
+  const wantsOwn = conn === undefined && canView;
   useEffect(() => {
     if (!wantsOwn) return;
     let cancelled = false;
@@ -292,15 +298,16 @@ export function AutomationHeader({ lang, actions, ruleCount, conn, children }: {
   const shown = wantsOwn ? own : conn;
   const [channels, setChannels] = useState<Channels | null>(null);
   useEffect(() => {
+    if (!canView) return;
     let cancelled = false;
     api<Channels>("/api/automation/settings").then((r) => { if (!cancelled && r.ok) setChannels(r.data); });
     return () => { cancelled = true; };
-  }, []);
+  }, [canView]);
   const onRules = pathname === "/dashboard/automation" || pathname.startsWith("/dashboard/automation/rules");
   // «إشعارات الحالات» (addition beyond Figma): the admin role only, as its API.
-  const isAdmin = useUser()?.role === "admin";
-  // Fix round 2: a manager / rep without the automation module reads the log and the archive only.
-  const { canView } = useAutomationAbilities();
+  const isAdmin = viewer?.role === "admin";
+  // P2 ERR-20: the archive is closed to a sales rep (owner, 8 Nov 2026 — the API answers REP_NOT_ALLOWED): no tab.
+  const rep = !!viewer && isSalesRep({ role: viewer.role, permissions: viewer.permissions } as Viewer);
   return (
     <>
       <PageHeader title={ar ? "رسائل العملاء التلقائية" : "Automated customer messages"} actions={actions} />
@@ -313,7 +320,7 @@ export function AutomationHeader({ lang, actions, ruleCount, conn, children }: {
           ...(isAdmin ? [{ href: "/dashboard/automation/statuses", label: <TabLabel full={ar ? "إشعارات الحالات" : "Status notifications"} short={ar ? "الحالات" : "Statuses"} />, current: pathname.startsWith("/dashboard/automation/statuses"), testId: "tab-statuses" }] : []),
           { href: "/dashboard/automation/messages", label: <TabLabel full={ar ? "سجل الرسائل" : "Message log"} short={ar ? "السجل" : "Log"} />, current: pathname.startsWith("/dashboard/automation/messages"), testId: "tab-messages" },
           ...(canView ? [{ href: "/dashboard/automation/whatsapp", label: <TabLabel full={ar ? "الإعدادات" : "Settings"} short={ar ? "الإعدادات" : "Settings"} />, current: pathname.startsWith("/dashboard/automation/whatsapp"), testId: "tab-whatsapp" }] : []),
-          ...(isAdmin || !canView ? [{ href: "/dashboard/automation/archive", label: <TabLabel full={ar ? "الأرشيف" : "Archive"} short={ar ? "الأرشيف" : "Archive"} />, current: pathname.startsWith("/dashboard/automation/archive"), testId: "tab-archive" }] : []),
+          ...((isAdmin || !canView) && !rep ? [{ href: "/dashboard/automation/archive", label: <TabLabel full={ar ? "الأرشيف" : "Archive"} short={ar ? "الأرشيف" : "Archive"} />, current: pathname.startsWith("/dashboard/automation/archive"), testId: "tab-archive" }] : []),
         ]}
       />
       {shown ? <ConnectionStrip conn={shown} channels={channels} lang={lang} /> : null}

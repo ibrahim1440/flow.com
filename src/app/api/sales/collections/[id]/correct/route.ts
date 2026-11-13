@@ -1,3 +1,4 @@
+import { latinNumberText } from "@/lib/numbers/typed-number";
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { privilegedGate, requireAuth } from "@/lib/auth-server";
@@ -45,7 +46,7 @@ export async function POST(request: Request, { params }: Params) {
   if (idempotencyKey.length < 8 || idempotencyKey.length > 128) return NextResponse.json({ error: "idempotencyKey must be 8–128 characters." }, { status: 400 });
   const edits: CorrectionEdits = {};
   if (b.amountGross !== undefined) {
-    const raw = String(b.amountGross).trim();
+    const raw = latinNumberText(String(b.amountGross)); // P2 ERR-17
     if (!AMOUNT_PATTERN.test(raw)) return NextResponse.json({ error: "amountGross must be a positive amount with at most two decimal places." }, { status: 400 });
     edits.amountGross = new Decimal(raw);
   }

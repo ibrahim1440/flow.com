@@ -176,6 +176,14 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
         </span>
       }>
       <Msg error={w.error} done={w.done} onClose={() => { w.setError(null); w.setDone(null); }} />
+      {/* P2 SUSP-03 (owner decision أ): a draft made from an order is not yet with the accountant — say so, with the button. */}
+      {search?.get("fromOrder") === "1" && canRequest && !canIssue ? (
+        <Banner tone="info" testId="from-order-ready">
+          <b>{L("المسودة جاهزة — أرسلها للمحاسب", "The draft is ready — send it to the accountant")}</b>
+          <span>{L("ما تظهر عنده في «طلبات الفواتير» إلا بعد ما ترسلها.", "It shows in the accountant's invoice requests only once you send it.")}</span>
+          <button type="button" className="hr-btn is-primary is-sm" disabled={!!w.busy || waitingSupervisor} onClick={sendRequest} data-testid="from-order-send">{L("أرسلها للمحاسب", "Send it to the accountant")}</button>
+        </Banner>
+      ) : null}
       {d.sample ? (
         <Banner tone={d.sample.awaitingApproval ? "warning" : "info"} testId="sample-banner">
           <b><span className="inv-badge is-sample" data-testid="sample-badge">{L("عيّنة", "Sample")}</span>{" "}

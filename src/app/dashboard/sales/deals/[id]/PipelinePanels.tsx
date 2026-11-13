@@ -74,12 +74,16 @@ export function NeedsBlock({ ar, needs, canEdit, onEdit }: { ar: boolean; needs:
 
 /** Edit the needs (PATCH /api/sales/opportunities/[id]/needs). */
 export function NeedsDialog({ ar, dealId, needs, onClose, onDone }: {
-  ar: boolean; dealId: string; needs: Needs; onClose: () => void; onDone: () => void;
+  ar: boolean; dealId: string; needs: Needs; onClose: () => void; onDone: (message: string) => void;
 }) {
   const [draft, setDraft] = useState<QualificationDraft>(() => draftFromLead(needs));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   async function save() {
+    // P2 ERR-12: nothing typed is nothing saved — say so instead of «حُفظ تحليل الاحتياج».
+    const empty = !draft.businessType && !draft.needSummary.trim() && !String(draft.expectedMonthlyKg ?? "").trim() && !draft.nextStep.trim();
+    const hadAny = !!(needs.businessType || needs.needSummary || needs.expectedMonthlyKg || needs.agreedNextStep);
+    if (empty && !hadAny) { setErr(ar ? "ما كتبت شي — عبّ حقل واحد على الأقل." : "Nothing typed — fill at least one field."); return; }
     setBusy(true); setErr("");
     const res = await api(`/api/sales/opportunities/${dealId}/needs`, {
       method: "PATCH",
@@ -88,7 +92,11 @@ export function NeedsDialog({ ar, dealId, needs, onClose, onDone }: {
     });
     setBusy(false);
     if (!res.ok) { setErr(res.data.error ?? (ar ? "تعذّر الحفظ." : "Could not save.")); return; }
-    onDone();
+    // The success line says what the server now holds: complete, or what is still missing.
+    const left = qualificationMissing({ businessType: draft.businessType || null, needSummary: draft.needSummary, agreedNextStep: draft.nextStep });
+    onDone(left.length === 0
+      ? (ar ? "حُفظ تحليل الاحتياج." : "Needs saved.")
+      : ar ? `حُفظ — باقي: ${left.map((m) => QUALIFICATION_FIELD_LABELS[m].ar).join("، ")}.` : `Saved — still missing: ${left.map((m) => QUALIFICATION_FIELD_LABELS[m].en).join(", ")}.`);
   }
   return (
     <Modal title={ar ? "تحليل الاحتياج" : "Needs analysis"} onClose={onClose} testId="needs-dialog"

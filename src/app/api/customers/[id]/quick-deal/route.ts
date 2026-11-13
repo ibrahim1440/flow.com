@@ -1,6 +1,6 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
-import { requireSub } from "@/lib/auth-server";
+import { requireSub, requireModule } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
 import { NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
@@ -24,6 +24,9 @@ type Params = { params: Promise<{ id: string }> };
  * the caller is a team-view manager — and then the deal is the ACCOUNT OWNER's, never the manager's (H1).
  */
 export async function POST(request: Request, { params }: Params) {
+  // P2 SEC-10: the session first — a visitor gets 401 before any input is read or looked up.
+  const signedIn = await requireModule("customers");
+  if (signedIn.error) return signedIn.error;
   let body: Record<string, unknown> = {};
   try { body = ((await request.json()) ?? {}) as Record<string, unknown>; } catch { /* empty body: refused below */ }
   const purpose: QuickPurpose | null = body.purpose === "quote" || body.purpose === "sample" ? body.purpose : null;

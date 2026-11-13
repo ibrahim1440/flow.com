@@ -1,5 +1,6 @@
 "use client";
 
+import { percentOf, perDayNeeded, wholePercentLabel } from "@/lib/format/figures";
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -433,10 +434,12 @@ function RepBoard({ ar, data, month, lang, onMonth, can }: { ar: boolean; data: 
   const pctN = prog.percent === null ? 0 : Math.max(0, Math.min(100, Number(prog.percent)));
   const thisMonth = day?.month === month;
   const daysLeft = thisMonth ? day!.daysLeft : null;
-  const perDay = daysLeft && prog.remaining && Number(prog.remaining) > 0 ? Number(prog.remaining) / Math.max(1, daysLeft) : null;
+  // P2 ERR-19: the band's rule (rounded up to a riyal) and the unrounded percent, so «يومي» and this page agree.
+  const perDay = perDayNeeded(prog.remaining, daysLeft);
+  const pctLabel = wholePercentLabel(prog.target === null ? null : percentOf(prog.achieved, prog.target) ?? prog.percent, ar);
   const line = prog.target === null ? (ar ? "ما فيه هدف مسجّل لهالشهر" : "No target for this month")
-    : prog.met ? (ar ? `حقّقت ${whole(prog.percent)}% — فوق الهدف` : `${whole(prog.percent)}% — above target`)
-      : [ar ? `حقّقت ${whole(prog.percent)}%` : `${whole(prog.percent)}% achieved`, ar ? `باقي ${whole(prog.remaining)} ${sar}` : `${whole(prog.remaining)} ${sar} to go`,
+    : prog.met ? (ar ? `حقّقت ${pctLabel}% — فوق الهدف` : `${pctLabel}% — above target`)
+      : [ar ? `حقّقت ${pctLabel}%` : `${pctLabel}% achieved`, ar ? `باقي ${whole(prog.remaining)} ${sar}` : `${whole(prog.remaining)} ${sar} to go`,
         daysLeft !== null ? (ar ? `باقي ${daysLeft} يوم` : `${daysLeft} days left`) : null,
         perDay ? (ar ? `تحتاج ${whole(perDay)} ${sar} يوميًا` : `${whole(perDay)} ${sar} a day`) : null].filter(Boolean).join(" · ");
   const closed = t.won + t.lost;

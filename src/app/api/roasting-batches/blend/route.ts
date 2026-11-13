@@ -12,7 +12,7 @@ import {
   consumeBlendSources,
   recordBlendMovements,
 } from "@/lib/services/blend-transformation";
-import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
+import { canSeeCustomerContact, CUSTOMER_NAME_SELECT, fullCustomer } from "@/lib/auth/customer-detail";
 import { nextBlendBatchNumber } from "@/lib/services/batch-number";
 import { isHeldStatus } from "@/lib/services/qc/hold-guard";
 import { approvedBlendFor } from "@/lib/services/qc/dispositions";
@@ -225,7 +225,7 @@ export async function POST(request: Request) {
           blendInputs: { select: { id: true, sourceBatchId: true, quantityUsed: true } },
           // F4 / review F-1: the customer's name only, unless the caller holds the
           // customer contact right (the production screen does not read this body at all).
-          orderItem: { include: { order: { include: { customer: canSeeCustomerContact(user.permissions) ? true : { select: CUSTOMER_NAME_SELECT } } } } },
+          orderItem: { include: { order: { include: { customer: canSeeCustomerContact(user.permissions) ? fullCustomer(user) : { select: CUSTOMER_NAME_SELECT } } } } },
         },
       });
     }, TX_OPTS);

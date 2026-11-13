@@ -2,7 +2,7 @@ import type { PrismaClient } from "@/generated/prisma/client";
 import {
   Decimal, ZERO, roundMoney, riyadhMonthStart, riyadhMonthEnd, qualifyingBase,
 } from "@/lib/services/commissions/engine";
-import { withLostQuoteValue } from "./deal-amount";
+import { dealNetValues, withLostQuoteValue } from "./deal-amount";
 
 /**
  * «لوحة الأداء» — the monthly performance figures of a rep and of the team, computed from the
@@ -132,7 +132,7 @@ export function previousMonths(start: Date, count: number): Date[] {
 }
 
 type Db = Pick<PrismaClient,
-  "collectionEvent" | "opportunity" | "salesTarget" | "lead" | "quote" | "commissionLedgerEntry" | "pipelineStage" | "employee">;
+  "collectionEvent" | "opportunity" | "salesTarget" | "lead" | "quote" | "commissionLedgerEntry" | "pipelineStage" | "employee" | "opportunityOrder" | "salesInvoice">;
 
 /** RECORDED collection events in [from, to) and the deals they belong to, attributed. */
 async function collectedIn(db: Db, from: Date, to: Date) {
@@ -216,7 +216,11 @@ export async function performanceSummary(db: Db, opts: {
     }),
     db.opportunity.findMany({
       where: { ...mine, outcome: "WON", closedAt: { gte: start, lt: end } },
-      select: { ownerId: true, amount: true },
+      select: { id: true, ownerId: true, amount: true },
+    }).then(async (rows) => {
+      // P2 SUSP-05: the won value before VAT (the dashboard's figures are all before VAT).
+      const net = await dealNetValues(db, rows);
+      return rows.map((r) => ({ ...r, amount: new Decimal(net.get(r.id) ?? r.amount.toString()) }));
     }),
     db.opportunity.findMany({
       where: { ...mine, outcome: "LOST", closedAt: { gte: start, lt: end } },

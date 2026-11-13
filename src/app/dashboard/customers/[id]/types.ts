@@ -2,7 +2,7 @@ import type { CreditState } from "@/components/credit/credit-ui";
 // The shape of GET /api/customers/[id]/account (src/app/api/customers/[id]/account/route.ts),
 // as the account page reads it. Dates arrive as ISO strings, money as fixed-point strings.
 
-export type Contact = { id: string; name: string; role: string | null; phone: string | null; email: string | null; position: number };
+export type Contact = { id: string; name: string; role: string | null; phone: string | null; email: string | null; position: number; updatedAt?: string };
 
 export type RoastPreference = {
   id: string; greenBeanId: string; profileName: string; usageType: "ESPRESSO" | "FILTER" | "BOTH"; notes: string | null;
@@ -13,6 +13,8 @@ export type RoastPreference = {
 };
 
 export type Customer = {
+  /** P2 ERR-06: sent back on save (`expectedUpdatedAt`) so a change made in another tab is never overwritten. */
+  updatedAt?: string;
   id: string; name: string; nameAr: string | null; phone: string | null; email: string | null; address: string | null;
   whatsappOptOut: boolean; emailOptOut?: boolean; createdAt: string;
   commercialRegNo: string | null; vatNumber: string | null; segment: string | null; city: string | null; priceList: string | null;

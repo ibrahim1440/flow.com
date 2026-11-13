@@ -1,5 +1,6 @@
 "use client";
 
+import { halalas } from "@/lib/format/money";
 import { displayPhone, waDigits } from "@/lib/contact/phone";
 import { useState, useEffect, useRef, use } from "react";
 import Link from "next/link";
@@ -14,7 +15,7 @@ import { useD21Title, usePhone, useD21Phone, useCreateRequest } from "@/componen
 import { splitTitle } from "@/components/d21/labels";
 import { ACTIVITY_OUTCOMES } from "@/lib/services/sales/qualification";
 import {
-  dayCount, daysFromToday, dueText, longDate, money2, relativeDays, shortDate, whole,
+  dayCount, daysFromToday, dueText, longDate, money2, relativeDays, shortDate,
 } from "@/components/d21/format";
 import { CollectionsPanel, type CollectionRow, type Summary } from "./CollectionsPanel";
 import { NeedsDialog } from "./PipelinePanels";
@@ -28,6 +29,7 @@ import {
 import { SampleDialog } from "../../_components/SampleDialog";
 import { NewCustomerDialog, type CreatedCustomer } from "@/components/customers/new-customer-form";
 import { useUser } from "../../../user-context";
+import { riyadhDayOf } from "@/lib/dates/not-past";
 
 
 /** FOLLOWUPS sales UI bug 4: a product's Arabic name on the Arabic screen (its English name, else its code, otherwise). */
@@ -709,7 +711,8 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   const { top: headTitle, sub: headSub } = splitTitle(deal.title, customerName);
   const phase = ns?.phase ?? (open ? "QUALIFIED" : "CLOSED");
   const liveSamples = deal.samples.filter((x) => x.status !== "CANCELLED");
-  const money = (v: string | number) => ar ? <><span className="n">{whole(v)}</span> ⃁</> : <>SAR <span className="n">{whole(v)}</span></>;
+  // P2 UXM-21: the deal value keeps its halalas (it is compared with what is collected, «310.50», on the same page).
+  const money = (v: string | number) => ar ? <><span className="n">{halalas(v)}</span> ⃁</> : <>SAR <span className="n">{halalas(v)}</span></>;
   const pad2 = (n: number) => String(n).padStart(2, "0");
   const timeOf = (v: string) => { const d = new Date(v); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
 
@@ -791,8 +794,8 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       base = ar ? `${n === 0 ? "أُرسلت اليوم" : `أُرسلت قبل ${dayCount(n, lang)}`} ولم يصل رد بعد.${currentQuote.validUntil ? ` العرض صالح حتى ${shortDate(currentQuote.validUntil, lang)}.` : ""}`
         : `${n === 0 ? "Sent today" : `Sent ${dayCount(n, lang)} ago`} with no reply yet.${currentQuote.validUntil ? ` Valid until ${shortDate(currentQuote.validUntil, lang)}.` : ""}`;
     } else if (k === "CREATE_ORDER" && acceptedQuote) {
-      base = ar ? `قبل العميل النسخة ${acceptedQuote.revision} بقيمة ${whole(acceptedQuote.grandTotal)} ⃁. إنشاء الطلب يبدأ التجهيز والتوصيل، ولا يحتاج إعادة إدخال الأصناف.`
-        : `The customer accepted version ${acceptedQuote.revision} (SAR ${whole(acceptedQuote.grandTotal)}). The order starts preparation and delivery; nothing is typed again.`;
+      base = ar ? `قبل العميل النسخة ${acceptedQuote.revision} بقيمة ${halalas(acceptedQuote.grandTotal)} ⃁. إنشاء الطلب يبدأ التجهيز والتوصيل، ولا يحتاج إعادة إدخال الأصناف.`
+        : `The customer accepted version ${acceptedQuote.revision} (SAR ${halalas(acceptedQuote.grandTotal)}). The order starts preparation and delivery; nothing is typed again.`;
     }
     return [base, ...extra].filter(Boolean).join(" ") || null;
   };
@@ -1153,7 +1156,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   ) : null;
 
   const quoteStage = stages.find((x) => x.isActive && x.purpose === "QUOTATION");
-  const dealLine = `${headTitle} · ${whole(deal.amount)} ${ar ? "⃁" : "SAR"} · ${ar ? deal.stage.nameAr : deal.stage.nameEn}`;
+  const dealLine = `${headTitle} · ${halalas(deal.amount)} ${ar ? "⃁" : "SAR"} · ${ar ? deal.stage.nameAr : deal.stage.nameEn}`;
   const dialogs = (
     <>
       {dialog === "close" && (
@@ -1162,7 +1165,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       )}
       {dialog === "needs" && (
         <NeedsDialog ar={ar} dealId={deal.id} needs={deal} onClose={() => setDialog(null)}
-          onDone={() => { setDialog(null); setSuccess(ar ? "حُفظ تحليل الاحتياج." : "Needs saved."); reload(); }} />
+          onDone={(message) => { setDialog(null); setSuccess(message); reload(); }} />
       )}
       {dialog === "skip" && (
         <SkipSamplesSheet ar={ar} busy={busy} dealName={headTitle} error={dialogError}
@@ -1534,7 +1537,10 @@ function EditDialog({
   const [amount, setAmount] = useState(String(deal.amount));
   const [probability, setProbability] = useState(String(deal.probability));
   const [expectedCloseAt, setExpectedCloseAt] = useState(deal.expectedCloseAt?.slice(0, 10) ?? "");
-  const [nextFollowUpAt, setNextFollowUpAt] = useState(deal.nextFollowUpAt?.slice(0, 10) ?? "");
+  // Gate B2: the follow-up is shown as its RIYADH day (a follow-up after 21:00 UTC is the next day there), and sent only
+  // when it is changed — an overdue follow-up never blocks renaming the deal or changing its amount.
+  const followUpDay = deal.nextFollowUpAt ? riyadhDayOf(new Date(deal.nextFollowUpAt)) : "";
+  const [nextFollowUpAt, setNextFollowUpAt] = useState(followUpDay);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -1559,7 +1565,7 @@ function EditDialog({
                   amount,
                   probability: Number(probability),
                   expectedCloseAt: expectedCloseAt || null,
-                  nextFollowUpAt: nextFollowUpAt || null,
+                  ...(nextFollowUpAt !== followUpDay ? { nextFollowUpAt: nextFollowUpAt || null } : {}),
                 },
               });
               setBusy(false);

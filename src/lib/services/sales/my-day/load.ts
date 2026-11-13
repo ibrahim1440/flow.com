@@ -93,7 +93,7 @@ export async function loadMyDay(db: Db, opts: {
          ords AS (SELECT DISTINCT ol."orderId" FROM "OpportunityOrder" ol WHERE ol."opportunityId" IN (SELECT "id" FROM d)),
          qts AS (SELECT q."id" FROM "Quote" q WHERE q."opportunityId" IN (SELECT "id" FROM d)),
          inv AS (
-           SELECT i."id", i."kind", i."status", i."number", i."customerId", i."issueDate", i."taxableTotal", i."grandTotal",
+           SELECT i."id", i."kind", i."status", i."number", i."customerId", i."issueDate", i."dueDate", i."taxableTotal", i."grandTotal",
                   coalesce(i."orderId", oi."orderId") AS "orderId", coalesce(i."quoteId", oi."quoteId") AS "quoteId"
              FROM "SalesInvoice" i LEFT JOIN "SalesInvoice" oi ON oi."id" = i."originalInvoiceId"
             WHERE (coalesce(i."orderId", oi."orderId") IN (SELECT "orderId" FROM ords) OR coalesce(i."quoteId", oi."quoteId") IN (SELECT "id" FROM qts))
@@ -110,7 +110,7 @@ export async function loadMyDay(db: Db, opts: {
                       AND od."status" NOT IN ('Cancelled', 'Rejected') AND od."discountApprovalStatus" NOT IN ('PENDING', 'REJECTED'))) AS "draftLive"
              FROM inv)
          SELECT json_agg(json_build_object('id', res."id", 'kind', res."kind", 'status', res."status", 'number', res."number", 'customerId', res."customerId",
-                  'customerName', c."name", 'customerNameAr', c."nameAr", 'customerPhone', c."phone", 'issueDate', res."issueDate",
+                  'customerName', c."name", 'customerNameAr', c."nameAr", 'customerPhone', c."phone", 'issueDate', res."issueDate", 'dueDate', res."dueDate",
                   'taxableTotal', res."taxableTotal", 'grandTotal', res."grandTotal", 'applied', res.applied, 'notesOpen', res."notesOpen",
                   'inMonth', coalesce(res."inMonth", false), 'draftLive', res."draftLive", 'dealOwnerId', d."ownerId", 'owners', d.owners))
            FROM res JOIN d ON d."id" = res.deal LEFT JOIN "Customer" c ON c."id" = res."customerId"

@@ -8,7 +8,7 @@ import { SUBJECT_NOT_VERIFIED_EN } from "@/lib/hr/identity";
 import { isPinLookupConflict, pinSetThrottle, pinUnavailable } from "@/lib/pin-set-guard";
 import { gainedPrivileges, normalizeUsername, usernameValid, USERNAME_INVALID, withoutPrivileged } from "@/lib/auth/privileged";
 import { isSimpleMode } from "@/lib/simple-mode";
-import { ROLE_LABELS } from "@/lib/auth-shared";
+import { hasModuleAccess, ROLE_LABELS } from "@/lib/auth-shared";
 import { HrError } from "@/lib/hr/core";
 import { toArabic } from "@/lib/hr/messages-ar";
 import { validatePin } from "@/lib/pin-policy";
@@ -43,6 +43,8 @@ const SELECT_FULL = {
 const SELECT_ROSTER = {
   id: true, name: true, role: true, active: true,
 } as const;
+
+const SELECT_PEOPLE = { id: true, name: true } as const;
 
 const ALLOWED_DEFAULT_ROUTES = new Set([
   "/dashboard",
@@ -88,6 +90,12 @@ export async function GET() {
   if (error) return error;
 
   const isAdmin = user.role === "admin";
+  // P2 SEC-11: the role and the active flag of every employee (the admin included) are the employees module's. Any
+  // other signed-in caller (a rep's owner pickers) gets the ACTIVE people only, by id and name — as /api/workspace/people.
+  if (!isAdmin && !hasModuleAccess(user.permissions, "employees")) {
+    const people = await prisma.employee.findMany({ where: { active: true }, orderBy: { createdAt: "desc" }, select: SELECT_PEOPLE });
+    return NextResponse.json(people);
+  }
   const employees = await prisma.employee.findMany({
     orderBy: { createdAt: "desc" },
     select: isAdmin ? SELECT_FULL : SELECT_ROSTER,

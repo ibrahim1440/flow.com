@@ -33,6 +33,12 @@ const wantsCallback = () => process.env.VERCEL === "1" && !!process.env.BLOB_WEB
 export async function POST(request: Request, { params }: Params) {
   const { id } = await params;
   const body = (await request.json().catch(() => null)) as HandleUploadPresignedBody | null;
+  // P2 SEC-10: only the storage callback (signed, below) comes without a session; anything else is an upload-token
+  // request and is the customers editor's — a visitor gets 401 before the body is judged.
+  if (!body || typeof body !== "object" || body.type !== "blob.upload-completed") {
+    const signedIn = await requireEdit("customers");
+    if (signedIn.error) return signedIn.error;
+  }
   if (!body || typeof body !== "object" || typeof body.type !== "string") {
     return NextResponse.json({ error: "طلب غير صالح.", errorEn: "Invalid request." }, { status: 400 });
   }

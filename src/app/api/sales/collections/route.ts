@@ -1,3 +1,4 @@
+import { latinNumberText } from "@/lib/numbers/typed-number";
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireAnyModule, requireSub } from "@/lib/auth-server";
@@ -280,7 +281,7 @@ export async function POST(request: Request) {
   }
 
   const rawAmount = typeof b.amountGross === "string" || typeof b.amountGross === "number"
-    ? String(b.amountGross).trim()
+    ? latinNumberText(String(b.amountGross))
     : "";
   if (!AMOUNT_PATTERN.test(rawAmount)) {
     return NextResponse.json(

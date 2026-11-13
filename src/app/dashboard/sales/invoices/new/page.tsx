@@ -55,7 +55,8 @@ function FromOrder({ orderId }: { orderId: string }) {
   const any = d?.lines.some((l) => Number(qty(l)) > 0);
   const create = async () => {
     const r = await w.run<{ id: string }>("create", "/api/sales/invoices/from-order", "POST", { orderId, basis, family, requestKey: key });
-    if (r) router.push(`/dashboard/sales/invoices/${r.id}`);
+    // P2 SUSP-03 (owner decision أ): the draft page says it is ready and offers «أرسلها للمحاسب» right there.
+    if (r) router.push(`/dashboard/sales/invoices/${r.id}?fromOrder=1`);
   };
   return (
     <InvShell title={L("فاتورة من الطلب", "Invoice from an order")} testId="invoice-from-order">
