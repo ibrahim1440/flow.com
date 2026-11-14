@@ -557,7 +557,7 @@ export async function resolveDuplicate(actor: FinanceActor, scope: FinanceScope,
 
 // ─── Transfers between company accounts ───────────────────────────────────────
 
-export async function createTransfer(actor: FinanceActor, scope: FinanceScope, body: Record<string, unknown>) {
+export async function createTransfer(actor: FinanceActor, scope: FinanceScope, body: Record<string, unknown>, outer?: Prisma.TransactionClient) {
   assertCan(actor, "txn_enter");
   const from = await accountInScope(prisma, scope, reqStr(body.fromAccountId, "From account", 40));
   const to = await accountInScope(prisma, scope, reqStr(body.toAccountId, "To account", 40));
@@ -567,14 +567,16 @@ export async function createTransfer(actor: FinanceActor, scope: FinanceScope, b
   if (!isDateString(body.txnDate)) throw new FinanceError("Date is required.", 400);
   const status: "PENDING" | "CONFIRMED" = body.status === "PENDING" ? "PENDING" : "CONFIRMED";
   const reference = str(body.bankReference, 120);
-  return prisma.$transaction(async (tx) => {
+  const run = async (tx: Prisma.TransactionClient) => {
     const common = { txnDate: dbDate(body.txnDate as string), bankReference: reference, description: str(body.description, 500) ?? `Transfer ${from.code} → ${to.code}`, status, source: "MANUAL" as const, classification: "INTERNAL_TRANSFER" as const, reviewStatus: "REVIEWED" as const, reviewedBy: actor.id, reviewedAt: new Date(), createdBy: actor.id };
     const out = await tx.bankTransaction.create({ data: { ...common, cashAccountId: from.id, branchKey: from.branchKey, amount: fromMinor(-amount) } });
     const inn = await tx.bankTransaction.create({ data: { ...common, cashAccountId: to.id, branchKey: to.branchKey, amount: fromMinor(amount), transferPeerId: out.id } });
     await tx.bankTransaction.update({ where: { id: out.id }, data: { transferPeerId: inn.id } });
     await audit(tx, { action: "bank_txn.transfer", entityType: "BankTransaction", entityId: out.id, branchKey: from.branchKey, after: { out: out.id, in: inn.id, amount }, userId: actor.id });
     return { out, in: inn };
-  });
+  };
+  // R1-b: inside the caller's transaction when given one (the Idempotency-Key row commits with this write).
+  return outer ? run(outer) : prisma.$transaction(run);
 }
 
 /** Pair two existing (e.g. imported) lines as the two legs of one transfer. */

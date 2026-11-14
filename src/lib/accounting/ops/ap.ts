@@ -594,8 +594,10 @@ export async function supplierOpeningOutstanding(db: Tx | typeof prisma, supplie
   return new Decimal(o?.v ?? 0).minus(new Decimal(p?.v ?? 0));
 }
 
-export async function recordPayment(input: PaymentInput, ctx: AuditContext) {
-  return prisma.$transaction((tx) => recordPaymentTx(tx, input, ctx), TX_OPTS);
+export async function recordPayment(input: PaymentInput, ctx: AuditContext, outer?: Prisma.TransactionClient) {
+  const run = (tx: Prisma.TransactionClient) => recordPaymentTx(tx, input, ctx);
+  // R1-b: inside the caller's transaction when given one (the Idempotency-Key row commits with this write).
+  return outer ? run(outer) : prisma.$transaction(run, TX_OPTS);
 }
 
 /** recordPayment in the caller's transaction («فواتير بسيطة»: the bill and its payment in one act). */

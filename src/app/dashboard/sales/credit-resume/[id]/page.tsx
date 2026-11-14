@@ -5,7 +5,8 @@
 // request that was refused, as the rep, with a new request key — the endpoint re-checks everything and uses the approval.
 // Existing tokens only (the invoice shell's card); no new layout.
 import Link from "next/link";
-import { use, useState } from "react";
+import { use, useRef, useState } from "react";
+import { createRequestKeyHolder, fetchKeyedWrite } from "@/lib/request-key";
 import { InvShell, Msg, money, useApi, useLang } from "../../invoices/_ui/inv";
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useD21Title } from "@/components/shell/page-context";
@@ -19,7 +20,6 @@ type Resume = {
   closedBy?: "SYSTEM" | "WITHDRAWN" | null;
 };
 
-const newKey = () => (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
 export default function CreditResumePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -28,6 +28,7 @@ export default function CreditResumePage({ params }: { params: Promise<{ id: str
   useD21Title(L("كمّل الطلب", "Continue the order"));
   const q = useApi<Resume>(`/api/customers/credit-overrides/${encodeURIComponent(id)}/resume`);
   const [busy, setBusy] = useState(false);
+  const resumeKey = useRef(createRequestKeyHolder());
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState<{ orderId: string | null; orderNumber: number | null } | null>(null);
   async function withdraw() {
@@ -50,8 +51,10 @@ export default function CreditResumePage({ params }: { params: Promise<{ id: str
   async function go() {
     if (!r?.resume || busy) return;
     setBusy(true); setErr(null);
-    const body = r.resume.body ? { ...r.resume.body, ...("requestKey" in r.resume.body ? { requestKey: newKey() } : {}) } : undefined;
-    const res = await fetch(r.resume.path, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": newKey() }, ...(body ? { body: JSON.stringify(body) } : {}) }).catch(() => null);
+    const body = r.resume.body ? { ...r.resume.body, ...("requestKey" in r.resume.body ? { requestKey: resumeKey.current.keyForAttempt() } : {}) } : undefined;
+    // R1-b: the same Idempotency-Key until a conclusive answer — a retry after a lost answer is the same order.
+    const res = await fetchKeyedWrite(r.resume.path, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": resumeKey.current.keyForAttempt() }, ...(body ? { body: JSON.stringify(body) } : {}) }).catch(() => null);
+    if (res) resumeKey.current.recordResponse(res.status);
     const b = res ? await res.json().catch(() => ({})) : {};
     setBusy(false);
     if (!res?.ok) { setErr(localizeApiError(b, lang === "en" ? "en" : "ar") ?? b.error ?? L("ما كمل — جرّب مرة ثانية.", "It did not go through — try again.")); return; }

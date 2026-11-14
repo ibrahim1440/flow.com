@@ -62,6 +62,15 @@ type OrderItem = {
   productionOrders?: { id: string; productionNumber: string; status: string }[];
 };
 
+/** A GET /api/orders row as this screen reads it: the line carries no `order` (pendingItems adds it), but does carry
+ *  the preparation decision canStartProduction mirrors from the server gate. */
+type ProductionOrderLine = Omit<OrderItem, "order"> & { preparationDecision: string | null };
+type ProductionOrder = {
+  orderNumber: number; status: string; approvalStatus?: string;
+  customer: { name: string; roastPreferences?: CustomerPref[] }; // Order.customerId is required
+  items: ProductionOrderLine[];
+};
+
 type GreenBean = { id: string; beanType: string; quantityKg: number; serialNumber: string };
 
 /** Direction 2.1 status dots for a roasting batch (label from the same translation keys). */
@@ -94,7 +103,7 @@ export default function ProductionPage() {
   const canEditDate = hasSubPrivilege(user?.permissions ?? {}, "production", "edit_date");
   const canOverrideInventory = hasSubPrivilege(user?.permissions ?? {}, "inventory", "override");
 
-  const [orders, setOrders] = useState<{ items: OrderItem[] }[]>([]);
+  const [orders, setOrders] = useState<ProductionOrder[]>([]);
   const [beans, setBeans] = useState<GreenBean[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
   const [error, setError] = useState("");
@@ -304,10 +313,10 @@ export default function ProductionPage() {
   // does: the order is in a production-entry status, the line has been through preparation
   // review, and it is not blocked. Approval is NOT among them — it no longer gates the
   // normal path. Every field is already in the /api/orders payload; nothing was added to it.
-  const pendingItems = orders.flatMap((o: any) =>
+  const pendingItems = orders.flatMap((o): OrderItem[] =>
     o.items
-      .filter((i: { preparationDecision: string | null }) => canStartProduction(o, i))
-      .filter((i: any) => i.productionStatus !== "Completed" && i.productionStatus !== "Order cancelled")
+      .filter((i) => canStartProduction(o, i))
+      .filter((i) => i.productionStatus !== "Completed" && i.productionStatus !== "Order cancelled")
       // A line preparation covered entirely from the shelf is not production work, and
       // listing it here invented a roasting task for coffee the order already holds.
       //
@@ -316,8 +325,8 @@ export default function ProductionPage() {
       // is recomputed per caller), and canStartProduction still mirrors the gate exactly.
       // If coverage later evaporates, preparation review is re-run and the line reappears
       // here with a decision that reflects the shortfall.
-      .filter((i: { preparationDecision: string | null }) => i.preparationDecision !== "Available on Shelf")
-      .map((i: any) => ({
+      .filter((i) => i.preparationDecision !== "Available on Shelf")
+      .map((i): OrderItem => ({
         ...i,
         order: {
           orderNumber: o.orderNumber,
@@ -327,15 +336,15 @@ export default function ProductionPage() {
           },
         },
       }))
-      .filter((i: any) => {
+      .filter((i) => {
         // Roasted output against ordered finished weight. Summing greenBeanQuantity here
         // compared roaster INPUT against customer OUTPUT and hid lines that still needed
         // roasting, because the green figure is always the larger of the two.
         // Rejected roasts are not progress — a line whose only roast failed QC must stay in
         // the queue rather than disappearing from it as though it were covered.
         const producedFinishedKg = (i.roastingBatches ?? [])
-          .filter((b: any) => !b.isBlend && b.status !== "Rejected")
-          .reduce((s: number, b: any) => s + b.roastedBeanQuantity, 0);
+          .filter((b) => !b.isBlend && b.status !== "Rejected")
+          .reduce((s, b) => s + b.roastedBeanQuantity, 0);
         return i.quantityKg - producedFinishedKg > 0;
       })
   );

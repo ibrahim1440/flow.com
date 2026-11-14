@@ -92,6 +92,7 @@ function InviteModal({ session, onClose }: { session: Session; onClose: () => vo
   const closeRef = useRef(onClose);
   useEffect(() => { closeRef.current = onClose; });
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- R1-a CI baseline: pre-existing, behaviour unchanged — refactor tracked separately
   useEffect(() => { setOrigin(window.location.origin); }, []);
   useEffect(() => {
     const mq = window.matchMedia(DRAWER_MQ);
@@ -622,6 +623,7 @@ export default function CuppingPage() {
     setLoading(false);
   }, []);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- R1-a CI baseline: pre-existing, behaviour unchanged — refactor tracked separately
   useEffect(() => { fetchSessions(); }, [fetchSessions]);
 
   async function handleClose(id: string, req: CloseRequest): Promise<CloseResult> {

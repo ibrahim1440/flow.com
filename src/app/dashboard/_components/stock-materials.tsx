@@ -7,7 +7,7 @@
 // inventory › adjust (PATCH /api/materials/:id, reason required), create = POST /api/materials.
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select } from "@/components/ui/Select";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Btn, Field, Notice, useL } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
 import { useI18n } from "@/lib/i18n/context";
@@ -17,6 +17,7 @@ import { canEdit, hasSubPrivilege } from "@/lib/auth-shared";
 import { PrintLabelButton } from "@/components/print/QuickPrint";
 import { ScanInput, lookupScanCode } from "@/components/scan/ScanInput";
 import { OpeningSiteField, SiteReorderEditor } from "../inventory/_parts/locations";
+import { createRequestKeyHolder, fetchKeyedWrite } from "@/lib/request-key";
 
 export type Material = {
   id: string;
@@ -133,17 +134,20 @@ export function MaterialsPanel({
     onChanged();
   }
 
+  // R1-b: one Idempotency-Key per submission until a conclusive answer (a double click or a retry is the same write).
+  const receiveKey = useRef(createRequestKeyHolder());
   async function saveReceipt(m: Material) {
     const n = Number(rqty);
     if (!Number.isFinite(n) || n <= 0) {
       onError(L("الكمية المستلمة يجب أن تكون أكبر من صفر.", "Received quantity must be greater than zero."));
       return;
     }
-    const res = await fetch(`/api/materials/${m.id}/receive`, {
+    const res = await fetchKeyedWrite(`/api/materials/${m.id}/receive`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "Idempotency-Key": receiveKey.current.keyForAttempt(), "content-type": "application/json" },
       body: JSON.stringify({ quantity: n, reference: rref.trim(), ...(recvSite ? { locationId: recvSite.id } : {}) }),
     });
+    receiveKey.current.recordResponse(res.status);
     if (!res.ok) onError(localizeApiError(await res.json().catch(() => ({})), lang) ?? L("تعذّر استلام المخزون.", "Failed to receive stock."));
     setReceiving(null);
     setRqty("");
@@ -382,13 +386,15 @@ export function MaterialForm({ category, categories, onClose, onSaved, onError, 
   const [error, setError] = useState("");
   const chosen = options.find((c) => c.id === form.categoryId) ?? category;
 
+  // R1-b: one Idempotency-Key per submission until a conclusive answer (a double click or a retry is the same write).
+  const createKey = useRef(createRequestKeyHolder());
   async function submit() {
     setSaving(true);
     setError("");
     try {
-      const res = await fetch("/api/materials", {
+      const res = await fetchKeyedWrite("/api/materials", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "Idempotency-Key": createKey.current.keyForAttempt(), "content-type": "application/json" },
         body: JSON.stringify({
           categoryId: form.categoryId,
           code: form.code.trim() || undefined,
@@ -400,6 +406,7 @@ export function MaterialForm({ category, categories, onClose, onSaved, onError, 
           reorderPoint: Number(form.reorderPoint),
         }),
       });
+    createKey.current.recordResponse(res.status);
       if (!res.ok) {
         const msg = localizeApiError(await res.json().catch(() => ({})), lang) ?? L("تعذّر إنشاء الصنف.", "Could not create the item.");
         setError(msg);

@@ -12,13 +12,14 @@
 //           is posted — the deferrals service links a schedule to a POSTED journal line only, council F1), «حفظ» (save and
 //           submit for approval), «حفظ كمسودة», «إلغاء».
 // Control accounts are not offered (their sub-ledgers feed them). The server re-checks every rule.
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { createRequestKeyHolder } from "@/lib/request-key";
 import { useRouter } from "next/navigation";
 import { Select } from "@/components/ui/Select";
 import { Btn } from "@/components/ops/ui";
 import { Section } from "@/components/chrome";
 import { FormHead, FormField, AddMore, Collapse, Seg, useShiftA } from "@/components/forms/QoyodForm";
-import { Msg, acctFetch, money, todayRiyadh, useApi, useLang } from "./shell";
+import { AcctHttpError, Msg, acctFetch, money, todayRiyadh, useApi, useLang } from "./shell";
 import { useAccountantView } from "./qoyod-pages";
 
 type Dims = {
@@ -105,6 +106,8 @@ export function JournalEditor({ initial, entryId }: { initial?: EditorValue; ent
     return shown.map(({ l }, n) => ({ l, n: n + 1 })).filter(({ l }) => l.accountId === t.balanceAccount!.id && (cents(l.debit) > 0 || cents(l.credit) > 0));
   }, [tpls.data, defer?.templateId, shown]);
 
+  // R1-b: one Idempotency-Key per new entry until a conclusive answer — a double click makes one journal.
+  const createKey = useRef(createRequestKeyHolder());
   async function save(mode: "draft" | "submit" | "defer") {
     setBusy(mode); setError(null);
     try {
@@ -122,7 +125,8 @@ export function JournalEditor({ initial, entryId }: { initial?: EditorValue; ent
       };
       const saved = entryId
         ? await acctFetch<{ id: string }>(`/api/accounting/journals/${entryId}`, { method: "PATCH", json: body })
-        : await acctFetch<{ id: string }>("/api/accounting/journals", { method: "POST", json: body });
+        : await acctFetch<{ id: string }>("/api/accounting/journals", { method: "POST", json: body, idempotencyKey: createKey.current.keyForAttempt() })
+            .then((r) => { createKey.current.recordResponse(201); return r; }, (e) => { if (e instanceof AcctHttpError) createKey.current.recordResponse(e.status); throw e; });
       if (mode !== "draft") await acctFetch(`/api/accounting/journals/${saved.id}/submit`, { method: "PATCH", json: {} });
       if (mode === "defer" && defer) {
         // The line's number among the SAVED lines (empty ones dropped) — the entry page finds it after posting.

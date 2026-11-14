@@ -15,6 +15,7 @@ import { accountingErrorJson } from "@/lib/accounting/errors";
 import { invError, refuseInv } from "@/lib/services/invoicing/refusals";
 import { m2 } from "@/lib/services/invoicing/pricing";
 import { branchWhere, parseBranchFilter } from "@/lib/accounting/locations";
+import { replayOnKeyRace } from "@/lib/idempotency";
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const day = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
@@ -133,14 +134,14 @@ export async function POST(request: Request) {
     };
     if (issueNow) {
       if (!requestKey) throw refuseInv("REQUEST_KEY_REQUIRED");
-      const r = await saveAndIssue({ ...input, requestKey }, auditFromRequest(request, user.id, "save and issue"));
+      const r = await replayOnKeyRace(() => saveAndIssue({ ...input, requestKey }, auditFromRequest(request, user.id, "save and issue")), ["requestKey"]);
       if (r.state === "NOT_READY") {
         return NextResponse.json({ ...accountingErrorJson(refuseInv("NOT_READY")), id: r.id, kept: true, problems: r.problems }, { status: 409 });
       }
       const submission = await zatcaAfterIssue(r.issue, user.id);
       return NextResponse.json({ ...r.issue, id: r.id, replayed: r.replayed, zatcaSubmission: submission }, { status: r.replayed ? 200 : 201 });
     }
-    const r = await createDraft(input, auditFromRequest(request, user.id, "invoice draft"));
+    const r = await replayOnKeyRace(() => createDraft(input, auditFromRequest(request, user.id, "invoice draft")), ["requestKey"]);
     return NextResponse.json(r, { status: r.replayed ? 200 : 201 });
   } catch (err) {
     return invError(err);

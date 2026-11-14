@@ -5,6 +5,7 @@ import { requireAnyModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { greenLotFields, sackFields, sackMismatch } from "@/lib/services/green-lots";
 import { receivingLocationId, setStockLocation } from "@/lib/services/stock-locations";
+import { withIdempotency } from "@/lib/idempotency";
 
 export async function GET(request: Request) {
   // Production workers need to see bean names and stock when creating roasting batches
@@ -41,9 +42,11 @@ export async function POST(request: Request) {
   const data = { ...greenLotFields(raw), quantityKg };
 
   try {
+    // R1-b (owner 1-أ/1-ب, item هـ): one lot per submission — the lot number is random, so a double click made two lots.
+    return await withIdempotency(request, { scope: "inventory.green_lot", actorId: user.id, intent: raw }, async (tx) => {
     let bean;
     if (quantityKg > 0) {
-      bean = await prisma.$transaction(async (tx) => {
+      bean = await (async () => {
         // Phase 3: the opening stock is received at a site, named explicitly (raw.locationId, active; else the
         // default receiving site) — this transaction is that one receipt.
         const locationId = await receivingLocationId(tx, raw.locationId);
@@ -68,13 +71,14 @@ export async function POST(request: Request) {
         // Accounting A3: an opening balance carries no cost; the opening valuation costs it.
         await onOpeningStock(tx, { kind: "GREEN_BEAN", entityId: created.id, qty: quantityKg, actor: user.id, movementId: movement.id });
         return created;
-      });
+      })();
     } else {
-      bean = await prisma.greenBean.create({ data });
+      bean = await tx.greenBean.create({ data });
     }
     // A soft warning only (the lot is saved): the sacks do not add up to the quantity received.
     const sackWarning = sackMismatch(bean.sackCount, bean.sackWeightKg, bean.quantityKg);
-    return NextResponse.json(sackWarning ? { ...bean, sackWarning } : bean, { status: 201 });
+    return { status: 201, body: sackWarning ? { ...bean, sackWarning } : bean };
+    });
   } catch (err) {
     return handleDomainError(err);
   }

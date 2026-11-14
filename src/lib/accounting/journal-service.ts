@@ -154,7 +154,7 @@ const lineData = (lines: CleanLine[], tax: Map<string, Parameters<typeof buildTa
 
 const ctxOf = (who: string | AuditContext): AuditContext => (typeof who === "string" ? { actorId: who } : who);
 
-export async function createManualJournalEntry(input: CreateManualJournalEntryInput, who: string | AuditContext) {
+export async function createManualJournalEntry(input: CreateManualJournalEntryInput, who: string | AuditContext, outer?: Prisma.TransactionClient) {
   const ctx = ctxOf(who);
   // Phase 1 (owner decision D1): manual journals are disabled for everyone (./manual-journals).
   await assertManualJournalsEnabled();
@@ -163,11 +163,13 @@ export async function createManualJournalEntry(input: CreateManualJournalEntryIn
   const entryDate = toBusinessDay(input.entryDate);
   const attachments = cleanAttachments(input.attachments);
 
-  return prisma.$transaction(async (tx) => {
+  const run = async (tx: Prisma.TransactionClient) => {
     await setAuditContext(tx, ctx);
     await assertManualJournalsEnabled(tx);
     return insertManualDraft(tx, entryDate, input.description, lines, attachments, ctx.actorId);
-  }, TX_OPTS);
+  };
+  // R1-b: inside the caller's transaction when given one (the Idempotency-Key row commits with this write).
+  return outer ? run(outer) : prisma.$transaction(run, TX_OPTS);
 }
 
 async function insertManualDraft(tx: Prisma.TransactionClient, entryDate: Date, description: string | undefined, lines: CleanLine[], attachments: Prisma.InputJsonValue | undefined, createdBy: string, source?: { type: string; id: string; event: string }) {

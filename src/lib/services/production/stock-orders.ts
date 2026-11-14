@@ -7,6 +7,7 @@
  * row audit, and SettingsAuditLog's action list is closed).
  */
 import { prisma } from "@/lib/db";
+import type { Prisma } from "@/generated/prisma/client";
 import { hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 import { ipHashOf } from "@/lib/accounting/ops/purchase-activity";
 import { nextProductionNumber } from "@/lib/services/production-planning";
@@ -103,7 +104,7 @@ export async function openStockOrders() {
  * «أمر تحميص للمخزون»: green kg of a coffee's SKU → a PENDING ProductionOrder with no order item. The green lot is the
  * product's default (refused without one: 409 NO_DEFAULT_GREEN); the roasted target is green × (1 − expected loss).
  */
-export async function createStockOrder(actor: StockActor, body: { productSkuId?: unknown; greenKg?: unknown }) {
+export async function createStockOrder(actor: StockActor, body: { productSkuId?: unknown; greenKg?: unknown }, outer?: Prisma.TransactionClient) {
   const skuId = typeof body.productSkuId === "string" ? body.productSkuId : "";
   const greenKg = typeof body.greenKg === "number" ? body.greenKg : Number(body.greenKg);
   if (!skuId) throw fail(400, "SKU_REQUIRED", "اختر صنف البيع.", "Choose the SKU.");
@@ -111,7 +112,7 @@ export async function createStockOrder(actor: StockActor, body: { productSkuId?:
   if (greenKg > MAX_STOCK_GREEN_KG) throw fail(400, "GREEN_KG_TOO_LARGE", `الحد ${MAX_STOCK_GREEN_KG} كغ أخضر للأمر الواحد.`, `At most ${MAX_STOCK_GREEN_KG} kg of green per order.`);
   const green = +greenKg.toFixed(3);
   if (green < MIN_STOCK_GREEN_KG) throw fail(400, "GREEN_KG_TOO_SMALL", `أقل كمية ${MIN_STOCK_GREEN_KG} كغ أخضر.`, `At least ${MIN_STOCK_GREEN_KG} kg of green.`);
-  return prisma.$transaction(async (tx) => {
+  const run = async (tx: Prisma.TransactionClient) => {
     const sku = await tx.productSKU.findUnique({
       where: { id: skuId },
       select: { id: true, skuCode: true, weightGrams: true, isBulk: true, product: { select: { id: true, isActive: true, expectedRoastLoss: true, defaultGreenBeanId: true } } },
@@ -132,7 +133,9 @@ export async function createStockOrder(actor: StockActor, body: { productSkuId?:
     });
     await audit(actor, "STOCK_PO_CREATED", { productionOrderId: po.id, productionNumber, productSkuId: sku.id, greenKg: green, targetWeightKg, greenBeanId: sku.product.defaultGreenBeanId }, tx);
     return po;
-  });
+  };
+  // R1-b: inside the caller's transaction when given one (the Idempotency-Key row commits with this write).
+  return outer ? run(outer) : prisma.$transaction(run);
 }
 
 /** Cancel a stock order that has not started (PENDING, no order item, nothing roasted against it). */

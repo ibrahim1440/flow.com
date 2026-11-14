@@ -7,6 +7,7 @@ import { jsonBody } from "@/lib/accounting/http";
 import { inScope } from "@/lib/services/invoicing/http";
 import { createNote, creditable } from "@/lib/services/invoicing/service";
 import { invError } from "@/lib/services/invoicing/refusals";
+import { withIdempotency } from "@/lib/idempotency";
 
 type Ctx = { params: Promise<{ id: string }> };
 const notFound = () => NextResponse.json({ error: "غير موجود.", errorEn: "Not found.", code: "NOT_FOUND" }, { status: 404 });
@@ -38,8 +39,9 @@ export async function POST(request: Request, { params }: Ctx) {
   try {
     const body = await jsonBody(request);
     const kind = body.kind === "DEBIT_NOTE" ? "DEBIT_NOTE" : "CREDIT_NOTE";
-    const r = await createNote(id, { kind, reasonCode: body.reasonCode, reason: body.reason, lines: body.lines, full: body.full === true }, auditFromRequest(request, user.id, String(body.reason ?? "")));
-    return NextResponse.json(r, { status: 201 });
+    const ctx = auditFromRequest(request, user.id, String(body.reason ?? ""));
+    // R1-b (owner 1-ج, item ح): one note per submission — a double click or two simultaneous requests make one note.
+    return await withIdempotency(request, { scope: "invoice.note", actorId: user.id, intent: { id, body } }, async (tx) => ({ status: 201, body: await createNote(id, { kind, reasonCode: body.reasonCode, reason: body.reason, lines: body.lines, full: body.full === true }, ctx, tx) }));
   } catch (err) {
     return invError(err);
   }

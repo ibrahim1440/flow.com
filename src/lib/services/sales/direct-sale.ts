@@ -443,7 +443,11 @@ export async function createDirectSale(
     await setAuditContext(tx, ctx);
     // Two taps with one key queue here; the second finds the first sale's audit row below and replays it.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${DIRECT_SALE_LOCK_NAMESPACE}, hashtext(${key}))`;
-    const hit = await tx.hrAuditLog.findFirst({ where: { action: "DIRECT_SALE_CREATED", after: { path: ["requestKey"], equals: key } }, select: { entityId: true, after: true } });
+    // R1-b: the lookup by key reads the partial index HrAuditLog_direct_sale_key_idx (20261231160000) — the same expression.
+    const hit = (await tx.$queryRaw<{ entityId: string; after: unknown }[]>`
+      SELECT "entityId", "after" FROM "HrAuditLog"
+       WHERE "action" = 'DIRECT_SALE_CREATED' AND ("after" ->> 'requestKey') = ${key}
+       ORDER BY "createdAt" LIMIT 1`)[0] ?? null;
     if (hit) {
       const a = hit.after as { customerId?: string; payment?: PaymentChoice } | null;
       if (a?.customerId !== customerId) throw refuse(409, "REQUEST_KEY_REUSED", "مفتاح الطلب مستخدم لعملية ثانية.", "This requestKey belongs to another sale.");

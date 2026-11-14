@@ -348,9 +348,11 @@ export default function QCPage() {
     if (res.ok) { setHistoryBatches(await res.json()); setHistoryLoaded(true); }
   }, []);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- R1-a CI baseline: pre-existing, behaviour unchanged — refactor tracked separately
   useEffect(() => { loadBacklog(); }, [loadBacklog]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- R1-a CI baseline: pre-existing, behaviour unchanged — refactor tracked separately
     if (tab === "history" && !historyLoaded) loadHistory();
   }, [tab, historyLoaded, loadHistory]);
 
@@ -573,6 +575,7 @@ export default function QCPage() {
     return opts;
   }, [backlogBatches, t]);
 
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- R1-a CI baseline: pre-existing, behaviour unchanged — refactor tracked separately
   const filteredBacklog = useMemo(() => {
     const q = backlogSearch.toLowerCase();
     return backlogBatches.filter((b) => {

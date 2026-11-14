@@ -7,11 +7,12 @@
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select } from "@/components/ui/Select";
 import Link from "next/link";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Btn, Field, FilterChip, Notice, OpsBanner, OpsLoading, OpsPane, opsDate, useL } from "@/components/ops/ui";
 import { DownloadIcon, SortControl } from "../../inventory/_parts/shared";
 import { PURCHASE_PERIODS, periodStart, purchaseTotals, sortPurchases, type PurchasePeriod, type PurchaseSort } from "@/lib/inventory/purchases-query";
 import { useI18n } from "@/lib/i18n/context";
+import { createRequestKeyHolder, fetchKeyedWrite } from "@/lib/request-key";
 
 const fmtQty = (v: number | null | undefined, digits: number): string =>
   typeof v === "number" && Number.isFinite(v) ? v.toFixed(digits) : "—";
@@ -79,6 +80,8 @@ export function AddPurchasePane({
     }
   }
 
+  // R1-b: one Idempotency-Key per submission until a conclusive answer (a double click or a retry is the same write).
+  const receiptKey = useRef(createRequestKeyHolder());
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setFormError("");
@@ -117,9 +120,9 @@ export function AddPurchasePane({
         supplierId = newSupplier.id;
       }
 
-      const res = await fetch("/api/purchases", {
+      const res = await fetchKeyedWrite("/api/purchases", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Idempotency-Key": receiptKey.current.keyForAttempt(), "Content-Type": "application/json" },
         body: JSON.stringify({
           supplierId,
           itemId: form.itemId,
@@ -129,6 +132,7 @@ export function AddPurchasePane({
           notes: form.notes.trim() || null,
         }),
       });
+    receiptKey.current.recordResponse(res.status);
 
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));

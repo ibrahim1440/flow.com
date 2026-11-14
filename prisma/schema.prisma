@@ -10776,3 +10776,21 @@ model CreditLimitOverride {
 
   @@index([customerId, status])
 }
+
+/// R1-b (owner decision 1-أ, 20261231160000_idempotency_request): the money / stock writes already done, by (actor, scope,
+/// Idempotency-Key). Written first inside the write's own transaction (lib/idempotency.ts): a duplicate waits on the unique
+/// key, then replays the stored answer; a failed write rolls its row back. Never edited by hand.
+model IdempotencyRequest {
+  id             String    @id @default(cuid())
+  actorId        String
+  scope          String
+  key            String
+  intentHash     String
+  responseStatus Int?
+  responseBody   Json?
+  createdAt      DateTime  @default(now())
+  completedAt    DateTime?
+
+  @@unique([actorId, scope, key])
+  @@index([createdAt])
+}

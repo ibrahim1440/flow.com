@@ -7,7 +7,7 @@
 //      ROASTED/FINISHED  nothing to add here: a short explanation and the way to production / products.
 // Underneath an item is still an ordinary stock record booked to its category's inventory account.
 import { localizeApiError } from "@/lib/i18n/api-errors";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import Link from "next/link";
 import { Btn, Notice, useL } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
@@ -15,6 +15,7 @@ import { useI18n } from "@/lib/i18n/context";
 import { MaterialForm, type MaterialCategoryOption } from "../../_components/stock-materials";
 import { BeanForm, emptyForm, type FormState } from "./bean-form";
 import { PrintLabelButton } from "@/components/print/QuickPrint";
+import { createRequestKeyHolder, fetchKeyedWrite } from "@/lib/request-key";
 
 export type CategoryNode = MaterialCategoryOption & { isSystem: boolean; sortOrder: number; itemCount: number; lowCount: number; archivedAt: string | null; updatedByName: string | null };
 
@@ -76,9 +77,12 @@ export function AddItemFlow({ categories, initialCategoryId, canReceive, onClose
     setPicked(c);
   }
 
+  // R1-b: one Idempotency-Key per submission until a conclusive answer (a double click or a retry is the same write).
+  const beanKey = useRef(createRequestKeyHolder());
   async function saveBean(f: FormState) {
     setSavingBean(true);
-    const res = await fetch("/api/green-beans", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(f) });
+    const res = await fetchKeyedWrite("/api/green-beans", { method: "POST", headers: { "Idempotency-Key": beanKey.current.keyForAttempt(), "Content-Type": "application/json" }, body: JSON.stringify(f) });
+    beanKey.current.recordResponse(res.status);
     setSavingBean(false);
     if (!res.ok) {
       const msg = localizeApiError(await res.json().catch(() => ({})), lang) ?? L("تعذّرت إضافة البن.", "Failed to add bean");

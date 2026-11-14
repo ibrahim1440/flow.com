@@ -392,6 +392,7 @@ function SessionPageInner({ params }: { params: Promise<{ id: string }> }) {
     setLoading(false);
   }, [id]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- R1-a CI baseline: pre-existing, behaviour unchanged — refactor tracked separately
   useEffect(() => { fetchSession(); }, [fetchSession]);
 
   async function handleSubmit(data: CuppingFormData) {

@@ -2,7 +2,8 @@
 // «تحميص للمخزون» (owner-approved D14, Figma 1921:3): the «أمر تحميص للمخزون» dialog (coffee · SKU · green kg, the
 // summary, the open stock orders with «إلغاء الأمر» on a PENDING one) and the «الدفعة الخضراء الافتراضية» picker it shares
 // with the product page. Every rule is the API's (/api/production/stock-orders, /api/coffee-products/[id]/default-green).
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createRequestKeyHolder, fetchKeyedWrite } from "@/lib/request-key";
 import { Btn, Dialog, Field, Notice } from "@/components/hr/ui";
 import { Select } from "@/components/ui/Select";
 import { useI18n } from "@/lib/i18n/context";
@@ -27,12 +28,15 @@ function useL() {
   const ar = lang !== "en";
   return { ar, L: (a: string, e: string) => (ar ? a : e), msg: (b: Err | null | undefined, fa: string, fe: string) => (ar ? b?.error || fa : b?.errorEn || b?.error || fe) };
 }
-async function send<T>(url: string, method: string, body?: unknown): Promise<{ ok: true; data: T } | { ok: false; data: Err }> {
+async function send<T>(url: string, method: string, body?: unknown, idempotencyKey?: string): Promise<{ ok: true; data: T; status: number } | { ok: false; data: Err; status: number }> {
   try {
-    const r = await fetch(url, { method, cache: "no-store", headers: body !== undefined ? { "Content-Type": "application/json" } : undefined, body: body !== undefined ? JSON.stringify(body) : undefined });
+    const headers: Record<string, string> = {};
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
+    const r = await fetchKeyedWrite(url, { method, cache: "no-store", headers, body: body !== undefined ? JSON.stringify(body) : undefined });
     const data = await r.json().catch(() => ({}));
-    return r.ok ? { ok: true, data: data as T } : { ok: false, data: data as Err };
-  } catch { return { ok: false, data: {} }; }
+    return r.ok ? { ok: true, data: data as T, status: r.status } : { ok: false, data: data as Err, status: r.status };
+  } catch { return { ok: false, data: {}, status: 0 }; }
 }
 
 export function lotText(l: { serialNumber: string; beanType: string; beanTypeAr: string | null; quantityKg: number }, ar: boolean) {
@@ -106,6 +110,8 @@ export function StockOrderDialog({ onClose }: { onClose: () => void }) {
     const p = data?.products.find((x) => x.id === id);
     setSkuId(p?.productSkus[0]?.id ?? "");
   };
+  // R1-b: one Idempotency-Key per stock order until a conclusive answer — a double click makes one order.
+  const orderKey = useRef(createRequestKeyHolder());
   const create = async () => {
     setErr(""); setNote("");
     if (!product || !skuId) { setErr(L("اختر القهوة وصنف البيع.", "Choose the coffee and the SKU.")); return; }
@@ -116,7 +122,8 @@ export function StockOrderDialog({ onClose }: { onClose: () => void }) {
       const s = await send(`/api/coffee-products/${product.id}/default-green`, "PATCH", { greenBeanId: lot });
       if (!s.ok) { setBusy(false); setErr(msg(s.data, "تعذّر حفظ الدفعة.", "Could not save the lot.")); return; }
     }
-    const r = await send<{ productionNumber: string }>("/api/production/stock-orders", "POST", { productSkuId: skuId, greenKg: g });
+    const r = await send<{ productionNumber: string }>("/api/production/stock-orders", "POST", { productSkuId: skuId, greenKg: g }, orderKey.current.keyForAttempt());
+    if (r.status) orderKey.current.recordResponse(r.status);
     setBusy(false);
     if (!r.ok) { setErr(msg(r.data, "تعذّر إنشاء الأمر.", "Could not create the order.")); return; }
     setNote(L(`أُنشئ ${r.data.productionNumber} · يظهر في «تحضير الدلاء» تحت «مخزون».`, `${r.data.productionNumber} created · it shows in bucket prep under «Stock».`));

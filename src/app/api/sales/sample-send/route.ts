@@ -10,6 +10,7 @@ import { auditFromRequest } from "@/lib/accounting/audit";
 import { AccountingError } from "@/lib/accounting/errors";
 import { invError } from "@/lib/services/invoicing/refusals";
 import { createSampleSend, maySendSample, sampleSendFacts } from "@/lib/services/sales/sample-send";
+import { replayOnKeyRace } from "@/lib/idempotency";
 
 export async function GET(request: Request) {
   const { user, error } = await requireAuth();
@@ -31,11 +32,11 @@ export async function POST(request: Request) {
   let body: Record<string, unknown>;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "طلب غير صالح.", errorEn: "Invalid JSON body.", code: "BAD_INPUT" }, { status: 400 }); }
   try {
-    const r = await createSampleSend(
+    const r = await replayOnKeyRace(() => createSampleSend(
       { customerId: body.customerId, opportunityId: body.opportunityId, lines: body.lines, requestKey: body.requestKey, note: body.note, invoice: body.invoice },
       user,
       auditFromRequest(request, user.id),
-    );
+    ), ["requestKey"]);
     return NextResponse.json(r, { status: r.replayed ? 200 : 201 });
   } catch (err) {
     if (err instanceof AccountingError) return invError(err);

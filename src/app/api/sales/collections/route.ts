@@ -17,6 +17,7 @@ import { receiptAbilities, decisionKey } from "@/lib/services/sales/receipts";
 import { redactCollectionRow, seesCollectionNet } from "@/lib/services/sales/collection-visibility";
 import { receiptSelfConfirmAllowed } from "@/lib/services/sales/receipt-four-eyes";
 import { AMOUNT_PATTERN } from "@/lib/money/amount-input";
+import { replayOnKeyRace } from "@/lib/idempotency";
 
 /**
  * Sales collections — the list, and recording a new one.
@@ -318,7 +319,8 @@ export async function POST(request: Request) {
     });
     if (!deal) return NextResponse.json({ error: "Deal not found." }, { status: 404 });
 
-    const result = await prisma.$transaction(
+    // R1-b: two simultaneous submissions of one key — the slower one replays the first (never a 409).
+    const result = await replayOnKeyRace(() => prisma.$transaction(
       async (tx) =>
         submitCollection(tx, {
           // Owner أ (the manual-collection trap): a deal with a held order takes no collection here unless it names a
@@ -336,7 +338,7 @@ export async function POST(request: Request) {
           branchId: b.branchId,
         }),
       TX_OPTS,
-    );
+    ), ["idempotencyKey"]);
 
     const summary = serialiseSummary(await collectionSummary(prisma, opportunityId));
     // D20 R4-L1: the recorder's answer carries the net only for Finance — the same rule as the GET lists.

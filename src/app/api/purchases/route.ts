@@ -6,6 +6,7 @@ import { handlePrismaError } from "@/lib/api-error";
 import { parsePeriod, periodStart } from "@/lib/inventory/purchases-query";
 import { receiveGreen } from "@/lib/services/purchase-receipts";
 import { receivingLocationId } from "@/lib/services/stock-locations";
+import { withIdempotency } from "@/lib/idempotency";
 
 /**
  * The purchase register. Without parameters: the newest 200 (unchanged). With `period` (30 | 90 |
@@ -50,7 +51,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await prisma.$transaction(async (tx) => {
+    // R1-b (owner 1-أ/1-ب): one receipt per submission — the green stock arrives once.
+    return await withIdempotency(request, { scope: "inventory.green_receipt", actorId: user.id, intent: body }, async (tx) => ({ status: 201, body: await (async () => {
       // The shared receive service (src/lib/services/purchase-receipts.ts): the lock, the purchase record, the IN
       // movement, the lot's balance and the GRN (cost + entry), exactly as this route always booked them.
       // Phase 3: the receiving location (body.locationId, an active site; else the default).
@@ -58,9 +60,7 @@ export async function POST(request: Request) {
       const { purchase, updatedBean } = await receiveGreen(tx, user, { supplierId, greenBeanId: itemId, quantity, costPerUnit, purchaseDate: new Date(purchaseDate), notes: notes ?? null, locationId });
       await flushPostings(tx);
       return { purchase, updatedBean };
-    });
-
-    return NextResponse.json(result, { status: 201 });
+    })() }));
   } catch (err: unknown) {
     if (err && typeof err === "object" && "_appCode" in err) {
       const e = err as { _appCode: number; message: string };

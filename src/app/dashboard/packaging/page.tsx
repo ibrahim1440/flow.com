@@ -11,7 +11,7 @@ import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../user-context";
 import { canEdit, hasSubPrivilege } from "@/lib/auth-shared";
 import Link from "next/link";
-import { createRequestKeyHolder } from "@/lib/request-key";
+import { createRequestKeyHolder, fetchKeyedWrite } from "@/lib/request-key";
 
 import { RestockReason, restockReasonOk } from "@/components/ops/RestockReason";
 import { AutoRow, Cta, NumIn, Stepper } from "@/components/ops/station";
@@ -293,13 +293,14 @@ export default function PackagingPage() {
   useEffect(() => {
     if (!packBatch) return;
     const payload = JSON.parse(payloadKey) as unknown[];
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- R1-a CI baseline: pre-existing, behaviour unchanged — refactor tracked separately
     if (payload.length === 0) { setPreview(null); setPreviewing(false); return; }
 
     const controller = new AbortController();
     setPreviewing(true);
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/roasting-batches/${packBatch.id}/pack`, {
+        const res = await fetchKeyedWrite(`/api/roasting-batches/${packBatch.id}/pack`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ preview: true, lines: payload }),
@@ -322,6 +323,7 @@ export default function PackagingPage() {
   // Any outcome below nominal leaves stock that cannot be sold, whether it is a new
   // package or a top-up that did not reach the line. Both are acknowledged.
   const createsPartial = !!preview?.lines.some((l) => l.classification === "PARTIAL");
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- R1-a CI baseline: pre-existing, behaviour unchanged — refactor tracked separately
   useEffect(() => { if (!createsPartial) setPartialAck(false); }, [createsPartial]);
 
   const blocked =

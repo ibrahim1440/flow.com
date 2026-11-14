@@ -15,6 +15,7 @@ import { useI18n } from "@/lib/i18n/context";
 import { formatSAR } from "@/lib/finance/money";
 import { Dialog as HrDialog } from "@/components/hr/ui";
 import { OpsError, OpsLoading } from "@/components/ops/ui";
+import { fetchKeyedWrite } from "@/lib/request-key";
 
 // ─── Language helpers ─────────────────────────────────────────────────────────
 
@@ -51,7 +52,7 @@ export class ApiError extends Error {
 }
 
 export async function api<T = unknown>(url: string, init?: RequestInit & { json?: unknown }): Promise<T> {
-  const res = await fetch(url, {
+  const res = await fetchKeyedWrite(url, {
     ...init,
     headers: init?.json !== undefined ? { "Content-Type": "application/json", ...(init?.headers ?? {}) } : init?.headers,
     body: init?.json !== undefined ? JSON.stringify(init.json) : init?.body,

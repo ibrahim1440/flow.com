@@ -711,11 +711,11 @@ export async function voidDirectSaleDrafts(tx: Tx, input: { orderId: string; act
 export type NoteInput = { kind: "CREDIT_NOTE" | "DEBIT_NOTE"; reasonCode: unknown; reason: unknown; lines?: unknown; full?: boolean };
 
 /** A note DRAFT against an issued invoice. A credit note's lines come from the original's (full, or the given ones). */
-export async function createNote(originalId: string, input: NoteInput, ctx: AuditContext) {
+export async function createNote(originalId: string, input: NoteInput, ctx: AuditContext, outer?: Prisma.TransactionClient) {
   if (!(NOTE_REASONS as readonly unknown[]).includes(input.reasonCode)) throw refuseInv("BAD_INPUT", "reasonCode.", "اختر سبب الإصدار.");
   const reason = notesOf(input.reason);
   if (!reason || reason.length < 3) throw refuseInv("REASON_REQUIRED");
-  return prisma.$transaction(async (tx) => {
+  const run = async (tx: Prisma.TransactionClient) => {
     await setAuditContext(tx, ctx);
     const orig = await loadDocument(tx, originalId);
     if (!orig) throw refuseInv("NOT_FOUND");
@@ -757,7 +757,9 @@ export async function createNote(originalId: string, input: NoteInput, ctx: Audi
     });
     await tx.salesInvoiceLine.createMany({ data: rows.map((r) => ({ ...r, invoiceId: created.id })) });
     return { id: created.id };
-  }, TX_OPTS);
+  };
+  // R1-b: inside the caller's transaction when given one (the Idempotency-Key row commits with this write).
+  return outer ? run(outer) : prisma.$transaction(run, TX_OPTS);
 }
 
 async function creditedPerLine(db: Tx | typeof prisma, originalLineIds: string[]): Promise<Map<string, Decimal>> {

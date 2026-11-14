@@ -6,6 +6,7 @@ import { handlePrismaError } from "@/lib/api-error";
 import { parseStockQuantity } from "@/lib/services/stock-quantity";
 import { receiveMaterial } from "@/lib/services/purchase-receipts";
 import { receivingLocationId } from "@/lib/services/stock-locations";
+import { withIdempotency } from "@/lib/idempotency";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -54,7 +55,8 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   try {
-    const result = await prisma.$transaction(async (tx) => {
+    // R1-b (owner 1-أ/1-ب): one receipt per submission — the material arrives once.
+    return await withIdempotency(request, { scope: "inventory.material_receipt", actorId: user.id, intent: { id, b } }, async (tx) => ({ status: 201, body: await (async () => {
       // The shared receive service (src/lib/services/purchase-receipts.ts): the row lock, the whole-number rule, the
       // IN movement, the balance, the costed GRN when a supplier and a unit cost are given, and the receipt audit.
       // Phase 3: the receiving location (b.locationId, an active site; else the default).
@@ -62,8 +64,7 @@ export async function POST(request: Request, { params }: Params) {
       const { material: updated, movement } = await receiveMaterial(tx, user, { materialItemId: id, quantity, rawQuantity: b.quantity, supplierId, reference, notes, unitCost, locationId });
       await flushPostings(tx);
       return { material: updated, movement };
-    });
-    return NextResponse.json(result, { status: 201 });
+    })() }));
   } catch (err: unknown) {
     if (err && typeof err === "object" && "_appCode" in err) {
       const e = err as { _appCode: number; message: string; code?: string };

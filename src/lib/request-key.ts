@@ -141,3 +141,20 @@ export function createRequestKeyHolder(): RequestKeyHolder {
     },
   };
 }
+
+/**
+ * R1-b gate M1: send a keyed write, and while the server answers 425 «الطلب قيد المعالجة» (the same key is being written
+ * by another request right now) wait for its Retry-After and send the SAME request again — same key — until the first
+ * one's answer can be replayed. Any other answer is returned as is. Bounded (~10 s), so a stuck server still surfaces.
+ */
+export async function fetchKeyedWrite(input: RequestInfo | URL, init?: RequestInit, maxWaitMs = 10_000): Promise<Response> {
+  const started = Date.now();
+  for (;;) {
+    const res = await fetch(input, init);
+    if (res.status !== 425) return res;
+    const after = Number(res.headers.get("Retry-After"));
+    const waitMs = Math.min(5_000, Math.max(250, Number.isFinite(after) && after > 0 ? after * 1_000 : 1_000));
+    if (Date.now() - started + waitMs > maxWaitMs) return res;
+    await new Promise((r) => setTimeout(r, waitMs));
+  }
+}

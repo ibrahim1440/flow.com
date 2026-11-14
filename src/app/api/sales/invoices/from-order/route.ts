@@ -7,6 +7,7 @@ import { jsonBody } from "@/lib/accounting/http";
 import { inScope } from "@/lib/services/invoicing/http";
 import { draftFromOrder } from "@/lib/services/invoicing/service";
 import { invError, refuseInv } from "@/lib/services/invoicing/refusals";
+import { replayOnKeyRace } from "@/lib/idempotency";
 
 /**
  * POST /api/sales/invoices/from-order { orderId, basis: REMAINING | DELIVERED, deliveryIds?, family?, requestKey? } —
@@ -22,10 +23,10 @@ export async function POST(request: Request) {
     const order = orderId ? await prisma.order.findUnique({ where: { id: orderId }, select: { customerId: true } }) : null;
     if (!order || !(await inScope(user, order.customerId))) throw refuseInv("ORDER_NOT_FOUND");
     const deliveryIds = Array.isArray(body.deliveryIds) ? body.deliveryIds.filter((x): x is string => typeof x === "string").slice(0, 50) : undefined;
-    const r = await draftFromOrder(orderId, {
+    const r = await replayOnKeyRace(() => draftFromOrder(orderId, {
       basis: body.basis === "DELIVERED" ? "DELIVERED" : "REMAINING", deliveryIds, family: body.family === "SIMPLIFIED" || body.family === "STANDARD" ? (body.family as "SIMPLIFIED" | "STANDARD") : undefined /* absent → by the buyer's VAT number (A2) */,
       requestKey: typeof body.requestKey === "string" && /^[A-Za-z0-9:_-]{8,80}$/.test(body.requestKey) ? `client:${user.id}:${body.requestKey}` : null,
-    }, auditFromRequest(request, user.id, "invoice from order"));
+    }, auditFromRequest(request, user.id, "invoice from order")), ["requestKey"]);
     return NextResponse.json(r, { status: r.replayed ? 200 : 201 });
   } catch (err) {
     return invError(err);

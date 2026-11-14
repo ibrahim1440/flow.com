@@ -46,7 +46,9 @@ function createPrismaClient() {
   // SQLite fallback is gone rather than gated.
   const url = requireDatabaseUrl(process.env);
 
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- R1-a CI baseline: pre-existing, behaviour unchanged — refactor tracked separately
   const { Pool } = require("pg");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- R1-a CI baseline: pre-existing, behaviour unchanged — refactor tracked separately
   const { PrismaPg } = require("@prisma/adapter-pg");
   const pool = new Pool({
     connectionString: url,

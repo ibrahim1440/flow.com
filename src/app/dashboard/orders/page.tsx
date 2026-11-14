@@ -6,6 +6,7 @@ import { prepareReceipt } from "@/lib/files/receipt-prep";
 import { CHANNEL_LABEL, FORM_CHANNELS } from "@/lib/station/board";
 import { CreditLimitDialog, CustomerCreditNotice, creditRefusalOf, type CreditRefusal } from "@/components/credit/credit-ui";
 import { localizeApiError } from "@/lib/i18n/api-errors";
+import { createRequestKeyHolder, fetchKeyedWrite } from "@/lib/request-key";
 import { requestShellCreate, useCreateRequest } from "@/components/shell/page-context";
 import { customersScopedToOwner } from "@/lib/services/sales/scope";
 
@@ -345,6 +346,9 @@ export default function OrdersPage() {
   // «إيقاف البيع» (feat/credit-hold): the chosen customer's hold disables «إنشاء الطلب».
   const [customerHeld, setCustomerHeld] = useState(false);
   const creatingRef = useRef(false);
+  // R1-b: one Idempotency-Key per order submission, kept until a conclusive answer (a retry after a lost answer is the
+  // same order); a change to the form starts a new submission.
+  const orderKey = useRef(createRequestKeyHolder());
   const [creditRefusal, setCreditRefusal] = useState<{ customerId: string; credit: CreditRefusal; body?: Record<string, unknown> } | null>(null);
   // Abu Fahd H2: a notification / the resume page opens one order directly (?order=<id>).
   const [expanded, setExpanded] = useState<string | null>(() => params.get("order"));
@@ -458,6 +462,8 @@ export default function OrdersPage() {
     };
   }, [form.items]);
 
+  useEffect(() => { orderKey.current.abandon(); }, [form, dealChoice]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     // Without this guard a double click sent the order twice and the customer got two of
@@ -467,11 +473,12 @@ export default function OrdersPage() {
     creatingRef.current = true;
     setCreating(true);
     try {
-      const res = await fetch("/api/orders", {
+      const res = await fetchKeyedWrite("/api/orders", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": orderKey.current.keyForAttempt() },
         body: JSON.stringify({ ...form, ...(dealChoice ? { opportunityId: dealChoice } : {}) }),
       });
+      orderKey.current.recordResponse(res.status);
       if (!res.ok) {
         const body = await res.json();
         // P1 ERR-02: over the credit limit — the figures and «اطلب اعتماد المشرف» (Figma 2033:28), not an alert.
@@ -485,6 +492,9 @@ export default function OrdersPage() {
       setForm({ customerId: "", quotationNumber: "", approvalStatus: "Pending", channel: "", items: [{ productSkuId: "", quantityUnits: 0 }] });
       setPreview(null);
       loadData();
+    } catch {
+      // R1-b: no answer (the connection dropped) — the key is kept, so «إنشاء الطلب» again is the SAME order, never a second.
+      alert(lang === "ar" ? "ما وصلنا رد الخادم — اضغط «إنشاء الطلب» مرة ثانية، والطلب ما يتكرر." : "No answer from the server — press Create Order again; the order will not be duplicated.");
     } finally {
       creatingRef.current = false;
       setCreating(false);

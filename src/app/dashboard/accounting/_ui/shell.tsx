@@ -6,7 +6,8 @@
 // the API re-checks each duty.
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { createRequestKeyHolder, type RequestKeyHolder, fetchKeyedWrite } from "@/lib/request-key";
 import { OpsRoot, PageHeader, Notice } from "@/components/ops/ui";
 import { localizeApiError, networkErrorText } from "@/lib/i18n/api-errors";
 import { useI18n } from "@/lib/i18n/context";
@@ -50,17 +51,23 @@ export const sourceLabel = (m: string, L: (ar: string, en: string) => string) =>
 
 /** fetch for the accounting pages: JSON in and out; a refusal throws its text in the viewer's language
  *  (the body's Arabic, else the shared Arabic table, else the English — src/lib/i18n/api-errors.ts). */
-export async function acctFetch<T = unknown>(url: string, init?: { method?: string; json?: unknown }): Promise<T> {
+/** A refusal from the server, with its HTTP status (R1-b: a conclusive status retires the Idempotency-Key). */
+export class AcctHttpError extends Error { constructor(message: string, readonly status: number) { super(message); } }
+
+export async function acctFetch<T = unknown>(url: string, init?: { method?: string; json?: unknown; idempotencyKey?: string }): Promise<T> {
   // A request that never reached the server reads in the page's language, not the browser's "Failed to fetch".
-  const res = await fetch(url, {
+  const headers: Record<string, string> = {};
+  if (init?.json !== undefined) headers["Content-Type"] = "application/json";
+  if (init?.idempotencyKey) headers["Idempotency-Key"] = init.idempotencyKey;
+  const res = await fetchKeyedWrite(url, {
     method: init?.method ?? (init?.json !== undefined ? "POST" : "GET"),
-    headers: init?.json !== undefined ? { "Content-Type": "application/json" } : undefined,
+    headers: Object.keys(headers).length ? headers : undefined,
     body: init?.json !== undefined ? JSON.stringify(init.json) : undefined,
     cache: "no-store",
   }).catch(() => { throw new Error(networkErrorText()); });
   const ct = res.headers.get("content-type") ?? "";
   const body = ct.includes("application/json") ? await res.json().catch(() => ({})) : null;
-  if (!res.ok) throw new Error(localizeApiError(body) ?? `HTTP ${res.status}`);
+  if (!res.ok) throw new AcctHttpError(localizeApiError(body) ?? `HTTP ${res.status}`, res.status);
   return body as T;
 }
 
@@ -83,13 +90,19 @@ export function useWrite() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  // R1-b: one Idempotency-Key per action, kept until a conclusive answer — a double click or a retry after a lost answer
+  // is the same write (the server replays it); a refusal or a success retires the key.
+  const keys = useRef(new Map<string, RequestKeyHolder>());
   const run = useCallback(async <T,>(id: string, url: string, method: string, json?: unknown, ok?: string): Promise<T | null> => {
     setBusy(id); setError(null); setDone(null);
+    const holder = method === "GET" ? null : (keys.current.get(id) ?? keys.current.set(id, createRequestKeyHolder()).get(id)!);
     try {
-      const r = await acctFetch<T>(url, { method, json: json ?? {} });
+      const r = await acctFetch<T>(url, { method, json: json ?? {}, ...(holder ? { idempotencyKey: holder.keyForAttempt() } : {}) });
+      holder?.recordResponse(200);
       if (ok) setDone(ok);
       return r;
     } catch (e) {
+      if (holder && e instanceof AcctHttpError) holder.recordResponse(e.status);
       setError(e instanceof Error ? e.message : String(e));
       return null;
     } finally {

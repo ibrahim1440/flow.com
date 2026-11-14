@@ -7,6 +7,7 @@ import { hasSubPrivilege } from "@/lib/auth-shared";
 import { seesAllSales, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
 import { createOrderFromQuote, prepareConvertedOrder } from "@/lib/services/sales/quote-to-order";
 import { emitAutomationEvent } from "@/lib/automation/emit";
+import { replayOnKeyRace } from "@/lib/idempotency";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -71,7 +72,8 @@ async function convert(request: Request, id: string, user: { id: string; name: s
     });
     if (!visible) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });
 
-    const result = await prisma.$transaction(
+    // R1-b: two simultaneous submissions of one key — the slower one replays the first (never a 409).
+    const result = await replayOnKeyRace(() => prisma.$transaction(
       async (tx) => {
         const created = await createOrderFromQuote(tx, {
           quoteId: id,
@@ -85,7 +87,7 @@ async function convert(request: Request, id: string, user: { id: string; name: s
         return created;
       },
       TX_OPTS,
-    );
+    ), ["requestKey"]);
     // Quote → order triggers preparation (handoff §6.8), after the order committed.
     await prepareConvertedOrder(result, { id: user.id, name: user.name });
 

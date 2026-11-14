@@ -11,6 +11,7 @@ import { resolveMaterialCategory, categoryDbRefusal } from "@/lib/services/item-
 import { refusal } from "@/lib/inventory/category-response";
 import { ITEM_UNITS } from "@/lib/inventory/item-categories";
 import { receivingLocationId, setStockLocation } from "@/lib/services/stock-locations";
+import { withIdempotency } from "@/lib/idempotency";
 
 // Stocked packaging materials: bags, labels, cartons. These are what a BOM's MATERIAL
 // components consume. Before this existed, PurchaseType.PACKAGING recorded the cost of
@@ -137,11 +138,12 @@ export async function POST(request: Request) {
     );
 
   try {
-    const clash = await prisma.materialItem.findUnique({ where: { code } });
-    if (clash)
-      return NextResponse.json({ error: `Material code "${code}" already exists.` }, { status: 409 });
-
-    const item = await prisma.$transaction(async (tx) => {
+    // R1-b (owner 1-أ/1-ب, item هـ): one material per submission (a replay instead of the code clash).
+    return await withIdempotency(request, { scope: "inventory.material", actorId: user.id, intent: b }, async (tx) => {
+      // The code clash is checked AFTER the key: a retry of the same submission replays its material, a new one is refused.
+      if (await tx.materialItem.findUnique({ where: { code }, select: { id: true } }))
+        return { status: 409, body: { error: `Material code "${code}" already exists.` } };
+      return { status: 201, body: await (async () => {
       // Phase 3: opening stock is received at a site, named explicitly (b.locationId, active; else the default
       // receiving site) — this transaction is that one receipt.
       const locationId = quantityOnHand > 0 ? await receivingLocationId(tx, b.locationId) : null;
@@ -185,8 +187,8 @@ export async function POST(request: Request) {
         await onOpeningStock(tx, { kind: "MATERIAL", entityId: created.id, qty: quantityOnHand, actor: user.id, movementId: movement.id });
       }
       return created;
+    })() };
     });
-    return NextResponse.json(item, { status: 201 });
   } catch (err) {
     const r = categoryDbRefusal(err);
     if (r) return refusal(r);

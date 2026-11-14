@@ -3,6 +3,7 @@ import { requireAnyModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { auditFromRequest } from "@/lib/accounting/audit";
 import { createTransfer, listTransfers } from "@/lib/services/stock-transfers";
+import { replayOnKeyRace } from "@/lib/idempotency";
 
 /**
  * «تحويل مخزون» (20261115090000_stock_locations).
@@ -30,7 +31,7 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
   if (!body || typeof body !== "object") return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   try {
-    const r = await createTransfer(body, { id: user.id, name: user.name }, auditFromRequest(request, user.id));
+    const r = await replayOnKeyRace(() => createTransfer(body, { id: user.id, name: user.name }, auditFromRequest(request, user.id)), ["requestKey"]);
     return NextResponse.json(r, { status: r.replayed ? 200 : 201 });
   } catch (err) {
     return handleDomainError(err);

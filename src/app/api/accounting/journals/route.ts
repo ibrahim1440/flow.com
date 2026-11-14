@@ -1,5 +1,6 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
+import { withIdempotency } from "@/lib/idempotency";
 import { Prisma } from "@/generated/prisma/client";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { createManualJournalEntry } from "@/lib/accounting/journal-service";
@@ -76,9 +77,11 @@ export async function POST(request: Request) {
   const { user, error } = await requireSub("accounting", "journal_create");
   if (error) return error;
   try {
-    const input = parseJournalBody(await jsonBody(request));
-    const entry = await createManualJournalEntry(input, auditFromRequest(request, user.id));
-    return NextResponse.json(entry, { status: 201 });
+    const raw = await jsonBody(request);
+    const input = parseJournalBody(raw);
+    const ctx = auditFromRequest(request, user.id);
+    // R1-b (owner 1-أ/1-ب): one manual journal per submission.
+    return await withIdempotency(request, { scope: "journal.manual", actorId: user.id, intent: raw }, async (tx) => ({ status: 201, body: await createManualJournalEntry(input, ctx, tx) }));
   } catch (err) {
     return acctError(err);
   }

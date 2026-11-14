@@ -7,6 +7,8 @@ const eslintConfig = defineConfig([
   ...nextTs,
   // Override default ignores of eslint-config-next.
   globalIgnores([
+    // R1-a: design-tool scripts under docs/ (Figma helpers run by hand in Node) are not part of the app.
+    "docs/**",
     // Default ignores of eslint-config-next:
     ".next/**",
     "out/**",

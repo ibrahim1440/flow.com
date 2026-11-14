@@ -491,9 +491,13 @@ function TransferDialog({ open, onClose, accounts, onDone }: { open: boolean; on
   const [busy, setBusy] = useState(false); const [err, setErr] = useState<string | null>(null);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   const opts = useMemo(() => accounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {name(a)}</option>), [accounts, name]);
+  // R1-b: one Idempotency-Key per transfer until a conclusive answer — a double click makes one transfer.
+  const idem = useIdempotencyKey();
   async function submit() {
     setBusy(true); setErr(null);
-    try { await api(withBranch("/api/finance/transfers", branch), { method: "POST", json: f }); onDone(); onClose(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+    try { await api(withBranch("/api/finance/transfers", branch), { method: "POST", json: f, headers: { "Idempotency-Key": idem.key } }); idem.renew(); onDone(); onClose(); }
+    catch (e) { const st = (e as { status?: number }).status ?? 0; if (st >= 400 && st < 500 && st !== 408 && st !== 429) idem.renew(); setErr((e as Error).message); }
+    finally { setBusy(false); }
   }
   return (
     <Dialog open={open} onClose={onClose} title={L("تحويل بين حسابات الشركة", "Transfer between company accounts")} sub={L("ليس إيراداً ولا مصروفاً، ولا يغيّر النقد الموحد.", "Neither revenue nor expense; consolidated cash does not change.")}>

@@ -2,6 +2,7 @@ import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireAnyModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
+import { runIdempotent } from "@/lib/idempotency";
 // One implementation of "make an order", shared with the quotation-to-order path. A
 // second copy here is exactly the shape of defect the packaging rework was spent closing.
 import { resolveOrderLines, createOrderWithNumber } from "@/lib/services/orders/create-order";
@@ -151,8 +152,10 @@ export async function POST(request: Request) {
     // nothing, and this path was relying entirely on the unique index and the retry while
     // the quotation-to-order path held the lock properly. Two writers, two different
     // schemes, and a lock that only looked like it covered both.
-    const order = await prisma.$transaction(
-      async (tx) => {
+    //
+    // R1-b (owner 1-أ/1-ب): ONE order per submission — the Idempotency-Key row is written first in this same transaction
+    // (lib/idempotency.ts); a double click, a retry after a lost answer or simultaneous submits get the first order back.
+    const outcome = await runIdempotent(request, { scope: "orders.create", actorId: user.id, intent: body }, async (tx) => {
         const created = await createOrderWithNumber(
           tx,
           {
@@ -173,10 +176,10 @@ export async function POST(request: Request) {
         // The order does not assign the customer (accountOwnerId untouched) and opens no deal — no commission. The
         // supervisors and the admins are told once per order.
         if (access === "unassigned") await notifyUnassignedCustomerOrder(tx, { id: created.id, orderNumber: created.orderNumber, customerId: body.customerId as string }, { id: user.id, name: user.name });
-        return created;
-      },
-      TX_OPTS,
-    );
+        return { status: 201, body: created };
+    });
+    if ("done" in outcome) return outcome.done;
+    const order = outcome.fresh.body as Awaited<ReturnType<typeof createOrderWithNumber>>;
 
     // «طلب مباشر» (owner, option A): the order joins a deal — the chosen one, else the customer's newest open deal the
     // creator can see, else a deal opened for it (WON) — so collections and commission work as on a quotation-born order.
@@ -201,14 +204,17 @@ export async function POST(request: Request) {
     const prepared = await autoPrepareOrder(order.id, "order_created", { id: user.id, name: user.name });
     if (prepared?.order) {
       const byId = new Map(prepared.order.items.map((i) => [i.id, i]));
-      return NextResponse.json({
+      const full = {
         ...order,
         status: prepared.order.status,
         items: order.items.map((i) => ({ ...i, ...(byId.get(i.id) ?? {}) })),
         deal, dealError,
-      }, { status: 201 });
+      };
+      await outcome.finalize({ status: 201, body: full }); // a later replay answers with the prepared order
+      return NextResponse.json(full, { status: 201 });
     }
 
+    await outcome.finalize({ status: 201, body: { ...order, deal, dealError } });
     return NextResponse.json({ ...order, deal, dealError }, { status: 201 });
   } catch (err) {
     return handleDomainError(err);

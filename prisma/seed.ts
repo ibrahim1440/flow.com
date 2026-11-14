@@ -48,7 +48,9 @@ function seedDatabaseUrl(): string {
 }
 
 function createClient() {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- R1-a CI baseline: pre-existing, behaviour unchanged — refactor tracked separately
   const { Pool } = require("pg");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- R1-a CI baseline: pre-existing, behaviour unchanged — refactor tracked separately
   const { PrismaPg } = require("@prisma/adapter-pg");
   return new PrismaClient({ adapter: new PrismaPg(new Pool({ connectionString: seedDatabaseUrl() })) });
 }

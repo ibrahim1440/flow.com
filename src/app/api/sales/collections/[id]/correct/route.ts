@@ -9,6 +9,7 @@ import { PAYMENT_METHODS, type PaymentMethodValue } from "@/lib/services/sales/c
 import { copyAndCorrect, receiptAbilities, type CorrectionEdits } from "@/lib/services/sales/receipts";
 import { auditFromRequest, setAuditContext } from "@/lib/accounting/audit";
 import { AMOUNT_PATTERN } from "@/lib/money/amount-input";
+import { replayOnKeyRace } from "@/lib/idempotency";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -63,10 +64,11 @@ export async function POST(request: Request, { params }: Params) {
   if (b.note !== undefined) edits.note = typeof b.note === "string" ? b.note : null;
 
   try {
-    const r = await prisma.$transaction(async (tx) => {
+    // R1-b: two simultaneous submissions of one key — the slower one replays the first (never a 409).
+    const r = await replayOnKeyRace(() => prisma.$transaction(async (tx) => {
       await setAuditContext(tx, auditFromRequest(request, user.id));
       return copyAndCorrect(tx, { collectionId: id, actorId: user.id, idempotencyKey, edits });
-    }, TX_OPTS);
+    }, TX_OPTS), ["idempotencyKey"]);
     return NextResponse.json(r, { status: r.replayed ? 200 : 201 });
   } catch (err) {
     return handleDomainError(err);
