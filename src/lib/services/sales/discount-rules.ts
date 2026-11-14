@@ -13,16 +13,18 @@
 import { createHash } from "node:crypto";
 import { Prisma } from "@/generated/prisma/client";
 import { DEFAULT_VAT_RATE } from "@/lib/services/invoicing/pricing";
-import { DISCOUNT_MAX } from "./discount-limits";
+import { aboveCeiling, aboveLimit, effectiveDiscountBp, percentToBp } from "./discount-measure";
 
 type DV = string | number | Prisma.Decimal;
 const D = (v: DV) => new Prisma.Decimal(v);
 
-/** 1 − net ÷ list value, in %, 2 dp, never below 0 (a price above the list is no discount). Pure. */
+/**
+ * 1 − net ÷ list value, in %, 2 dp, never below 0 (a price above the list is no discount). Pure.
+ * HOTFIX quote-45: computed by the ONE fixed-point measure the editor uses too (discount-measure.ts).
+ */
 export function effectiveDiscount(listGross: Prisma.Decimal, lineNet: Prisma.Decimal): Prisma.Decimal {
-  if (listGross.lessThanOrEqualTo(0)) return D(0);
-  const d = D(1).minus(lineNet.dividedBy(listGross)).times(100).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
-  return d.lessThan(0) ? D(0) : d;
+  const bp = effectiveDiscountBp(listGross.toFixed(5), lineNet.toFixed(5));
+  return bp == null ? D(0) : D(bp).dividedBy(100);
 }
 
 export type DiscountLine = {
@@ -55,7 +57,7 @@ export function discountFigures(lines: DiscountLine[]): DiscountFigures {
     if (!l.sku || price.lessThanOrEqualTo(0)) { customLines.push(i); perLine.push(null); return; }
     const eff = effectiveDiscount(price.times(D(String(l.quantity))), D(String(l.lineNet)));
     perLine.push(eff);
-    if (eff.greaterThan(DISCOUNT_MAX)) overCeiling.push(i);
+    if (aboveCeiling(percentToBp(eff.toFixed(2)))) overCeiling.push(i);
     if (eff.greaterThan(max)) max = eff;
   });
   return { maxEffective: max, perLine, customLines, inactiveLines, overCeiling };
@@ -63,7 +65,8 @@ export function discountFigures(lines: DiscountLine[]): DiscountFigures {
 
 /** Does this document need a supervisor? (custom lines, or the figure above the threshold) Pure. */
 export function needsApproval(f: DiscountFigures, threshold: DV): boolean {
-  return f.customLines.length > 0 || f.maxEffective.greaterThan(D(String(threshold)));
+  // HOTFIX quote-45: strictly above, in basis points — exactly the limit (45.00 at 45) does not need a supervisor.
+  return f.customLines.length > 0 || aboveLimit(percentToBp(f.maxEffective.toFixed(2)), String(threshold));
 }
 
 // ── VAT treatments (C5 / C6) ──────────────────────────────────────────────────────────────────────

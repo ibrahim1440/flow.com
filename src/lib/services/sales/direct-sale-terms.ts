@@ -40,6 +40,7 @@ export function assertTaxAllowed(terms: { taxCategory: string; taxRatePercent: s
   if (i >= 0) throw taxLocked(i);
 }
 import { DISCOUNT_MAX } from "./discount-limits";
+import { aboveCeiling, aboveLimit, percentToBp } from "./discount-measure";
 import { effectiveDiscount, isStandard } from "./discount-rules";
 export { effectiveDiscount } from "./discount-rules";
 
@@ -182,9 +183,10 @@ export async function priceTerms(db: Db, raw: unknown, threshold: Prisma.Decimal
 /** The approval on terms: refused above the ceiling; waits above the threshold for a rep who cannot approve. Pure. */
 export function termsApproval(quote: TermsQuote, threshold: Prisma.Decimal, mayApprove: boolean): { percent: Prisma.Decimal; needsApproval: boolean } {
   const top = new Prisma.Decimal(quote.discountPercent);
-  if (top.greaterThan(DISCOUNT_MAX)) {
-    const i = quote.lines.findIndex((l) => new Prisma.Decimal(l.effectiveDiscount).greaterThan(DISCOUNT_MAX));
+  // HOTFIX quote-45: the one fixed-point comparison (discount-measure.ts) — strictly above, in basis points.
+  if (aboveCeiling(percentToBp(top.toFixed(2)))) {
+    const i = quote.lines.findIndex((l) => aboveCeiling(percentToBp(l.effectiveDiscount)));
     throw refuse(400, "DISCOUNT_TOO_HIGH", `البند ${i + 1}: الخصم ${quote.lines[i].effectiveDiscount}٪ من سعر القائمة — أعلى خصم ${DISCOUNT_MAX}٪.`, `Line ${i + 1}: ${quote.lines[i].effectiveDiscount}% off the list price — the most is ${DISCOUNT_MAX}%.`, { index: i });
   }
-  return { percent: top, needsApproval: top.greaterThan(threshold) && !mayApprove };
+  return { percent: top, needsApproval: aboveLimit(percentToBp(top.toFixed(2)), threshold.toString()) && !mayApprove };
 }

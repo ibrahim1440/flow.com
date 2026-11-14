@@ -3,7 +3,7 @@
 import { TaxOverridePanel } from "@/components/sales/tax-override-panel";
 import { CreditLimitDialog, CustomerCreditNotice, creditRefusalOf, type CreditRefusal } from "@/components/credit/credit-ui";
 import { Select } from "@/components/ui/Select";
-import { useState, useEffect, useMemo, useRef, use } from "react";
+import { useState, useEffect, useMemo, useRef, use, useCallback } from "react";
 import Link from "next/link";
 import { Printer, FileText, Send, Trash2, Plus } from "lucide-react";
 import { usePrintDocuments } from "@/components/print/Certification";
@@ -18,6 +18,7 @@ import { Ico } from "@/components/shell/icons";
 import { useD21Title, usePhone, useD21Phone } from "@/components/shell/page-context";
 import { splitTitle } from "@/components/d21/labels";
 import { longDate, shortDate } from "@/components/d21/format";
+import { aboveLimit, bpToPercent, measureLines, percentToBp } from "@/lib/services/sales/discount-measure";
 import { DISCOUNT_MAX } from "@/lib/services/sales/discount-limits";
 import { useAccountantView } from "../../../accounting/_ui/qoyod-pages";
 import { useQuotesBase } from "../base";
@@ -286,7 +287,27 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   useUnsavedGuard(dirty && Boolean(state?.editable));
 
   const preview = useMemo(() => previewTotals(lines), [lines]);
-  const needsApproval = preview.discountPercent > Number(threshold);
+  // HOTFIX quote-45 (owner, Q-202611-0022): the SERVER's rule, line by line against the list price, in fixed point
+  // (discount-measure.ts) — not the old floating-point percent over the whole quotation, which read 45.00006 % for lines
+  // at exactly 45 % and blocked «حفظ وإصدار». Exactly the limit needs no approval; strictly above it does; above 60 % is
+  // refused. A line with no list price (custom) needs a manager, as on the server.
+  const skuPriceOf = useCallback((skuId: string): number | null => {
+    if (!skuId) return null;
+    const s = skus.find((x) => x.id === skuId) ?? quote?.lines.find((x) => x.productSkuId === skuId)?.productSku ?? null;
+    return s ? s.price : null;
+  }, [skus, quote]);
+  const measured = useMemo(() => measureLines(lines.map((l) => ({ quantity: l.quantity, unitPrice: l.unitPrice, discountPercent: l.discountPercent, skuPrice: skuPriceOf(l.productSkuId) })), threshold), [lines, skuPriceOf, threshold]);
+  // A line just added and not started (no product, no description) is not a custom line yet: it asks nothing of the
+  // supervisor (UXM-01: «＋ أضف صنف» then «حفظ وإصدار», not «طلب اعتماد») — the save refuses it as incomplete anyway.
+  const blankAt = (i: number) => !lines[i]?.productSkuId && !(lines[i]?.description ?? "").trim();
+  const needsApproval = measured.lines.some((m) => !blankAt(m.index) && (m.custom || m.overLimit));
+  /** The lines that need the supervisor, by number and name — the banner names them (the discount is per line). */
+  const offenders = measured.lines.filter((m) => !blankAt(m.index) && (m.overLimit || m.custom || m.overCeiling)).map((m) => {
+    const l = lines[m.index];
+    const sku = skus.find((x) => x.id === l.productSkuId) ?? quote?.lines.find((x) => x.productSkuId === l.productSkuId)?.productSku ?? null;
+    const name = sku ? (ar ? sku.nameAr || sku.name || sku.skuCode : sku.name || sku.skuCode) : (l.description || "");
+    return { ...m, name };
+  });
 
   const editable = Boolean(state?.editable && can?.write);
   const customerName = quote?.customer ? (ar ? (quote.customer.nameAr ?? quote.customer.name) : quote.customer.name) : null;
@@ -498,6 +519,17 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
     : (ar ? "إصدار العرض" : "Issue");
   // A rep cannot issue past an undecided discount (the server refuses with 403): said, not offered.
   const issueBlocked = waiting && !can.approveThisDiscount;
+  // HOTFIX quote-45 (owner): above the limit the rep had a disabled button and no way on. «حفظ وطلب اعتماد المشرف» saves
+  // the draft — the save itself records the need and tells the discount approvers (sales.discount_pending, the approvals
+  // list «يحتاج اعتماد خصم»), bound to these terms (P0 C3: any later change withdraws an approval). Above 60 % nothing is
+  // offered: the server refuses it even with an approval.
+  const overCeiling = measured.overCeiling;
+  const requestBtn = editable && can.write && !can.approveThisDiscount && dirty && needsApproval && !overCeiling ? (
+    <button type="button" className="btn p" disabled={busy || lines.length === 0} onClick={() => { void save(); }} data-testid="request-discount-approval">
+      {ar ? "حفظ وطلب اعتماد المشرف" : "Save and ask for supervisor approval"}
+    </button>
+  ) : null;
+  const awaitingApproval = quote.status === "DRAFT" && !dirty && dState === "PENDING" && !can.approveThisDiscount;
   const saveBtn = editable ? (
     <button type="button" className="btn" onClick={save} disabled={busy || lines.length === 0} data-testid="save-quote">
       {ar ? "حفظ" : "Save"}
@@ -575,11 +607,13 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
               {!dirty && discount?.customLine ? (
                 <span data-testid="discount-custom-line">{ar ? "فيه بند بدون سعر قائمة معتمد (بند حر أو صنف بلا سعر) — يحتاج موافقة المدير قبل الإصدار." : "A line has no approved list price (a custom line, or a product priced 0) — a manager approves it before issue."}</span>
               ) : ar
-                ? `الخصم عن سعر القائمة ${(!dirty && discount?.basisPercent ? Number(discount.basisPercent) : preview.discountPercent).toFixed(2)}% وحدّ الاعتماد ${threshold}%، ` +
+                ? (offenders.length ? `${offenders.map((o) => o.custom ? `البند ${o.index + 1}${o.name ? ` «${o.name}»` : ""}: بدون سعر قائمة` : `البند ${o.index + 1}${o.name ? ` «${o.name}»` : ""}: خصم ${bpToPercent(o.effBp ?? 0)}% عن سعر القائمة`).join("، ")} — وحدّ الاعتماد ${threshold}% لكل بند، `
+                  : `الخصم عن سعر القائمة ${bpToPercent(!dirty && discount?.basisPercent ? Math.round(Number(discount.basisPercent) * 100) : measured.maxBp)}% وحدّ الاعتماد ${threshold}%، `) +
                   (can.approveThisDiscount
                     ? "والإصدار يسجّل اعتمادك على العرض."
                     : "ويبقى العرض مسودة حتى يعتمده مديرٌ لديه صلاحية اعتماد الخصم.")
-                : `The discount below the list price is ${(!dirty && discount?.basisPercent ? Number(discount.basisPercent) : preview.discountPercent).toFixed(2)}% against a ${threshold}% limit; ` +
+                : (offenders.length ? `${offenders.map((o) => o.custom ? `Line ${o.index + 1}${o.name ? ` "${o.name}"` : ""}: no list price` : `Line ${o.index + 1}${o.name ? ` "${o.name}"` : ""}: ${bpToPercent(o.effBp ?? 0)}% below the list price`).join("; ")} — the limit is ${threshold}% per line; `
+                  : `The discount below the list price is ${bpToPercent(!dirty && discount?.basisPercent ? Math.round(Number(discount.basisPercent) * 100) : measured.maxBp)}% against a ${threshold}% limit; `) +
                   (can.approveThisDiscount
                     ? "issuing records your approval."
                     : "the quotation stays a draft until a manager with discount approval approves it.")}
@@ -612,6 +646,20 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         )}
       </div>
     )
+  ) : null;
+
+  // HOTFIX quote-45: above the hard ceiling the line is named and nothing can carry it (not even an approval).
+  const ceilingBand = editable && overCeiling ? (
+    <div className="callout er" role="alert" data-testid="discount-ceiling-notice" style={{ marginBottom: 18 }}>
+      <b>{ar ? `الخصم فوق الحد الأقصى ${DISCOUNT_MAX}٪ — ما يُقبل حتى بموافقة.` : `Discount above the ${DISCOUNT_MAX}% maximum — refused even with approval.`}</b>{" "}
+      {offenders.filter((o) => o.overCeiling).map((o) => ar ? `البند ${o.index + 1}${o.name ? ` «${o.name}»` : ""}: ${bpToPercent(o.effBp ?? 0)}%` : `Line ${o.index + 1}${o.name ? ` "${o.name}"` : ""}: ${bpToPercent(o.effBp ?? 0)}%`).join(ar ? "، " : "; ")}
+      {ar ? ". عدّل السعر أو الخصم." : ". Change the price or the discount."}
+    </div>
+  ) : awaitingApproval ? (
+    <p className="notice" role="status" data-testid="discount-awaiting" style={{ marginBottom: 12 }}>
+      {ar ? "بانتظار اعتماد المشرف — أُرسل الطلب. بعد الاعتماد يصير «إصدار العرض» متاح، وأي تعديل على البنود يلغي الاعتماد ويحتاج طلب جديد."
+        : "Waiting for supervisor approval — the request is sent. Once approved, «Issue» is enabled; any change to the lines withdraws the approval and needs a new request."}
+    </p>
   ) : null;
 
   /* Notes to the customer (Figma 1230:121651 «ملاحظات للعميل · تظهر في المطبوع»): free text on
@@ -699,7 +747,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
             const gross = (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0);
             const net = gross - (gross * (Number(l.discountPercent) || 0)) / 100;
             const lineTotal = net + (net * (Number(l.taxRatePercent) || 0)) / 100;
-            const over = Number(l.discountPercent) > Number(threshold);
+            const over = !!measured.lines[i]?.overLimit; // HOTFIX quote-45: the line's discount below its list, strictly above the limit
             return (
               <tr key={i} data-testid={`line-${i}`}>
                 <td className="prod">
@@ -1066,7 +1114,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         {ar ? "حفظ وإصدار" : "Save and issue"}
       </button>
     ) : null;
-    const primary = addFirstBtn ?? saveIssueBtn ?? issueBtn ?? orderBtn ?? acceptBtn ?? (!rejectBtn ? reviseBtn : null);
+    const primary = addFirstBtn ?? requestBtn ?? saveIssueBtn ?? issueBtn ?? orderBtn ?? acceptBtn ?? (!rejectBtn ? reviseBtn : null);
     const secondary = firstDraft ? null : editingHere ? saveBtn : (rejectBtn ?? collectionLink);
     const moreItems: React.ReactNode[] = [];
     if (editable && !phoneEdit) moreItems.push(
@@ -1113,7 +1161,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         <div className="q-mmeta">
           {meta.map((m, i) => <span key={i} style={{ display: "contents" }}>{i > 0 && <span aria-hidden>·</span>}{m}</span>)}
         </div>
-        {discountBand}
+        {ceilingBand}{discountBand}
         {recordNotes}
         {/* Quotes v2: the phone shows where the quotation is too; its buttons stay in the sticky bar. */}
         {!editable && quote.status !== "DRAFT" ? progressBlock(false) : null}
@@ -1131,7 +1179,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                 const gross = (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0);
                 const net = gross - (gross * (Number(l.discountPercent) || 0)) / 100;
                 const lineTotal = net + (net * (Number(l.taxRatePercent) || 0)) / 100;
-                const over = Number(l.discountPercent) > Number(threshold);
+                const over = !!measured.lines[i]?.overLimit; // HOTFIX quote-45
                 const lab = (a: string, e: string) => (ar ? `${a} · البند ${i + 1}` : `${e} · line ${i + 1}`);
                 return (
                   <div key={i} className="q-pcard" data-testid={`line-${i}`}>
@@ -1167,7 +1215,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                 <div className="r2">
                   <span><bdi className="n">{num(Number(r.qty), lang)}</bdi> {unitLabel(r.unit)} × <bdi className="n">{formatMoney(String(r.price))}</bdi></span>
                   {Number(r.disc) > 0
-                    ? <span className={Number(r.disc) > Number(threshold) ? "wa" : undefined}>{ar ? "خصم " : "Disc. "}{pct(r.disc)}</span>
+                    ? <span className={aboveLimit(percentToBp(r.disc), threshold) ? "wa" : undefined}>{ar ? "خصم " : "Disc. "}{pct(r.disc)}</span>
                     : <span>{ar ? "ضريبة " : "Tax "}{pct(r.tax)}</span>}
                 </div>
               </div>
@@ -1237,11 +1285,11 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
           {docLink}
           {reviseBtn}
           {collectionLink}
-          {editable || quote.status === "DRAFT" ? <>{rejectBtn}{saveBtn}{issueBtn}{acceptBtn}{orderBtn}</> : null}
+          {editable || quote.status === "DRAFT" ? <>{rejectBtn}{saveBtn}{requestBtn}{issueBtn}{acceptBtn}{orderBtn}</> : null}
         </div>
       </div>
 
-      {discountBand}
+      {ceilingBand}{discountBand}
       {recordNotes}
 
       {editable ? (

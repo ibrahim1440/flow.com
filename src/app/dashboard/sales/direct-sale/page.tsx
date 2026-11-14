@@ -8,6 +8,7 @@
 //                  supervisor (same inbox as a quotation's) — then the deal, the invoice request and the collection follow.
 //   ✓ انرسلت       the order, the deal, the invoice at the accountant; «أرسل للعميل» opens WhatsApp on the rep's phone
 // The rep never issues the invoice (decision 9): «إرسال» only raises it to the accountant.
+import { aboveLimit, percentToBp } from "@/lib/services/sales/discount-measure";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CreditLimitDialog, creditRefusalOf, type CreditRefusal } from "@/components/credit/credit-ui";
 import Link from "next/link";
@@ -129,7 +130,7 @@ function DirectSale() {
   const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
   const can = opts?.can;
   const discountNum = discountOn && discount.trim() ? Number(discount.replace(",", ".")) : 0;
-  const overThreshold = !!can && discountNum > can.threshold;
+  const overThreshold = !!can && aboveLimit(percentToBp(discount.trim() ? discount.replace(",", ".") : "0"), can.threshold) && discountOn; // HOTFIX quote-45: basis points
 
   // The server's price of the cart (the same arithmetic «إرسال» commits).
   const reprice = useCallback(async () => {

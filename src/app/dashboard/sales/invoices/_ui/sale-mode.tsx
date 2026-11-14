@@ -9,6 +9,7 @@
 //                        «أرسل» = POST /api/sales/sample-send (the samples to the warehouse — a repeat this year waits for a
 //                        manager —, the deal kept open, the zero invoice's request to the accountant).
 // Everything here renders ONLY in those modes; the manual invoice and the invoice from an order are untouched.
+import { effectiveDiscountBp, listValue2dp } from "@/lib/services/sales/discount-measure";
 import { creditRefusalOf, type CreditRefusal } from "@/components/credit/credit-ui";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -75,12 +76,14 @@ export function lineForSku(mode: SaleMode, prev: EditLine, s: ModeSku | null, ar
 
 /** The effective discount of each line against the list (1 − net ÷ list × units) — what the approval is decided on. */
 export function effectiveDiscounts(lines: EditLine[], nets: (string | null)[], skus: ModeSku[]): number[] {
+  // HOTFIX quote-45: the server's own fixed-point measure (discount-measure.ts) — no floating point, so a line at exactly
+  // the limit reads exactly the limit. The value is the 2-dp percent (basis points ÷ 100, exact for display).
   return lines.map((l, i) => {
     const s = skus.find((x) => x.id === l.productSkuId);
-    const listGross = s ? Math.round(s.price * Number(l.quantity || 0) * 100) / 100 : 0;
-    const net = Number(nets[i] ?? NaN);
-    if (!s || !(listGross > 0) || !Number.isFinite(net)) return 0;
-    return Math.max(0, Math.round((1 - net / listGross) * 10000) / 100);
+    const net = nets[i];
+    if (!s || net == null) return 0;
+    const bp = effectiveDiscountBp(listValue2dp(String(s.price), l.quantity || "0"), net);
+    return bp == null ? 0 : bp / 100;
   });
 }
 

@@ -3,6 +3,7 @@
 // A new invoice draft: «فاتورة يدوية» (Figma ZT-14) or «إنشاء فاتورة من الطلب» (?orderId=…, the order's lines with
 // what is ordered, delivered, already invoiced and left; full, partial or delivered-only). Saving creates a DRAFT
 // (no number) and opens it; issuing is a separate, privileged step on the draft.
+import { aboveLimit } from "@/lib/services/sales/discount-measure";
 import { NewCustomerDialog, type CreatedCustomer } from "@/components/customers/new-customer-form";
 import { canEdit, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 import { useUser } from "@/app/dashboard/user-context";
@@ -205,7 +206,8 @@ function Manual({ initialQ, mode = null, initialCustomerId, opportunityId }: { i
   const totals = useTotals(lines);
   const eff = mode ? effectiveDiscounts(lines, lines.map((_, i) => totals.priced?.lines[i]?.lineNet.toFixed(2) ?? null), md.skus) : [];
   const topEff = eff.length ? Math.max(...eff) : 0;
-  const needsApproval = mode === "direct-sale" && !!md.can && topEff > md.can.threshold && !md.can.approveDiscount;
+  // HOTFIX quote-45: strictly above the limit, in basis points (exactly the limit needs no approval).
+  const needsApproval = mode === "direct-sale" && !!md.can && aboveLimit(Math.round(topEff * 100), md.can.threshold) && !md.can.approveDiscount;
   // P0 C5 (owner, 11 Nov 2026): a new sale / sample is always S at the standard rate — a VAT change is a request on the
   // draft, approved by a second person (also for a holder of invoice_tax_override).
   const lockTax = true;
