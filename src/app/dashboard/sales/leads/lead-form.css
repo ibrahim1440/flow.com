@@ -19,3 +19,16 @@
 .hr-form.lf .lf-dup .hr-btn { justify-self: start; }
 .lf-foot-hint { margin-inline-start: auto; font-size: 12.5px; line-height: 20px; color: var(--text-muted, #6e6a61); }
 @media (max-width: 767px) { .lf-foot-hint { display: none; } }
+
+/* P2 ERR-07 (approved Figma 1أ / 1ب): the pre-save match panel under the business name. */
+.hr-form.lf .lf-found { grid-column: 1 / -1; display: grid; gap: 8px; padding: 12px 14px; border-radius: 10px; font-size: 13.5px; }
+.hr-form.lf .lf-found > b { font-size: 14px; }
+.hr-form.lf .lf-found.is-mine { background: var(--status-warning-tint, #fbf3e5); color: var(--text-primary, #28241a); }
+.hr-form.lf .lf-found.is-mine > b { color: var(--status-warning, #95651e); }
+.hr-form.lf .lf-found.is-colleague { background: var(--status-success-tint, #ebf1ea); }
+.hr-form.lf .lf-found-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px;
+  background: var(--surface, #fff); border: 1px solid var(--border-subtle, #e1e6e0); color: inherit; text-decoration: none; min-height: 44px; }
+.hr-form.lf .lf-found-row > span:first-child { display: grid; gap: 2px; }
+.hr-form.lf .lf-found-name { font-weight: 700; }
+.hr-form.lf .lf-found-row small { color: var(--text-muted, #6e6a61); }
+.hr-form.lf .lf-found-go { color: var(--action-primary, #405f4d); font-weight: 700; white-space: nowrap; }

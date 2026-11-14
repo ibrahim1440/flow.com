@@ -88,7 +88,7 @@ type Snapshot = {
 };
 
 export type QuoteForEmail = {
-  id: string; quoteNumber: string; revision: number; status: string; customerId: string | null; issuedAt: Date | null; validUntil: Date | null;
+  id: string; quoteNumber: string | null; revision: number; status: string; customerId: string | null; issuedAt: Date | null; validUntil: Date | null;
   issuedSnapshot: unknown;
 };
 
@@ -116,7 +116,7 @@ export function quoteEmailInput(q: QuoteForEmail, fallbackCompany: CompanyInfo, 
       address: s.customer?.address ?? null,
       vatNumber: s.customer?.vatNumber ?? null,
     },
-    quoteNumber: s.quoteNumber ?? q.quoteNumber,
+    quoteNumber: s.quoteNumber ?? q.quoteNumber ?? "", // issued: the snapshot always carries the number
     revision: s.revision ?? q.revision,
     issueDate: q.issuedAt,
     validUntil,

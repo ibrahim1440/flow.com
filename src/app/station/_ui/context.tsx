@@ -2,6 +2,7 @@
 import { createContext, useContext } from "react";
 import type { Lang } from "@/lib/i18n/translations";
 import type { Permissions } from "@/lib/auth-shared";
+import { clearAllDrafts } from "@/lib/drafts/local-draft";
 
 export type StationUser = { id: string; name: string; role: string; permissions: Permissions; preferredLanguage: Lang };
 /** A paired station device (Workstations W2): its station, as GET /api/station/device returns it. */
@@ -27,6 +28,7 @@ export const useStation = () => useContext(StationCtx)!;
 
 /** Station drafts live in sessionStorage only (D14); a sign-out leaves none behind for the next person. */
 export function clearStationDrafts() {
+  clearAllDrafts(); // P2 gate B1: and the office drafts of this device (a station sign-out is a sign-out)
   try {
     for (let i = sessionStorage.length - 1; i >= 0; i--) {
       const k = sessionStorage.key(i);

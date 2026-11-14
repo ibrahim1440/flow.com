@@ -5,6 +5,8 @@ import { forbidden, requireAdminAction, requireAuth } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { parseSettingsPatch, readQuoteSettings, settingsFromRow, SELLER_FIELDS } from "@/lib/services/sales/quote-settings";
 import { DISCOUNT_APPROVAL_THRESHOLD, DISCOUNT_MAX } from "@/lib/services/sales/discount-limits";
+import { refreshDraftApprovalNeeds } from "@/lib/services/sales/quotes";
+import { Decimal } from "@/lib/services/commissions/engine";
 
 /**
  * Quotation settings (migration 20261021090000_sales_quotes), on the SystemConfig singleton:
@@ -66,6 +68,10 @@ export async function PUT(request: Request) {
       const after = settingsFromRow(row);
       const changed = (["discountApprovalPercent", "requireQualificationMinimum"] as const).filter((k) => before[k] !== after[k]) as string[];
       for (const k of SELLER_FIELDS) if (before.seller[k] !== after.seller[k]) changed.push(k);
+      // P2-B gate: a new threshold re-reads the stored need of every open draft (the list, the editor and My Day read it).
+      if (before.effectiveThresholdPercent !== after.effectiveThresholdPercent) {
+        await refreshDraftApprovalNeeds(tx, new Decimal(after.effectiveThresholdPercent));
+      }
       if (changed.length) {
         const actor = await tx.employee.findUnique({ where: { id: user.id }, select: { name: true } });
         await tx.salesQuoteAudit.create({

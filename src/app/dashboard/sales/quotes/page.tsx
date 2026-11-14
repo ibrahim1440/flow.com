@@ -12,6 +12,7 @@ import { QuotePane } from "./QuotePane";
 import { QuotePicker } from "./QuotePicker";
 import { useQuotesBase } from "./base";
 import { RepQuotes, type RepStage } from "./RepQuotes";
+import { quoteKey, quoteRef } from "@/lib/services/sales/quote-label";
 
 /**
  * Quotations list, built to `crm-quotes` 1440 (`181:1609`, EN `1528:1930`) and 1024
@@ -33,7 +34,7 @@ import { RepQuotes, type RepStage } from "./RepQuotes";
 
 type Quote = {
   id: string;
-  quoteNumber: string;
+  quoteNumber: string | null; // null: a draft (numbered at issue)
   revision: number;
   status: string;
   currency: string;
@@ -199,15 +200,15 @@ export default function QuotesPage() {
   const approvalFlag = (q: Quote) =>
     q.status !== "DRAFT" ? null
       : q.discountApproval === "PENDING"
-        ? <span className="flag wa" data-testid={`quote-flag-${q.quoteNumber}`}>{ar ? "الخصم يحتاج اعتمادًا" : "Discount needs approval"}</span>
+        ? <span className="flag wa" data-testid={`quote-flag-${quoteKey(q)}`}>{ar ? "الخصم يحتاج اعتمادًا" : "Discount needs approval"}</span>
         : q.discountApproval === "REJECTED"
-          ? <span className="flag" data-testid={`quote-flag-${q.quoteNumber}`}>{ar ? "رُفض الخصم" : "Discount refused"}</span>
+          ? <span className="flag" data-testid={`quote-flag-${quoteKey(q)}`}>{ar ? "رُفض الخصم" : "Discount refused"}</span>
           : q.discountApproval === "APPROVED"
-            ? <span className="flag ok" data-testid={`quote-flag-${q.quoteNumber}`}>{ar ? "خصم معتمد" : "Discount approved"}</span>
+            ? <span className="flag ok" data-testid={`quote-flag-${quoteKey(q)}`}>{ar ? "خصم معتمد" : "Discount approved"}</span>
             : null;
   const statusDot = (q: Quote) => (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 8, whiteSpace: "nowrap" }}>
-      <span className={`st ${STATUS_DOT[q.status] ?? ""}`} data-testid={`quote-status-${q.quoteNumber}`}>{label(q.status)}</span>
+      <span className={`st ${STATUS_DOT[q.status] ?? ""}`} data-testid={`quote-status-${quoteKey(q)}`}>{label(q.status)}</span>
       {approvalFlag(q)}
     </span>
   );
@@ -439,15 +440,15 @@ export default function QuotesPage() {
             {rows.map((q) => {
               const rev = revisionText(q);
               return (
-                <div key={q.id} className="mrow rowlink" data-testid={`m-quote-${q.quoteNumber}`}>
+                <div key={q.id} className="mrow rowlink" data-testid={`m-quote-${quoteKey(q)}`}>
                   <div style={{ minWidth: 0 }}>
                     <Link href={`${base}/${q.id}`} className="who open" style={{ textDecoration: "none" }}>
                       <bdi>{customerName(q)}</bdi>
                     </Link>
                   </div>
-                  <span className={`st ${STATUS_DOT[q.status] ?? ""}`} data-testid={`quote-status-${q.quoteNumber}`}>{label(q.status)}</span>
+                  <span className={`st ${STATUS_DOT[q.status] ?? ""}`} data-testid={`quote-status-${quoteKey(q)}`}>{label(q.status)}</span>
                   <div className="r2">
-                    <span className="id" style={{ fontSize: 12 }}>{q.quoteNumber}</span>
+                    <span className="id" style={{ fontSize: 12 }}>{quoteRef(q.quoteNumber, ar)}</span>
                     <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       <bdi>{q.opportunity?.title ?? (ar ? "بدون صفقة · قسم المحاسبة" : "No deal · accounting")}</bdi>{rev && <> · {rev}</>}
                     </span>
@@ -530,9 +531,9 @@ export default function QuotesPage() {
                   const rev = revisionText(q);
                   const owner = q.opportunity?.owner ?? null;
                   return (
-                    <tr key={q.id} data-testid={`quote-row-${q.quoteNumber}`} className={selected === q.id ? "sel" : undefined}>
+                    <tr key={q.id} data-testid={`quote-row-${quoteKey(q)}`} className={selected === q.id ? "sel" : undefined}>
                       <td>
-                        <Link href={`${base}/${q.id}`} className="id" data-testid={`open-quote-${q.quoteNumber}`}
+                        <Link href={`${base}/${q.id}`} className="id" data-testid={`open-quote-${quoteKey(q)}`}
                           onClick={(e) => openPreview(e, q.id)} aria-describedby={undefined}
                           style={{ color: "var(--text-secondary)" }}>
                           {q.quoteNumber}

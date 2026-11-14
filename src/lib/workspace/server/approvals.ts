@@ -27,6 +27,7 @@ import { resolveScope as finScope } from "@/lib/finance/server/context";
 import { listApprovals as mktList } from "@/lib/marketing/server/approvals";
 import { parseDay } from "@/lib/hr/dates";
 import type { WsActor } from "./context";
+import { quoteRef } from "@/lib/services/sales/quote-label";
 
 export type ApprovalType = "LEAVE" | "ADVANCE" | "DISCOUNT" | "SAMPLE" | "STAGE_MOVE" | "TAX_OVERRIDE" | "CREDIT_OVERRIDE" | "FINANCE" | "MARKETING";
 
@@ -150,7 +151,8 @@ async function discountItems(actor: WsActor): Promise<ApprovalItem[]> {
     const grand = priced.grandTotal.toFixed(2);
     out.push({
       key: `DISCOUNT:${q.id}`, type: "DISCOUNT", id: q.id,
-      title: `خصم ${pct}% · عرض ${q.quoteNumber}`, titleEn: `Discount ${pct}% · quotation ${q.quoteNumber}`, requester: q.createdById ? creators.get(q.createdById) ?? null : null, subject: q.customer?.name ?? q.opportunity.title,
+      // An unnumbered draft (owner decision, quote-45 round): «مسودة» — the subject (customer / deal) and the date say which.
+      title: `خصم ${pct}% · عرض ${quoteRef(q.quoteNumber, true)}`, titleEn: `Discount ${pct}% · quotation ${quoteRef(q.quoteNumber, false)}`, requester: q.createdById ? creators.get(q.createdById) ?? null : null, subject: q.customer?.name ?? q.opportunity.title,
       createdAt: iso(q.updatedAt),
       facts: {
         quoteNumber: q.quoteNumber, revision: q.revision, customer: q.customer?.name ?? null, deal: q.opportunity.title, dealOwner: q.opportunity.owner?.name ?? null,
@@ -269,7 +271,7 @@ async function taxOverrideItems(actor: WsActor): Promise<ApprovalItem[]> {
     const lines = (r.lines as { key: string; taxCategory: string; taxRatePercent: string; exemptionReasonCode: string | null }[]) ?? [];
     out.push({
       key: `TAX_OVERRIDE:${r.id}`, type: "TAX_OVERRIDE", id: r.id,
-      title: q ? `تغيير ضريبة · عرض ${q.quoteNumber}` : "تغيير ضريبة · مسودة فاتورة", titleEn: q ? `VAT change · quotation ${q.quoteNumber}` : "VAT change · invoice draft",
+      title: q ? `تغيير ضريبة · عرض ${quoteRef(q.quoteNumber, true)}` : "تغيير ضريبة · مسودة فاتورة", titleEn: q ? `VAT change · quotation ${quoteRef(q.quoteNumber, false)}` : "VAT change · invoice draft",
       requester: people.find((p) => p.id === r.requestedById)?.name ?? null, subject: c ? c.nameAr || c.name : null, subjectEn: c?.name ?? null,
       createdAt: iso(r.requestedAt),
       facts: { documentType: r.documentType, customer: c ? c.nameAr || c.name : null, reason: r.reason, lines: lines.map((l) => ({ key: l.key, taxCategory: l.taxCategory, taxRatePercent: l.taxRatePercent, exemptionReasonCode: l.exemptionReasonCode })) },

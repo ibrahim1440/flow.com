@@ -1,4 +1,5 @@
 "use client";
+import { ReceiptButtons } from "@/components/receipt/ReceiptButtons";
 import { displayPhone } from "@/lib/contact/phone";
 import { amountForServer } from "@/lib/money/amount-input";
 import { prepareReceipt } from "@/lib/files/receipt-prep";
@@ -20,7 +21,6 @@ import { hasSubPrivilege, hasModuleAccess, canEdit } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import { orderNeedsAttention } from "@/lib/order-operations-client";
-import { LocalizedName } from "@/components/LocalizedName";
 import { Combobox, Select } from "@/components/ui/Select";
 import {
   OrderStatusBadge, NeedsAttentionBadge, OwnerControl, ActivityTimeline, AddNoteForm, canAddOrderNote,
@@ -149,7 +149,6 @@ function PaymentWait({ order, ar, onChanged }: { order: { id?: string; paymentHo
   // Abu Fahd R3 A1: the same receipt as «سجّل تحصيل» (P1 ERR-01): checked the moment it is chosen, uploaded after the
   // top-up is made; a failed upload is said here, the top-up kept, with «أرفق الإيصال» to send it again.
   const [receipt, setReceipt] = useState<File | null>(null);
-  const receiptInput = useRef<HTMLInputElement>(null);
   const [receiptErr, setReceiptErr] = useState("");
   const [uploadFail, setUploadFail] = useState<{ id: string; text: string } | null>(null);
   async function chooseReceipt(f: File | null) {
@@ -235,7 +234,7 @@ function PaymentWait({ order, ar, onChanged }: { order: { id?: string; paymentHo
                 <input className="hr-input" dir="ltr" inputMode="decimal" value={topUp.amount} onChange={(e) => setTopUp({ ...topUp, amount: e.target.value })} data-testid="topup-amount" /></label>
               <label className="hr-help" style={{ margin: 0 }}>{ar ? "طريقة الدفع" : "Payment method"}
                 <Select value={topUp.method} onChange={(e) => setTopUp({ ...topUp, method: e.target.value })} data-testid="topup-method">
-                  <option value="CASH">{ar ? "كاش" : "Cash"}</option>
+                  <option value="CASH">{ar ? "نقداً" : "Cash"}</option>
                   <option value="POS_CARD">{ar ? "شبكة" : "Card"}</option>
                   <option value="BANK_TRANSFER">{ar ? "تحويل بنكي" : "Bank transfer"}</option>
                 </Select></label>
@@ -243,14 +242,10 @@ function PaymentWait({ order, ar, onChanged }: { order: { id?: string; paymentHo
                 <input className="hr-input" dir="ltr" value={topUp.ref} onChange={(e) => setTopUp({ ...topUp, ref: e.target.value })} data-testid="topup-ref" /></label>
               {/* Abu Fahd R4 F3: the same picker as «سجّل تحصيل» — «صوّر الإيصال أو اختر ملف», never the browser's raw input. */}
               <span className="hr-help" style={{ margin: 0 }}>{topUp.method === "BANK_TRANSFER" ? (ar ? "إيصال التحويل" : "Transfer receipt") : (ar ? "الإيصال" : "Receipt")} <small>{ar ? "(اختياري)" : "(optional)"}</small></span>
-              <input ref={receiptInput} type="file" accept="image/*,application/pdf" capture="environment" hidden onChange={(e) => { const f = e.target.files?.[0] ?? null; e.target.value = ""; void chooseReceipt(f); }} aria-invalid={!!receiptErr} data-testid="topup-receipt" />
               {receipt ? (
                 <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }} data-testid="topup-receipt-file"><bdi>{receipt.name}</bdi> <button type="button" className="hr-btn is-ghost is-sm" onClick={() => setReceipt(null)}>{ar ? "حذف" : "Remove"}</button></span>
               ) : (
-                <button type="button" onClick={() => receiptInput.current?.click()} data-testid="topup-receipt-pick"
-                  style={{ appearance: "none", font: "inherit", display: "grid", gap: 2, justifyItems: "center", padding: 12, borderRadius: 10, border: "1px dashed var(--hr-border-strong)", background: "var(--hr-subtle)", color: "var(--hr-text)", cursor: "pointer", minHeight: 56, width: "100%" }}>
-                  <b>{ar ? "صوّر الإيصال أو اختر ملف" : "Photograph the receipt or choose a file"}</b><small style={{ color: "var(--hr-muted)", fontSize: 12 }}>{ar ? "صورة أو PDF · لين 5 ميجا" : "Photo or PDF · up to 5 MB"}</small>
-                </button>
+                <ReceiptButtons ar={ar} onPick={(f) => void chooseReceipt(f)} testId="topup-receipt-pick" fileInputTestId="topup-receipt" invalid={!!receiptErr} />
               )}
               {receiptErr ? <span role="alert" style={{ color: "var(--status-danger)", fontSize: 12 }} data-testid="topup-receipt-error">{receiptErr}</span> : null}
               <span style={{ display: "flex", gap: 6 }}>
@@ -640,8 +635,6 @@ export default function OrdersPage() {
   // STRUCTURAL_EDIT_ENTRY_STATUSES), a delete once anything was delivered — so the buttons follow.
   const showEdit = (o: Order) => canEditOrder && EDITABLE_ORDER_STATUSES.has(o.status);
   const showDelete = (o: Order) => canDelete && o.status !== "Completed" && o.items.every((i) => i.deliveries.length === 0);
-  const productionStatusOf = (order: Order) =>
-    order.items.every((i) => i.productionStatus === "Completed") ? "Completed" : order.items.some((i) => i.productionStatus === "In Production") ? "In Production" : "Pending";
   const totalKg = (order: Order) => order.items.reduce((s, i) => s + i.quantityKg, 0);
 
   return (
@@ -968,7 +961,8 @@ export default function OrdersPage() {
                     <DiscountWait order={order} ar={lang === "ar"} />
                     <PaymentWait order={order} ar={lang === "ar"} onChanged={() => { void loadData(); }} />
                     {orderNeedsAttention(order) ? <NeedsAttentionBadge /> : null}
-                    {isHeldForPayment(order.paymentHold) ? null : <StatusBadge status={productionStatusOf(order)} />}
+                    {/* Abu Fahd (P2-B gate): ONE status in the header — the order's; the production stage reads in the
+                        stepper below and per line in «بنود الطلب». */}
                   </div>
                 </div>
 
@@ -1005,39 +999,10 @@ export default function OrdersPage() {
                   </div>
                 ) : null}
 
+                {/* Abu Fahd (P2-B gate): the lines are listed ONCE — in «بنود الطلب» below, with what was delivered and what
+                    remains under each; this section keeps the deliveries and the linked batches. */}
+                {order.items.some((i) => i.deliveries.length > 0) || order.items.some((i) => i.roastingBatches.length > 0) ? (
                 <section>
-                  <h3 className="hr-label" style={{ margin: "0 0 4px" }}>{t("orderItemsLabel")}</h3>
-                  <ul className="ops-list">
-                    {order.items.map((item) => {
-                      const completionTotal = itemCompletionTotal(item);
-                      const surplus = +(completionTotal - item.quantityKg).toFixed(2);
-                      const isOverproduced = surplus > 1;
-                      return (
-                        <li key={item.id} data-testid={`order-item-${item.id}`}>
-                          <span style={{ minWidth: 0 }}>
-                            {/* E7: the same rule as the preparation review below it. */}
-                            {item.product ? (
-                              <LocalizedName lang={lang} en={item.product.productNameEn} ar={item.product.productNameAr} lastResort={item.beanTypeName} />
-                            ) : (
-                              <bdi>{item.beanTypeName}</bdi>
-                            )}
-                            <span className="ops-sub">
-                              {t("deliveredCol")} <span className="hr-num">{item.deliveredQty}</span> · {t("remainingCol")}{" "}
-                              {isOverproduced ? (
-                                <span style={{ color: "var(--status-warning)" }}>+<Kg v={surplus} /> · {t("surplusToInventory")} ({t("totalProducedLabel")} <Kg v={completionTotal} /> — {t("requiredQtyLabel")} <Kg v={item.quantityKg} />)</span>
-                              ) : <span className="hr-num">{item.remainingQty}</span>}
-                            </span>
-                            <span className="ops-sub" style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                              {isHeldForPayment(order.paymentHold) ? null : <StatusBadge status={item.productionStatus} />}
-                              <StatusBadge status={item.deliveryStatus} />
-                              {isOverproduced ? <span className="hr-flag tone-warning"><span>{t("overproduced")}</span></span> : null}
-                            </span>
-                          </span>
-                          <span style={{ whiteSpace: "nowrap" }}><Kg v={item.quantityKg} /></span>
-                        </li>
-                      );
-                    })}
-                  </ul>
                   {order.items.some((i) => i.deliveries.length > 0) && (() => {
                     // The rows recorded together (one dispatch confirm) print as one note.
                     const groups = deliveryShipments(order.items.flatMap((i) => i.deliveries.filter((d) => d.id).map((d) => ({ id: d.id!, orderId: order.id, createdAt: d.createdAt ?? d.date, notes: d.notes ?? null }))));
@@ -1087,6 +1052,7 @@ export default function OrdersPage() {
                     </p>
                   )}
                 </section>
+                ) : null}
 
                 {editingId === order.id && (() => {
                   const editWarnings = getEditStockWarnings();
@@ -1157,7 +1123,24 @@ export default function OrdersPage() {
                       name, quantity and one text status per line. Blocking a line is intentionally
                       not offered (see OrderLines in ./_parts/board for the server path kept and how
                       to re-enable it). */}
-                  <OrderLines orderStatus={order.status} paymentHold={order.paymentHold} paymentShort={order.paymentShort ?? null} items={order.items} pipeline={order.pipeline ?? null} />
+                  <OrderLines orderStatus={order.status} paymentHold={order.paymentHold} paymentShort={order.paymentShort ?? null} items={order.items} pipeline={order.pipeline ?? null}
+                    lineDetail={(id) => {
+                      const item = order.items.find((x) => x.id === id);
+                      if (!item) return null;
+                      const completionTotal = itemCompletionTotal(item);
+                      const surplus = +(completionTotal - item.quantityKg).toFixed(2);
+                      const isOverproduced = surplus > 1;
+                      return (
+                        <div className="ops-dline-sub" data-testid={`order-item-${item.id}`}>
+                          {/* Abu Fahd R2 (low): delivered / remaining are KILOGRAMS (the line may be ordered in units) — said with their unit. */}
+                          {t("deliveredCol")} <Kg v={item.deliveredQty} /> · {t("remainingCol")}{" "}
+                          {isOverproduced ? (
+                            <span style={{ color: "var(--status-warning)" }}>+<Kg v={surplus} /> · {t("surplusToInventory")} ({t("totalProducedLabel")} <Kg v={completionTotal} /> — {t("requiredQtyLabel")} <Kg v={item.quantityKg} />)</span>
+                          ) : <Kg v={item.remainingQty} />}
+                          {isOverproduced ? <> <span className="hr-flag tone-warning"><span>{t("overproduced")}</span></span></> : null}
+                        </div>
+                      );
+                    }} />
                 </div>
 
                 <StatusActionsBar orderId={order.id} status={order.status} ownerId={order.ownerId} onSuccess={loadData} />

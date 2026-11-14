@@ -4,6 +4,7 @@ import { OwnCustomerDialog, ownCustomerOf, type OwnCustomer } from "@/components
 import { displayPhone } from "@/lib/contact/phone";
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useEffect, useRef, useState } from "react";
+import { ResultConfirm } from "@/components/confirm/ResultConfirm";
 import Link from "next/link";
 import { LEAD_STATUS_SPECS, LEAD_SOURCE_LABELS, pick } from "../_components/ui";
 import { Ico } from "@/components/shell/icons";
@@ -54,6 +55,7 @@ export function LeadPane({
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [ownDup, setOwnDup] = useState<OwnCustomer | null>(null);
+  const [askConvert, setAskConvert] = useState(false); // P2 ب3: name the result before converting
   const [error, setError] = useState("");
   const [token, setToken] = useState(0);
   const head = useRef<HTMLHeadingElement | null>(null);
@@ -79,6 +81,7 @@ export function LeadPane({
 
   async function convert(linkToCustomerId?: string) {
     if (busy || !lead) return;
+    setAskConvert(false);
     setBusy(true); setError("");
     try {
       const res = await fetch(`/api/sales/leads/${lead.id}/convert`, {
@@ -180,9 +183,10 @@ export function LeadPane({
       {lead && (convertible || canWrite) && (
         <div className="pane-f">
           {ownDupDialog}
+          {askConvert ? <ConvertConfirm ar={ar} name={name} busy={busy} onConfirm={() => void convert()} onClose={() => setAskConvert(false)} /> : null}
           {convertible && (
-            <button type="button" className="btn p" onClick={() => void convert()} disabled={busy} aria-busy={busy || undefined} data-testid="convert-lead">
-              {busy ? (ar ? "جارٍ التحويل…" : "Converting…") : (ar ? "تحويل إلى عميل" : "Convert to customer")}
+            <button type="button" className="btn p" onClick={() => setAskConvert(true)} disabled={busy} aria-busy={busy || undefined} data-testid="convert-lead">
+              {busy ? (ar ? "جارٍ التحويل…" : "Converting…") : (ar ? "حوّله لفرصة" : "Convert to customer")}
             </button>
           )}
           {/* The activity form lives on the lead's page; this takes you to it. */}
@@ -192,5 +196,15 @@ export function LeadPane({
         </div>
       )}
     </aside>
+  );
+}
+
+/** P2 ب3 (Figma 8أ): «حوّله لفرصة» says what it creates before it does. */
+export function ConvertConfirm({ ar, name, busy, onConfirm, onClose }: { ar: boolean; name: string; busy?: boolean; onConfirm: () => void; onClose: () => void }) {
+  return (
+    <ResultConfirm ar={ar} testId="convert-confirm" busy={busy} onConfirm={onConfirm} onClose={onClose}
+      title={ar ? <>تحوّل «<bdi>{name}</bdi>» لفرصة؟</> : <>Make «<bdi>{name}</bdi>» a deal?</>}
+      body={ar ? "بينشأ عميل جديد وصفقة باسمك، والعميل المحتمل يتقفل." : "A new customer and a deal are created in your name, and the lead is closed."}
+      confirmLabel={ar ? "حوّله" : "Convert"} />
   );
 }

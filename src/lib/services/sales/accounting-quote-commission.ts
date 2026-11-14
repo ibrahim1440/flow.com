@@ -94,8 +94,9 @@ export async function onAccountingQuoteIssued(tx: Tx, quoteId: string, actorId: 
 }
 
 /** Has anything been paid against this quotation (its order's collections, its invoices' applied receipts)? */
-export async function paidAgainst(db: Db, q: { id: string; quoteNumber: string }): Promise<boolean> {
-  const orders = await db.order.findMany({ where: { quotationNumber: q.quoteNumber }, select: { id: true } });
+export async function paidAgainst(db: Db, q: { id: string; quoteNumber: string | null }): Promise<boolean> {
+  // An unnumbered draft (owner decision, quote-45 round) has no order by number — never match the orders WITHOUT one.
+  const orders = q.quoteNumber ? await db.order.findMany({ where: { quotationNumber: q.quoteNumber }, select: { id: true } }) : [];
   const orderIds = orders.map((o) => o.id);
   const invoices = orderIds.length ? await db.salesInvoice.findMany({ where: { orderId: { in: orderIds } }, select: { id: true } }) : [];
   const invoiceIds = invoices.map((i) => i.id);

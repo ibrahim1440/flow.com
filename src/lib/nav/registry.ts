@@ -1293,6 +1293,11 @@ export function routeAllowed(v: Viewer, pathname: string): boolean {
     if (n.adminOnly && v.role !== "admin") return false;
     if (n.blockRouteForRep && isRep(v)) return false;
     if (!n.anyOf || n.anyOf.length === 0) return true;
+    // P2 ERR-21 (owner QA): a sales rep opening a manager's screen by its address (commission plans, team goals, sales
+    // settings, receivables…) saw its buttons and «ليست لديك صلاحية», or a page stuck on «جاري التحميل…». For a rep the
+    // node's FULL requirement is checked — sub-privileges and requiresAll too, as the menus do — so the one block screen
+    // («لا يمكنك فتح هذه الشاشة») answers instead. Everyone else keeps the module-only rule above.
+    if (isRep(v)) return (!n.requiresAll || n.requiresAll.every((a) => holds(v, a))) && n.anyOf.some((r) => meets(v, r));
     return n.anyOf.some((r) => meetsModule(v, r));
   });
 }

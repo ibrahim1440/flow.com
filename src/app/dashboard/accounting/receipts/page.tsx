@@ -117,7 +117,7 @@ function Receipts() {
                     <td className="acct-hide-m">{L(METHOD[r.paymentMethod]?.[0] ?? r.paymentMethod, METHOD[r.paymentMethod]?.[1] ?? r.paymentMethod)}</td>
                     <td className="acct-hide-m hr-num">{day(r.collectedAt)}</td>
                     <td className="acct-hide-m">{r.submittedBy.name}</td>
-                    <td>{view === "pending" ? <AgeChip r={r} /> : <StatusChip r={r} />}{list.data?.releases?.[r.id] ? <span className="hr-dot tone-warning" data-testid={`rct-releases-${r.id}`}><span>{L(`يفك الطلب #${list.data.releases[r.id]}`, `Releases order #${list.data.releases[r.id]}`)}</span></span> : null}</td>
+                    <td>{view === "pending" ? <AgeChip r={r} /> : <StatusChip r={r} />}{list.data?.releases?.[r.id] ? <span className="hr-dot tone-warning" data-testid={`rct-releases-${r.id}`}><span>{L(`يفتح قفل الطلب #${list.data.releases[r.id]}`, `Releases order #${list.data.releases[r.id]}`)}</span></span> : null}</td>
                     <td><Btn size="sm" variant={r.can.confirm ? "primary" : "ghost"} onClick={() => setOpenId(r.id)} data-testid={`rct-open-${r.id}`}>{r.can.confirm ? L("مراجعة", "Review") : L("عرض", "View")}</Btn></td>
                   </tr>
                 ))}

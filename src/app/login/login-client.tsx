@@ -7,7 +7,6 @@ import { Languages, WifiOff } from "lucide-react";
 import { PIN_LENGTH } from "@/lib/pin-policy";
 import { cameForExpiredSession, SESSION_EXPIRED_AR, SESSION_EXPIRED_EN } from "@/lib/session-expired";
 import { IDLE_OUT_KEY, IDLE_REASON, SESSION_IDLE_AR, SESSION_IDLE_EN, safeNext } from "@/lib/auth/idle";
-import { DesktopRecommendedNotice } from "@/components/shell/DesktopRecommendedNotice";
 import { SHOW_PIN_SIGN_IN } from "@/lib/simple-mode";
 import { BrandMark } from "@/components/brand/BrandMark";
 import "@/components/shell/direction-2.1.css";
@@ -16,6 +15,8 @@ import { LoginLangContext, LoginTaglineContext } from "./lang-context";
 import { taglineLines } from "@/lib/login-tagline";
 import { applyDocumentLang, toggleAriaLabel, writeLangCookie } from "@/lib/i18n/language-switch";
 import { RiyalFont } from "@/components/fonts/RiyalFont";
+import { clearAllDrafts } from "@/lib/drafts/local-draft";
+import { arCount, AR_MINUTES, AR_SECONDS } from "@/lib/i18n/ar-count";
 
 // Owner security decision (16 Oct, Option A). Three ways in:
 //   · "pin"           — PIN alone: operational accounts only (a privileged account is refused
@@ -31,7 +32,7 @@ import { RiyalFont } from "@/components/fonts/RiyalFont";
 type Mode = "pin" | "username_pin" | "password";
 type Lang = "ar" | "en";
 type Attempt = { url: string; body: Record<string, unknown>; step: Mode | "mfa" };
-type Note = { tone: "danger" | "warning" | "info"; title: string; body?: string; kind: "invalid" | "paused" | "offline" | "other" };
+type Note = { tone: "danger" | "warning" | "info"; title: string; body?: string; kind: "invalid" | "paused" | "offline" | "other"; until?: number; locked?: boolean };
 
 const PIN_AUTO_SUBMIT_LENGTH = PIN_LENGTH;
 const PIN_MAX_LENGTH = PIN_LENGTH;
@@ -53,6 +54,11 @@ const T = {
     invalidPassword: "اسم المستخدم أو كلمة المرور غير صحيحة.", invalidUserPin: "اسم المستخدم أو الرمز غير صحيح.", invalidPin: "الرمز غير صحيح.",
     hintPassword: "تحقّق من لغة لوحة المفاتيح ومفتاح الأحرف الكبيرة، ثم أعد المحاولة.", hintPin: "تحقّق من الرمز ثم أعد المحاولة.",
     pausedTitle: "توقفت محاولات الدخول مؤقتًا.", pausedBody: "تكررت المحاولات غير الناجحة. حاول مجددًا لاحقًا، أو اطلب من مسؤول النظام إعادة تعيين بيانات الدخول.",
+    // P2 SEC-09 (approved Figma P2 6أ / 6ب): the progressive delay and the temporary lock.
+    // Abu Fahd R2: the count agrees with its noun («22 ثانية», «3 ثوانٍ»); the lock text is neutral — it shows on a device the
+    // account does not trust, so it never promises that «this» phone gets in.
+    waitTitle: "محاولات غلط كثيرة", waitBody: (n: number) => `جرّب بعد ${arCount(n, AR_SECONDS)}.`, waitBtn: (n: number) => `انتظر ${n} ث`,
+    lockedTitle: (m: number) => `الدخول من هالجهاز موقوف ${arCount(m, AR_MINUTES)}`, lockedBody: "بسبب محاولات دخول غلط كثيرة على الحساب. جرّب بعد انتهاء المدة، أو كلّم مسؤول النظام يفتح القفل.",
     offlineTitle: "لا يوجد اتصال بالشبكة.", offlineBody: "لم تُرسل بيانات الدخول. تحقّق من اتصال الجهاز ثم أعد المحاولة.",
     failed: "تعذّر الدخول", lang: "English", system: "نظام إدارة حقبة",
   },
@@ -72,6 +78,8 @@ const T = {
     invalidPassword: "The username or password is incorrect.", invalidUserPin: "The username or PIN is incorrect.", invalidPin: "The PIN is incorrect.",
     hintPassword: "Check the keyboard language and Caps Lock, then try again.", hintPin: "Check the PIN, then try again.",
     pausedTitle: "Sign-in attempts are paused.", pausedBody: "There were too many unsuccessful attempts. Try again later, or ask your system administrator to reset your sign-in.",
+    waitTitle: "Too many wrong attempts", waitBody: (n: number) => `Try again in ${n} ${n === 1 ? "second" : "seconds"}.`, waitBtn: (n: number) => `Wait ${n} s`,
+    lockedTitle: (m: number) => `Sign-in from this device is paused for ${m} minutes`, lockedBody: "Because of too many wrong sign-ins on the account. Try again when the time is up, or ask your system administrator to unlock it.",
     offlineTitle: "No network connection.", offlineBody: "Your sign-in details were not sent. Check the device's connection, then try again.",
     failed: "Sign-in failed", lang: "العربية", system: "Hiqbah management system",
   },
@@ -102,6 +110,17 @@ export default function LoginClient() {
   const [challenge, setChallenge] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [note, setNote] = useState<Note | null>(null);
+  // P2 gate B1: the sign-in page is where every sign-out ends (the menu, idle, expiry, a session revoked elsewhere): no
+  // unsaved draft of the previous person survives on this device.
+  useEffect(() => { clearAllDrafts(); }, []);
+  // P2 SEC-09: the seconds left of a server-held wait (re-read every second while one runs).
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  const holdLeft = note?.until ? Math.max(0, Math.ceil((note.until - nowTick) / 1000)) : 0;
+  useEffect(() => {
+    if (!note?.until) return;
+    const id = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [note?.until]);
   const [recover, setRecover] = useState(false);
   const [loading, setLoading] = useState(false);
   const [lastAttempt, setLastAttempt] = useState<Attempt | null>(null);
@@ -141,7 +160,14 @@ export default function LoginClient() {
   /** The approved notice for a refused attempt: wrong details (AU-01b), paused (AU-10), or the server's own words. */
   const noteFor = useCallback((status: number, data: { error?: string; errorAr?: string } | null, step: Mode | "mfa"): Note => {
     const server = (lang === "ar" ? data?.errorAr ?? data?.error : data?.error) ?? t.failed;
-    if (status === 429) return { tone: "warning", title: t.pausedTitle, body: t.pausedBody, kind: "paused" };
+    if (status === 429) {
+      // P2 SEC-09: the server says how long — a short wait counts down on the button; a lock names its minutes.
+      const d = data as { code?: string; retryAfterSec?: number } | null;
+      const sec = Math.max(1, Math.round(Number(d?.retryAfterSec) || 0));
+      if (d?.code === "LOGIN_WAIT") return { tone: "warning", title: t.waitTitle, body: t.waitBody(sec), kind: "paused", until: Date.now() + sec * 1000 };
+      if (d?.code === "LOGIN_LOCKED") return { tone: "danger", title: t.lockedTitle(Math.max(1, Math.ceil(sec / 60))), body: t.lockedBody, kind: "paused", until: Date.now() + sec * 1000, locked: true };
+      return { tone: "warning", title: t.pausedTitle, body: t.pausedBody, kind: "paused" };
+    }
     if (status === 401 && step !== "mfa" && data?.error === "Invalid credentials") {
       const title = step === "password" ? t.invalidPassword : step === "username_pin" ? t.invalidUserPin : t.invalidPin;
       return { tone: "danger", title, body: step === "password" ? t.hintPassword : t.hintPin, kind: "invalid" };
@@ -150,13 +176,14 @@ export default function LoginClient() {
   }, [lang, t]);
 
   // "refused": the server answered no; "offline": nothing reached it (the attempt is kept for «إعادة المحاولة»).
-  const post = useCallback(async ({ url, body, step }: Attempt): Promise<"ok" | "refused" | "offline"> => {
+  // "throttled": a 429 — the server did not check the password / PIN, so what was typed is kept for after the wait.
+  const post = useCallback(async ({ url, body, step }: Attempt): Promise<"ok" | "refused" | "throttled" | "offline"> => {
     setNote(null);
     setLoading(true);
     try {
       const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const data = await safeJson(res);
-      if (!res.ok) { setNote(noteFor(res.status, data, step)); return "refused"; }
+      if (!res.ok) { setNote(noteFor(res.status, data, step)); return res.status === 429 ? "throttled" : "refused"; }
       if (data?.mfaRequired && data.challenge) { setChallenge(data.challenge); setCode(""); return "ok"; }
       // A new session: the last one's «signed out for inactivity» no longer speaks for anything (D20.1 R2-L1).
       try { window.localStorage.removeItem(IDLE_OUT_KEY); } catch { /* storage unavailable */ }
@@ -232,7 +259,7 @@ export default function LoginClient() {
       {note.kind === "offline" ? <WifiOff aria-hidden className="lg-note-ico" /> : null}
       <div className="lg-note-txt">
         <b>{note.title}</b>
-        {note.body ? <span>{note.body}</span> : null}
+        {note.body ? <span>{note.until && !note.locked && holdLeft > 0 ? t.waitBody(holdLeft) : note.body}</span> : null}
       </div>
     </div>
   ) : null;
@@ -241,9 +268,9 @@ export default function LoginClient() {
   const primary = (label: string, onClick: () => void, disabled: boolean, testId: string) => {
     const offline = note?.kind === "offline" && lastAttempt;
     const btn = (
-      <button type="button" className="lg-btn" data-testid={testId} disabled={disabled || loading} aria-busy={loading || undefined}
+      <button type="button" className="lg-btn" data-testid={testId} disabled={disabled || loading || holdLeft > 0} aria-busy={loading || undefined}
         onClick={offline ? retryLast : onClick}>
-        {loading ? t.verifying : offline ? t.retry : label}
+        {loading ? t.verifying : offline ? t.retry : holdLeft > 0 && !note?.locked ? t.waitBtn(holdLeft) : label}
       </button>
     );
     return loading ? <div className="lg-busyrow">{btn}<span className="lg-sukun" aria-hidden /></div> : btn;
@@ -300,8 +327,8 @@ export default function LoginClient() {
             </div>
           </div>
         ) : null}
-        {/* Phase 1 is desktop-first: below 1280 px only, in flow above the form (never over it). */}
-        <DesktopRecommendedNotice lang={lang} />
+        {/* Abu Fahd (P2-B gate): no «desktop recommended» line here — the rep signs in from the phone, and who signs in
+            is not known yet; after sign-in the dashboard shows it only where it was meant (showsDesktopNotice). */}
         {challenge ? (
           <div className="lg-form" data-testid="login-mfa">
             <div className="lg-head">

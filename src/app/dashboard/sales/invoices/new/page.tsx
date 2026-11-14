@@ -3,6 +3,7 @@
 // A new invoice draft: «فاتورة يدوية» (Figma ZT-14) or «إنشاء فاتورة من الطلب» (?orderId=…, the order's lines with
 // what is ordered, delivered, already invoiced and left; full, partial or delivered-only). Saving creates a DRAFT
 // (no number) and opens it; issuing is a separate, privileged step on the draft.
+import { withRiyal } from "@/lib/money/riyal";
 import { aboveLimit } from "@/lib/services/sales/discount-measure";
 import { NewCustomerDialog, type CreatedCustomer } from "@/components/customers/new-customer-form";
 import { canEdit, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
@@ -21,7 +22,9 @@ import { useAccountantView } from "../../../accounting/_ui/qoyod-pages";
 import { PartyCard } from "@/components/forms/QoyodForm";
 import { UNASSIGNED_LOCATION, useLocations } from "../../../accounting/_ui/locations";
 import { CreditLimitDialog, type CreditRefusal } from "@/components/credit/credit-ui";
-import { DirectDealPicker, DoneCard, ModeBadge, PaymentSection, SampleDealPicker, samplePaidText, SampleNotes, effectiveDiscounts, isSaleMode, lineForSku, modeLine, sendMode, useModeData, type ModeDone, type SaleMode } from "../_ui/sale-mode";
+import { DraftBanner, useLeaveGuard, useLocalDraft } from "@/components/drafts/LeaveGuard";
+import { useD21Phone } from "@/components/shell/page-context";
+import { DirectDealPicker, DoneCard, ModeBadge, OtherOwnerNotice, PaymentSection, SaleReview, SampleDealPicker, samplePaidText, SampleNotes, effectiveDiscounts, isSaleMode, lineForSku, modeLine, sendMode, useModeData, type ModeDone, type SaleMode } from "../_ui/sale-mode";
 
 type Customer = { id: string; name: string; nameAr: string | null; vatNumber: string | null; commercialRegNo: string | null; city: string | null; address: string | null; paymentTermsDays: number | null;
   nationalBuildingNo?: string | null; nationalStreet?: string | null; nationalDistrict?: string | null; nationalCity?: string | null; nationalPostalCode?: string | null };
@@ -222,6 +225,35 @@ function Manual({ initialQ, mode = null, initialCustomerId, opportunityId }: { i
   const overLimit = room != null && modeGross > room;
   const willHold = mode === "direct-sale" && overLimit && !needsApproval && (payment === "CASH" || payment === "CARD");
   const modeReady = !!mode && !!customer && totals.ok && lines.length > 0 && lines.every((l) => !!l.productSkuId) && (mode === "sample" || !!payment);
+  // P2 ب5 (owner): «أرسل» on the form opens «راجع قبل الإرسال»; only «أرسل» there sends the sale.
+  const [reviewing, setReviewing] = useState(false);
+  // P2 ب6 / UXM-20: the deal and the commission will be the account owner's (a deal of the rep's own chosen: theirs).
+  const otherOwner = mode === "direct-sale" && md.accountOwnedByOther && !(directDeal && md.directDeals.find((d) => d.id === directDeal)?.mine);
+  // Gate Q16: the rep's own open deal on another rep's customer — the deal stays theirs, the owner is still told.
+  const keptOwn = mode === "direct-sale" && md.accountOwnedByOther && !otherOwner;
+  // P2 ب9 / UXM-02: the unsaved sale / sample, kept on this device (never the receipt image).
+  // Abu Fahd R2 (M2): only what the PERSON entered makes the form dirty — the customer the page was opened on («＋» from
+  // the customer) is not input; a customer they picked, an item, a payment choice, a reference or a note is.
+  const dirty = !!mode && !done && ((!!customer && customer.id !== initialCustomerId) || lines.some((l) => !!l.productSkuId) || !!notes.trim()
+    || (!!payment && !!md.can?.collect) || !!reference.trim()); // «آجل» forced for a rep who may not collect is not a choice
+  const draft = useLocalDraft(viewer?.id, mode ? `invoice-${mode}` : null, { customer, lines, payment, reference, notes, pickedDeal, directPick }, dirty, (d) => {
+    if (initialCustomerId && d.customer && d.customer.id !== initialCustomerId) return false;
+    prefilled.current = true;
+    if (d.customer) pickCustomer(d.customer);
+    if (Array.isArray(d.lines) && d.lines.length) setLines(d.lines);
+    setPayment(d.payment ?? null); setReference(d.reference ?? ""); setNotes(d.notes ?? "");
+    setPickedDeal(d.pickedDeal ?? null); setDirectPick(d.directPick ?? null);
+  });
+  const resetForm = () => {
+    draft.clear();
+    // The page opened for a customer («＋» from the customer) stays on that customer; only what was entered goes.
+    if (askedFirst) pickCustomer(askedFirst); else setCustomer(null);
+    setLines([mode ? modeLine(mode)() : emptyLine()]); setPayment(null); setReference(""); setReceipt(null); setNotes("");
+    setPickedDeal(null); setDirectPick(null); setTried(false);
+  };
+  const guard = useLeaveGuard({ ar: isAr, dirty, onLeave: () => draft.clear() });
+  // UXM-03 (approved Figma 9أ/9ب): the input page has its own sticky bar — no tab bar under it on the phone.
+  useD21Phone(mode ? { title: mode === "sample" ? L("إرسال عيّنة", "Send a sample") : L("بيع مباشر", "Direct sale"), back: "/dashboard/my-day", ownBar: true, replacesRepBar: true } : null);
   const sendSale = async () => {
     setTried(true);
     if (!mode || !customer || !modeReady || sending) return;
@@ -237,9 +269,11 @@ function Manual({ initialQ, mode = null, initialCustomerId, opportunityId }: { i
     setSending(true);
     const r = await sendMode(mode, body, payment === "BANK_TRANSFER" ? receipt : null, L);
     setSending(false);
-    if (r.ok) setDone(r.done);
+    // Sent: the draft is done with. Not sent: back to the form, where the error (or the credit dialog) is shown.
+    if (r.ok) { draft.clear(); setDone(r.done); } else setReviewing(false);
+    if (r.ok) return;
     // P1 ERR-02: over the credit limit — the figures and «اطلب اعتماد المشرف» (Figma 2033:28), not a bare error line.
-    else if (r.credit && mode === "direct-sale") { setCreditBody(body); setCreditRefusal(r.credit); }
+    if (r.credit && mode === "direct-sale") { setCreditBody(body); setCreditRefusal(r.credit); }
     else w.setError(r.error);
   };
   const [creditRefusal, setCreditRefusal] = useState<CreditRefusal | null>(null);
@@ -272,6 +306,25 @@ function Manual({ initialQ, mode = null, initialCustomerId, opportunityId }: { i
     if (!res.ok) { w.setError(b.error ?? b.errorEn ?? `HTTP ${res.status}`); return; }
     router.push(then === "issue" ? `/dashboard/sales/invoices/${b.id}` : `/dashboard/sales/invoices/${b.id}/print${then === "pdf" ? "?pdf=1" : ""}`);
   };
+  // What «أرسل» does, as the state really is (أبو فهد B4) — UXM-03: said inside the page, above the sticky bar.
+  const footText = !mode ? null : (mode === "sample"
+                ? (modeGross > 0
+                  ? <>{L("لما تضغط «أرسل»: تنسوّى شحنة العيّنة وتروح للتحضير · ", "On «Send»: the sample goes to preparation · ")}{samplePaidText(modeGross, L)}</>
+                  : L("لما تضغط «أرسل»: تنسوّى شحنة العيّنة وتروح للتحضير · الفاتورة بصفر تروح للمحاسب يصدرها · ما فيه دفع", "On «Send»: the sample goes to preparation · the zero invoice goes to the accountant to issue · no payment"))
+                : needsApproval
+                  ? L("لما تضغط «أرسل»: يروح لمشرفك يوافق — بعدها الطلب للتحضير والفاتورة للمحاسب", "On «Send»: it goes to your supervisor — then the order to preparation and the invoice to the accountant")
+                  : willHold
+                    // Abu Fahd R2 P5: «هالطلب يتجاوز الحد» when only this order goes over what is left.
+                    ? (room != null && room > 0
+                      ? L("لما تضغط «أرسل»: ينسوّى الطلب، بس هالطلب يتجاوز الحد المتبقي — يوقف «بانتظار تأكيد استلام المبلغ» لين يأكّد المحاسب، بعدها يروح للتحضير", "On «Send»: the order is created, but this order goes over what is left of the limit — it is held «awaiting payment confirmation» until the accountant confirms, then it goes to preparation")
+                      : L("لما تضغط «أرسل»: ينسوّى الطلب، بس العميل فوق حد الائتمان — يوقف «بانتظار تأكيد استلام المبلغ» لين يأكّد المحاسب، بعدها يروح للتحضير", "On «Send»: the order is created, but the customer is over the credit limit — it is held «awaiting payment confirmation» until the accountant confirms, then it goes to preparation"))
+                  : payment === "CREDIT" && overLimit
+                    ? (room != null && room > 0
+                      ? L("لما تضغط «أرسل»: هالطلب يتجاوز الحد المتبقي — بيطلب منك اعتماد المشرف قبل ما ينسوّى", "On «Send»: this order goes over what is left of the limit — it will ask for a supervisor's approval first")
+                      : L("لما تضغط «أرسل»: العميل فوق حد الائتمان — بيطلب منك اعتماد المشرف قبل ما ينسوّى", "On «Send»: the customer is over the credit limit — it will ask for a supervisor's approval first"))
+                  : payment === "CREDIT"
+                    ? L("لما تضغط «أرسل»: ينسوّى الطلب ويروح للتحضير · تروح الفاتورة للمحاسب يصدرها · ما ينسجل تحصيل — الفاتورة تنتظر الدفع", "On «Send»: the order goes to preparation · the invoice goes to the accountant to issue · no collection is recorded — the invoice waits for payment")
+                    : L("لما تضغط «أرسل»: ينسوّى الطلب ويروح للتحضير · تروح الفاتورة للمحاسب يصدرها · ينسجل التحصيل", "On «Send»: the order goes to preparation · the invoice goes to the accountant to issue · the collection is recorded"));
   if (mode && done) {
     return (
       <InvShell title={L("فاتورة مبيعات جديدة", "New sales invoice")} testId="invoice-new" bare={simple}>
@@ -280,16 +333,34 @@ function Manual({ initialQ, mode = null, initialCustomerId, opportunityId }: { i
       </InvShell>
     );
   }
+  if (mode === "direct-sale" && reviewing && customer && totals.priced) {
+    const pr = totals.priced;
+    return (
+      <InvShell title={L("فاتورة مبيعات جديدة", "New sales invoice")} testId="invoice-new" bare={simple}>
+        {guard.dialog}
+        <SaleReview customer={customer.nameAr || customer.name}
+          lines={lines.map((l, i) => ({ key: String(i), name: l.description || l.skuCode || "—", qty: l.quantity, net: pr.lines[i]?.lineNet.toFixed(2) ?? "0" }))}
+          taxable={pr.taxableTotal.toFixed(2)} tax={pr.taxTotal.toFixed(2)} grand={pr.grandTotal.toFixed(2)}
+          payment={payment} receipt={payment === "BANK_TRANSFER" && !!receipt} otherOwner={otherOwner} keptOwn={keptOwn} consequence={footText}
+          sendLabel={needsApproval ? L("أرسل للموافقة", "Send for approval") : L("أرسل", "Send")} sending={sending}
+          onSend={() => void sendSale()} onBack={() => setReviewing(false)} />
+      </InvShell>
+    );
+  }
   return (
     <InvShell title={L("فاتورة مبيعات جديدة", "New sales invoice")} testId="invoice-new" bare={simple}>
+      {guard.dialog}
+      {mode && draft.restored ? <DraftBanner ar={isAr} receipt={mode === "direct-sale"} onKeep={draft.dismiss} onDiscard={resetForm} /> : null}
       {mode ? <ModeBadge mode={mode} lockTax={lockTax} gross={modeGross} /> : null}
       <Msg error={w.error ?? (mode ? md.error : null)} />
       {creditRefusal && customer ? <CreditLimitDialog ar={isAr} customerId={customer.id} kind="DIRECT_SALE" credit={creditRefusal} onClose={() => setCreditRefusal(null)} resume={creditBody ? { path: "/api/sales/direct-sale", body: creditBody } : undefined} /> : null}
       <div className="acct-card">
         <h2>{L("العميل", "Customer")}</h2>
-        {customer ? (
+        {customer ? (<>
           <div className="acct-row"><b data-testid="picked-customer"><bdi>{customer.nameAr || customer.name}</bdi></b><button type="button" className="hr-btn is-sm" onClick={() => setCustomer(null)}>{L("تغيير", "Change")}</button></div>
-        ) : (
+          {/* Gate A2: said as soon as the customer is chosen, not only in the review. */}
+          {otherOwner ? <OtherOwnerNotice testId="invoice-form-other-owner" /> : keptOwn ? <OtherOwnerNotice kept testId="invoice-form-other-owner" /> : null}
+        </>) : (
           <>
             <label className="hr-field"><span className="hr-label">{L("ابحث عن العميل", "Find the customer")}</span>
               <input className="hr-input" value={q} onChange={(e) => setQ(e.target.value)} data-testid="customer-search" /></label>
@@ -372,7 +443,7 @@ function Manual({ initialQ, mode = null, initialCustomerId, opportunityId }: { i
                 {needsApproval
                   ? L(`خصم ${topEff}٪ من سعر القائمة فوق الحد (${md.can.threshold}٪). لما ترسل يروح لمشرفك يوافق — الطلب ينتظر، والفاتورة ما تروح للمحاسب قبل الموافقة.`, `${topEff}% off the list price is above the limit (${md.can.threshold}%). When you send, it goes to your supervisor — the order waits, and the invoice reaches the accountant only after the approval.`)
                   : lockTax
-                    ? L(`لين ${md.can.threshold}٪ بدون موافقة. فوقها يروح لمشرفك يوافق. السعر والخصم تقدر تعدّلها — الضريبة 15٪ ثابتة، والمحاسب يراجع قبل ما يصدر`, `Up to ${md.can.threshold}% needs no approval; above it your supervisor approves. You can change the price and the discount — VAT is a fixed 15%, and the accountant reviews before issue`)
+                    ? L(`لين ${md.can.threshold}٪ بدون موافقة. فوقها يروح لمشرفك يوافق. السعر والخصم تقدر تعدّلها — الضريبة 15٪، والمحاسب يراجع قبل ما يصدر`, `Up to ${md.can.threshold}% needs no approval; above it your supervisor approves. You can change the price and the discount — VAT is 15%, and the accountant reviews before issue`)
                     : L(`لين ${md.can.threshold}٪ بدون موافقة. فوقها يروح لمشرفك يوافق. السعر والخصم والضريبة تقدر تعدّلها — المحاسب يراجع قبل ما يصدر`, `Up to ${md.can.threshold}% needs no approval; above it your supervisor approves. You can change the price, discount and VAT — the accountant reviews before issue`)}
               </p>
             ) : null}
@@ -386,29 +457,17 @@ function Manual({ initialQ, mode = null, initialCustomerId, opportunityId }: { i
           {qoyod ? <div className="acct-card" data-testid="buyer-card">{buyerBlock}</div> : null}
           {mode === "direct-sale" ? <PaymentSection can={md.can} payment={payment} setPayment={setPayment} reference={reference} setReference={setReference} receipt={receipt} setReceipt={setReceipt} pending={needsApproval} /> : null}
           {mode ? (
-            <div className="acct-foot inv-mode-foot" data-testid="invoice-mode-foot">
-              {/* أبو فهد (B4 / wording): what «أرسل» does, as the state really is — never a line that contradicts it. */}
+            <div className="inv-mode-what">
               {mode === "direct-sale" && room != null && customer ? <span className={`acct-hint${overLimit ? " is-warn" : ""}`} data-testid="invoice-mode-limit">{L(`باقي من حد ${customer.nameAr || customer.name}: `, `Left on ${customer.name}'s limit: `)}<bdi className="hr-num">{money(room.toFixed(2))}</bdi> {L("⃁", "SAR")}</span> : null}
-              <span className={`acct-hint${willHold ? " is-warn" : ""}`} data-testid="invoice-mode-foot-text">{mode === "sample"
-                ? (modeGross > 0
-                  ? <>{L("لما تضغط «أرسل»: تنسوّى شحنة العيّنة وتروح للتحضير · ", "On «Send»: the sample goes to preparation · ")}{samplePaidText(modeGross, L)}</>
-                  : L("لما تضغط «أرسل»: تنسوّى شحنة العيّنة وتروح للتحضير · الفاتورة بصفر تروح للمحاسب يصدرها · ما فيه دفع", "On «Send»: the sample goes to preparation · the zero invoice goes to the accountant to issue · no payment"))
-                : needsApproval
-                  ? L("لما تضغط «أرسل»: يروح لمشرفك يوافق — بعدها الطلب للتحضير والفاتورة للمحاسب", "On «Send»: it goes to your supervisor — then the order to preparation and the invoice to the accountant")
-                  : willHold
-                    // Abu Fahd R2 P5: «هالطلب يتجاوز الحد» when only this order goes over what is left.
-                    ? (room != null && room > 0
-                      ? L("لما تضغط «أرسل»: ينسوّى الطلب، بس هالطلب يتجاوز الحد المتبقي — يوقف «بانتظار تأكيد استلام المبلغ» لين يأكّد المحاسب، بعدها يروح للتحضير", "On «Send»: the order is created, but this order goes over what is left of the limit — it is held «awaiting payment confirmation» until the accountant confirms, then it goes to preparation")
-                      : L("لما تضغط «أرسل»: ينسوّى الطلب، بس العميل فوق حد الائتمان — يوقف «بانتظار تأكيد استلام المبلغ» لين يأكّد المحاسب، بعدها يروح للتحضير", "On «Send»: the order is created, but the customer is over the credit limit — it is held «awaiting payment confirmation» until the accountant confirms, then it goes to preparation"))
-                  : payment === "CREDIT" && overLimit
-                    ? (room != null && room > 0
-                      ? L("لما تضغط «أرسل»: هالطلب يتجاوز الحد المتبقي — بيطلب منك اعتماد المشرف قبل ما ينسوّى", "On «Send»: this order goes over what is left of the limit — it will ask for a supervisor's approval first")
-                      : L("لما تضغط «أرسل»: العميل فوق حد الائتمان — بيطلب منك اعتماد المشرف قبل ما ينسوّى", "On «Send»: the customer is over the credit limit — it will ask for a supervisor's approval first"))
-                  : payment === "CREDIT"
-                    ? L("لما تضغط «أرسل»: ينسوّى الطلب ويروح للتحضير · تروح الفاتورة للمحاسب يصدرها · ما ينسجل تحصيل — الفاتورة تنتظر الدفع", "On «Send»: the order goes to preparation · the invoice goes to the accountant to issue · no collection is recorded — the invoice waits for payment")
-                    : L("لما تضغط «أرسل»: ينسوّى الطلب ويروح للتحضير · تروح الفاتورة للمحاسب يصدرها · ينسجل التحصيل", "On «Send»: the order goes to preparation · the invoice goes to the accountant to issue · the collection is recorded")}</span>
+              <p className={`acct-hint${willHold ? " is-warn" : ""}`} data-testid="invoice-mode-foot-text">{footText}</p>
+            </div>
+          ) : null}
+          {mode ? (
+            <div className="acct-foot inv-mode-foot" data-testid="invoice-mode-foot">
+              <span className="inv-mode-total" data-testid="invoice-mode-total"><b className="hr-num"><bdi>{withRiyal(money(modeGross.toFixed(2)), L("ar", "en") as "ar" | "en")}</bdi></b><small>{L("شامل الضريبة", "incl. VAT")}</small></span>
+              {/* أبو فهد (B4 / wording): what «أرسل» does, as the state really is — never a line that contradicts it. */}
               <span className="acct-actions">
-                <button type="button" className="hr-btn is-primary" disabled={sending || ((!simple || tried) && !modeReady)} onClick={sendSale} data-testid="invoice-mode-send">{sending ? L("نرسل…", "Sending…") : needsApproval ? L("أرسل للموافقة", "Send for approval") : repeatSample ? L("أرسل للمدير يوافق", "Send to the manager to approve") : L("أرسل", "Send")}</button>
+                <button type="button" className="hr-btn is-primary" disabled={sending || ((!simple || tried) && !modeReady)} onClick={mode === "direct-sale" ? () => { setTried(true); if (modeReady) { w.setError(null); setReviewing(true); window.scrollTo({ top: 0 }); } } : sendSale} data-testid="invoice-mode-send">{sending ? L("نرسل…", "Sending…") : needsApproval ? L("أرسل للموافقة", "Send for approval") : repeatSample ? L("أرسل للمدير يوافق", "Send to the manager to approve") : L("أرسل", "Send")}</button>
                 <Link className="hr-btn" href="/dashboard/my-day">{L("إلغاء", "Cancel")}</Link>
               </span>
             </div>

@@ -1,8 +1,8 @@
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import {
-  extractIp, hashRateLimitKey, pruneExpired, isIpRateLimited, isPairRateLimited, isIdentifierRateLimited,
-  recordFailedAttempt, clearAttempts, recordPinFailure, clearPinAttempts,
+  extractIp, hashRateLimitKey, pruneExpired, isIpRateLimited, isPairRateLimited,
+  recordFailedAttempt, recordPinFailure,
   isPinSpaceConstrained, isIpQuietForPin, isIpPinRateLimited,
 } from "@/lib/rate-limit";
 import { validatePin } from "@/lib/pin-policy";
@@ -12,6 +12,9 @@ import { isEnrolled, mfaConfigured } from "@/lib/auth/mfa";
 import { authAudit, completeSignIn, signChallenge, INVALID, MFA_UNAVAILABLE, TOO_MANY, verifySecret } from "@/lib/auth/sign-in";
 import type { SessionMethod } from "@/lib/auth/session";
 import { pinLoginEnabled } from "@/lib/auth/pin-login";
+import { afterLoginFailure, loginThrottle, pinOnlyAccountLock, pinOnlyDelay } from "@/lib/auth/login-throttle";
+import { deviceIdFromCookieHeader } from "@/lib/auth/device";
+import { arCount, AR_MINUTES, AR_SECONDS } from "@/lib/i18n/ar-count";
 
 // W0 (security, Phase D batch; tightened by Workstations W0, owner decision D4): only "password" is
 // open by default, and it is the default when `method` is omitted. "pin" and "username_pin" answer
@@ -44,6 +47,23 @@ async function byUsername(username: string) {
 }
 
 
+
+/**
+ * P2 SEC-09: the answer while an attempt must wait or the username is locked — the same for an existing and a missing
+ * account (nothing to learn), with when to try again. The password / PIN was not checked.
+ */
+function throttled(g: { kind: "WAIT" | "LOCKED"; retryAfterSec: number }) {
+  const ar = g.kind === "LOCKED"
+    ? `محاولات دخول غلط كثيرة على هالحساب — انقفل مؤقتًا. جرّب بعد ${arCount(Math.ceil(g.retryAfterSec / 60), AR_MINUTES)}، أو اطلب من مسؤول النظام يفتح القفل.`
+    : `انتظر ${arCount(g.retryAfterSec, AR_SECONDS)} وجرّب مرة ثانية.`;
+  const en = g.kind === "LOCKED"
+    ? `Too many wrong sign-ins on this account — it is locked for now. Try again in ${Math.ceil(g.retryAfterSec / 60)} minutes, or ask an administrator to unlock it.`
+    : `Wait ${g.retryAfterSec} seconds and try again.`;
+  const res = NextResponse.json({ error: en, errorAr: ar, errorEn: en, code: g.kind === "LOCKED" ? "LOGIN_LOCKED" : "LOGIN_WAIT", retryAfterSec: g.retryAfterSec }, { status: 429 });
+  res.headers.set("Retry-After", String(g.retryAfterSec));
+  return res;
+}
+
 async function afterFirstFactor(request: Request, employeeId: string, method: SessionMethod) {
   if (await isEnrolled(employeeId)) {
     if (!mfaConfigured()) {
@@ -74,25 +94,41 @@ export async function POST(request: Request) {
     const candidate = shape.pin;
     const identifierHash = hashRateLimitKey("pin:" + candidate);
     await pruneExpired();
+    // P2-B gate R2: the SEC-09 progressive delay, per address (lib/auth/login-throttle.ts pinOnlyDelay) — first.
+    const wait = await pinOnlyDelay(ipHash);
+    if (!wait.ok) return throttled(wait);
     // Throttles before any bcrypt work: per address, per (address, candidate), and — because the
     // candidate IS the identifier — a system-wide bucket against a distributed walk of the space.
     if (await isIpRateLimited(ipHash, 30)) return TOO_MANY();
     if (await isPairRateLimited(ipHash, identifierHash, 10)) return TOO_MANY();
     if ((await isPinSpaceConstrained()) && (!(await isIpQuietForPin(ipHash)) || (await isIpPinRateLimited(ipHash, 3)))) return TOO_MANY();
     const secret = requirePinLookupSecret();
-    const byLookup = await prisma.employee.findFirst({ where: { pinLookup: pinLookup(candidate, secret), active: true }, select: { id: true, role: true, permissions: true, active: true, pin: true } });
+    const byLookup = await prisma.employee.findFirst({ where: { pinLookup: pinLookup(candidate, secret), active: true }, select: { id: true, role: true, permissions: true, active: true, pin: true, username: true } });
     // Finding the row is not authenticating the person: bcrypt over pinVerifierInput decides.
     if (!byLookup || !(await verifySecret(pinVerifierInput(candidate, secret), byLookup.pin))) {
       await recordPinFailure(ipHash, identifierHash);
       return INVALID();
     }
+    const accountUsername = normalizeUsername(byLookup.username);
     if (isPrivilegedStored(byLookup.permissions as string, byLookup.role)) {
       // Same answer and the same counting as a wrong PIN, so a PIN-only attempt learns nothing.
       await recordPinFailure(ipHash, identifierHash);
+      // Gate R2: the PIN proved the account, so the refusal is also evidence against it (the lock and the alerts).
+      if (accountUsername) {
+        await recordFailedAttempt(ipHash, hashRateLimitKey("login:" + accountUsername));
+        await afterLoginFailure({ identifierHash: hashRateLimitKey("login:" + accountUsername), employeeId: byLookup.id, username: accountUsername, request });
+      }
       await authAudit(request, { userId: byLookup.id, action: "PRIVILEGED_PIN_ONLY_REFUSED", result: "REFUSED", reasonCode: "USERNAME_REQUIRED" });
       return INVALID();
     }
-    await clearPinAttempts(ipHash, identifierHash);
+    // Gate R2: the account lock (SEC-09) — the PIN has proved which account; its known device stays exempt.
+    const lock = await pinOnlyAccountLock({ employeeId: byLookup.id, normalizedUsername: accountUsername, deviceId: deviceIdFromCookieHeader(request.headers.get("cookie")) });
+    if (!lock.ok) {
+      await authAudit(request, { userId: byLookup.id, action: "SIGN_IN", result: "REFUSED", reasonCode: "ACCOUNT_LOCKED" });
+      return throttled(lock);
+    }
+    // Gate R2: a success no longer clears the PIN failures (evidence kept, as on the other methods); the per-address
+    // delay restarts from this sign-in (pinOnlyDelay counts only the failures after it).
     return afterFirstFactor(request, byLookup.id, "PIN");
   }
 
@@ -104,17 +140,21 @@ export async function POST(request: Request) {
     const identifierHash = hashRateLimitKey("login:" + u);
     await pruneExpired();
     if (await isIpRateLimited(ipHash, 30)) return TOO_MANY();
-    if (await isPairRateLimited(ipHash, identifierHash, 10)) return TOO_MANY();
-    if (await isIdentifierRateLimited(identifierHash, 20)) return TOO_MANY();
     const secret = requirePinLookupSecret();
     const found = (await byUsername(u)) as Found | null;
+    // P2 SEC-09: the progressive delay and the temporary lock (lib/auth/login-throttle.ts) — before the PIN is checked.
+    const gate = await loginThrottle({ ipHash, identifierHash, employeeId: found?.id ?? null, deviceId: deviceIdFromCookieHeader(request.headers.get("cookie")) });
+    if (!gate.ok) return throttled(gate);
     const ok = await verifySecret(pinVerifierInput(shape.pin, secret), found?.pin);
     if (!found || !ok) {
       await recordFailedAttempt(ipHash, identifierHash);
+      await afterLoginFailure({ identifierHash, employeeId: found?.id ?? null, username: u, request });
       await authAudit(request, { userId: found?.id ?? null, action: "SIGN_IN", result: "FAILURE", reasonCode: "USERNAME_PIN", identifier: "login:" + u });
       return INVALID();
     }
-    await clearAttempts(ipHash, identifierHash);
+    // P2-B gate (Abu Fahd): a success no longer DELETES the failures — they stay as evidence for the account lock, the
+    // per-address limit and the hourly alert (each already audited). The per-address delay starts again from this
+    // sign-in instead (lib/auth/login-throttle.ts counts only the failures after this address's last success).
     return afterFirstFactor(request, found.id, "USERNAME_PIN");
   }
 
@@ -124,13 +164,15 @@ export async function POST(request: Request) {
     const identifierHash = hashRateLimitKey("login:" + u);
     await pruneExpired();
     if (await isIpRateLimited(ipHash, 30)) return TOO_MANY();
-    if (await isPairRateLimited(ipHash, identifierHash, 10)) return TOO_MANY();
-    if (await isIdentifierRateLimited(identifierHash, 20)) return TOO_MANY();
     // Review item 3: the USERNAME only (unique, normal form). A display name never identifies a login.
     const found = await byUsername(u);
+    // P2 SEC-09: the progressive delay and the temporary lock (lib/auth/login-throttle.ts) — before the password is checked.
+    const gate = await loginThrottle({ ipHash, identifierHash, employeeId: found?.id ?? null, deviceId: deviceIdFromCookieHeader(request.headers.get("cookie")) });
+    if (!gate.ok) return throttled(gate);
     const ok = await verifySecret(password, found?.password);
     if (!found || !found.password || !ok) {
       await recordFailedAttempt(ipHash, identifierHash);
+      await afterLoginFailure({ identifierHash, employeeId: found?.id ?? null, username: u, request });
       await authAudit(request, { userId: found?.id ?? null, action: "SIGN_IN", result: "FAILURE", reasonCode: "PASSWORD", identifier: "login:" + u });
       return INVALID();
     }
@@ -140,7 +182,7 @@ export async function POST(request: Request) {
       await authAudit(request, { userId: found.id, action: "SIGN_IN", result: "REFUSED", reasonCode: "TEMP_PASSWORD_EXPIRED", identifier: "login:" + u });
       return NextResponse.json({ error: "Invalid credentials", errorAr: "انتهت صلاحية كلمة المرور المؤقتة. اطلب من مسؤول النظام كلمة جديدة.", code: "TEMP_PASSWORD_EXPIRED" }, { status: 401 });
     }
-    await clearAttempts(ipHash, identifierHash);
+    // P2-B gate (Abu Fahd): the failures are kept as evidence (see the username + PIN branch above).
     return afterFirstFactor(request, found.id, "PASSWORD");
   }
 

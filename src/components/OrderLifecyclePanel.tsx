@@ -284,6 +284,9 @@ const ACTIVITY_LABEL_KEYS: Record<string, TranslationKey> = {
   STOCK_RESERVED_FROM_PACKAGING: "activityStockReservedFromPackaging",
   ORDER_ITEMS_EDITED: "activityOrderItemsEdited",
   ORDER_HANDED_TO_DISPATCH: "activityHandedToDispatch",
+  DEAL_LINKED: "activityDealLinked",
+  DIRECT_SALE: "activityDirectSale",
+  DEAL_REOPENED: "activityDealReopened",
 };
 
 
@@ -320,7 +323,7 @@ export function ActivityTimeline({ activities }: { activities: LifecycleActivity
               {ar ? (
                 ar.userText ? <span className="ops-sub" dir="auto" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{ar.userText}</span> : null
               ) : a.message ? <span className="ops-sub" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{a.message}</span> : null}
-              <span className="ops-sub">{ar?.detail ? <>{ar.detail} · </> : null}{a.authorName} · {opsDate(a.createdAt, lang, true)}</span>
+              <span className="ops-sub">{ar?.detail ? <>{ar.detail} · </> : null}{a.authorName === "System" || a.authorName === "النظام" ? t("activitySystemAuthor") : a.authorName} · {opsDate(a.createdAt, lang, true)}</span>
             </span>
           </li>
         );

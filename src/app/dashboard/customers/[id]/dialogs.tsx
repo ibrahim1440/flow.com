@@ -1,5 +1,6 @@
 "use client";
 
+import { PastDateHint } from "@/components/dates/PastDateHint";
 import { baselineOf } from "@/lib/http/stale-record";
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select } from "@/components/ui/Select";
@@ -306,6 +307,7 @@ export function ActivityDialog({ ar, customerId, customerName, customerNames, de
         {isTask || remind === "date" ? (
           <Field label={`${L("متى؟", "When?")} *`} help={isTask ? L("المهمة بلا موعد ما تظهر في المتأخرات.", "A task with no date never shows as overdue.") : undefined}>
             <input className="hr-input" type="datetime-local" value={dueAt} onChange={(e) => setDueAt(e.target.value)} dir="ltr" data-testid="activity-due" />
+            <PastDateHint ar={ar} value={dueAt} testId="activity-due-past" />
           </Field>
         ) : null}
         {reminderAt && canRemind && !isTask ? (

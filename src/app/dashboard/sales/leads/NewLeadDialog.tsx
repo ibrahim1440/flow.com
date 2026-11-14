@@ -10,6 +10,8 @@ import { Dialog, Field, HrRoot } from "@/components/hr/ui";
 import { Ico } from "@/components/shell/icons";
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { IdentityFields, blankIdentity, type IdentityForm } from "@/components/customers/identity-fields";
+import { DraftBanner, useLeaveGuard, useLocalDraft } from "@/components/drafts/LeaveGuard";
+import { useUser } from "@/app/dashboard/user-context";
 import "./lead-form.css";
 
 export const LEAD_SOURCES = ["WALK_IN", "REFERRAL", "PHONE", "SOCIAL", "EXHIBITION", "WEBSITE", "OTHER"] as const;
@@ -38,6 +40,42 @@ export function NewLeadDialog({ ar, sourceLabel, onClose, onSaved }: {
     if (k === "companyName" || k === "phone") setDups([]);
   };
   const valid = f.companyName.trim().length >= 2;
+  // P2 ب9 / UXM-02: the unsaved lead is kept on this device (24 h, gone at sign-out); leaving asks first.
+  const dirty = Object.entries(f).some(([k, v]) => k !== "source" && String(v).trim() !== "") || f.source !== "OTHER" || Object.values(idf).some((v) => String(v ?? "").trim() !== "");
+  const me = useUser();
+  const draft = useLocalDraft(me?.id, "lead-new", { f, idf }, dirty && !busy, (d) => {
+    if (d?.f) setF({ ...blank(), ...d.f });
+    if (d?.idf) setIdf({ ...blankIdentity(), ...d.idf });
+  });
+  const guard = useLeaveGuard({ ar, dirty, onLeave: () => draft.clear() });
+  const close = () => { if (!busy) guard.ask(onClose); };
+  // P2 ERR-07 (owner decision ب1, approved Figma 1أ / 1ب): BEFORE saving, the business is looked up among the rep's own
+  // customers and leads (named, with «افتحه») and everyone else's (said without a name). Saving stays the rep's choice.
+  type Match = { href: string; name: string; sub: string };
+  const [lookup, setFound] = useState<{ mine: Match[]; colleague: boolean; limited?: boolean } | null>(null);
+  const lookable = f.companyName.trim().length >= 2 || f.phone.replace(/\D/g, "").length >= 7;
+  const found = lookable ? lookup : null;
+  useEffect(() => {
+    const name = f.companyName.trim(), phone = f.phone.trim();
+    if (name.length < 2 && phone.replace(/\D/g, "").length < 7) return;
+    let off = false;
+    const t = window.setTimeout(async () => {
+      const r = await fetch("/api/sales/leads/check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ companyName: name, phone }) }).catch(() => null);
+      // Abu Fahd (P2-B gate): the check is limited to 30 a minute (gate E2) — say so, never a silent or generic failure.
+      if (!off && r?.status === 429) { setFound({ mine: [], colleague: false, limited: true }); return; }
+      const d = r && r.ok ? await r.json().catch(() => null) : null;
+      if (off || !d) return;
+      const mine: Match[] = [
+        ...((d.customers ?? []) as { id: string | null; name: string | null; colleague: boolean }[]).filter((c) => !c.colleague && c.id)
+          .map((c) => ({ href: `/dashboard/customers/${c.id}`, name: c.name ?? "", sub: L("عميل في دفترك", "A customer in your book") })),
+        ...((d.leads ?? []) as { leadId: string | null; companyName: string | null }[]).filter((l) => l.leadId)
+          .map((l) => ({ href: `/dashboard/sales/leads/${l.leadId}`, name: l.companyName ?? "", sub: L("عميل محتمل عندك", "One of your leads") })),
+      ];
+      const colleague = ((d.customers ?? []) as { colleague: boolean }[]).some((c) => c.colleague) || ((d.leads ?? []) as { leadId: string | null }[]).some((l) => !l.leadId);
+      setFound(mine.length || colleague ? { mine, colleague } : null);
+    }, 450);
+    return () => { off = true; window.clearTimeout(t); };
+  }, [f.companyName, f.phone]); // eslint-disable-line react-hooks/exhaustive-deps -- L is the language, stable for the dialog
   // The dialog focuses its first control (the close button); the business name is where typing starts.
   const nameRef = useRef<HTMLInputElement>(null);
   useEffect(() => { const t = window.setTimeout(() => nameRef.current?.focus(), 0); return () => window.clearTimeout(t); }, []);
@@ -55,6 +93,7 @@ export function NewLeadDialog({ ar, sourceLabel, onClose, onSaved }: {
       if (res.status === 409 && Array.isArray(d.duplicates)) { setDups(d.duplicates); return; }
       if (!res.ok) { setErr(localizeApiError(d, ar ? "ar" : "en") ?? (ar ? d.error : d.errorEn ?? d.error) ?? L("تعذّر الحفظ.", "Could not save.")); return; }
       const weak = Array.isArray(d.weakDuplicates) ? (d.weakDuplicates as { companyName: string | null }[]).map((w) => w.companyName).filter((x): x is string => !!x) : [];
+      draft.clear();
       onSaved({ id: d.lead.id, companyName: d.lead.companyName, companyNameAr: f.companyNameAr.trim() || null }, { logActivity, weak });
     } catch {
       setErr(L("تعذّر الاتصال — حاول مرة ثانية.", "Could not connect — try again."));
@@ -65,19 +104,42 @@ export function NewLeadDialog({ ar, sourceLabel, onClose, onSaved }: {
 
   return (
     <HrRoot>
-      <Dialog open title={L("عميل محتمل جديد", "New lead")} onClose={() => { if (!busy) onClose(); }} testId="lead-form"
+      {guard.dialog}
+      <Dialog open title={L("عميل محتمل جديد", "New lead")} onClose={close} testId="lead-form"
         actions={<>
-          <button type="submit" form="new-lead-el" className="hr-btn is-primary" disabled={!valid || !!busy} data-testid="lead-save">{busy === "save" ? L("جارٍ الحفظ…", "Saving…") : L("حفظ", "Save")}</button>
-          <button type="button" className="hr-btn" onClick={onClose} disabled={!!busy}>{L("إلغاء", "Cancel")}</button>
+          <button type="submit" form="new-lead-el" className="hr-btn is-primary" disabled={!valid || !!busy} data-testid="lead-save">{busy === "save" ? L("جارٍ الحفظ…", "Saving…") : found && !found.limited ? L("كمّل الحفظ", "Save anyway") : L("حفظ", "Save")}</button>
+          <button type="button" className="hr-btn" onClick={close} disabled={!!busy} data-testid="lead-cancel">{L("إلغاء", "Cancel")}</button>
           <span className="lf-foot-hint">{L("المطلوب اسم المنشأة بس. لما يتحول لعميل تنتقل كل البيانات معه.", "Only the business name is required. Everything moves to the customer on conversion.")}</span>
         </>}>
         <form id="new-lead-el" className="hr-form lf" noValidate onSubmit={(e) => { e.preventDefault(); void save(false); }}>
+          {draft.restored ? <div style={{ gridColumn: "1 / -1" }}><DraftBanner ar={ar} onKeep={draft.dismiss} onDiscard={() => { draft.clear(); setF(blank()); setIdf(blankIdentity()); }} /></div> : null}
           {err ? <p className="hr-err is-wide" role="alert" style={{ gridColumn: "1 / -1", margin: 0 }} data-testid="lead-form-error">{err}</p> : null}
           {/* First in the DOM so the dialog focuses it; drawn under the activity bar (order). */}
           <p className="lf-h">{L("بيانات المنشأة", "Business")}</p>
           <Field label={`${L("اسم المنشأة", "Business name")} *`} wide>
             <input ref={nameRef} required value={f.companyName} onChange={set("companyName")} className="hr-input" maxLength={200} aria-required="true" data-testid="lead-company" />
           </Field>
+          {found?.limited ? (
+            <div className="lf-found is-mine is-limited" role="alert" data-testid="lead-check-limited">
+              <b>{L("تجاوزت حد الفحص، حاول بعد دقيقة", "Too many checks — try again in a minute")}</b>
+            </div>
+          ) : found?.mine.length ? (
+            <div className="lf-found is-mine" role="status" data-testid="lead-found-mine">
+              <b>{L("فيه منشأة بنفس الاسم أو الجوال", "A business with this name or phone is already there")}</b>
+              <span>{L("لو هي نفسها، افتحها بدل ما تضيف مكرر.", "If it is the same one, open it instead of adding a duplicate.")}</span>
+              {found.mine.slice(0, 4).map((m) => (
+                <a key={m.href} className="lf-found-row" href={m.href} data-leave-ok="" onClick={() => draft.flush()} data-testid="lead-found-open">
+                  <span><bdi className="lf-found-name">{m.name}</bdi><small>{m.sub}</small></span>
+                  <span className="lf-found-go">{L("افتحه ←", "Open →")}</span>
+                </a>
+              ))}
+            </div>
+          ) : found?.colleague ? (
+            <div className="lf-found is-colleague" role="status" data-testid="lead-found-colleague">
+              <b>{L("هالمنشأة مسجّلة عند زميل — كلّم مشرفك", "This business is with a colleague — talk to your supervisor")}</b>
+              <span>{L("ما نعرض بيانات سجل زميلك. تقدر تكمّل الحفظ، ومشرفك يقرر لمين تكون.", "A colleague's record is not shown. You can still save; your supervisor decides whose it is.")}</span>
+            </div>
+          ) : null}
           <div className="lf-act">
             <button type="button" className="lf-act-btn" disabled={!valid || !!busy} onClick={() => void save(true)} data-testid="lead-log-activity">
               <Ico name="plus" small />{busy === "activity" ? L("جارٍ الحفظ…", "Saving…") : L("تسجيل نشاط", "Log activity")}

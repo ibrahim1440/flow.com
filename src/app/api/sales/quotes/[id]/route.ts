@@ -205,7 +205,7 @@ export async function PUT(request: Request, { params }: Params) {
         }
         await tx.quote.update({ where: { id }, data: header });
       }
-      return saveQuoteLines(tx, { quoteId: id, lines, threshold, actorId: user.id });
+      return saveQuoteLines(tx, { quoteId: id, lines, threshold, actorId: user.id, notifyApprovers: b.autosave !== true, requestApproval: b.requestApproval === true });
     }, TX_OPTS);
 
     return NextResponse.json({

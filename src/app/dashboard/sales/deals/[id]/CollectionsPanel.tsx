@@ -1,12 +1,13 @@
 "use client";
 
+import { ReceiptButtons } from "@/components/receipt/ReceiptButtons";
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Camera, Paperclip, Plus, Upload } from "lucide-react";
+import { Camera, Paperclip, Plus } from "lucide-react";
 import {
   Field, TextInput, TextArea, Button, Modal,
-  Money, Num, ROW_ACTION, api, formatDay, num, moneyText,
+  Money, Num, api, formatDay, num, moneyText,
 } from "../../_components/ui";
 import { RIYAL } from "@/lib/money/riyal";
 import { amountForServer, amountValue, cleanAmount, hasMinusSign, parsePastedAmount } from "@/lib/money/amount-input";
@@ -142,6 +143,7 @@ export function CollectionsPanel({
   // reading; a rep sees one plain line instead — «بانتظار المحاسب يعتمد». Finance's view is unchanged.
   const financeView = !!viewer && hasSubPrivilege(viewer.permissions, "commissions", "collection_verify");
   const laterInput = useRef<HTMLInputElement>(null);
+  const laterCamera = useRef<HTMLInputElement>(null);
   const [laterFor, setLaterFor] = useState<string | null>(null);
   const [laterBusy, setLaterBusy] = useState<string | null>(null);
   // أبو فهد B1: the answer is said ON the row (the panel's `error` only shows inside the record dialog): the refusal or
@@ -422,10 +424,17 @@ export function CollectionsPanel({
                       <p className={laterMsg.ok ? "col-later-ok" : "col-later-err"} role={laterMsg.ok ? "status" : "alert"} data-testid={`collection-attach-msg-${r.id}`}>{laterMsg.text}</p>
                     ) : null}
                     {r.status === "PENDING_VERIFICATION" && r._count.evidence === 0 && me && r.submittedBy?.id === me ? (
-                      <button type="button" className="col-later" disabled={laterBusy === r.id}
-                        onClick={() => { setLaterFor(r.id); laterInput.current?.click(); }} data-testid={`collection-attach-later-${r.id}`}>
-                        <Camera size={15} aria-hidden /> {laterBusy === r.id ? (ar ? "يرفع…" : "Uploading…") : (ar ? "أرفق الإيصال" : "Attach the receipt")}
-                      </button>
+                      // P2 UXM-24 (approved Figma 2ب): «📷 صوّر» (camera) and «اختر ملف» (photos / PDF) — never the camera forced.
+                      <div className="col-later-pair">
+                        <button type="button" className="col-later" disabled={laterBusy === r.id}
+                          onClick={() => { setLaterFor(r.id); laterCamera.current?.click(); }} data-testid={`collection-attach-camera-${r.id}`}>
+                          <Camera size={15} aria-hidden /> {ar ? "صوّر الإيصال" : "Photo of the receipt"}
+                        </button>
+                        <button type="button" className="col-later" disabled={laterBusy === r.id}
+                          onClick={() => { setLaterFor(r.id); laterInput.current?.click(); }} data-testid={`collection-attach-later-${r.id}`}>
+                          <Paperclip size={15} aria-hidden /> {laterBusy === r.id ? (ar ? "يرفع…" : "Uploading…") : (ar ? "اختر ملف الإيصال" : "Choose the receipt file")}
+                        </button>
+                      </div>
                     ) : null}
                   </li>
                 );
@@ -433,7 +442,9 @@ export function CollectionsPanel({
             </ul>
           )}
 
-          <input ref={laterInput} type="file" accept="image/*,application/pdf" capture="environment" hidden data-testid="collection-attach-later-input"
+          <input ref={laterInput} type="file" accept="image/*,application/pdf" hidden data-testid="collection-attach-later-input"
+            onChange={(e) => { const picked = e.target.files?.[0]; e.target.value = ""; if (picked && laterFor) void attachLater(laterFor, picked); }} />
+          <input ref={laterCamera} type="file" accept="image/*" capture="environment" hidden data-testid="collection-attach-camera-input"
             onChange={(e) => { const picked = e.target.files?.[0]; e.target.value = ""; if (picked && laterFor) void attachLater(laterFor, picked); }} />
           {financeView ? (
             <p className="lbl" style={{ fontWeight: 400, marginTop: 10 }} data-testid="collection-finance-note">
@@ -459,6 +470,21 @@ export function CollectionsPanel({
           if (c === "today") setCollectedAt(today);
           if (c === "yesterday") { const d = new Date(); d.setDate(d.getDate() - 1); setCollectedAt(d.toISOString().slice(0, 10)); }
         };
+        // P2 UXM-23 / UXM-24 (approved Figma 2أ): the receipt field — right under the method with «تحويل بنكي», under
+        // «تفاصيل إضافية» otherwise; «📷 صوّر» and «اختر ملف» (the file input keeps its test id «collection-file»).
+        const bank = method === "BANK_TRANSFER";
+        const receiptField = (
+          <div className="col-field col-receipt" data-testid="collection-receipt">
+            <div className="col-receipt-h">
+              <span className="col-l">{bank ? (ar ? "إيصال التحويل" : "Transfer receipt") : (ar ? "المرفق" : "Evidence")}</span>
+              <small>{ar ? "صورة أو PDF · حتى 5 ميجا" : "Photo or PDF · up to 5 MB"}</small>
+            </div>
+            <ReceiptButtons ar={ar} onPick={(f) => void chooseFile(f)} testId="collection-receipt-pick" fileInputTestId="collection-file"
+              accept="application/pdf,image/jpeg,image/png" invalid={!!fileErr} />
+            {file && !fileErr ? <span className="col-receipt-ok" data-testid="collection-file-ok">✓ <bdi>{file.name}</bdi></span> : null}
+            {fileErr ? <span className="col-later-err" role="alert" data-testid="collection-file-error">{fileErr}</span> : null}
+          </div>
+        );
         return (
         <Modal
           title={ar ? "تسجيل تحصيل" : "Record a collection"}
@@ -554,31 +580,16 @@ export function CollectionsPanel({
             </div>
           </div>
 
+          {/* P2 UXM-23 (approved Figma 2أ): with «تحويل بنكي» the transfer receipt is asked for right here, not under
+              «تفاصيل إضافية». UXM-24: «📷 صوّر» and «اختر ملف» side by side. */}
+          {bank ? receiptField : null}
           <details className="col-more">
             <summary>{ar ? "تفاصيل إضافية (اختياري)" : "More details (optional)"}</summary>
             <div className="col-grid">
               <Field id="col-ref" label={ar ? "رقم المرجع" : "Reference number"}>
                 <TextInput id="col-ref" value={reference} onChange={setReference} placeholder={ar ? "مثال: رقم الحوالة" : "e.g. the transfer number"} />
               </Field>
-              <Field
-                id="col-file"
-                label={ar ? "المرفق" : "Evidence"}
-                hint={ar ? "PDF أو صورة، حتى 5 ميجابايت." : "PDF or an image, up to 5 MB."}
-              >
-                <label className={`${ROW_ACTION} w-full cursor-pointer justify-center gap-2 text-oo-text-secondary`}>
-                  <Upload size={14} aria-hidden />
-                  {file ? file.name : (ar ? "أرفق صورة الإيصال" : "Attach the receipt")}
-                  <input
-                    id="col-file"
-                    type="file"
-                    accept="application/pdf,image/jpeg,image/png"
-                    className="sr-only"
-                    onChange={(e) => void chooseFile(e.target.files?.[0] ?? null)}
-                    data-testid="collection-file"
-                  />
-                </label>
-                {fileErr ? <span className="col-later-err" role="alert" data-testid="collection-file-error">{fileErr}</span> : null}
-              </Field>
+              {!bank ? receiptField : null}
             </div>
             <Field id="col-note" label={ar ? "ملاحظات" : "Notes"}>
               <TextArea id="col-note" value={note} onChange={setNote} rows={2} />

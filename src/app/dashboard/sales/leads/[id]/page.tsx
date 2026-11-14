@@ -1,5 +1,6 @@
 "use client";
 
+import { PastDateHint } from "@/components/dates/PastDateHint";
 import { baselineOf } from "@/lib/http/stale-record";
 import { OwnCustomerDialog, ownCustomerOf, type OwnCustomer } from "@/components/customers/own-customer-dialog";
 import { HrRoot } from "@/components/hr/ui";
@@ -23,6 +24,7 @@ import {
 } from "../../_components/ui";
 import { useUnsavedGuard, isDirtyAgainst } from "../../../_components/useUnsavedGuard";
 import { SectionPages } from "@/components/shell/page-context";
+import { ConvertConfirm } from "../LeadPane";
 import { ACTIVITY_OUTCOMES, QUALIFYING_OUTCOMES as QUALIFYING } from "@/lib/services/sales/qualification";
 import {
   QualificationFields, EMPTY_QUALIFICATION, draftFromLead, qualificationPayload, missingText, type QualificationDraft,
@@ -123,6 +125,7 @@ export default function LeadDetailPage() {
   const [lead, setLead] = useState<Lead | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [stale, setStale] = useState(false);
   const [success, setSuccess] = useState("");
   const [busy, setBusy] = useState("");
 
@@ -215,6 +218,8 @@ export default function LeadDetailPage() {
         body: JSON.stringify(((x) => ({ ...x, expectedUpdatedAt: lead?.updatedAt, baseline: baselineOf(lead as unknown as Record<string, unknown>, x) }))({ ...form, ...changedIdentityBody(idf, lead) })),
       });
       const data = await res.json().catch(() => ({}));
+      // P2 ERR-06 (approved Figma 4): the lead changed in another tab — say so, keep what was typed, offer «حدّث».
+      if (res.status === 409 && data?.code === "STALE_RECORD") { setStale(true); return; }
       if (!res.ok) { setError(localizeApiError(data) ?? (ar ? data.error : data.errorEn ?? data.error) ?? (ar ? "تعذّر الحفظ." : "Could not save.")); return; }
       setSuccess(ar ? "حُفظت التعديلات." : "Changes saved.");
       setEditing(false);
@@ -371,8 +376,10 @@ export default function LeadDetailPage() {
   }
 
   const [ownDup, setOwnDup] = useState<OwnCustomer | null>(null);
+  const [askConvert, setAskConvert] = useState(false); // P2 ب3
   async function convert(linkToCustomerId?: string) {
     if (busy) return;
+    setAskConvert(false);
     setBusy("convert"); setError(""); setSuccess("");
     try {
       const res = await fetch(`/api/sales/leads/${params.id}/convert`, {
@@ -443,8 +450,8 @@ export default function LeadDetailPage() {
               </Button>
             )}
             {canConvert && !converted && lead.status !== "UNQUALIFIED" && (
-              <Button onClick={() => void convert()} disabled={busy === "convert"} testId="convert-lead">
-                {busy === "convert" ? (ar ? "جارٍ التحويل…" : "Converting…") : (ar ? "تحويل إلى عميل" : "Convert to customer")}
+              <Button onClick={() => setAskConvert(true)} disabled={busy === "convert"} testId="convert-lead">
+                {busy === "convert" ? (ar ? "جارٍ التحويل…" : "Converting…") : (ar ? "حوّله لفرصة" : "Convert to customer")}
               </Button>
             )}
           </>
@@ -452,7 +459,14 @@ export default function LeadDetailPage() {
       />
 
       {error && <Alert kind="error" onDismiss={() => setError("")}>{error}</Alert>}
+      {stale ? (
+        <div className="hr-notice tone-warning" role="alert" data-testid="lead-stale" style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+          <span><strong>{ar ? "السجل تغيّر من مكان ثاني — حدّث الصفحة" : "The record changed elsewhere — reload the page"}</strong> {ar ? "تعديلاتك محفوظة هنا لين تحدّث." : "Your edits stay here until you reload."}</span>
+          <button type="button" className="hr-btn is-primary is-sm" onClick={() => { setStale(false); void load(); }} data-testid="lead-stale-reload">{ar ? "حدّث" : "Reload"}</button>
+        </div>
+      ) : null}
       {ownDup ? <OwnCustomerDialog ar={ar} customer={ownDup} onLink={() => convert(ownDup.id)} onClose={() => setOwnDup(null)} /> : null}
+      {askConvert && lead ? <ConvertConfirm ar={ar} name={ar && lead.companyNameAr ? lead.companyNameAr : lead.companyName} busy={busy === "convert"} onConfirm={() => void convert()} onClose={() => setAskConvert(false)} /> : null}
       {success && (
         <Alert kind="success" onDismiss={() => { setSuccess(""); setQualifiedDealId(null); }}>
           <span className="flex flex-wrap items-center gap-2">
@@ -653,6 +667,7 @@ export default function LeadDetailPage() {
               <div className="mt-3 space-y-2">
                 <Field id="scheduleAt" label={ar ? "موعد المتابعة" : "Follow-up date"}>
                   <TextInput id="scheduleAt" type="datetime-local" value={scheduleAt} onChange={setScheduleAt} />
+                  <PastDateHint ar={ar} value={scheduleAt} testId="lead-schedule-past" />
                 </Field>
                 <Field id="scheduleSubject" label={ar ? "ماذا ستفعل؟" : "What will you do?"}>
                   <TextInput id="scheduleSubject" value={scheduleSubject} onChange={setScheduleSubject}

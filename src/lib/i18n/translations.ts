@@ -30,7 +30,7 @@ export const translations = {
   leadOwner:          { en: "Owner",                  ar: "المالك" },
   leadNextFollowUp:   { en: "Next follow-up",         ar: "الالتزام القادم" },
   leadStatus:         { en: "Status",                 ar: "الحالة" },
-  leadConvertBtn:     { en: "Convert to customer",    ar: "تحويل إلى عميل" },
+  leadConvertBtn:     { en: "Convert to customer",    ar: "حوّله لفرصة" }, // P2 ب3 wording everywhere (Abu Fahd)
   leadNoFollowUp:     { en: "No follow-up set",       ar: "لا يوجد موعد متابعة" },
   leadOverdue:        { en: "Overdue",                ar: "متأخرة" },
   leadShown:          { en: "shown",                  ar: "معروضة" },
@@ -983,6 +983,11 @@ export const translations = {
   activityProductionSurplusOverridden: { en: "Surplus production authorized", ar: "اعتُمد إنتاج فائض" },
   activityStockReservedFromPackaging:  { en: "Stock reserved from packaging", ar: "حُجز مخزون من التعبئة" },
   activityHandedToDispatch:           { en: "Prepared and handed to dispatch", ar: "جُهّز وسُلّم للشحن" },
+  // Abu Fahd (P2-B gate): the order log never shows a raw code.
+  activityDealLinked:                 { en: "Linked to a deal", ar: "ارتبط بصفقة" },
+  activityDirectSale:                 { en: "Direct sale", ar: "بيع مباشر" },
+  activityDealReopened:               { en: "Deal reopened", ar: "رجعت الصفقة مفتوحة" },
+  activitySystemAuthor:               { en: "System", ar: "النظام" },
   activityOrderItemsEdited:            { en: "Order lines edited", ar: "عُدّلت بنود الطلب" },
 
   // ── Unified packaging ──────────────────────────────────────────────────

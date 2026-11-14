@@ -3732,8 +3732,13 @@ enum QuoteStatus {
 
 model Quote {
   id           String  @id @default(cuid())
-  /// Human reference, unique per revision chain.
-  quoteNumber  String  @unique
+  /// Human reference, unique per revision chain. Owner decision (13 Nov 2026, quote-45 round): a DRAFT has NO number —
+  /// the number is taken at issue (gapless, under a lock); drafts numbered before keep theirs. CHECK
+  /// Quote_number_issued_check (20261231140000): only a DRAFT may be without one.
+  quoteNumber  String? @unique
+  /// Abu Fahd R3 (20261231150000_quote_draft_key): the editor session that created this draft — one session creates ONE
+  /// draft (a second create with the same key returns the first). NULL when created otherwise.
+  draftKey     String? @unique
   revision     Int     @default(1)
   /// Points at the quote this one revises, so a chain is walkable in both directions.
   supersedesId String? @unique

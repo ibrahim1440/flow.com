@@ -3,11 +3,12 @@
 //   1 لمين؟        the rep's own customers (never the pool), «＋ عميل جديد» = the shared NewCustomerDialog
 //   2 وش بياخذ؟    products at the list price (no price editing), quantity steppers, an optional discount with the
 //                  threshold shown inline as it is typed; the totals are the SERVER's (POST /api/sales/direct-sale/price)
-//   3 راجع وأرسل    كاش / شبكة / آجل, what «إرسال» does; one tap = one sale (a requestKey per sale). Every order ships
+//   3 راجع وأرسل    نقداً / شبكة / آجل, what «إرسال» does; one tap = one sale (a requestKey per sale). Every order ships
 //                  from the roastery (owner, 6 Nov 2026): no hand-over choice. A discount above the threshold WAITS for a
 //                  supervisor (same inbox as a quotation's) — then the deal, the invoice request and the collection follow.
 //   ✓ انرسلت       the order, the deal, the invoice at the accountant; «أرسل للعميل» opens WhatsApp on the rep's phone
 // The rep never issues the invoice (decision 9): «إرسال» only raises it to the accountant.
+import { ReceiptButtons } from "@/components/receipt/ReceiptButtons";
 import { aboveLimit, percentToBp } from "@/lib/services/sales/discount-measure";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CreditLimitDialog, creditRefusalOf, type CreditRefusal } from "@/components/credit/credit-ui";
@@ -37,7 +38,7 @@ const num2 = (v: string | number) => Number(v).toLocaleString("en-US", { minimum
 const money = (v: string | number) => withRiyal(num2(v), "ar");
 /** What leaves the system (the WhatsApp message to the customer): «ر.س» / «SAR» in letters (gate M1). */
 const moneyOut = (v: string | number, lang: "ar" | "en") => formatSARText(num2(v), lang);
-const payAr = (m: "CASH" | "CARD" | "BANK_TRANSFER" | "CREDIT") => (m === "CASH" ? "كاش" : m === "CARD" ? "شبكة" : m === "BANK_TRANSFER" ? "تحويل بنكي" : "آجل");
+const payAr = (m: "CASH" | "CARD" | "BANK_TRANSFER" | "CREDIT") => (m === "CASH" ? "نقداً" : m === "CARD" ? "شبكة" : m === "BANK_TRANSFER" ? "تحويل بنكي" : "آجل");
 const payEn = (m: "CASH" | "CARD" | "BANK_TRANSFER" | "CREDIT") => (m === "CASH" ? "Cash" : m === "CARD" ? "Card" : m === "BANK_TRANSFER" ? "Bank transfer" : "On account");
 const kb = (bytes: number) => Math.max(1, Math.round(bytes / 1024)).toLocaleString("en-US");
 
@@ -94,7 +95,6 @@ function DirectSale() {
     setPreparing(false);
     if (r.ok) setReceipt(r.file); else { setReceipt(null); setReceiptError(ar ? r.ar : r.en); }
   }
-  const receiptInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<Done | null>(null);
   const key = useRef(newKey());
@@ -368,8 +368,6 @@ function DirectSale() {
               ) : (
                 <div className="ds-field">
                   <span className="ds-lbl strong">{L("إيصال التحويل", "Transfer receipt")} <small>{L("(اختياري)", "(optional)")}</small></span>
-                  <input ref={receiptInput} type="file" accept="image/*,application/pdf" capture="environment" hidden data-testid="ds-receipt-input"
-                    onChange={(e) => { const f = e.target.files?.[0] ?? null; e.target.value = ""; void chooseReceipt(f); }} />
                   {receipt ? (
                     <div className="ds-file" data-testid="ds-receipt-file">
                       <span className="ds-file-ic" aria-hidden><Ico name="doc" small /></span>
@@ -377,10 +375,8 @@ function DirectSale() {
                       <button type="button" className="ds-file-x" onClick={() => { setReceipt(null); setReceiptError(""); }} data-testid="ds-receipt-remove">{L("حذف", "Remove")}</button>
                     </div>
                   ) : (
-                    <button type="button" className="ds-drop" disabled={preparing} onClick={() => receiptInput.current?.click()} data-testid="ds-receipt-pick">
-                      <span className="ds-drop-ic" aria-hidden><Ico name="camera" small /></span>
-                      <span className="ds-drop-t"><b>{preparing ? L("نجهّز الصورة…", "Preparing the photo…") : L("صوّر الإيصال أو اختر ملف", "Photograph the receipt or choose a file")}</b><small>{L("صورة أو PDF · لين 5 ميجا", "Photo or PDF · up to 5 MB")}</small></span>
-                    </button>
+                    // P2 UXM-24 (approved Figma 2ب): «📷 صوّر» and «اختر ملف» — the phone never forces the camera.
+                    <ReceiptButtons ar={ar} onPick={(f) => void chooseReceipt(f)} disabled={preparing} testId="ds-receipt-pick" fileInputTestId="ds-receipt-input" />
                   )}
                 </div>
               )}

@@ -24,6 +24,7 @@ import type { Target } from "@/lib/services/sales/activity-targets";
 import ImportDialog from "./ImportDialog";
 import { SalesJourney } from "../_components/journey";
 import { telHref, waNumber } from "@/lib/services/search/normalize";
+import { ConvertConfirm } from "./LeadPane";
 import "../_components/money.css";
 import "../_components/sales-pages.css";
 
@@ -251,8 +252,10 @@ export default function LeadsPage() {
   }
 
   const [ownDup, setOwnDup] = useState<{ lead: Lead; customer: OwnCustomer } | null>(null);
+  const [askLead, setAskLead] = useState<Lead | null>(null); // P2 ب3: name the result first
   async function convert(lead: Lead, linkToCustomerId?: string) {
     if (converting) return;
+    setAskLead(null);
     setConverting(lead.id);
     setError("");
     try {
@@ -330,6 +333,7 @@ export default function LeadsPage() {
 
   const notices = (
     <>
+      {askLead ? <ConvertConfirm ar={lang === "ar"} name={lang === "ar" && askLead.companyNameAr ? askLead.companyNameAr : askLead.companyName} busy={converting === askLead.id} onConfirm={() => void convert(askLead)} onClose={() => setAskLead(null)} /> : null}
       {ownDup ? <OwnCustomerDialog ar={lang === "ar"} customer={ownDup.customer} onLink={() => convert(ownDup.lead, ownDup.customer.id)} onClose={() => setOwnDup(null)} /> : null}
       {error && (
         <p className="notice er" role="alert" data-testid="alert-error" style={{ marginBottom: 16 }}>
@@ -447,7 +451,7 @@ export default function LeadsPage() {
     if (lead.status === "UNQUALIFIED") return <Link href={href} className="spg-cta">{ar ? "افتح" : "Open"}</Link>;
     if (lead.status === "QUALIFIED" && canConvert) {
       return (
-        <button type="button" className="spg-cta p" onClick={() => convert(lead)} disabled={converting !== null}
+        <button type="button" className="spg-cta p" onClick={() => setAskLead(lead)} disabled={converting !== null}
           aria-busy={converting === lead.id || undefined} data-testid={`convert-lead-${lead.id}`}>
           <Ico name="trend" small />{converting === lead.id ? (ar ? "جارٍ التحويل…" : "Converting…") : ar ? "حوّله لفرصة" : "Make it a deal"}
         </button>
@@ -684,7 +688,7 @@ export default function LeadsPage() {
                           <td style={{ textAlign: "end" }}>
                             <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                               <RowAction lead={lead} lang={lang} canConvert={canConvert} converting={converting}
-                                onConvert={() => convert(lead)} isOverdue={isOverdue} hasNoCommitment={hasNoCommitment} />
+                                onConvert={() => setAskLead(lead)} isOverdue={isOverdue} hasNoCommitment={hasNoCommitment} />
                               {/* Not in the frame; the only delete there is (record: conflict L-2). */}
                               {canWrite && !lead.conversion && (
                                 <button type="button" className="ib" onClick={() => setDeleting(lead)} data-testid={`delete-lead-${lead.id}`}

@@ -31,7 +31,7 @@ export async function POST(request: Request) {
   const phone = typeof b.phone === "string" ? b.phone.trim().slice(0, 40) : "";
   const rl = await checkAndRecordRateLimit({ scope: "sales.lead-check", key: user.id, ...LEAD_CHECK_LIMIT });
   if (rl.limited) {
-    return NextResponse.json({ error: "فحوصات كثيرة في دقيقة — انتظر شوي ثم جرّب.", errorEn: "Too many checks in a minute — wait a moment and try again.", code: "TOO_MANY_CHECKS" }, { status: 429, headers: { "Retry-After": "60" } });
+    return NextResponse.json({ error: "تجاوزت حد الفحص، حاول بعد دقيقة", errorEn: "Too many checks in a minute — wait a moment and try again.", code: "TOO_MANY_CHECKS" }, { status: 429, headers: { "Retry-After": "60" } });
   }
   if (companyName.length < 2 && !phone) {
     return NextResponse.json({ error: "اكتب اسم المنشأة أو الجوال.", errorEn: "Send a company name or a phone.", code: "NOTHING_TO_CHECK" }, { status: 400 });

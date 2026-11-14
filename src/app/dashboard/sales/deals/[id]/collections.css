@@ -54,3 +54,10 @@
 .col-later[disabled] { opacity: .6; cursor: default }
 .col-later-ok { margin: 6px 0 0; font-size: 13px; font-weight: 600; color: var(--status-success) }
 .col-later-err { margin: 6px 0 0; font-size: 13px; color: var(--status-danger) }
+/* P2 UXM-23 / UXM-24 (approved Figma 2أ): the receipt field with «📷 صوّر» / «اختر ملف». */
+.col-receipt { display: grid; gap: 8px; margin-top: 12px; }
+.col-receipt-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.col-receipt-h small { font-size: 12px; color: var(--text-muted); }
+.col-receipt-ok { font-size: 13px; color: var(--status-success, #405f4d); }
+.col-later-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.col-later-pair .col-later { margin: 0; justify-content: center; }

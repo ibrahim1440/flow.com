@@ -1,10 +1,12 @@
 "use client";
 
+import { withRiyal } from "@/lib/money/riyal";
 import { TaxOverridePanel } from "@/components/sales/tax-override-panel";
 import { CreditLimitDialog, CustomerCreditNotice, creditRefusalOf, type CreditRefusal } from "@/components/credit/credit-ui";
 import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useMemo, useRef, use, useCallback } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Printer, FileText, Send, Trash2, Plus } from "lucide-react";
 import { usePrintDocuments } from "@/components/print/Certification";
 // The stored unit, as the frames write it («800 عبوة»); the printed document uses the same labels.
@@ -13,7 +15,6 @@ import {
   useLang, pick, Spinner, Button, Field, TextArea, Modal, api,
   QUOTE_STATUS_SPECS, num, formatDay, formatMoney,
 } from "../../_components/ui";
-import { useUnsavedGuard } from "../../../_components/useUnsavedGuard";
 import { Ico } from "@/components/shell/icons";
 import { useD21Title, usePhone, useD21Phone } from "@/components/shell/page-context";
 import { splitTitle } from "@/components/d21/labels";
@@ -26,6 +27,8 @@ import { IssueOutcome, SentMessagesLine } from "@/components/automation/SentMess
 import { useUser } from "../../../user-context";
 import { CommissionPanel, type CommissionInfo } from "./CommissionPanel";
 import { ProductCombo } from "./ProductCombo";
+import { ResultConfirm } from "@/components/confirm/ResultConfirm";
+import { quoteRef } from "@/lib/services/sales/quote-label";
 
 /**
  * The quotation — editor while it is a draft (GX A-10, Figma 1230:121651 / EN 1230:147423,
@@ -67,7 +70,7 @@ type Line = {
 
 type Quote = CommissionInfo & {
   id: string;
-  quoteNumber: string;
+  quoteNumber: string | null; // owner decision (quote-45 round): null on a draft — numbered at issue
   revision: number;
   status: string;
   currency: string;
@@ -87,8 +90,8 @@ type Quote = CommissionInfo & {
   discountRejectionNote: string | null;
   customerNotes: string | null;
   createdAt: string;
-  supersedes: { id: string; quoteNumber: string; revision: number } | null;
-  supersededBy: { id: string; quoteNumber: string; revision: number; status: string } | null;
+  supersedes: { id: string; quoteNumber: string | null; revision: number } | null;
+  supersededBy: { id: string; quoteNumber: string | null; revision: number; status: string } | null;
   customer: { id: string; name: string; nameAr: string | null } | null;
   /** NULL on a quotation from the accounting section with no deal («مسار المحاسب»). */
   opportunity: { id: string; title: string; outcome: string; owner: { id: string; name: string } | null } | null;
@@ -170,7 +173,20 @@ function previewTotals(lines: Line[]) {
 }
 
 export default function QuoteEditorPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+  const { id: routeId } = use(params);
+  // P2 ب4: «draft» is the UNSAVED quotation of a deal (no row, no number) — its first save creates it, takes its number
+  // and the address becomes the new quotation's (history.replaceState, so this screen keeps its state for «حفظ وإصدار»).
+  const search = useSearchParams();
+  const draftDeal = routeId === "draft" ? search.get("opportunityId") : null;
+  // P2 gate Q18: the accountant's quotation without a deal is unsaved too, by customer.
+  const draftCustomer = routeId === "draft" && !draftDeal ? search.get("customerId") : null;
+  const draftFrom = routeId === "draft" ? search.get("from") : null;
+  // Abu Fahd R2 (M3): a customer with no open deal — the deal is opened by the first save, not by opening this editor.
+  const draftOpenDeal = !!draftCustomer && search.get("openDeal") === "1";
+  const [savedId, setSavedId] = useState<string | null>(null);
+  const idRef = useRef(routeId);
+  const id = savedId ?? routeId;
+  const unsaved = routeId === "draft" && !savedId;
   const lang = useLang();
   const ar = lang === "ar";
   const phone = usePhone();
@@ -216,6 +232,20 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   }, [lines.length]);
   const [validUntil, setValidUntil] = useState("");
   const [dirty, setDirty] = useState(false);
+  // Owner decision (13 Nov 2026, quote-45 round, item 3): the lines are KEPT in the draft — saved as the rep works
+  // (autosave, and before leaving) — so leaving never loses them; the draft still takes no number until it is issued.
+  const [autoSaving, setAutoSaving] = useState(false);
+  const savingRef = useRef<Promise<boolean> | null>(null);
+  // Abu Fahd R3: one key per editor session, sent with every create of the draft (the autosave, «حفظ», the leave-save) —
+  // the server returns the draft this session already created instead of a second one (Quote.draftKey, UNIQUE).
+  const [draftKey] = useState(() => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, ""));
+  /** The next load keeps what is on screen (an autosave refreshes the quotation's state, never the rep's typing). */
+  const keepLinesRef = useRef(false);
+  /** A leave asked while there is something to save: «جارٍ حفظ التعديلات…», then go (or stay, on a failure). */
+  const [leaving, setLeaving] = useState<{ href: string; failed?: boolean } | null>(null);
+  /** «طلب اعتماد المشرف» sent — for exactly what was on screen then (any change makes it a new request). */
+  const [requestedFor, setRequestedFor] = useState<string | null>(null);
+  const router = useRouter();
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -224,7 +254,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   // Fix round 1 (council b25 #12): after «إصدار», say what reached the customer.
   const [justIssued, setJustIssued] = useState(false);
   const viewerIsAdmin = useUser()?.role === "admin";
-  const [dialog, setDialog] = useState<"reject" | "order" | null>(null);
+  const [dialog, setDialog] = useState<"reject" | "order" | "issue" | "accept" | null>(null);
   /** Phone: the «⋯» menu of the sticky bar, and the lines opened for editing from it. */
   const [more, setMore] = useState(false);
   const [phoneEdit, setPhoneEdit] = useState(false);
@@ -243,7 +273,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
     (async () => {
     const res = await api<{
       quote: Quote; state: State; can: Can; discountThresholdPercent: string; discount: DiscountInfo; issuer?: { name: string } | null;
-    }>(`/api/sales/quotes/${id}`);
+    }>(unsaved ? `/api/sales/quotes/draft?${draftCustomer ? `customerId=${encodeURIComponent(draftCustomer)}${draftOpenDeal ? "&openDeal=1" : ""}` : `opportunityId=${encodeURIComponent(draftDeal ?? "")}`}${draftFrom === "customer" ? "&from=customer" : ""}` : `/api/sales/quotes/${id}`);
     if (cancelled) return;
     if (res.ok) {
       setQuote(res.data.quote);
@@ -252,6 +282,9 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       setCan(res.data.can);
       setThreshold(res.data.discountThresholdPercent);
       setDiscount(res.data.discount);
+      const keep = keepLinesRef.current;
+      keepLinesRef.current = false;
+      if (!keep) {
       setNotes(res.data.quote.customerNotes ?? "");
       setValidUntil(res.data.quote.validUntil?.slice(0, 10) ?? "");
       setLines(
@@ -266,7 +299,9 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
           taxRatePercent: String(l.taxRatePercent),
         })),
       );
-      setDirty(false);
+      // An unsaved quotation that opens with the customer's usual items has something to save.
+      setDirty(unsaved && res.data.quote.lines.length > 0);
+      }
       setError("");
     } else {
       setError(res.data.error ?? (ar ? "تعذّر تحميل العرض." : "Could not load the quotation."));
@@ -274,7 +309,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
     setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [id, ar, reloadToken]);
+  }, [id, ar, reloadToken]); // eslint-disable-line react-hooks/exhaustive-deps -- `unsaved` / `draftDeal` follow `id`
 
   useEffect(() => {
     api<Sku[]>("/api/products").then((r) => {
@@ -282,9 +317,6 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
     });
   }, []);
 
-  // Edited lines that have not been saved are the only unsaved state in the module.
-  // Navigating away from them silently would lose a priced quotation somebody was building.
-  useUnsavedGuard(dirty && Boolean(state?.editable));
 
   const preview = useMemo(() => previewTotals(lines), [lines]);
   // HOTFIX quote-45 (owner, Q-202611-0022): the SERVER's rule, line by line against the list price, in fixed point
@@ -310,10 +342,13 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   });
 
   const editable = Boolean(state?.editable && can?.write);
+  // P2 ب4: an unsaved quotation has no number yet — it takes one at its first save (Figma 8ب note).
+  // Owner decision (quote-45 round): a draft keeps its lines (saved) but has no number until it is issued.
+  const qNo = quote ? (quote.quoteNumber || (ar ? "مسودة — بدون رقم بعد (يأخذ رقمه عند الإصدار)" : "Draft — not numbered yet (numbered at issue)")) : undefined;
   const customerName = quote?.customer ? (ar ? (quote.customer.nameAr ?? quote.customer.name) : quote.customer.name) : null;
 
   // The last crumb of the top bar is the quotation number («المبيعات / عروض الأسعار / Q-…»).
-  useD21Title(quote?.quoteNumber);
+  useD21Title(qNo);
 
   // The phone bar carries the actions the 390 frames put at the bottom; with none, the tab bar stays.
   const phoneBar = !!(quote && state && can) && (
@@ -327,7 +362,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   useD21Phone({
     title: ar ? "عرض السعر" : "Quotation",
     sub: quote
-      ? `${quote.quoteNumber} · ${editable ? `${ar ? "المراجعة" : "revision"} ${quote.revision}` : (customerName ?? quote.opportunity?.title ?? "")}`
+      ? `${qNo} · ${editable ? `${ar ? "المراجعة" : "revision"} ${quote.revision}` : (customerName ?? quote.opportunity?.title ?? "")}`
       : undefined,
     back: base,
     ownBar: phoneBar,
@@ -361,30 +396,150 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
     });
   }
 
+  /** What is on screen, as one value (an autosave knows whether the rep typed on while it was saving). */
+  // By VALUE (2 and 2.000 are the same quantity): the server returns its own formatting after a save.
+  const screenOf = (l: Line[], v: string, n: string) => JSON.stringify({
+    l: l.map((x) => [x.productSkuId, x.description.trim(), Number(x.quantity), Number(x.unitPrice), Number(x.discountPercent), Number(x.taxRatePercent)]),
+    v, n: n.trim(),
+  });
+  const screenRef = useRef("");
+  useEffect(() => { screenRef.current = screenOf(lines, validUntil, notes); }, [lines, validUntil, notes]);
+  const dirtyRef = useRef(false);
+  useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
+  const requested = requestedFor !== null && requestedFor === screenOf(lines, validUntil, notes);
+
   async function save() {
-    if (busy) return;
-    setBusy(true);
-    setError("");
-    const res = await api<{ totals: Record<string, string>; needsDiscountApproval: boolean; notice: string | null }>(
-      `/api/sales/quotes/${id}`,
-      { method: "PUT", body: { lines, validUntil: validUntil || null, customerNotes: notes } },
-    );
-    setBusy(false);
-    if (!res.ok) {
-      setError(res.data.error ?? (ar ? "تعذّر الحفظ." : "Could not save."));
-      return false;
-    }
-    setSuccess(ar ? "حُفظ العرض." : "Saved.");
-    reload();
-    return true;
+    if (busy) return false;
+    if (savingRef.current) await savingRef.current; // an autosave in flight finishes first
+    return persist("manual");
   }
+
+  /**
+   * Save the lines: "manual" («حفظ»), "request" («حفظ وطلب اعتماد المشرف» — the approvers are told), "auto" (as the rep
+   * works, and before leaving — quietly: no approver is told, the screen is not reloaded under the rep's typing).
+   */
+  async function persist(kind: "manual" | "request" | "auto"): Promise<boolean> {
+    const auto = kind === "auto";
+    const sent = screenOf(lines, validUntil, notes);
+    const run = (async () => {
+      if (auto) setAutoSaving(true); else { setBusy(true); setError(""); }
+      const fail = (msg: string) => { if (auto) setAutoSaving(false); else setBusy(false); setError(msg); return false; };
+      if (idRef.current === "draft") {
+        // P2 ب4: the first save of an unsaved quotation creates it, with its lines (owner decision, quote-45 round: still
+        // without a number — it takes one at issue).
+        const created = await api<{ quote: { id: string } | null }>("/api/sales/quotes", {
+          method: "POST", body: { ...(draftCustomer ? { customerId: draftCustomer, ...(draftOpenDeal ? { openDeal: true } : {}) } : { opportunityId: draftDeal }), validUntil: validUntil || null, lines, deferEmpty: true, draftKey, autosave: kind !== "manual" && kind !== "request" ? true : undefined },
+        });
+        if (!created.ok || !created.data.quote) {
+          return fail(created.ok ? (ar ? "أضف صنف واحد على الأقل قبل الحفظ." : "Add at least one item before saving.") : (created.data as { error?: string }).error ?? (ar ? "تعذّر الحفظ." : "Could not save."));
+        }
+        idRef.current = created.data.quote.id;
+        window.history.replaceState(null, "", `${base}/${created.data.quote.id}`);
+        keepLinesRef.current = true;
+        setSavedId(created.data.quote.id);
+      }
+      const res = await api<{ totals: Record<string, string>; needsDiscountApproval: boolean; notice: string | null }>(
+        `/api/sales/quotes/${idRef.current}`,
+        { method: "PUT", body: { lines, validUntil: validUntil || null, customerNotes: notes, ...(auto ? { autosave: true } : {}), ...(kind === "request" ? { requestApproval: true } : {}) } },
+      );
+      if (!res.ok) return fail(res.data.error ?? (ar ? "تعذّر الحفظ." : "Could not save."));
+      if (auto) {
+        setAutoSaving(false);
+        // Saved what was on screen when it started; if the rep typed on meanwhile, the next autosave carries it.
+        if (screenRef.current === sent) setDirty(false);
+        keepLinesRef.current = true;
+        reload();
+        return true;
+      }
+      setBusy(false);
+      if (kind === "request") setRequestedFor(sent);
+      setSuccess(kind === "request" ? (ar ? "حُفظ العرض وأُرسل طلب الاعتماد للمشرف." : "Saved, and the approval request was sent.") : (ar ? "حُفظ العرض." : "Saved."));
+      reload();
+      return true;
+    })();
+    savingRef.current = run;
+    try { return await run; } finally { if (savingRef.current === run) savingRef.current = null; }
+  }
+
+  // Autosave: 1.5 s after the last change, while the draft is editable and its lines can be saved (a line with neither a
+  // product nor a description waits; above the 60 % ceiling the band says so and nothing is sent).
+  useEffect(() => {
+    if (!dirty || !state?.editable || !can?.write || busy || autoSaving || leaving) return;
+    if (!lines.length || measured.overCeiling) return;
+    if (lines.some((l) => !l.productSkuId && !l.description.trim())) return;
+    const t = window.setTimeout(() => { void persist("auto"); }, 1500);
+    return () => window.clearTimeout(t);
+  }, [dirty, lines, validUntil, notes, busy, autoSaving, leaving, state?.editable, can?.write]); // eslint-disable-line react-hooks/exhaustive-deps -- persist / measured follow lines
+
+  // Leaving: an in-app link saves first, then goes (our own dialog while it saves — no browser question); closing or
+  // reloading the tab sends what is on screen with the request kept alive (keepalive) — nothing is asked, nothing lost.
+  // Gate R4 B1: an in-app Back (the router's history.back / popstate — no link click, no page hide) unmounted the editor
+  // before the 1.5-s autosave and lost the first line. The same save is now sent on popstate and when the editor unmounts
+  // (any route change), with the same draftKey — still exactly one draft — and at most once per screen state.
+  const flushRef = useRef<() => void>(() => undefined);
+  const flushedRef = useRef("");
+  useEffect(() => () => flushRef.current(), []);
+  useEffect(() => {
+    if (!state?.editable || !can?.write) { flushRef.current = () => undefined; return; }
+    const flushOnHide = () => {
+      if (!dirtyRef.current || !lines.length) return;
+      const once = `${idRef.current}|${screenRef.current}`;
+      if (flushedRef.current === once) return;
+      flushedRef.current = once;
+      const draft = idRef.current === "draft";
+      const body = draft
+        ? { ...(draftCustomer ? { customerId: draftCustomer, ...(draftOpenDeal ? { openDeal: true } : {}) } : { opportunityId: draftDeal }), validUntil: validUntil || null, lines, deferEmpty: true, draftKey, autosave: true }
+        : { lines, validUntil: validUntil || null, customerNotes: notes, autosave: true };
+      fetch(draft ? "/api/sales/quotes" : `/api/sales/quotes/${idRef.current}`, {
+        method: draft ? "POST" : "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), keepalive: true,
+      }).catch(() => undefined);
+    };
+    const onHidden = () => { if (document.visibilityState === "hidden") flushOnHide(); };
+    const onClick = (e: MouseEvent) => {
+      if (!dirtyRef.current && !savingRef.current) return;
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = (e.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!a || (a.target && a.target !== "_self") || a.hasAttribute("download")) return;
+      const href = a.getAttribute("href") ?? "";
+      if (!href || href.startsWith("#")) return;
+      const url = new URL(a.href, window.location.href);
+      if (url.origin !== window.location.origin || url.pathname === window.location.pathname) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setLeaving({ href: url.pathname + url.search + url.hash });
+    };
+    flushRef.current = flushOnHide;
+    window.addEventListener("pagehide", flushOnHide);
+    window.addEventListener("popstate", flushOnHide);
+    document.addEventListener("visibilitychange", onHidden);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      window.removeEventListener("pagehide", flushOnHide);
+      window.removeEventListener("popstate", flushOnHide);
+      document.removeEventListener("visibilitychange", onHidden);
+      document.removeEventListener("click", onClick, true);
+    };
+  }, [state?.editable, can?.write, lines, validUntil, notes, draftCustomer, draftOpenDeal, draftDeal, draftKey]);
+
+  useEffect(() => {
+    if (!leaving || leaving.failed) return;
+    let gone = false;
+    void (async () => {
+      if (savingRef.current) await savingRef.current;
+      const ok = dirtyRef.current ? await persist("auto") : true;
+      if (gone) return;
+      if (ok) router.push(leaving.href);
+      else setLeaving({ ...leaving, failed: true });
+    })();
+    return () => { gone = true; };
+  }, [leaving]); // eslint-disable-line react-hooks/exhaustive-deps -- persist reads the latest screen
 
   async function transition(to: string, note?: string) {
     if (busy) return;
     setBusy(true);
     setError("");
     const res = await api<{ status: string; discountApproved?: boolean }>(
-      `/api/sales/quotes/${id}/transition`,
+      `/api/sales/quotes/${idRef.current}/transition`,
       { method: "POST", body: { to, note } },
     );
     setBusy(false);
@@ -449,7 +604,11 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   const SCREEN_AR: Record<string, string> = { KG: "كجم", UNIT: "عبوة", GRAM: "جرام" };
   const unitLabel = (u: string) => (UNIT_LABELS[u] ? (ar ? SCREEN_AR[u] ?? UNIT_LABELS[u].ar : UNIT_LABELS[u].en) : u);
   const pct = (v: string | number) => <bdi>{`${num(Number(v), lang)}%`}</bdi>;
-  const dealTitle = quote.opportunity?.title ?? (ar ? "بدون صفقة · قسم المحاسبة" : "No deal · accounting");
+  // Abu Fahd R3: a rep's unsaved quotation for a customer with no open deal opens its deal at the first save — say so
+  // (not «قسم المحاسبة», which is the accountant's quotation without a deal).
+  const dealTitle = quote.opportunity?.title ?? (draftOpenDeal
+    ? (ar ? "صفقة جديدة — تنفتح مع أول حفظ" : "New deal — opened at the first save")
+    : (ar ? "بدون صفقة · قسم المحاسبة" : "No deal · accounting"));
   const dealSub = quote.opportunity ? splitTitle(dealTitle, customerName).sub || (customerName ? "" : dealTitle) : dealTitle;
   const revisionText = (n: number) => `${ar ? "المراجعة" : "Revision"} ${n}`;
 
@@ -469,7 +628,6 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   const hasDiscount = Number(fig.discount) > 0;
   const rates = Array.from(new Set((editable ? lines.map((l) => l.taxRatePercent) : quote.lines.map((l) => l.taxRatePercent)).map((r) => Number(r))));
   const vatLabel = <>{ar ? "ضريبة القيمة المضافة" : "VAT"}{rates.length === 1 && <> {pct(rates[0])}</>}</>;
-  const unit = quote.currency === "SAR" ? (ar ? "ريال" : "SAR") : quote.currency;
   const minus = (v: string) => (Number(v) > 0 ? `−${formatMoney(v)}` : formatMoney(v));
 
   // ── Notices ──
@@ -524,12 +682,16 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   // list «يحتاج اعتماد خصم»), bound to these terms (P0 C3: any later change withdraws an approval). Above 60 % nothing is
   // offered: the server refuses it even with an approval.
   const overCeiling = measured.overCeiling;
-  const requestBtn = editable && can.write && !can.approveThisDiscount && dirty && needsApproval && !overCeiling ? (
-    <button type="button" className="btn p" disabled={busy || lines.length === 0} onClick={() => { void save(); }} data-testid="request-discount-approval">
-      {ar ? "حفظ وطلب اعتماد المشرف" : "Save and ask for supervisor approval"}
+  // Quote-45 round (item 3): with the lines autosaved, a saved draft above the limit may not have been REQUESTED yet (an
+  // autosave tells no approver) — the button stays until the rep asks; asking again for the same figures sends nothing new.
+  const requestBtn = editable && can.write && !can.approveThisDiscount && !overCeiling && !requested
+    && (dirty ? needsApproval : dState === "PENDING" || dState === "REJECTED") ? (
+    <button type="button" className="btn p" disabled={busy || lines.length === 0}
+      onClick={async () => { if (savingRef.current) await savingRef.current; void persist("request"); }} data-testid="request-discount-approval">
+      {dirty ? (ar ? "حفظ وطلب اعتماد المشرف" : "Save and ask for supervisor approval") : (ar ? "طلب اعتماد المشرف" : "Ask for supervisor approval")}
     </button>
   ) : null;
-  const awaitingApproval = quote.status === "DRAFT" && !dirty && dState === "PENDING" && !can.approveThisDiscount;
+  const awaitingApproval = quote.status === "DRAFT" && !dirty && dState === "PENDING" && !can.approveThisDiscount && requested;
   const saveBtn = editable ? (
     <button type="button" className="btn" onClick={save} disabled={busy || lines.length === 0} data-testid="save-quote">
       {ar ? "حفظ" : "Save"}
@@ -541,7 +703,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       className="btn p"
       disabled={busy || dirty || lines.length === 0 || issueBlocked}
       title={dirty ? (ar ? "احفظ أولاً" : "Save first") : issueBlocked ? (ar ? "بانتظار اعتماد الخصم" : "Waiting for discount approval") : undefined}
-      onClick={() => transition("ISSUED")}
+      onClick={() => setDialog("issue")}
       data-testid="issue-quote"
     >
       <Send size={15} aria-hidden /> {issueLabel}
@@ -549,14 +711,22 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   ) : null;
   // Accepting closes the deal Won, so it follows the deal-close privilege.
   const acceptBtn = quote.status === "ISSUED" && can.write && can.close ? (
-    <button type="button" className="btn p" disabled={busy} onClick={() => transition("ACCEPTED")} data-testid="accept-quote">
-      {ar ? "قَبِل العميل" : "Customer accepted"}
+    <button type="button" className="btn p q-accept" disabled={busy} onClick={() => setDialog("accept")} data-testid="accept-quote">
+      {ar ? "قَبِل العميل العرض ✓" : "Customer accepted ✓"}
     </button>
   ) : null;
   const rejectBtn = quote.status === "ISSUED" && can.write && can.reject !== false ? (
-    <button type="button" className="btn" disabled={busy} onClick={() => setDialog("reject")} data-testid="reject-quote">
-      {ar ? "رفَضه العميل" : "Customer rejected"}
+    <button type="button" className="q-rej-link" disabled={busy} onClick={() => setDialog("reject")} data-testid="reject-quote">
+      {ar ? "رفضه العميل" : "Customer rejected"}
     </button>
+  ) : null;
+  // P2 ب3 (approved Figma 8ب): «قَبِل» is the one full-width answer; «رفضه العميل» sits apart, as a quiet link under «ما قَبِل؟».
+  const decisionCard = acceptBtn || rejectBtn ? (
+    <section className="q-decide" data-testid="quote-decision">
+      <h2 className="q-decide-h">{ar ? "وش قال العميل؟" : "What did the customer say?"}</h2>
+      {acceptBtn}
+      {rejectBtn ? <p className="q-decide-no"><span>{ar ? "ما قَبِل؟" : "Didn't accept?"}</span>{rejectBtn}</p> : null}
+    </section>
   ) : null;
   const reviseBtn = state.revisable && can.write ? (
     <button type="button" className="btn" disabled={busy} data-testid="revise-quote" onClick={revise}>
@@ -578,10 +748,11 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   ) : null;
   // Every quotation has its document: an issued one its frozen snapshot, a draft its saved lines
   // under the «مسودة — غير صادر» banner (owner decision D-3).
-  const docLink = <QuoteDocumentLink id={quote.id} ar={ar} />;
+  const docLink = unsaved ? null : <QuoteDocumentLink id={quote.id} ar={ar} />; // P2 ب4: nothing to print before the first save
 
   // ── Blocks ──
-  const discountBand = quote.status === "DRAFT" && dState !== "NOT_NEEDED" ? (
+  // Abu Fahd R3: above the 60 % ceiling only the refusal shows (discount-ceiling-notice) — no «يحتاج اعتماد» beside it.
+  const discountBand = quote.status === "DRAFT" && dState !== "NOT_NEEDED" && !overCeiling ? (
     dState === "APPROVED" ? (
       <p className="notice ok" style={{ marginBottom: 18 }} data-testid="discount-approved-notice">
         {ar ? "اعتُمد الخصم" : "Discount approved"}
@@ -803,10 +974,10 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                   )}
                 </td>
                 <td>
-                  {/* P0 SEC-07 / C6: the VAT is fixed (S at the standard rate); a change is a request approved by a second person. */}
-                  <span className="qi num pct" aria-readonly="true" data-testid={`quote-line-tax-locked-${i}`} title={ar ? "يغيّرها المحاسب بطلب وموافقة" : "Changed by the accountant, with a request and an approval"}
-                    style={{ display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
-                    <span aria-hidden="true">🔒</span><bdi>{Number(l.taxRatePercent)}٪</bdi>{Number(l.taxRatePercent) === 15 ? (ar ? " (ثابتة)" : " (fixed)") : null}
+                  {/* P0 SEC-07 / C6: the VAT is fixed (S at the standard rate); a change is a request approved by a second person.
+                      Owner (14 Nov 2026, live Q-202611-0024): plain read-only «15%» — no lock, no «(ثابتة)» (it overflowed the total). */}
+                  <span className="qi num pct q-vat-ro" aria-readonly="true" data-testid={`quote-line-tax-locked-${i}`} title={ar ? "يغيّرها المحاسب بطلب وموافقة" : "Changed by the accountant, with a request and an approval"}>
+                    <bdi>{`${Number(l.taxRatePercent)}%`}</bdi>
                   </span>
                 </td>
                 <td data-testid={`line-total-${i}`}><bdi className="n">{formatMoney(lineTotal.toFixed(2))}</bdi></td>
@@ -902,12 +1073,14 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         <dd><bdi className="n">{formatMoney(taxableBase)}</bdi></dd>
         <dt>{vatLabel}</dt><dd><bdi className="n">{formatMoney(fig.tax)}</bdi></dd>
         <dt className="grand">{ar ? "الإجمالي" : "Total"}</dt>
-        <dd className="grand"><bdi>{formatMoney(fig.grand)}</bdi><span className="unit">{unit}</span></dd>
+        <dd className="grand"><bdi>{withRiyal(formatMoney(fig.grand), ar ? "ar" : "en")}</bdi></dd>
       </dl>
       {previewNote}
       {quote.status !== "DRAFT" ? <SentMessagesLine subjectType="Quote" subjectId={quote.id} ar={ar} isAdmin={viewerIsAdmin} reloadKey={justIssued ? 1 : 0} /> : null}
-      {quote.status === "DRAFT" ? (
+      {quote.status === "DRAFT" && !unsaved && quote.id !== "draft" ? (
         // P0 C5 (approved Figma 2029-2): VAT is fixed; a holder of the request privilege asks, a second person decides.
+        // Abu Fahd R2/R3: an unsaved quotation has no requests yet — nothing is asked for (it answered 404), also in the
+        // moment between its first save and the reload that brings its id.
         <TaxOverridePanel documentType="QUOTE" documentId={quote.id} ar={ar} editable={!dirty} onApplied={reload} reloadKey={quote.grandTotal + quote.lines.length} />
       ) : null}
       <CommissionPanel quoteId={quote.id} info={quote} issuer={issuer} canDecide={!!canRaw?.decideCommission} ar={ar} onDone={reload} />
@@ -969,9 +1142,10 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
      A revision does not replace its predecessor, it supersedes it: the old quotation stays,
      marked, because it is the document a customer was actually sent. */
   const showChain = !editable || quote.supersedes != null || quote.supersededBy != null;
-  const chainLink = (r: { id: string; quoteNumber: string; revision: number }) => (
-    <Link href={`${base}/${r.id}`}>
-      <span className="id">{r.quoteNumber}</span> · {revisionText(r.revision)}
+  // Gate R3 L1: the newer revision may still be an unnumbered draft — «مسودة», never a blank number.
+  const chainLink = (r: { id: string; quoteNumber: string | null; revision: number }) => (
+    <Link href={`${base}/${r.id}`} data-testid={`chain-link-${r.id}`}>
+      <span className="id">{quoteRef(r.quoteNumber, ar)}</span> · {revisionText(r.revision)}
     </Link>
   );
   const chainRows: [string, React.ReactNode][] = [
@@ -979,7 +1153,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       ? <>{chainLink(quote.supersededBy)} · <span className={`st ${STATUS_DOT[quote.supersededBy.status] ?? ""}`}>{statusLabel(quote.supersededBy.status)}</span></>
       : "—"],
     [ar ? "المعروضة الآن" : "Shown here",
-      <><span className="id">{quote.quoteNumber}</span> · {revisionText(quote.revision)} · {statusLabel(quote.status)}</>],
+      <><span className="id">{qNo}</span> · {revisionText(quote.revision)} · {statusLabel(quote.status)}</>],
     [ar ? "السابقة" : "Earlier", quote.supersedes
       ? <>{chainLink(quote.supersedes)} · <span className="st x">{statusLabel("SUPERSEDED")}</span></>
       : "—"],
@@ -1034,7 +1208,8 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         ))}
       </ol>
       {nextStep ? <p className="q-next" data-testid="quote-next-step">{nextStep}</p> : null}
-      {withActs && (acceptBtn || rejectBtn || orderBtn) ? <div className="q-next-acts">{rejectBtn}{acceptBtn}{orderBtn}</div> : null}
+      {withActs && orderBtn ? <div className="q-next-acts">{orderBtn}</div> : null}
+      {withActs ? decisionCard : null}
     </div>
   );
   const progress = progressBlock(true);
@@ -1075,8 +1250,43 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
 
   const dialogs = (
     <>
+    {leaving ? (
+      // Quote-45 round (item 3): no browser question on leaving — the lines are saved first, said in our words.
+      <div role="alertdialog" aria-modal="true" aria-labelledby="q-leave-t" data-testid="quote-leave-saving"
+        style={{ position: "fixed", inset: 0, zIndex: 80, display: "grid", placeItems: "center", background: "rgba(20,24,22,.35)" }}>
+        <div style={{ background: "var(--surface, #fff)", color: "var(--text-primary, #25312b)", borderRadius: 12, padding: "18px 20px", maxWidth: 360, width: "calc(100% - 32px)", display: "grid", gap: 12 }}>
+          {leaving.failed ? (
+            <>
+              <b id="q-leave-t">{ar ? "تعذّر حفظ التعديلات." : "The changes could not be saved."}</b>
+              <span>{error || (ar ? "إذا غادرت الآن فستُفقد آخر التعديلات." : "If you leave now, the last changes are lost.")}</span>
+              <span style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button type="button" className="btn p" onClick={() => setLeaving(null)} data-testid="quote-leave-stay">{ar ? "البقاء في الصفحة" : "Stay"}</button>
+                <button type="button" className="btn" onClick={() => { const h = leaving.href; dirtyRef.current = false; setLeaving(null); router.push(h); }} data-testid="quote-leave-go">{ar ? "المغادرة دون حفظ" : "Leave without saving"}</button>
+              </span>
+            </>
+          ) : (
+            <b id="q-leave-t" role="status">{ar ? "جارٍ حفظ التعديلات قبل المغادرة…" : "Saving the changes before leaving…"}</b>
+          )}
+        </div>
+      </div>
+    ) : null}
+    <>
+      {dialog === "issue" && (
+        <ResultConfirm ar={ar} testId="issue-confirm" busy={busy} onClose={() => setDialog(null)} onConfirm={() => void transition("ISSUED")}
+          title={quote.quoteNumber ? (ar ? <>تصدر العرض <bdi>{quote.quoteNumber}</bdi>؟</> : <>Issue quotation <bdi>{quote.quoteNumber}</bdi>?</>) : (ar ? <>تصدر العرض؟ يأخذ رقمه الآن.</> : <>Issue the quotation? It is numbered now.</>)}
+          body={ar ? "بعد الإصدار ما تقدر تعدّل البنود — تقدر ترسله للعميل أو تعمل نسخة جديدة." : "Once issued the lines cannot be edited — you can send it to the customer or raise a new revision."}
+          fact={{ label: ar ? "الإجمالي شامل الضريبة" : "Total incl. VAT", value: withRiyal(formatMoney(fig.grand), ar ? "ar" : "en") }}
+          confirmLabel={ar ? "أصدر العرض" : "Issue it"} />
+      )}
+      {dialog === "accept" && (
+        <ResultConfirm ar={ar} testId="accept-confirm" busy={busy} onClose={() => setDialog(null)} onConfirm={() => void transition("ACCEPTED")}
+          title={ar ? "العميل قَبِل العرض؟" : "Did the customer accept?"}
+          body={ar ? "الصفقة تتقفل «رابحة» وما تقدر ترجعها — إعادة الفتح عند المشرف." : "The deal closes as won and cannot be undone — only a supervisor can reopen it."}
+          fact={{ label: ar ? "العرض" : "Quotation", value: `${quoteRef(quote.quoteNumber, ar)} · ${withRiyal(formatMoney(fig.grand), ar ? "ar" : "en")}` }}
+          confirmLabel={ar ? "إيه، قَبِل" : "Yes, accepted"} />
+      )}
       {dialog === "reject" && (
-        <RejectDialog ar={ar} busy={busy} quoteNumber={quote.quoteNumber} customer={customerName}
+        <RejectDialog ar={ar} busy={busy} quoteNumber={quoteRef(quote.quoteNumber, ar)} customer={customerName}
           onClose={() => setDialog(null)} onSubmit={(n) => transition("REJECTED", n)} />
       )}
       {dialog === "order" && (
@@ -1092,6 +1302,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
           }}
         />
       )}
+    </>
     </>
   );
 
@@ -1110,12 +1321,13 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
     ) : null;
     const saveIssueBtn = firstDraft && lines.length > 0 && can.write ? (
       <button type="button" className="btn p" disabled={busy || issueBlocked} data-testid="save-and-issue"
-        onClick={async () => { if (await save()) await transition("ISSUED"); }}>
+        onClick={async () => { if (await save()) setDialog("issue"); }}>
         {ar ? "حفظ وإصدار" : "Save and issue"}
       </button>
     ) : null;
-    const primary = addFirstBtn ?? requestBtn ?? saveIssueBtn ?? issueBtn ?? orderBtn ?? acceptBtn ?? (!rejectBtn ? reviseBtn : null);
-    const secondary = firstDraft ? null : editingHere ? saveBtn : (rejectBtn ?? collectionLink);
+    // P2 ب3 (Figma 8ب): accept / reject live in the «وش قال العميل؟» card, apart from each other — not side by side in the bar.
+    const primary = addFirstBtn ?? requestBtn ?? saveIssueBtn ?? issueBtn ?? orderBtn ?? (decisionCard ? null : reviseBtn);
+    const secondary = firstDraft ? null : editingHere ? saveBtn : decisionCard ? null : collectionLink;
     const moreItems: React.ReactNode[] = [];
     if (editable && !phoneEdit) moreItems.push(
       <button key="edit" type="button" role="menuitem" data-testid="phone-edit-lines" onClick={() => { setMore(false); setPhoneEdit(true); }}>
@@ -1165,6 +1377,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         {recordNotes}
         {/* Quotes v2: the phone shows where the quotation is too; its buttons stay in the sticky bar. */}
         {!editable && quote.status !== "DRAFT" ? progressBlock(false) : null}
+        {decisionCard}
         {linesHeader}
         {phoneRows.length === 0 && firstDraft ? (
           <div className="q-emptyfirst" data-testid="quote-empty-first">
@@ -1197,7 +1410,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                         </Select></label>
                       <label><span>{ar ? "سعر الوحدة" : "Unit price"}</span><input aria-label={lab("سعر الوحدة", "Unit price")} value={l.unitPrice} inputMode="decimal" onChange={(e) => setLine(i, { unitPrice: e.target.value })} className="qi num" /></label>
                       <label className={over ? "wa" : undefined}><span>{ar ? "خصم %" : "Disc. %"}</span><input aria-label={lab("الخصم", "Discount")} value={l.discountPercent} inputMode="decimal" onChange={(e) => setLine(i, { discountPercent: e.target.value })} className="qi num" /></label>
-                      <label><span>{ar ? "ضريبة %" : "Tax %"}</span><span className="qi num" aria-readonly="true" data-testid={`quote-line-tax-locked-${i}`} title={ar ? "يغيّرها المحاسب بطلب وموافقة" : "Changed by the accountant, with a request and an approval"} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><span aria-hidden="true">🔒</span><bdi>{Number(l.taxRatePercent)}٪</bdi>{Number(l.taxRatePercent) === 15 ? (ar ? " (ثابتة)" : " (fixed)") : null}</span></label>
+                      <label><span>{ar ? "ضريبة %" : "Tax %"}</span><span className="qi num" aria-readonly="true" data-testid={`quote-line-tax-locked-${i}`} title={ar ? "يغيّرها المحاسب بطلب وموافقة" : "Changed by the accountant, with a request and an approval"} style={{ display: "inline-flex", alignItems: "center" }}><bdi>{`${Number(l.taxRatePercent)}%`}</bdi></span></label>
                       <div className="q-pcard-t"><span>{ar ? "الإجمالي شامل الضريبة" : "Total incl. VAT"}</span><b data-testid={`line-total-${i}`}><bdi className="n">{formatMoney(lineTotal.toFixed(2))}</bdi></b></div>
                     </div>
                   </div>
@@ -1239,8 +1452,10 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         {previewNote}
         {issuedNote}
         {quote.status !== "DRAFT" ? <SentMessagesLine subjectType="Quote" subjectId={quote.id} ar={ar} isAdmin={viewerIsAdmin} reloadKey={justIssued ? 1 : 0} /> : null}
-      {quote.status === "DRAFT" ? (
+      {quote.status === "DRAFT" && !unsaved && quote.id !== "draft" ? (
         // P0 C5 (approved Figma 2029-2): VAT is fixed; a holder of the request privilege asks, a second person decides.
+        // Abu Fahd R2/R3: an unsaved quotation has no requests yet — nothing is asked for (it answered 404), also in the
+        // moment between its first save and the reload that brings its id.
         <TaxOverridePanel documentType="QUOTE" documentId={quote.id} ar={ar} editable={!dirty} onApplied={reload} reloadKey={quote.grandTotal + quote.lines.length} />
       ) : null}
       <CommissionPanel quoteId={quote.id} info={quote} issuer={issuer} canDecide={!!canRaw?.decideCommission} ar={ar} onDone={reload} />
@@ -1276,7 +1491,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       {notices}
       <div className="ph q-ph">
         <div style={{ minWidth: 0 }}>
-          <h1>{ar ? "عرض السعر" : "Quotation"}{" "}<span className="id">{quote.quoteNumber}</span></h1>
+          <h1>{ar ? "عرض السعر" : "Quotation"}{" "}<span className="id">{qNo}</span></h1>
           <div className="meta">
             {meta.map((m, i) => <span key={i} style={{ display: "contents" }}>{i > 0 && <i />}{m}</span>)}
           </div>

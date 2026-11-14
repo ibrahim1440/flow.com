@@ -61,7 +61,7 @@ export async function lastClosedQuote(db: Pick<Tx, "quote">, opportunityId: stri
   });
   if (!q) return null;
   return {
-    id: q.id, quoteNumber: q.quoteNumber, revision: q.revision, status: q.status, grandTotal: q.grandTotal.toFixed(2), currency: q.currency,
+    id: q.id, quoteNumber: q.quoteNumber ?? "" /* closed: always numbered (Quote_number_issued_check) */, revision: q.revision, status: q.status, grandTotal: q.grandTotal.toFixed(2), currency: q.currency,
     at: (q.rejectedAt ?? q.validUntil)?.toISOString() ?? null,
   };
 }
@@ -78,7 +78,7 @@ export async function lastClosedQuotes(db: Pick<Tx, "quote">, opportunityIds: st
   const live = new Set(rows.filter((r) => r.status === "ACCEPTED" || r.status === "ISSUED").map((r) => r.opportunityId));
   for (const r of rows) {
     if (!r.opportunityId || live.has(r.opportunityId) || out.has(r.opportunityId)) continue;
-    out.set(r.opportunityId, { quoteNumber: r.quoteNumber, grandTotal: r.grandTotal.toFixed(2), status: r.status });
+    out.set(r.opportunityId, { quoteNumber: r.quoteNumber ?? "" /* issued or later: numbered */, grandTotal: r.grandTotal.toFixed(2), status: r.status });
   }
   return out;
 }

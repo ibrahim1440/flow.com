@@ -13,6 +13,9 @@ import { OpsLoading } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
 import { AcctShell, Msg, money, useApi, useLang, useWrite } from "../_ui/shell";
 import { registrationNoOf } from "@/lib/services/customers/customer-identity";
+import { canQuoteWithoutDeal } from "@/lib/services/sales/quote-access";
+import { useUser } from "../../user-context";
+import type { Permissions } from "@/lib/auth-shared";
 
 type Row = {
   id: string; name: string; nameAr: string | null; vatNumber: string | null; commercialRegNo: string | null; unifiedNumber?: string | null; city: string | null; address: string | null;
@@ -49,6 +52,9 @@ function CustomersPage() {
   const identityChanged = !!edit?.id && !!edit.orig && IDENTITY.some((k) => edit.form[k].trim() !== edit.orig![k].trim());
   const rows = useMemo(() => api.data?.rows ?? [], [api.data]);
   const can = api.data?.can.write ?? false;
+  // Abu Fahd R2 (low): «عرض سعر» only for whom it works (accounting › quotes_issue) — never a button that answers «ليست لديك صلاحية».
+  const me = useUser();
+  const mayQuote = !!me && canQuoteWithoutDeal(me.permissions as Permissions);
   // «+» of the sidebar (?new=1): the new-customer form, once the page knows the viewer may write.
   const sp = useSearchParams();
   const wantsNew = sp.get("new") === "1";
@@ -63,10 +69,8 @@ function CustomersPage() {
       : await w.run("save", "/api/accounting/customers", "POST", edit.form, L("أُضيف العميل.", "Customer added."));
     if (r) { setEdit(null); api.reload(); }
   };
-  const quote = async (c: Row) => {
-    const r = await w.run<{ quote: { id: string } }>(`q-${c.id}`, "/api/sales/quotes", "POST", { customerId: c.id, lines: [] });
-    if (r) router.push(`/dashboard/accounting/quotes/${r.quote.id}`);
-  };
+  // P2 gate Q18 (ب4): «عرض سعر» opens the unsaved editor — nothing is created or numbered before the first line.
+  const quote = (c: Row) => { router.push(`/dashboard/accounting/quotes/draft?customerId=${encodeURIComponent(c.id)}`); };
   const f = (k: keyof Form, ar: string, en: string, ltr = false) => (
     <label className="hr-field" key={k}><span className="hr-label">{L(ar, en)}</span>
       <input className="hr-input" dir={ltr ? "ltr" : undefined} value={edit?.form[k] ?? ""} onChange={(e) => edit && setEdit({ ...edit, form: { ...edit.form, [k]: e.target.value } })} data-testid={`acust-${k}`} /></label>
@@ -95,7 +99,7 @@ function CustomersPage() {
                 <td className="num">{c.creditLimit ? money(c.creditLimit) : "—"}</td><td>{c.repName ?? <span className="acct-hint">{L("بدون مندوب", "No rep")}</span>}</td>
                 <td style={{ whiteSpace: "nowrap" }}>
                   <Link className="hr-btn is-sm" href={`/dashboard/sales/receivables/${c.id}`}>{L("كشف الحساب", "Statement")}</Link>{" "}
-                  <button type="button" className="hr-btn is-sm" disabled={!!w.busy} onClick={() => quote(c)} data-testid={`acust-quote-${c.id}`}>{L("عرض سعر", "Quotation")}</button>{" "}
+                  {mayQuote ? <><button type="button" className="hr-btn is-sm" disabled={!!w.busy} onClick={() => quote(c)} data-testid={`acust-quote-${c.id}`}>{L("عرض سعر", "Quotation")}</button>{" "}</> : null}
                   <Link className="hr-btn is-sm" href={`/dashboard/sales/invoices/new?q=${encodeURIComponent(c.nameAr || c.name)}`}>{L("فاتورة", "Invoice")}</Link>{" "}
                   {can ? <button type="button" className="hr-btn is-sm" onClick={() => { const form = { name: c.name, nameAr: c.nameAr ?? "", vatNumber: c.vatNumber ?? "", registrationNo: registrationNoOf(c), city: c.city ?? "", address: c.address ?? "", phone: c.phone ?? "", email: c.email ?? "" }; setEdit({ id: c.id, form, orig: form, reason: "", row: c }); }} data-testid={`acust-edit-${c.id}`}>{L("تعديل", "Edit")}</button> : null}
                 </td>

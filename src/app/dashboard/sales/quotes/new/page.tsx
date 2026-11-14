@@ -55,12 +55,16 @@ export default function NewQuotePage() {
       // and one that is at least not in the past, which an empty date would leave them to
       // discover at the moment of issue.
       const validUntil = new Date(Date.now() + 30 * 86400_000).toISOString().slice(0, 10);
-      const res = await api<{ quote: { id: string } }>("/api/sales/quotes", {
+      // P2 ب4: `deferEmpty` — nothing is created while there is no line (no number burnt by an abandoned «عرض سعر جديد»);
+      // the answer is then the unsaved editor (…/draft), whose first save creates and numbers the quotation.
+      const res = await api<{ quote: { id: string } | null; draft?: boolean }>("/api/sales/quotes", {
         method: "POST",
-        body: { opportunityId, validUntil, lines: [], ...(fromCustomer ? { from: "customer" } : {}) },
+        body: { opportunityId, validUntil, lines: [], deferEmpty: true, ...(fromCustomer ? { from: "customer" } : {}) },
       });
       if (!alive.current) return;
-      if (res.ok && res.data.quote) {
+      if (res.ok && res.data.draft) {
+        router.replace(`${base}/draft?opportunityId=${encodeURIComponent(opportunityId)}${fromCustomer ? "&from=customer" : ""}`);
+      } else if (res.ok && res.data.quote) {
         router.replace(`${base}/${res.data.quote.id}`);
       } else {
         setCreateError(res.data.error ?? (ar ? "تعذّر إنشاء العرض." : "Could not create the quotation."));

@@ -32,6 +32,7 @@ import { AddPlanSheet } from "../../my-day/_components/khitati";
 import { useDropStaleLayer } from "../../my-day/_components/back-layer";
 import "../customers.css";
 import "./account.css";
+import { quoteRef } from "@/lib/services/sales/quote-label";
 
 /**
  * Customer account — the approved frame `crm-account` (Figma 179:1312, 1024 180:1470, 390
@@ -197,15 +198,18 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
     setQuickBusy(true);
     // «عيّنة» asks first WITHOUT writing (`preview`): when no deal exists yet, the request opens it on «إرسال الطلب» —
     // cancelling the dialog leaves nothing behind (council fix round 2, item 3).
-    const res = await api<{ kind: "use" | "created" | "pick" | "none" | "new"; opportunityId?: string; deals?: QuickPick["deals"] }>(`/api/customers/${id}/quick-deal`, { method: "POST", body: { purpose, preview: purpose === "sample" } });
+    // Abu Fahd R2 (M3): «عرض سعر» asks without writing too — with no open deal the unsaved editor opens and the deal is
+    // opened by its first save (POST /api/sales/quotes { customerId, openDeal }); leaving it leaves no empty deal.
+    const res = await api<{ kind: "use" | "created" | "pick" | "none" | "new"; opportunityId?: string; deals?: QuickPick["deals"] }>(`/api/customers/${id}/quick-deal`, { method: "POST", body: { purpose, preview: true } });
     setQuickBusy(false);
     if (!res.ok) { setNotice({ text: res.data.error ?? L("تعذّر فتح الصفقة.", "Could not open the deal."), ok: false }); return; }
     const r = res.data;
     if (r.kind === "new" && purpose === "sample") setDialog({ sample: { dealId: null, sampled: [], manager: false } });
+    else if (r.kind === "new" && purpose === "quote") router.push(`/dashboard/sales/quotes/draft?customerId=${encodeURIComponent(id)}&openDeal=1&from=customer`);
     else if ((r.kind === "use" || r.kind === "created") && r.opportunityId) void goWithDeal(purpose, r.opportunityId);
     else if (r.kind === "pick" && r.deals?.length) setDialog({ pick: { purpose, deals: r.deals } });
     else setNotice({ text: L("ما عندك صفقة مفتوحة مع هذا العميل، وما عندك صلاحية تفتح وحدة. كلّم مديرك.", "You have no open deal with this customer and may not open one. Ask your manager."), ok: false });
-  }, [quickBusy, held, id, L, goWithDeal]);
+  }, [quickBusy, held, id, L, goWithDeal, router]);
   // The «+ جديد» menu and Ctrl K open these on this page with the customer already chosen (?new=…).
   const salesOn = !!data?.sections.sales;
   useCreateRequest("activity", () => setDialog({ activity: "CALL" }), salesOn && !!data?.can.logActivity);
@@ -955,7 +959,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
     <div className="acc-scroll"><table className="t" data-testid="quotes-table">
       <thead><tr><th>{L("العرض", "Quotation")}</th><th>{L("الصفقة / المصدر", "Deal / source")}</th><th>{L("الحالة", "Status")}</th><th className="num">{L("الإجمالي · ريال", "Total · SAR")}</th><th>{L("صالح حتى", "Valid until")}</th><th>{L("أُصدر", "Issued")}</th></tr></thead>
       <tbody>{allQuotes.map((q) => (
-        <tr key={q.key}><td><Link href={`/dashboard/sales/quotes/${q.id}`}><bdi className="id">{q.quoteNumber}</bdi></Link> <span className="sm">{L("م", "rev")} {q.revision}</span></td><td>{q.source}</td>
+        <tr key={q.key}><td><Link href={`/dashboard/sales/quotes/${q.id}`}><bdi className="id">{quoteRef(q.quoteNumber, ar)}</bdi></Link> <span className="sm">{L("م", "rev")} {q.revision}</span></td><td>{q.source}</td>
           <td><span className={`st ${QUOTE_TONE[q.status] ?? ""}`}>{pick(QUOTE_STATUS_SPECS, q.status, lang)}</span></td><td className="num">{money2(q.grandTotal)}</td>
           <td>{q.validUntil ? shortDate(q.validUntil, lang) : "—"}</td><td>{q.issuedAt ? shortDate(q.issuedAt, lang) : "—"}</td></tr>
       ))}</tbody>

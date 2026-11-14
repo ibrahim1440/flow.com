@@ -62,6 +62,9 @@ export function LotLabel({ d }: { d: LotLabelData }) {
 }
 
 /**
+ * Station label — يطبع دائمًا (قرار المالك 13 Nov 2026، أرضية التحميص تعتمد عليها): the one print that does not follow
+ * PRINT_CERTIFIED / PRINT_DOCUMENTS_ENABLED (tests/print/unit/print-disable-all.test.ts lists it as "station-always").
+ *
  * Print one label now: rendered into a print-only layer (100×75 mm page) and window.print() once per mount (re-mount it —
  * a new `key` — to print again). The last label stays in the layer, hidden on screen.
  */

@@ -67,6 +67,20 @@ const LOCK_WINDOW_MS = 15 * 60 * 1000;
 export const LOCK_THRESHOLD = 10;
 const loginIdentifier = (username: string) => hashRateLimitKey("login:" + username);
 
+async function signInWatch(employeeId: string, username: string) {
+  const { lockStatus } = await import("@/lib/auth/login-throttle");
+  const { describeUserAgent } = await import("@/lib/auth/device");
+  const status = await lockStatus(username);
+  const rows = await prisma.authAuditLog.findMany({
+    where: { OR: [{ userId: employeeId }, { identifierHash: loginIdentifier(username) }], action: { in: ["SIGN_IN", "SIGN_IN_FIRST_FACTOR", "ACCOUNT_LOCKED", "LOGIN_SUSPICIOUS", "ACCOUNT_UNLOCKED"] } },
+    orderBy: { occurredAt: "desc" }, take: 10, select: { occurredAt: true, action: true, result: true, userAgent: true },
+  });
+  return {
+    ...status,
+    recent: rows.map((r) => { const d = describeUserAgent(r.userAgent); return { at: r.occurredAt.toISOString(), action: r.action, result: r.result, browser: d.browser, os: d.os }; }),
+  };
+}
+
 export type UserStatus = "active" | "inactive" | "locked" | "mustChange";
 
 async function lockState(usernames: string[]): Promise<Map<string, { count: number; last: Date | null }>> {
@@ -194,6 +208,9 @@ export async function profile(id: string, viewer: Viewer) {
     id: e.id, name: e.name, username: e.username, phoneNumber: e.phoneNumber, role: roleOf(e), customized: isCustomized(effective, template),
     status: statusOf(e, locked), active: e.active, self: viewer.id === e.id,
     lock: locked ? { attempts: lock!.count, since: iso(lock!.last) } : null,
+    // P2 SEC-09 (approved Figma 6ج): what the user administrators watch — the lock's end, the failures of the last hour
+    // (an alert above 20) and the latest sign-ins (when, which browser, the result; never an address or what was typed).
+    signInWatch: caps.manage && viewer.id !== e.id && e.username ? await signInWatch(id, e.username) : null,
     hr: e.hrPerson ? { id: e.hrPerson.id, name: e.hrPerson.fullNameAr, nameEn: e.hrPerson.fullNameEn, jobTitle: e.hrPerson.jobTitle, department: e.hrPerson.department?.nameAr ?? null, departmentEn: e.hrPerson.department?.nameEn ?? null } : null,
     external: !!e.externalPerson,
     // «البريد الإلكتروني للشركة» (feat/credit-hold): the linked HR person's, else the account's own.

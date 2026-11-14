@@ -472,7 +472,7 @@ export default function CollectionsPage() {
     const why = blockedReason(r);
     return (
       <div className="acts">
-        {data?.releases?.[r.id] ? <span className="wa" data-testid={`releases-order-${r.id}`}>{ar ? `يفك الطلب #${data.releases[r.id]}` : `Releases order #${data.releases[r.id]}`}</span> : null}
+        {data?.releases?.[r.id] ? <span className="wa" data-testid={`releases-order-${r.id}`}>{ar ? `يفتح قفل الطلب #${data.releases[r.id]}` : `Releases order #${data.releases[r.id]}`}</span> : null}
         {why && (
           <span className="why" data-testid={`decision-blocked-${r.id}`} data-reason={why}>
             {ar ? WHY_NOT[why].ar : WHY_NOT[why].en}
@@ -667,8 +667,8 @@ export default function CollectionsPage() {
       {dialog.kind !== "reverse" && data?.releases?.[dialog.row.id] ? (
         <p className="notice" data-testid="reject-holds-order">{ar
           ? dialog.kind === "return"
-            ? `هذا التحصيل يفك الطلب #${data.releases[dialog.row.id]} (بيع مباشر والعميل فوق الحد). إذا رجّعته للتصحيح يظل الطلب موقوف لين يصحّحه المندوب وتعتمد التصحيح.`
-            : `هذا التحصيل يفك الطلب #${data.releases[dialog.row.id]} (بيع مباشر والعميل فوق الحد). إذا رفضته يظل الطلب موقوف.`
+            ? `هذا التحصيل يفتح قفل الطلب #${data.releases[dialog.row.id]} (بيع مباشر والعميل فوق الحد). إذا رجّعته للتصحيح يظل الطلب موقوف لين يصحّحه المندوب وتعتمد التصحيح.`
+            : `هذا التحصيل يفتح قفل الطلب #${data.releases[dialog.row.id]} (بيع مباشر والعميل فوق الحد). إذا رفضته يظل الطلب موقوف.`
           : dialog.kind === "return"
             ? `This collection releases order #${data.releases[dialog.row.id]} (a direct sale over the credit limit). Returned for correction, the order stays held until the rep corrects it and you approve the correction.`
             : `This collection releases order #${data.releases[dialog.row.id]} (a direct sale over the credit limit). Rejecting it keeps the order held.`}</p>

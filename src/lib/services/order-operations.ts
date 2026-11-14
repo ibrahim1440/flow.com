@@ -116,7 +116,7 @@ export const ACTIVITY_TYPES = [
   // «طلب مباشر» (20261219090000_direct_order_deal): the order joined a deal — the one the creator chose or the
   // customer's open deal at creation, a deal opened for it (WON, «تلقائي: طلب مباشر»), or «اربط بصفقة» later.
   "DEAL_LINKED",
-  // «بيع مباشر» (D10): the order was a direct sale — how it is handed over (تسليم الحين / توصيل) and paid (كاش / شبكة / آجل).
+  // «بيع مباشر» (D10): the order was a direct sale — how it is handed over (تسليم الحين / توصيل) and paid (نقداً / شبكة / آجل).
   "DIRECT_SALE",
   // «بيع مباشر» D1: the order ended, so the deal the sale had won went back to OPEN (its stage before the sale).
   "DEAL_REOPENED",

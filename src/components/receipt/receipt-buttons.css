@@ -1,0 +1,8 @@
+/* P2 UXM-24 (approved Figma 2أ / 2ب): «📷 صوّر» and «اختر ملف», two equal 44 px buttons. */
+.rcpt-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.rcpt-btn { min-height: 44px; border-radius: 8px; border: 1px solid var(--border-strong, #7e8b82); background: var(--surface, #fff);
+  color: var(--text-primary, #25312b); font: inherit; font-weight: 700; font-size: 14px; cursor: pointer; display: inline-flex;
+  align-items: center; justify-content: center; gap: 6px; }
+.rcpt-btn:hover:not(:disabled) { background: var(--surface-hover, #f1f3ef); }
+.rcpt-btn:focus-visible { outline: 2px solid var(--action-primary, #405f4d); outline-offset: 2px; }
+.rcpt-btn:disabled { opacity: .55; cursor: not-allowed; }

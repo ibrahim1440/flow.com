@@ -229,7 +229,7 @@ export async function GET(_request: Request, { params }: Params) {
           })
         : [];
       const s = salesLast12Months(accepted.map((q) => ({
-        opportunityId: q.opportunityId, quoteId: q.id, quoteNumber: q.quoteNumber, acceptedAt: q.acceptedAt,
+        opportunityId: q.opportunityId, quoteId: q.id, quoteNumber: q.quoteNumber ?? "" /* accepted: always numbered (Quote_number_issued_check) */, acceptedAt: q.acceptedAt,
         grandTotal: new Decimal(q.grandTotal.toString()), taxTotal: new Decimal(q.taxTotal.toString()),
       })), now);
       const b = outstandingBalance(

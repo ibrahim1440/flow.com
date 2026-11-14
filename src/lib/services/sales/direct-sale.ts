@@ -87,8 +87,8 @@ export const PAYMENT_CHOICES = ["CASH", "CARD", "BANK_TRANSFER", "CREDIT"] as co
 export type PaymentChoice = (typeof PAYMENT_CHOICES)[number];
 /** The collection's method for a paid-now choice (D20: «تحويل بنكي» — owner decision, option 2, the receipt optional). */
 export const collectionMethodOf = (m: Exclude<PaymentChoice, "CREDIT">) => (m === "CASH" ? "CASH" : m === "CARD" ? "POS_CARD" : "BANK_TRANSFER") as "CASH" | "POS_CARD" | "BANK_TRANSFER";
-/** «كاش» / «شبكة» / «تحويل بنكي» / «آجل» — the order's activity line. */
-export const paymentLabelAr = (m: PaymentChoice) => (m === "CASH" ? "كاش" : m === "CARD" ? "شبكة" : m === "BANK_TRANSFER" ? "تحويل بنكي" : "آجل");
+/** «نقداً» / «شبكة» / «تحويل بنكي» / «آجل» — the order's activity line. */
+export const paymentLabelAr = (m: PaymentChoice) => (m === "CASH" ? "نقداً" : m === "CARD" ? "شبكة" : m === "BANK_TRANSFER" ? "تحويل بنكي" : "آجل");
 /** The transfer's reference (optional, D20): trimmed, at most 100 characters; only kept for a bank transfer. */
 export function parseTransferReference(raw: unknown, method: PaymentChoice): string | null {
   if (method !== "BANK_TRANSFER" || typeof raw !== "string") return null;
@@ -192,14 +192,19 @@ export async function directSaleOptions(actor: DirectSaleActor, q: string, onlyI
   ]);
   // D22 (أبو فهد B2): for the customer chosen, the open deals the sale may join — the rep's own (or any, with the all-sales
   // view: the same scope the link checks); the page asks «تربطه بصفقة؟» whenever there is one.
+  // P2 ب6 / UXM-20: said BEFORE the sale — the customer's active account owner is someone else, so a new deal (and its
+  // commission) is theirs. The name is not sent.
+  const owner = onlyId && customers.length ? await prisma.customer.findUnique({ where: { id: onlyId }, select: { accountOwnerId: true, accountOwner: { select: { active: true } } } }) : null;
+  const accountOwnedByOther = !!owner?.accountOwnerId && owner.accountOwnerId !== actor.id && !!owner.accountOwner?.active;
   const deals = onlyId && customers.length ? await prisma.opportunity.findMany({
     where: { customerId: onlyId, outcome: "OPEN", ...(seesAllSales(actor.permissions) ? {} : { ownerId: actor.id }) },
     orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: 20,
-    select: { id: true, title: true, amount: true, createdAt: true, stage: { select: { nameAr: true, nameEn: true } }, _count: { select: { quotes: true, samples: true } }, quotes: { orderBy: { createdAt: "desc" }, take: 1, select: { createdAt: true } } },
+    select: { id: true, title: true, amount: true, createdAt: true, ownerId: true, stage: { select: { nameAr: true, nameEn: true } }, _count: { select: { quotes: true, samples: true } }, quotes: { orderBy: { createdAt: "desc" }, take: 1, select: { createdAt: true } } },
   }) : [];
   return {
     customers: customers.map((c) => ({ id: c.id, name: c.name, nameAr: c.nameAr, city: c.city, lastOrderAt: c.orders[0]?.createdAt.toISOString() ?? null })),
-    deals: deals.map((d) => ({ id: d.id, title: d.title, amount: d.amount == null ? null : d.amount.toFixed(2), createdAt: d.createdAt.toISOString(), stageAr: d.stage.nameAr, stageEn: d.stage.nameEn, quotes: d._count.quotes, samples: d._count.samples, quoteAt: d.quotes[0]?.createdAt.toISOString() ?? null })),
+    deals: deals.map((d) => ({ id: d.id, title: d.title, amount: d.amount == null ? null : d.amount.toFixed(2), createdAt: d.createdAt.toISOString(), stageAr: d.stage.nameAr, stageEn: d.stage.nameEn, quotes: d._count.quotes, samples: d._count.samples, quoteAt: d.quotes[0]?.createdAt.toISOString() ?? null, mine: d.ownerId === actor.id })),
+    accountOwnedByOther,
     products: products.map((p) => ({ id: p.id, skuCode: p.skuCode, name: p.nameAr || p.name || p.product.productNameAr || p.product.productNameEn, price: p.price.toFixed(2) })),
     can: {
       approveDiscount: mayApproveDiscount(actor.permissions),
@@ -224,7 +229,16 @@ export type DirectSaleResult = {
   /** Owner decision أ: PENDING — a paid-now sale over the customer's credit limit, held until the accountant verifies its
    *  collection («بانتظار تأكيد استلام المبلغ»); REJECTED — its receipt was rejected. */
   paymentHold?: "PENDING" | "REJECTED" | null;
+  /** P2 ب6 / UXM-20: the deal (and its commission) is another rep's — the customer's account owner's. Never their name. */
+  ownedByOther?: boolean;
 };
+
+/** P2 ب6: the deal the sale landed on belongs to someone other than the seller (directDealOwner: the account owner). */
+async function dealOwnedByOther(tx: Tx, opportunityId: string | null, sellerId: string): Promise<boolean> {
+  if (!opportunityId) return false;
+  const d = await tx.opportunity.findUnique({ where: { id: opportunityId }, select: { ownerId: true } });
+  return !!d?.ownerId && d.ownerId !== sellerId;
+}
 
 /** What the sale's own audit row says (written in the sale's transaction): its key, payment and note — and, for a sale
  *  made on the tax invoice page (D22), its terms (the latest: a resubmit after a refusal records the new ones). */
@@ -326,6 +340,24 @@ async function completeSale(tx: Tx, input: { orderId: string; orderNumber: numbe
     });
     collectionId = c.collectionId;
   }
+  // P2 ب6 / UXM-20 (owner decision 13 Nov 2026): the deal and the commission stay with the account owner — who, and the
+  // supervisors, are told that another rep sold on the account. The seller is not told the owner's name (the screen says
+  // «العميل تابع لمندوب ثاني»).
+  // P2 gate Q16 (pending the owner; built as recommended): the seller's OWN open deal on another rep's customer keeps the
+  // deal (and its commission) — but the account owner and the supervisors are told the same way.
+  const cust = await tx.customer.findUnique({ where: { id: order.customerId }, select: { name: true, nameAr: true, accountOwnerId: true, accountOwner: { select: { active: true } } } });
+  const otherDeal = !!opportunityId && await dealOwnedByOther(tx, opportunityId, rep.id);
+  const otherAccount = !!cust?.accountOwnerId && cust.accountOwnerId !== rep.id && !!cust.accountOwner?.active;
+  if (otherDeal || otherAccount) {
+    const deal = opportunityId ? await tx.opportunity.findUnique({ where: { id: opportunityId }, select: { ownerId: true } }) : null;
+    await notify(tx, {
+      event: "sales.direct_sale_other_owner", dedupeKey: orderId,
+      actorId: rep.id, entity: { type: "Order", id: orderId },
+      facts: { orderNumber: input.orderNumber, sellerName: rep.name, customerName: cust ? cust.nameAr || cust.name : "", customerNameEn: cust?.name ?? "", opportunityId, sellerKeptDeal: otherDeal ? 0 : 1 },
+      people: { accountOwner: otherDeal ? deal?.ownerId ?? cust?.accountOwnerId ?? null : cust?.accountOwnerId ?? null },
+      scopeOwners: [deal?.ownerId, cust?.accountOwnerId],
+    });
+  }
   await audit(tx, {
     action: "DIRECT_SALE_COMPLETED", entityType: "Order", entityId: orderId, actorId: input.ctx.actorId,
     after: { opportunityId, dealCreated: link.created, priorDeal, invoiceId: draft.id, requestKey: key, subtotal: priced.subtotal, discountPercent: priced.discountPercent, net: priced.net, tax: priced.tax, gross: priced.gross, payment: method, collectionId },
@@ -363,6 +395,7 @@ async function describeSale(tx: Tx, orderId: string, method: PaymentChoice, repI
     paymentHold: o.paymentHold === "PENDING" || o.paymentHold === "REJECTED" ? o.paymentHold : null,
     discountApproval: pending ? "PENDING" : o.discountApprovalStatus === "APPROVED" ? "APPROVED" : "NONE",
     opportunityId: o.opportunityLinks[0]?.opportunityId ?? null,
+    ownedByOther: await dealOwnedByOther(tx, o.opportunityLinks[0]?.opportunityId ?? null, repId),
     deal: await saleDeal(tx, orderId),
     invoice: inv ? { id: inv.id, requested: !!inv.requestedAt, warnings: [] } : null,
     totals: inv ? { net: inv.lineExtensionTotal.toString(), tax: inv.taxTotal.toString(), gross: inv.grandTotal.toString(), discountPercent: (o.requestedDiscountPercent ?? 0).toString() }
@@ -400,7 +433,7 @@ export async function createDirectSale(
   const header = termsMode ? parseHeader(input.invoice) : null;
   let { percent: discountPercent, needsApproval } = termsMode ? { percent: new Prisma.Decimal(0), needsApproval: false } : parseDiscount(input.discountPercent, await discountThreshold(prisma), mayApproveDiscount(actor.permissions));
   const method = (PAYMENT_CHOICES as readonly string[]).includes(String(input.payment)) ? input.payment as PaymentChoice : null;
-  if (!method) throw refuse(400, "PAYMENT_REQUIRED", "اختر طريقة الدفع: كاش أو شبكة أو تحويل بنكي أو آجل.", "Choose how the customer pays: cash, card, bank transfer or on account.");
+  if (!method) throw refuse(400, "PAYMENT_REQUIRED", "اختر طريقة الدفع: نقداً أو شبكة أو تحويل بنكي أو آجل.", "Choose how the customer pays: cash, card, bank transfer or on account.");
   const reference = parseTransferReference(input.reference, method);
   if (method !== "CREDIT" && !hasSubPrivilege(actor.permissions as Permissions, "sales", "collection_submit")) {
     throw refuse(403, "COLLECTION_FORBIDDEN", "ما عندك صلاحية تسجيل تحصيل — اختر «آجل».", "You may not record a collection — choose on account.");
@@ -472,6 +505,7 @@ export async function createDirectSale(
     return {
       paymentHold: over ? "PENDING" : null,
       replayed: false, order: { id: order.id, orderNumber: order.orderNumber, status: order.status }, discountApproval: "NONE", opportunityId: done.opportunityId, deal: await saleDeal(tx, order.id), invoice: done.invoice,
+      ownedByOther: await dealOwnedByOther(tx, done.opportunityId, actor.id),
       totals: { net: done.priced.net, tax: done.priced.tax, gross: done.priced.gross, discountPercent: done.priced.discountPercent }, payment: { method, collectionId: done.collectionId },
     } satisfies DirectSaleResult;
   }, TX_OPTS);

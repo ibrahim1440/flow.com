@@ -1,5 +1,6 @@
 "use client";
 
+import { PastDateHint } from "@/components/dates/PastDateHint";
 import { halalas } from "@/lib/format/money";
 import { displayPhone, waDigits } from "@/lib/contact/phone";
 import { useState, useEffect, useRef, use } from "react";
@@ -30,6 +31,7 @@ import { SampleDialog } from "../../_components/SampleDialog";
 import { NewCustomerDialog, type CreatedCustomer } from "@/components/customers/new-customer-form";
 import { useUser } from "../../../user-context";
 import { riyadhDayOf } from "@/lib/dates/not-past";
+import { quoteKey, quoteRef } from "@/lib/services/sales/quote-label";
 
 
 /** FOLLOWUPS sales UI bug 4: a product's Arabic name on the Arabic screen (its English name, else its code, otherwise). */
@@ -87,7 +89,7 @@ type Deal = {
   owners: { id: string; sharePercent: string; effectiveFrom: string; employee: { id: string; name: string } }[];
   conversion: { leadId: string; convertedAt: string; convertedById: string | null; lead: { companyName: string; contactName: string; phone: string | null; source: string } } | null;
   quotes: {
-    id: string; quoteNumber: string; revision: number; status: string; currency: string;
+    id: string; quoteNumber: string | null; revision: number; status: string; currency: string;
     validUntil: string | null; grandTotal: string; taxTotal: string; issuedAt: string | null; acceptedAt: string | null;
     lines: { taxRatePercent: string }[];
     _count: { lines: number; orderLinks: number };
@@ -924,7 +926,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       </div>
       <div className="ttl">
         <span style={{ display: "flex", flexDirection: "column" }}>
-          <b>{ar ? "عرض السعر " : "Quotation "}<bdi className="id" dir="ltr">{currentQuote.quoteNumber}</bdi> · {ar ? `النسخة ${currentQuote.revision}` : `version ${currentQuote.revision}`}</b>
+          <b>{ar ? "عرض السعر " : "Quotation "}<bdi className="id" dir="ltr">{quoteRef(currentQuote.quoteNumber, ar)}</bdi> · {ar ? `النسخة ${currentQuote.revision}` : `version ${currentQuote.revision}`}</b>
           {currentQuote.acceptedAt ? <span className="txt">{ar ? `قُبل في ${longDate(currentQuote.acceptedAt, lang)}` : `Accepted on ${longDate(currentQuote.acceptedAt, lang)}`}</span> : null}
         </span>
         {ns && ns.quoteId === currentQuote.id
@@ -952,7 +954,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
           </div>
           <div className="pv2-vers" data-testid="quote-versions">
             {versions.map((v) => (
-              <Link key={v.id} href={quoteHref(v.id)} className={`pv2-ver${v.id === currentQuote.id ? " cur" : ""}`} data-testid={`quote-row-${v.quoteNumber}`} aria-current={v.id === currentQuote.id ? "true" : undefined}>
+              <Link key={v.id} href={quoteHref(v.id)} className={`pv2-ver${v.id === currentQuote.id ? " cur" : ""}`} data-testid={`quote-row-${quoteKey(v)}`} aria-current={v.id === currentQuote.id ? "true" : undefined}>
                 <span className="top"><b>{ar ? `النسخة ${v.revision}` : `Version ${v.revision}`}</b><span>{money(v.grandTotal)}</span></span>
                 <Chip tone={v.status === "ACCEPTED" ? "ok" : v.status === "REJECTED" || v.status === "EXPIRED" ? "danger" : v.status === "ISSUED" ? "info" : "neutral"} label={pick(QUOTE_STATUS_SPECS, v.status, lang)} />
                 <small>{v.issuedAt ? shortDate(v.issuedAt, lang) : (ar ? "لم تُصدر" : "not issued")}</small>
@@ -961,7 +963,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         </>
       )}
-      {versions.length === 1 && <span hidden data-testid={`quote-row-${currentQuote.quoteNumber}`} />}
+      {versions.length === 1 && <span hidden data-testid={`quote-row-${quoteKey(currentQuote)}`} />}
       <div style={{ display: "flex", gap: 16 }}>
         <Link className="pv2-lk" style={{ margin: 0 }} href={quoteHref(currentQuote.id)}>{ar ? "فتح العرض" : "Open quotation"}</Link>
         <Link className="pv2-lk" style={{ margin: 0 }} href={`/dashboard/sales/quotes/${currentQuote.id}/print`}>{ar ? "تنزيل PDF" : "Download PDF"}</Link>
@@ -1106,8 +1108,8 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       <div className="h"><h2 id="pv2-sq-h">{deal.samples.length === 0 && !currentQuote && !samplesSkipped ? (ar ? "العيّنات وعروض الأسعار" : "Samples and quotations") : (ar ? "عروض الأسعار" : "Quotations")}</h2>
         {can.quote && open && <Link className="lk" href={`/dashboard/sales/quotes/new?opportunityId=${deal.id}`} data-testid="new-quote">{ar ? "عرض سعر جديد" : "New quotation"}</Link>}</div>
       {currentQuote ? (
-        <div className="kv" data-testid={`quote-row-${currentQuote.quoteNumber}`}>
-          <Link href={quoteHref(currentQuote.id)} style={{ color: "inherit" }}><bdi className="id" dir="ltr">{currentQuote.quoteNumber}</bdi></Link>
+        <div className="kv" data-testid={`quote-row-${quoteKey(currentQuote)}`}>
+          <Link href={quoteHref(currentQuote.id)} style={{ color: "inherit" }}><bdi className="id" dir="ltr">{quoteRef(currentQuote.quoteNumber, ar)}</bdi></Link>
           <b>{ns && ns.quoteId === currentQuote.id ? <Chip tone={QUOTE_TONE[ns.quoteState]} label={L2(ns.quoteStateLabel)} /> : pick(QUOTE_STATUS_SPECS, currentQuote.status, lang)}</b>
         </div>
       ) : (
@@ -1412,6 +1414,7 @@ function ActivityDialog({
         hint={isTask ? (ar ? "المهمة بلا تاريخ لا تظهر في المتأخرات أبداً." : "A task with no due date never appears on an overdue list.") : undefined}
       >
         <TextInput id="act-due" type="date" value={dueAt} onChange={setDueAt} />
+        <PastDateHint ar={ar} value={dueAt} testId="act-due-past" />
       </Field>
       {!isTask && (
         <label className="flex items-center gap-2 text-sm font-semibold">
@@ -1596,6 +1599,7 @@ function EditDialog({
         </Field>
         <Field id="d-follow" label={ar ? "المتابعة القادمة" : "Next follow-up"}>
           <TextInput id="d-follow" type="date" value={nextFollowUpAt} onChange={setNextFollowUpAt} />
+          <PastDateHint ar={ar} value={nextFollowUpAt} initial={deal.nextFollowUpAt?.slice(0, 10) ?? null} testId="deal-follow-past" />
         </Field>
       </div>
     </Modal>

@@ -28,6 +28,9 @@ type Event = { id: string; at: string; actor: string; actorId: string | null; ac
 type Profile = {
   id: string; name: string; username: string | null; phoneNumber?: string | null; role: { key: string; id: string; name: string; nameEn: string; system: boolean }; customized: boolean;
   status: UserStatus; active: boolean; self: boolean; lock: { attempts: number; since: string | null } | null;
+  /** P2 SEC-09: the lock's end, the last hour's failures and the latest sign-ins (account managers only). */
+  signInWatch?: { locked: boolean; lockedUntil: string | null; failuresWindow: number; failuresLastHour: number; suspicious: boolean;
+    recent: { at: string; action: string; result: string; browser: string | null; os: string | null }[] } | null;
   hr: { id: string; name: string; nameEn?: string | null; jobTitle: string; department: string | null; departmentEn?: string | null } | null; external: boolean;
   /** «البريد الإلكتروني للشركة»: the linked HR person's «بريد الشركة», else the account's own (feat/credit-hold). */
   companyEmail?: { email: string | null; source: "hr" | "account" };
@@ -135,7 +138,20 @@ function UserProfilePageInner() {
       </header>
 
       {p.self ? <div className="hr-notice tone-info" data-testid="ur-self-notice"><strong>{L("لا يمكنك تغيير دورك أو صلاحياتك.", "You cannot change your own role or permissions.")}</strong> {L("يغيّرها مسؤول آخر. كلمة المرور والأجهزة من «ملفي والأمان».", "Another administrator does. Your password and devices are in “My profile & security”.")}</div> : null}
-      {p.lock && p.caps.manageThis ? <div className="hr-notice tone-danger" role="status" data-testid="ur-locked"><strong>{L(`الحساب مقفل${p.lock.since ? ` منذ ${fmtWhen(p.lock.since, lang)}` : ""}`, "The account is locked")}</strong> {L(`${p.lock.attempts} محاولات دخول فاشلة. لا يستطيع الدخول حتى يُفتح القفل.`, `${p.lock.attempts} failed sign-ins. It cannot sign in until unlocked.`)}</div> : null}
+      {p.lock && p.caps.manageThis ? <div className="hr-notice tone-danger" role="status" data-testid="ur-locked"><strong>{L(`الحساب مقفل مؤقتًا${p.signInWatch?.lockedUntil ? ` · يفتح ${fmtWhen(p.signInWatch.lockedUntil, lang)}` : ""}`, `The account is locked for now${p.signInWatch?.lockedUntil ? ` · opens ${fmtWhen(p.signInWatch.lockedUntil, lang)}` : ""}`)}</strong> {L(`${p.lock.attempts} محاولات دخول غلط خلال 15 دقيقة. جهازه المعتاد يدخل عادي.`, `${p.lock.attempts} failed sign-ins within 15 minutes. Their usual device still signs in.`)}
+        {" "}<button type="button" className="hr-btn is-primary is-sm" onClick={() => setDlg("cred")} data-testid="ur-unlock">{L("فتح القفل", "Unlock")}</button></div> : null}
+      {p.signInWatch?.suspicious ? <div className="hr-notice tone-warning" role="status" data-testid="ur-suspicious"><strong>{L("تنبيه نشاط مشبوه", "Suspicious activity")}</strong> {L(`${p.signInWatch.failuresLastHour} محاولة دخول غلط على هالحساب خلال ساعة.`, `${p.signInWatch.failuresLastHour} wrong sign-ins on this account within an hour.`)}</div> : null}
+      {p.signInWatch && (p.lock || p.signInWatch.failuresLastHour > 0) && p.signInWatch.recent.length ? (
+        <div className="hr-card" data-testid="ur-signins">
+          <table className="hr-table">
+            <thead><tr><th scope="col">{L("الوقت", "Time")}</th><th scope="col">{L("الجهاز", "Device")}</th><th scope="col">{L("النتيجة", "Result")}</th></tr></thead>
+            <tbody>{p.signInWatch.recent.map((r, i) => (
+              <tr key={i}><td><bdi>{fmtWhen(r.at, lang)}</bdi></td><td>{[r.browser, r.os].filter(Boolean).join(" · ") || L("غير معروف", "Unknown")}</td>
+                <td className={r.result === "SUCCESS" ? "" : "ur-danger-text"}>{r.action === "ACCOUNT_UNLOCKED" ? L("فتح القفل", "Unlocked") : r.action === "ACCOUNT_LOCKED" ? L("انقفل", "Locked") : r.action === "LOGIN_SUSPICIOUS" ? L("تنبيه", "Alert") : r.result === "SUCCESS" ? L("نجح", "Succeeded") : L("غلط", "Wrong")}</td></tr>
+            ))}</tbody>
+          </table>
+        </div>
+      ) : null}
       {notice ? <div className="hr-notice tone-success" role="status">{notice}</div> : null}
 
       <nav className="hr-tabs is-underline ur-tabs" role="tablist" aria-label={L("أقسام الملف", "Profile sections")} data-testid="ur-profile-tabs">

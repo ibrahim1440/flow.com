@@ -152,12 +152,8 @@ export async function recordPinFailure(ipHash: string, identifierHash: string): 
   });
 }
 
-/** A success clears both: this address has just proved it belongs to somebody. */
-export async function clearPinAttempts(ipHash: string, identifierHash: string): Promise<void> {
-  await prisma.loginAttempt.deleteMany({
-    where: { ipHash, identifierHash: { in: [identifierHash, PIN_GLOBAL] } },
-  });
-}
+// P2-B gate R2: there is deliberately no "clear on success" — the failures stay as evidence (SEC-09); the per-address
+// delay restarts from the success instead (lib/auth/login-throttle.ts pinOnlyDelay).
 
 // Counts failed attempts for this exact IP + identifier pair in the window.
 // Catches targeted credential stuffing against one account from one source.

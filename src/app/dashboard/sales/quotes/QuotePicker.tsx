@@ -70,13 +70,12 @@ export function QuotePicker({ lang, onClose }: { lang: "ar" | "en"; onClose: () 
   const nameOf = (c: Pick<Customer, "name" | "nameAr">) => (ar ? (c.nameAr ?? c.name) : c.name);
   const goToEditor = (opportunityId: string) => router.push(`${base}/new?opportunityId=${encodeURIComponent(opportunityId)}`);
 
-  async function quoteWithoutDeal(c: Customer) {
+  // P2 gate Q18 (ب4): no row and no number until the first line is saved — the unsaved editor, by customer.
+  function quoteWithoutDeal(c: Customer) {
     if (busy) return;
     setBusy(c.id);
     setError("");
-    const res = await api<{ quote: { id: string } }>("/api/sales/quotes", { method: "POST", body: { customerId: c.id, lines: [] } });
-    if (!res.ok) { setBusy(null); setError(res.data.error ?? L("تعذّر إنشاء العرض.", "Could not create the quotation.")); return; }
-    router.push(`${base}/${encodeURIComponent(res.data.quote.id)}`);
+    router.push(`${base}/draft?customerId=${encodeURIComponent(c.id)}`);
   }
 
   async function newDeal(c: Customer, dealTitle?: string) {

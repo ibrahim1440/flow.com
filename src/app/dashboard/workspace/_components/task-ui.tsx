@@ -337,7 +337,7 @@ function RecordResultDialog({ sub, defaultChannel, leadId, submit, onClose, onDo
     return (
       <Dialog open title={L("استكمال التأهيل", "Complete the qualification")} sub={sub} onClose={() => onDone(qualify.saved)} testId="qualify-dialog" actions={<>
         <Btn onClick={() => onDone(qualify.saved)}>{L("لاحقًا", "Later")}</Btn>
-        <Btn variant="primary" busy={busy} onClick={() => void saveQualification()} data-testid="qualify-save">{L("تحويل إلى فرصة", "Make it an opportunity")}</Btn>
+        <Btn variant="primary" busy={busy} onClick={() => void saveQualification()} data-testid="qualify-save">{L("حوّله لفرصة", "Make it an opportunity")}</Btn>
       </>}>
         <Notice tone="info">{qualify.saved} {missingText(qualify.missing, lang === "ar")}</Notice>
         {err ? <Notice tone="danger">{err}</Notice> : null}

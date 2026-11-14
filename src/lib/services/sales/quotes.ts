@@ -438,6 +438,50 @@ export function discountApprovalState(input: {
   return "PENDING";
 }
 
+/**
+ * P2-B gate (quotes-approval #9): the stored need of each open draft is re-read against a NEW threshold.
+ *
+ * The need is stored at save (P0, so the list and My Day read it without the lines). A threshold change made the
+ * stored flag stale: raising 10% → 20% left a 15% draft «PENDING» though issuing it needed nothing. Called in the
+ * transaction that changes the threshold; only the derived flag and basis move — the draft's terms and any approval
+ * recorded on it stay (an approval of a draft that no longer needs one is harmless and is re-checked at issue).
+ *
+ * Gate R2: bounded work inside that transaction — one query for the drafts (an EXPIRED draft is skipped: it cannot be
+ * issued as it stands and is re-checked on its next save), ONE query for every product they name, the rule computed in
+ * memory, and ONE statement for the drafts whose need changed. updatedAt is left alone (raw UPDATE): a settings change
+ * is not an edit of the draft, so «آخر تعديل» and the recent-first lists do not move. Unchanged drafts are not written.
+ */
+export async function refreshDraftApprovalNeeds(tx: Tx, threshold: Decimal, now: Date = new Date()): Promise<number> {
+  const drafts = await tx.quote.findMany({
+    where: { status: "DRAFT", lines: { some: {} }, OR: [{ validUntil: null }, { validUntil: { gte: now } }] },
+    select: {
+      id: true, validUntil: true, approvalRequired: true,
+      lines: { orderBy: { position: "asc" }, select: { productSkuId: true, quantity: true, unitPrice: true, discountPercent: true, taxRatePercent: true } },
+    },
+  });
+  const live = drafts.filter((q) => !hasExpired(q, now));
+  const ids = [...new Set(live.flatMap((q) => q.lines.map((l) => l.productSkuId)).filter((x): x is string => !!x))];
+  const skus = ids.length ? await tx.productSKU.findMany({ where: { id: { in: ids } }, select: { id: true, isActive: true, price: true } }) : [];
+  const byId = new Map(skus.map((x) => [x.id, x]));
+  const changes: { id: string; needs: boolean; basis: string }[] = [];
+  for (const q of live) {
+    const priced = priceQuote(q.lines.map((l) => ({ quantity: l.quantity, unitPrice: l.unitPrice, discountPercent: l.discountPercent, taxRatePercent: l.taxRatePercent })));
+    const figures = discountFigures(q.lines.map((l, i) => ({
+      sku: l.productSkuId ? byId.get(l.productSkuId) ?? { isActive: false, price: 0 } : null,
+      quantity: l.quantity.toString(), lineNet: priced.lines[i].lineSubtotal.toString(),
+    })));
+    const needs = needsApproval(figures, threshold);
+    if (needs !== !!q.approvalRequired) changes.push({ id: q.id, needs, basis: figures.maxEffective.toString() });
+  }
+  if (!changes.length) return 0;
+  await tx.$executeRaw`
+    UPDATE "Quote" AS q SET "approvalRequired" = v.needs, "approvalBasisPercent" = v.basis
+    FROM (SELECT unnest(${changes.map((c) => c.id)}::text[]) AS id, unnest(${changes.map((c) => c.needs)}::boolean[]) AS needs,
+                 unnest(${changes.map((c) => c.basis)}::numeric[]) AS basis) AS v
+    WHERE q.id = v.id AND q.status = 'DRAFT'`;
+  return changes.length;
+}
+
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
 
 export type QuoteStatus = "DRAFT" | "ISSUED" | "ACCEPTED" | "REJECTED" | "EXPIRED" | "SUPERSEDED";
@@ -514,6 +558,10 @@ export function hasExpired(quote: { validUntil: Date | null }, at: Date): boolea
  * not hand its number to the next quote.
  */
 export async function nextQuoteNumber(tx: Tx, at: Date): Promise<string> {
+  // Owner decision (13 Nov 2026, quote-45 round): the number is taken AT ISSUE, inside the issuing transaction. One lock
+  // for the whole series, held to the end of that transaction: two quotations issued at the same moment are numbered
+  // one after the other — never the same number, never a gap (an issued quotation is never deleted).
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('Quote.quoteNumber'))::text AS locked`;
   const ym = `${at.getUTCFullYear()}${String(at.getUTCMonth() + 1).padStart(2, "0")}`;
   const prefix = `Q-${ym}-`;
   const last = await tx.quote.findFirst({
@@ -521,7 +569,7 @@ export async function nextQuoteNumber(tx: Tx, at: Date): Promise<string> {
     orderBy: { quoteNumber: "desc" },
     select: { quoteNumber: true },
   });
-  const n = last ? Number(last.quoteNumber.slice(prefix.length)) + 1 : 1;
+  const n = last?.quoteNumber ? Number(last.quoteNumber.slice(prefix.length)) + 1 : 1;
   return `${prefix}${String(n).padStart(4, "0")}`;
 }
 
@@ -543,14 +591,34 @@ export type SaveLinesResult = {
  * (channel ACCOUNTING, opportunityId NULL) — nothing of it reaches the pipeline or the commissions. Refused while the
  * customer's sales are on hold, like every new quotation. Lines, when given, are priced as any draft's.
  */
-export async function createAccountingQuote(tx: Tx, input: { customerId: string; actorId: string; validUntil?: Date | null; lines?: ReturnType<typeof parseLineInputs>; threshold: Decimal }) {
+/** Abu Fahd R3: the editor session's key — one session creates ONE draft ("Quote"."draftKey", UNIQUE). */
+export const DRAFT_KEY_RE = /^[A-Za-z0-9_-]{16,64}$/;
+/** A valid editor-session key from a request body, or null (an invalid one is ignored, never stored). */
+export const draftKeyOf = (v: unknown): string | null => (typeof v === "string" && DRAFT_KEY_RE.test(v) ? v : null);
+
+/**
+ * Abu Fahd R3 (duplicate drafts): the draft an editor session already created, under a lock on its key — so two creates of
+ * the same session (the autosave and the save sent while leaving, a few ms apart) make one draft: the second waits for the
+ * first's transaction, then finds its row. Another person's key is refused (it is not theirs to write). The UNIQUE index
+ * backs this up whatever the application does.
+ */
+export async function draftByKey(tx: Tx, key: string, actorId: string): Promise<{ id: string; quoteNumber: string | null; revision: number; status: string } | null> {
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`Quote.draftKey:${key}`}))::text AS locked`;
+  const q = await tx.quote.findUnique({ where: { draftKey: key }, select: { id: true, quoteNumber: true, revision: true, status: true, createdById: true } });
+  if (!q) return null;
+  if (q.createdById !== actorId) throw { _appCode: 409, message: "مفتاح المسودة لشخص ثاني.", errorEn: "This draft key belongs to someone else.", code: "DRAFT_KEY_TAKEN" };
+  return { id: q.id, quoteNumber: q.quoteNumber, revision: q.revision, status: q.status };
+}
+
+export async function createAccountingQuote(tx: Tx, input: { customerId: string; actorId: string; validUntil?: Date | null; lines?: ReturnType<typeof parseLineInputs>; threshold: Decimal; draftKey?: string | null }) {
   const { assertSalesAllowed } = await import("../customers/credit-db");
   const customer = await tx.customer.findUnique({ where: { id: input.customerId }, select: { id: true } });
   if (!customer) throw { _appCode: 404, message: "العميل غير موجود.", errorEn: "Customer not found.", code: "NOT_FOUND" };
   await assertSalesAllowed(tx, customer.id);
-  const quoteNumber = await nextQuoteNumber(tx, new Date());
+  // Owner decision (quote-45 round): a draft has no number — it takes one at issue (issueQuote).
+  const quoteNumber = null;
   const created = await tx.quote.create({
-    data: { quoteNumber, revision: 1, opportunityId: null, customerId: customer.id, channel: "ACCOUNTING", status: "DRAFT", currency: QUOTE_CURRENCY, validUntil: input.validUntil ?? null, createdById: input.actorId },
+    data: { quoteNumber, revision: 1, opportunityId: null, customerId: customer.id, channel: "ACCOUNTING", status: "DRAFT", currency: QUOTE_CURRENCY, validUntil: input.validUntil ?? null, createdById: input.actorId, draftKey: input.draftKey ?? null },
     select: { id: true, quoteNumber: true, revision: true },
   });
   if (input.lines && input.lines.length > 0) {
@@ -562,7 +630,13 @@ export async function createAccountingQuote(tx: Tx, input: { customerId: string;
 
 export async function saveQuoteLines(
   tx: Tx,
-  input: { quoteId: string; lines: LineInput[]; threshold?: Decimal; actorId?: string | null },
+  input: { quoteId: string; lines: LineInput[]; threshold?: Decimal; actorId?: string | null;
+    /** Quote-45 round: the editor's AUTOSAVE keeps the lines without telling the approvers — only an explicit save /
+     *  «حفظ وطلب اعتماد المشرف» does (default true). */
+    notifyApprovers?: boolean;
+    /** «طلب اعتماد المشرف»: tell the approvers even if these figures were saved before (an autosave kept them quietly).
+     *  The notification's own dedupe key still sends one message per set of figures. */
+    requestApproval?: boolean },
 ): Promise<SaveLinesResult> {
   const quote = await tx.quote.findUnique({
     where: { id: input.quoteId },
@@ -668,7 +742,7 @@ export async function saveQuoteLines(
   const needsDiscountApproval = rule.needs;
   // feat/notifications: a draft whose discount newly needs approval («اعتمادك مطلوب») is announced to
   // the discount approvers — once per set of figures (saving the same figures again adds nothing).
-  if (needsDiscountApproval && (figuresChanged || approvalVoid || !quote.approvalRequired)) {
+  if (input.notifyApprovers !== false && needsDiscountApproval && (input.requestApproval || figuresChanged || approvalVoid || !quote.approvalRequired)) {
     const q = await tx.quote.findUnique({ where: { id: input.quoteId }, select: { quoteNumber: true, customer: { select: { name: true, nameAr: true, accountOwnerId: true } }, opportunity: { select: { ownerId: true, customer: { select: { name: true, nameAr: true, accountOwnerId: true } } } } } });
     if (q) {
       // An ACCOUNTING quotation has no deal: its own customer.
@@ -801,9 +875,13 @@ export async function issueQuote(
     }
   }
 
+  // Owner decision (quote-45 round): an unnumbered draft takes its number now — in this transaction, under the series
+  // lock (nextQuoteNumber). A draft numbered before the decision keeps its number.
+  const quoteNumber = quote.quoteNumber ?? await nextQuoteNumber(tx, at);
+
   const snapshot = {
     frozenAt: at.toISOString(),
-    quoteNumber: quote.quoteNumber,
+    quoteNumber,
     revision: quote.revision,
     currency: quote.currency,
     validUntil: quote.validUntil.toISOString(),
@@ -851,6 +929,7 @@ export async function issueQuote(
     where: { id: input.quoteId },
     data: {
       status: "ISSUED",
+      quoteNumber,
       issuedAt: at,
       issuedSnapshot: snapshot as unknown as PrismaNS.InputJsonValue,
       subtotal: priced.subtotal,
@@ -866,7 +945,7 @@ export async function issueQuote(
 
   // P1-4: the deal's value follows its quotations (deal-amount.ts).
   await syncDealAmount(tx, quote.opportunityId);
-  return { quoteNumber: quote.quoteNumber, grandTotal: priced.grandTotal, discountApproved };
+  return { quoteNumber, grandTotal: priced.grandTotal, discountApproved };
 }
 
 /**
@@ -933,7 +1012,7 @@ export async function decideQuote(
 export async function reviseQuote(
   tx: Tx,
   input: { quoteId: string; actorId: string; at?: Date },
-): Promise<{ id: string; quoteNumber: string; revision: number }> {
+): Promise<{ id: string; quoteNumber: string | null; revision: number }> {
   const at = input.at ?? new Date();
 
   const locked = await tx.$queryRaw<{ id: string; status: string }[]>`
@@ -970,7 +1049,8 @@ export async function reviseQuote(
   // sales are on hold (409 CUSTOMER_SALES_HOLD).
   await assertSalesAllowed(tx, original.customerId ?? original.opportunity?.customerId ?? null, at);
 
-  const quoteNumber = await nextQuoteNumber(tx, at);
+  // Owner decision (quote-45 round): the revision is a draft — numbered at its issue, not now.
+  const quoteNumber = null;
   const created = await tx.quote.create({
     data: {
       quoteNumber,

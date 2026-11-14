@@ -9,6 +9,7 @@ import { BrandMark } from "@/components/brand/BrandMark";
 import "./direction-2.1.css";
 import "./shell-states.css";
 import { RiyalFont } from "@/components/fonts/RiyalFont";
+import { clearAllDrafts } from "@/lib/drafts/local-draft";
 
 /** The document language the root layout set from the session cookie (`<html lang>`). */
 function useDocLang(): "ar" | "en" {
@@ -53,7 +54,7 @@ export function MfaRequiredScreen({ lang }: { lang: "ar" | "en" }) {
         </div>
         <p>{ar ? "حسابك يحمل صلاحيات حساسة، فلا يفتح النظام قبل تفعيل التحقق بخطوتين." : "Your account holds sensitive duties, so the system opens only after two-step verification is on."}</p>
         <MfaEnrollment lang={lang} onEnrolled={() => window.location.reload()} />
-        <button type="button" className="d21-mfa-out" onClick={async () => { await fetch("/api/auth/me", { method: "DELETE" }); window.location.href = "/login"; }}>
+        <button type="button" className="d21-mfa-out" onClick={async () => { clearAllDrafts(); await fetch("/api/auth/me", { method: "DELETE" }); window.location.href = "/login"; }}>
           {ar ? "تسجيل الخروج" : "Sign out"}
         </button>
       </div>
@@ -101,7 +102,7 @@ export function PasswordChangeRequiredScreen({ lang }: { lang: "ar" | "en" }) {
           {err ? <div className="hr-notice tone-danger" role="alert">{err}</div> : null}
           <button type="submit" className="hr-btn is-primary" disabled={busy || !cur || next.length < 8 || mismatch} data-testid="pcr-save">{busy ? "…" : ar ? "حفظ كلمة المرور" : "Save password"}</button>
         </form>
-        <button type="button" className="d21-mfa-out" onClick={async () => { await fetch("/api/auth/me", { method: "DELETE" }); window.location.href = "/login"; }}>
+        <button type="button" className="d21-mfa-out" onClick={async () => { clearAllDrafts(); await fetch("/api/auth/me", { method: "DELETE" }); window.location.href = "/login"; }}>
           {ar ? "تسجيل الخروج" : "Sign out"}
         </button>
       </div>

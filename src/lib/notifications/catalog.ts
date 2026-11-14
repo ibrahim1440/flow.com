@@ -147,8 +147,8 @@ export const EVENTS: NotificationEventDef[] = [
     recipients: [{ perm: [sales("quote_approve_discount")] }], requires: [MOD("sales")], scope: "customer",
     trigger: "saveQuoteLines — a draft saved with a discount above the threshold (POST /api/sales/quotes, PATCH /api/sales/quotes/[id], revise)",
     render: (f) => ({
-      titleAr: `اعتمادك مطلوب: خصم ${s(f.percent)}٪ على عرض السعر ${s(f.quoteNumber)}`,
-      titleEn: `Your approval is needed: ${s(f.percent)}% discount on quotation ${s(f.quoteNumber)}`,
+      titleAr: `اعتمادك مطلوب: خصم ${s(f.percent)}٪ على عرض السعر ${f.quoteNumber ? s(f.quoteNumber) : `(مسودة) للعميل ${s(f.customerName)}`}`,
+      titleEn: `Your approval is needed: ${s(f.percent)}% discount on quotation ${f.quoteNumber ? s(f.quoteNumber) : `(draft) for ${s(f.customerName)}`}`,
       bodyAr: s(f.customerName), bodyEn: s(f.customerName),
       link: `/dashboard/sales/quotes/${enc(s(f.quoteId))}`,
     }),
@@ -160,8 +160,8 @@ export const EVENTS: NotificationEventDef[] = [
     trigger: "POST /api/sales/quotes/[id]/discount-approval (decideDiscount)",
     render: (f) => ({
       severity: f.decision === "APPROVE" ? "success" : "warning",
-      titleAr: f.decision === "APPROVE" ? `اعتُمد الخصم على عرض السعر ${s(f.quoteNumber)}` : `رُفض الخصم على عرض السعر ${s(f.quoteNumber)}`,
-      titleEn: f.decision === "APPROVE" ? `The discount on quotation ${s(f.quoteNumber)} was approved` : `The discount on quotation ${s(f.quoteNumber)} was refused`,
+      titleAr: f.decision === "APPROVE" ? `اعتُمد الخصم على عرض السعر ${f.quoteNumber ? s(f.quoteNumber) : "(مسودة)"}` : `رُفض الخصم على عرض السعر ${f.quoteNumber ? s(f.quoteNumber) : "(مسودة)"}`,
+      titleEn: f.decision === "APPROVE" ? `The discount on quotation ${f.quoteNumber ? s(f.quoteNumber) : "(draft)"} was approved` : `The discount on quotation ${f.quoteNumber ? s(f.quoteNumber) : "(draft)"} was refused`,
       bodyAr: s(f.note), bodyEn: s(f.note),
       link: `/dashboard/sales/quotes/${enc(s(f.quoteId))}`,
     }),
@@ -178,6 +178,22 @@ export const EVENTS: NotificationEventDef[] = [
       titleEn: `Your approval is needed: ${s(f.percent)}% discount on order ${s(f.orderNumber)} (direct sale)`,
       bodyAr: s(f.customerName), bodyEn: s(f.customerName),
       link: "/dashboard/workspace/approvals",
+    }),
+  },
+  {
+    // P2 ب6 / UXM-20 (owner decision 13 Nov 2026): a rep sold to a customer whose account belongs to another rep — the deal
+    // and the commission stay with the account owner (directDealOwner), and the owner and the supervisors are told.
+    key: "sales.direct_sale_other_owner", category: "sales", severity: "info",
+    label: { ar: "مندوب ثاني باع لعميل في حسابك", en: "Another rep sold to a customer on your account" },
+    recipients: [{ person: "accountOwner" }, { perm: [sales("lead_assign")] }], requires: [MOD("sales")], scope: "customer",
+    trigger: "createDirectSale / its discount approval (completeSale) — the seller is not the customer's active account owner",
+    render: (f) => ({
+      // Q16: on the seller's own open deal the deal stays the seller's — said as it is.
+      titleAr: f.sellerKeptDeal ? `${s(f.sellerName)} باع لعميل ${s(f.customerName)} على صفقته المفتوحة` : `${s(f.sellerName)} باع لعميل ${s(f.customerName)} — الصفقة باسم مالك الحساب`,
+      titleEn: f.sellerKeptDeal ? `${sEn(f, "sellerName")} sold to ${sEn(f, "customerName")} on their own open deal` : `${sEn(f, "sellerName")} sold to ${sEn(f, "customerName")} — the deal is the account owner's`,
+      bodyAr: f.sellerKeptDeal ? `الطلب ${s(f.orderNumber)} · العميل في حسابك، والبيع على صفقة البائع المفتوحة.` : `الطلب ${s(f.orderNumber)} · الصفقة والعمولة تتسجّل باسم مالك الحساب.`,
+      bodyEn: f.sellerKeptDeal ? `Order ${s(f.orderNumber)} · the customer is on your account; the sale went on the seller's open deal.` : `Order ${s(f.orderNumber)} · the deal and the commission are the account owner's.`,
+      link: f.opportunityId ? `/dashboard/sales/deals/${enc(s(f.opportunityId))}` : "/dashboard/sales/pipeline",
     }),
   },
   {
@@ -1287,6 +1303,21 @@ export const EVENTS: NotificationEventDef[] = [
     recipients: [{ perm: [{ module: "settings", edit: true }] }],
     trigger: "reportStorageSuccess (lib/services/system/storage-alerts.ts)",
     render: (f) => ({ severity: "success", titleAr: s(f.titleAr), titleEn: s(f.titleEn), bodyAr: s(f.bodyAr), bodyEn: s(f.bodyEn), link: "/dashboard/settings" }),
+  },
+  {
+    // P2 SEC-09 (owner decision 5): an account locked after 10 wrong sign-ins, or more than 20 in an hour — the user
+    // administrators are told and can «فتح القفل» from the user's page. The username only, never what was typed.
+    key: "security.login_locked", category: "system", severity: "warning",
+    label: { ar: "قفل دخول حساب / محاولات دخول مشبوهة", en: "Account sign-in locked / suspicious sign-ins" },
+    recipients: [{ perm: [{ module: "employees", edit: true }] }],
+    trigger: "afterLoginFailure (lib/auth/login-throttle.ts; POST /api/auth/login)",
+    render: (f) => f.kind === "SUSPICIOUS"
+      ? { severity: "danger", titleAr: `محاولات دخول مشبوهة على حساب ${s(f.username)}`, titleEn: `Suspicious sign-ins on ${s(f.username)}`,
+          bodyAr: `${s(f.count)} محاولة غلط خلال ساعة. افتح صفحة المستخدم وراجع، وتقدر تفتح القفل.`, bodyEn: `${s(f.count)} wrong attempts within an hour. Open the user's page to review; you can unlock it.`,
+          link: f.employeeId ? `/dashboard/employees?open=${enc(s(f.employeeId))}` : "/dashboard/employees" }
+      : { severity: "warning", titleAr: `انقفل دخول حساب ${s(f.username)} مؤقتًا`, titleEn: `Sign-in to ${s(f.username)} locked for now`,
+          bodyAr: `10 محاولات غلط خلال 15 دقيقة — القفل ${s(f.minutes)} دقيقة، وجهاز صاحب الحساب المعروف ما ينقفل. تقدر تفتح القفل من صفحة المستخدم.`, bodyEn: `10 wrong attempts within 15 minutes — locked for ${s(f.minutes)} minutes; the owner's known device is not locked. You can unlock it from the user's page.`,
+          link: f.employeeId ? `/dashboard/employees?open=${enc(s(f.employeeId))}` : "/dashboard/employees" },
   },
 ];
 

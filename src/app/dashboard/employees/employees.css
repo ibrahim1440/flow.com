@@ -95,3 +95,5 @@
   [data-emp-root] .emp-subs label { min-height: 32px; }
   .hr-dialog.emp-dialog .emp-delete { margin-inline-end: 0; }
 }
+/* P2 SEC-09: a refused sign-in in the latest-attempts table (Figma 6ج). */
+.ur-danger-text { color: var(--hr-danger); font-weight: 600; }

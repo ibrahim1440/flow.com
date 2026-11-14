@@ -314,3 +314,15 @@
 .d21 .q-emptyfirst b { font-size: 15px; color: var(--text-primary) }
 .d21 .q-emptyfirst span { font-size: 13.5px; color: var(--text-secondary); line-height: 22px }
 .d21 .q-addfirst { width: 100%; justify-content: center }
+
+/* P2 ب3 (approved Figma 8ب): the customer's answer — accept full width, reject apart as a quiet link. */
+.d21 .q-decide { margin-top: 12px; padding: 16px; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--surface); display: flex; flex-direction: column; gap: 12px }
+.d21 .q-decide-h { margin: 0; font-size: 16px; font-weight: 700; color: var(--text-primary) }
+.d21 .q-decide .q-accept { width: 100%; min-height: 48px; justify-content: center }
+.d21 .q-decide-no { margin: 24px 0 0; display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted) }
+.d21 .q-rej-link { min-height: 44px; padding: 0 4px; background: none; border: 0; color: var(--status-danger, #b42318); font-weight: 700; font-size: 14px; cursor: pointer }
+.d21 .q-rej-link:disabled { opacity: .5; cursor: default }
+/* Owner, 14 Nov 2026 (live Q-202611-0024 at 1440): the read-only VAT is plain «15%» — it stays inside its cell, and a line
+   total (up to «23,319.95») never wraps nor is drawn over by the cell beside it. */
+.d21 .t.q-lines .q-vat-ro { display: inline-block; width: auto; max-width: none; overflow: hidden; white-space: nowrap }
+.d21 .t.q-lines td[data-testid^="line-total-"] { white-space: nowrap; min-width: 96px; font-variant-numeric: tabular-nums }

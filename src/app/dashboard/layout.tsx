@@ -15,6 +15,7 @@ import { StepUpProvider } from "@/components/auth/StepUp";
 import { ShellLoading, MfaRequiredScreen, PasswordChangeRequiredScreen } from "@/components/shell/ShellStates";
 import { SESSION_EXPIRED_LOGIN } from "@/lib/session-expired";
 import { IdleGuard, broadcastLogout } from "@/components/auth/IdleGuard";
+import { clearAllDrafts } from "@/lib/drafts/local-draft";
 import { idleLoginUrl } from "@/lib/auth/idle";
 import { DesktopRecommendedNotice, showsDesktopNotice } from "@/components/shell/DesktopRecommendedNotice";
 
@@ -49,6 +50,7 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
   async function handleLogout() {
     clearRecent(); // Ctrl K «فتحتها مؤخرًا» never outlives the session (council fix round 1)
     clearRoundCounts(); // «كم محل زرت؟» counts this tab remembered are not the next person's (D20.1 gate L1)
+    clearAllDrafts(); // P2 ب9: the unsaved sale / sample / lead drafts kept on this device go with the session
     broadcastLogout(); // the other tabs of this site sign out with it (idle sign-out, owner 9 Nov)
     await fetch("/api/auth/me", { method: "DELETE" });
     router.push("/login");

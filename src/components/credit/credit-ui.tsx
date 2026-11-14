@@ -89,7 +89,7 @@ export function CreditCallout({ ar, c, phone, onHold, onLift }: { ar: boolean; c
       <div className={`callout er cr-callout${phone ? " ph" : ""}`} role="status" data-testid="credit-warning">
         <CreditBadges ar={ar} s={badgesOf(c)} compact />
         <span>{parts.join(ar ? "، و" : "; ")}. <span className="cr-muted">{c.warning.overLimit
-          ? t("فوق الحد: الطلب الجديد الآجل ما يمشي إلا باعتماد المشرف، والبيع الكاش يوقف لين يأكّد المحاسب المبلغ.", "Over the limit: a new order on account goes through only with a supervisor's approval; a cash sale is held until the accountant confirms the money.")
+          ? t("فوق الحد: الطلب الجديد الآجل ما يمشي إلا باعتماد المشرف، والبيع النقدي يوقف لين يأكّد المحاسب المبلغ.", "Over the limit: a new order on account goes through only with a supervisor's approval; a cash sale is held until the accountant confirms the money.")
           : t("تنبيه: البيع مستمر ما لم يُوقف.", "A warning: sales continue unless held.")}</span></span>
         {c.can.hold && <button type="button" className="btn sm" onClick={onHold} data-testid="credit-hold">{t("إيقاف البيع", "Hold sales")}</button>}
       </div>

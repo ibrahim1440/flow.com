@@ -13,6 +13,7 @@ import {
   formatIban, formatPercent, longDate, quoteDocumentNotice, quoteLineCells, quoteLineColumns, uniformTaxRate,
   type DocLang, type QuoteDocLine,
 } from "@/lib/print/quote-document";
+import { quoteRef } from "@/lib/services/sales/quote-label";
 
 /**
  * The quotation as a document (Figma QP-05 1295:987; the draft QP-03 1295:754; English 1373:791).
@@ -72,7 +73,7 @@ type Snapshot = {
 
 type Quote = {
   id: string;
-  quoteNumber: string;
+  quoteNumber: string | null; // null: a draft (numbered at issue)
   revision: number;
   status: string;
   currency: string;
@@ -148,10 +149,10 @@ export default function QuotePrintPage({
 
   const quote = data?.quote ?? null;
   // The last crumb of the top bar is the quotation number, as on the quotation itself.
-  useD21Title(quote?.quoteNumber);
+  useD21Title(quote ? quoteRef(quote.quoteNumber, ar) : undefined);
   useD21Phone({
     title: ar ? "مستند العرض" : "Quotation document",
-    sub: quote?.quoteNumber,
+    sub: quote ? quoteRef(quote.quoteNumber, ar) : undefined,
     back: `${base}/${id}`,
   });
 
@@ -170,7 +171,7 @@ export default function QuotePrintPage({
     <div className="pg">
       {/* Screen-only chrome (A-12 toolbar). None of this appears on paper. */}
       <div className="q-doc-bar print:hidden">
-        <Link href={`${base}/${quote.id}`} className="num">{quote.quoteNumber}</Link>
+        <Link href={`${base}/${quote.id}`} className="num">{quoteRef(quote.quoteNumber, ar)}</Link>
         <span className="sp" />
         <span className="why">
           {seller?.sellerVatNumber
@@ -247,7 +248,7 @@ function QuoteDocument({
     subtotal: quote.subtotal, discountTotal: quote.discountTotal, taxTotal: quote.taxTotal,
     grandTotal: quote.grandTotal, effectiveDiscountPercent: live?.effectiveDiscountPercent ?? "0",
   };
-  const number = snap?.quoteNumber ?? quote.quoteNumber;
+  const number = snap?.quoteNumber ?? quoteRef(quote.quoteNumber, true); // a draft: «مسودة» (numbered at issue)
   const revision = snap?.revision ?? quote.revision;
   const validUntil = snap?.validUntil ?? quote.validUntil;
   const isDraft = !snap;

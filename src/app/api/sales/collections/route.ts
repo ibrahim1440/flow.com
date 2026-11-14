@@ -229,7 +229,7 @@ export async function GET(request: Request) {
     }
 
     // Abu Fahd (friction 7): a pending collection that holds a direct sale (owner decision أ) names the order its approval
-    // releases — «يفك الطلب #112» on the accountant's row and in the reject dialog.
+    // releases — «يفتح قفل الطلب #112» on the accountant's row and in the reject dialog.
     const { heldOrderNumbersFor } = await import("@/lib/services/orders/payment-hold");
     const releases = await heldOrderNumbersFor(prisma as never, rows.filter((r) => r.status === "PENDING_VERIFICATION").map((r) => r.id));
 

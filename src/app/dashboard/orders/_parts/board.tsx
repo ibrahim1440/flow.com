@@ -51,8 +51,10 @@ type Line = {
  * Orders page. A line already blocked in data still reads «موقوف» (lineProgress), so nothing is
  * hidden.
  */
-export function OrderLines({ orderStatus, items, pipeline, paymentHold = null, paymentShort = null }: {
+export function OrderLines({ orderStatus, items, pipeline, paymentHold = null, paymentShort = null, lineDetail }: {
   orderStatus: string;
+  /** Abu Fahd (P2-B gate): the drawer's ONE list of lines — what was delivered / remains rides under each line. */
+  lineDetail?: (id: string) => React.ReactNode;
   /** Owner decision أ: the order's payment hold — its lines read it instead of a production stage. */
   paymentHold?: string | null;
   paymentShort?: string | null;
@@ -76,6 +78,7 @@ export function OrderLines({ orderStatus, items, pipeline, paymentHold = null, p
                 <div className="ops-dline-sub">
                   {i.quantityUnits != null ? countNoun(i.quantityUnits, lang === "ar" ? "ar" : "en", UNIT_FORMS) : <Kg v={i.quantityKg} />}
                 </div>
+                {lineDetail ? lineDetail(i.id) : null}
               </div>
               {d ? <ProgressChip d={d} testId={`order-line-status-${i.id}`} /> : <span className="hr-muted">—</span>}
             </li>

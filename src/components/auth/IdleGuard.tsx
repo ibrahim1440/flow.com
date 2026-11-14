@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { D21Dialog } from "@/components/ui/Dialog";
 import { IDLE_OUT_KEY, deadlineOf, idleLoginUrl, serverDeadlineLocal, shouldPing, stateAt } from "@/lib/auth/idle";
+import { clearAllDrafts } from "@/lib/drafts/local-draft";
 
 const CHANNEL = "bf-idle";
 const LAST_KEY = "bf-idle-last";
@@ -85,11 +86,12 @@ export function IdleGuard({ lang, onLogoutNow }: { lang: "ar" | "en"; onLogoutNo
   const [failed, setFailed] = useState(false);
 
   // The session ended on the server (a 401 to the keep-alive): straight to the idle sign-in.
-  const gone = useCallback(() => { if (!leaving.current) { leaving.current = true; window.location.replace(idleLoginUrl(here())); } }, []);
+  const gone = useCallback(() => { if (!leaving.current) { leaving.current = true; clearAllDrafts(); window.location.replace(idleLoginUrl(here())); } }, []);
 
   const leave = useCallback((kind: "idle" | "user", tell: boolean) => {
     if (leaving.current) return;
     leaving.current = true;
+    clearAllDrafts(); // P2 gate B1: an idle sign-out leaves no unsaved draft for the next person on this device
     if (tell) send({ type: "logout", kind, ref: myRef });
     if (kind === "user") { onLogoutNow(); return; }
     const go = () => window.location.replace(idleLoginUrl(here()));

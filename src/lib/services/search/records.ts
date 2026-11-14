@@ -5,6 +5,7 @@ import { canViewQuotes, quotesSeeAll } from "@/lib/services/sales/quote-access";
 import { SQL_FOLD_FROM, SQL_FOLD_TO, foldArabic, phoneDigits } from "./normalize";
 import { tiersForCustomers } from "@/lib/services/sales/my-day/tier";
 import type { Tier } from "@/lib/services/sales/my-day/rules";
+import { quoteRef } from "@/lib/services/sales/quote-label";
 
 /**
  * Ctrl K record search (batch 24 WP-A): customers, deals, quotations and leads, for GET /api/search.
@@ -130,15 +131,18 @@ export async function searchRecords(db: Db, viewer: SearchViewer, rawQ: string, 
   if (canViewQuotes(p)) {
     const scope = quotesSeeAll(p) ? Prisma.sql`true` : Prisma.sql`o."ownerId" = ${viewer.id}`;
     const num = toNumberQuery(rawQ);
-    jobs.push(db.$queryRaw<{ id: string; quoteNumber: string; status: string; customerId: string | null; cName: string | null; cNameAr: string | null }[]>(Prisma.sql`
+    jobs.push(db.$queryRaw<{ id: string; quoteNumber: string | null; status: string; customerId: string | null; cName: string | null; cNameAr: string | null }[]>(Prisma.sql`
       SELECT q."id", q."quoteNumber", q."status"::text AS "status", q."customerId", c."name" AS "cName", c."nameAr" AS "cNameAr"
         FROM "Quote" q LEFT JOIN "Opportunity" o ON o."id" = q."opportunityId" LEFT JOIN "Customer" c ON c."id" = q."customerId"
        WHERE ${scope} AND q."status" <> 'SUPERSEDED'
          AND (strpos(lower(q."quoteNumber"), ${num}) > 0 OR ${has(Prisma.sql`c."name"`)} OR ${has(Prisma.sql`c."nameAr"`)})
-       ORDER BY (strpos(lower(q."quoteNumber"), ${num}) > 0) DESC, q."updatedAt" DESC
+       -- Gate R3 L2: an unnumbered draft's number is NULL, and NULL sorts FIRST in DESC — the exact number, then a number
+       -- containing the text, then the rest (drafts found by their customer).
+       ORDER BY COALESCE(lower(q."quoteNumber") = ${num}, false) DESC, COALESCE(strpos(lower(q."quoteNumber"), ${num}) > 0, false) DESC, q."updatedAt" DESC
        LIMIT ${limit}`).then((rows) => {
       empty.quotes = rows.map((r) => ({
-        kind: "quote", id: r.id, title: r.quoteNumber, titleEn: r.quoteNumber, sub: r.cNameAr || r.cName || null,
+        // An unnumbered draft (quote-45 round) reads «مسودة», its customer beside it.
+        kind: "quote", id: r.id, title: quoteRef(r.quoteNumber, true), titleEn: quoteRef(r.quoteNumber, false), sub: r.cNameAr || r.cName || null,
         href: `/dashboard/sales/quotes/${r.id}`, customerId: r.customerId, phone: null, status: r.status,
       }));
     }));

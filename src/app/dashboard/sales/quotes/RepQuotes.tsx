@@ -16,11 +16,12 @@ import { Ico, type D21IconName } from "@/components/shell/icons";
 import { shortDate } from "@/components/d21/format";
 import "../_components/money.css";
 import "../_components/sales-pages.css";
+import { quoteKey, quoteRef } from "@/lib/services/sales/quote-label";
 
 export type RepStage = "" | "need" | "open" | "ended" | "lost";
 
 type Q = {
-  id: string; quoteNumber: string; status: string; currency: string; validUntil: string | null; grandTotal: string;
+  id: string; quoteNumber: string | null; status: string; currency: string; validUntil: string | null; grandTotal: string;
   createdAt: string; issuedAt: string | null; acceptedAt: string | null;
   discountApproval: "NOT_NEEDED" | "PENDING" | "APPROVED" | "REJECTED";
   customer: { id: string; name: string; nameAr: string | null } | null;
@@ -77,7 +78,7 @@ export function RepQuotes({
           under: waiting ? { ar: "الخصم بانتظار اعتماد المدير", en: "Discount awaiting approval", cls: "wa" } : q.validUntil ? { ar: `صالح لين ${day(q.validUntil)}`, en: `Valid until ${day(q.validUntil)}` } : null,
           cta: waiting
             ? <Link href={href} className="spg-cta">{ar ? "افتح العرض" : "Open"}</Link>
-            : <Link href={href} className="spg-cta p" data-testid={`rq-act-${q.quoteNumber}`}><Ico name="edit" small />{ar ? "كمّل وأرسل" : "Finish and send"}</Link>,
+            : <Link href={href} className="spg-cta p" data-testid={`rq-act-${quoteKey(q)}`}><Ico name="edit" small />{ar ? "كمّل وأرسل" : "Finish and send"}</Link>,
         };
       }
       case "ISSUED":
@@ -85,7 +86,7 @@ export function RepQuotes({
           pill: lapsed ? { cls: "t-wa", ar: "انتهت صلاحيته", en: "Past its date" } : { cls: "t-in", ar: "بانتظار رد العميل", en: "Awaiting the customer" }, tone: lapsed ? "t-wa" : "t-in",
           sub: `${ar ? "أرسلته" : "Sent"} ${day(q.issuedAt ?? q.createdAt)}`,
           under: q.validUntil ? { ar: `${lapsed ? "انتهى" : "صالح لين"} ${day(q.validUntil)}`, en: `${lapsed ? "Ended" : "Valid until"} ${day(q.validUntil)}`, cls: lapsed ? "wa" : undefined } : null,
-          cta: <Link href={href} className="spg-cta p" data-testid={`rq-act-${q.quoteNumber}`}><Ico name="phone" small />{ar ? "سجّل رد العميل" : "Record the answer"}</Link>,
+          cta: <Link href={href} className="spg-cta p" data-testid={`rq-act-${quoteKey(q)}`}><Ico name="phone" small />{ar ? "سجّل رد العميل" : "Record the answer"}</Link>,
         };
       case "ACCEPTED":
         return q._count.orderLinks > 0
@@ -94,14 +95,14 @@ export function RepQuotes({
             sub: order ? `${ar ? "طلب" : "Order"} #${order}` : `${ar ? "قبله العميل" : "Accepted"} ${day(q.acceptedAt ?? q.createdAt)}`,
             under: { ar: "تم", en: "Done", cls: "ok" },
             cta: order
-              ? <Link href={`/dashboard/orders?order=${order}`} className="spg-cta" data-testid={`rq-act-${q.quoteNumber}`}><Ico name="orders" small />{ar ? "افتح الطلب" : "Open the order"}</Link>
+              ? <Link href={`/dashboard/orders?order=${order}`} className="spg-cta" data-testid={`rq-act-${quoteKey(q)}`}><Ico name="orders" small />{ar ? "افتح الطلب" : "Open the order"}</Link>
               : <Link href={href} className="spg-cta">{ar ? "افتح العرض" : "Open"}</Link>,
           }
           : {
             pill: { cls: "t-ok", ar: "مقبول", en: "Accepted" }, tone: "t-ok",
             sub: `${ar ? "قبله العميل" : "Accepted"} ${day(q.acceptedAt ?? q.createdAt)}`,
             under: { ar: "ما تحوّل لطلب للحين", en: "Not an order yet", cls: "wa" },
-            cta: <Link href={href} className="spg-cta p" data-testid={`rq-act-${q.quoteNumber}`}><Ico name="orders" small />{ar ? "حوّله لطلب" : "Turn into an order"}</Link>,
+            cta: <Link href={href} className="spg-cta p" data-testid={`rq-act-${quoteKey(q)}`}><Ico name="orders" small />{ar ? "حوّله لطلب" : "Turn into an order"}</Link>,
           };
       case "REJECTED":
       case "EXPIRED":
@@ -109,7 +110,7 @@ export function RepQuotes({
           pill: q.status === "REJECTED" ? { cls: "t-er", ar: "انرفض", en: "Refused" } : { cls: "t-wa", ar: "انتهى", en: "Lapsed" }, tone: "t-er",
           sub: `${ar ? "أرسلته" : "Sent"} ${day(q.issuedAt ?? q.createdAt)}`,
           under: null,
-          cta: <Link href={href} className="spg-cta" data-testid={`rq-act-${q.quoteNumber}`}>{ar ? "سوّ نسخة جديدة" : "Raise a revision"}</Link>,
+          cta: <Link href={href} className="spg-cta" data-testid={`rq-act-${quoteKey(q)}`}>{ar ? "سوّ نسخة جديدة" : "Raise a revision"}</Link>,
         };
       default:
         return { pill: { cls: "t-pr", ar: "مستبدل", en: "Superseded" }, tone: "t-pr", sub: day(q.createdAt), under: null, cta: <Link href={href} className="spg-cta">{ar ? "افتح العرض" : "Open"}</Link> };
@@ -183,14 +184,14 @@ export function RepQuotes({
             {data.rows.map((q) => {
               const v = view(q);
               return (
-                <div key={q.id} className="spg-row" data-testid={`quote-row-${q.quoteNumber}`}>
+                <div key={q.id} className="spg-row" data-testid={`quote-row-${quoteKey(q)}`}>
                   <span className={`spg-av ${v.tone}`}><Ico name="quote" small /></span>
                   <div className="spg-main">
                     <div>
                       <Link href={`${base}/${q.id}`} className="who"><bdi>{name(q)}</bdi></Link>
-                      <span className={`mny-pill ${v.pill.cls}`} data-testid={`quote-status-${q.quoteNumber}`}>{ar ? v.pill.ar : v.pill.en}</span>
+                      <span className={`mny-pill ${v.pill.cls}`} data-testid={`quote-status-${quoteKey(q)}`}>{ar ? v.pill.ar : v.pill.en}</span>
                     </div>
-                    <small><bdi dir="ltr">{q.quoteNumber}</bdi> · {v.sub}</small>
+                    <small><bdi dir="ltr">{quoteRef(q.quoteNumber, ar)}</bdi> · {v.sub}</small>
                   </div>
                   <div className="spg-amt">
                     <b><bdi>{formatMoney(q.grandTotal)} {q.currency === "SAR" ? sar : q.currency}</bdi></b>

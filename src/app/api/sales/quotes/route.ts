@@ -5,10 +5,13 @@ import { prisma, TX_OPTS } from "@/lib/db";
 import { requireQuoteView, requireQuoteWrite, dealNotOpen } from "@/lib/services/sales/quote-guard";
 import { canQuoteWithoutDeal, canWriteQuotes, quotesSeeAll, writesViaAccounting } from "@/lib/services/sales/quote-access";
 import { handleDomainError } from "@/lib/api-error";
+import { actsForAccountOwner, resolveQuickDeal } from "@/lib/services/sales/quick-deal";
+import { customerInScope } from "@/lib/services/sales/customer-access";
+import { NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
 import { hasSubPrivilege, hasModuleAccess } from "@/lib/auth-shared";
 
 import {
-  nextQuoteNumber, saveQuoteLines, parseLineInputs, validateLines, QUOTE_CURRENCY, createAccountingQuote, type SkuFacts,
+  saveQuoteLines, parseLineInputs, validateLines, QUOTE_CURRENCY, createAccountingQuote, draftByKey, draftKeyOf, type SkuFacts,
 } from "@/lib/services/sales/quotes";
 import { readQuoteSettings, discountThreshold } from "@/lib/services/sales/quote-settings";
 import { Decimal } from "@/lib/services/commissions/engine";
@@ -242,13 +245,16 @@ export async function POST(request: Request) {
   const b = (body ?? {}) as Record<string, unknown>;
 
   const opportunityId = typeof b.opportunityId === "string" ? b.opportunityId : "";
+  // Abu Fahd R2 (M3): «عرض سعر» from the page of a customer with no open deal opens the UNSAVED editor; the deal is opened
+  // at the first save that carries lines (`openDeal`), never on opening — an abandoned editor leaves no empty deal.
+  const openDealFor = !opportunityId && b.openDeal === true && typeof b.customerId === "string" && b.customerId ? b.customerId : "";
   // «مسار المحاسب» (owner, 1 Nov 2026): the accounting section quotes a CUSTOMER directly — no deal, so nothing of it
   // reaches the pipeline or the commissions (channel ACCOUNTING). Only through accounting › quotes_issue.
-  const accountingCustomerId = !opportunityId && typeof b.customerId === "string" && b.customerId ? b.customerId : "";
+  const accountingCustomerId = !opportunityId && !openDealFor && typeof b.customerId === "string" && b.customerId ? b.customerId : "";
   if (accountingCustomerId && !canQuoteWithoutDeal(user.permissions)) {
     return NextResponse.json({ error: "عرض السعر بدون صفقة من قسم المحاسبة فقط.", errorEn: "A quotation without a deal is issued from the accounting section only.", code: "DEAL_REQUIRED" }, { status: 403 });
   }
-  if (!opportunityId && !accountingCustomerId) {
+  if (!opportunityId && !accountingCustomerId && !openDealFor) {
     return NextResponse.json({ error: "A quotation belongs to a deal." }, { status: 400 });
   }
   if (typeof b.currency === "string" && b.currency !== QUOTE_CURRENCY) {
@@ -266,20 +272,34 @@ export async function POST(request: Request) {
     }
   }
 
+  // Abu Fahd R3: the editor's session key — one editor session creates ONE draft (a second create returns the first).
+  const draftKey = draftKeyOf(b.draftKey);
   const rawLines = Array.isArray(b.lines) ? b.lines : [];
   if (rawLines.length > 100) {
     return NextResponse.json({ error: "A quotation may carry at most 100 lines." }, { status: 400 });
   }
 
+  if (openDealFor) {
+    // Nothing to save yet: nothing is opened (the editor stays unsaved).
+    if (rawLines.length === 0) return NextResponse.json({ quote: null, draft: true });
+    return firstSaveOpeningDeal(user, openDealFor, rawLines, validUntil, draftKey, b.autosave !== true);
+  }
+
   if (accountingCustomerId) {
+    // P2 gate Q18 (ب4): the screens open the unsaved editor; an empty «deferred» ask creates nothing here either.
+    if (rawLines.length === 0 && b.deferEmpty === true) return NextResponse.json({ quote: null, draft: true });
     try {
       const lines = parseLineInputs(rawLines);
-      const result = await prisma.$transaction(async (tx) => createAccountingQuote(tx, { customerId: accountingCustomerId, actorId: user.id, validUntil, lines, threshold: await discountThreshold(tx) }), TX_OPTS);
+      const result = await prisma.$transaction(async (tx) => {
+        const known = draftKey ? await draftByKey(tx, draftKey, user.id) : null;
+        if (known) return { ...(await resaveKnownDraft(tx, known, lines, user.id, b.autosave !== true)), reused: true };
+        return { ...(await createAccountingQuote(tx, { customerId: accountingCustomerId, actorId: user.id, validUntil, lines, threshold: await discountThreshold(tx), draftKey })), reused: false };
+      }, TX_OPTS);
       return NextResponse.json({
         quote: result.quote,
         totals: result.priced ? { subtotal: result.priced.subtotal.toFixed(2), discountTotal: result.priced.discountTotal.toFixed(2), taxTotal: result.priced.taxTotal.toFixed(2), grandTotal: result.priced.grandTotal.toFixed(2), effectiveDiscountPercent: result.priced.effectiveDiscountPercent.toString() } : null,
-        needsDiscountApproval: false, reused: false,
-      }, { status: 201 });
+        needsDiscountApproval: false, reused: result.reused,
+      }, { status: result.reused ? 200 : 201 });
     } catch (err) {
       return handleDomainError(err);
     }
@@ -316,6 +336,9 @@ export async function POST(request: Request) {
         await lockDealForQuote(tx, opportunityId);
         const reuse = await reusableDraft(tx, opportunityId, user.id);
         if (reuse && reuse.lineCount > 0) return { quote: reuse.quote, priced: null, needsDiscountApproval: false, reused: true };
+        // P2 gate A1 (ب4 on every entry point): no draft to reopen → nothing is created here, not even with the customer's
+        // usual items; the unsaved editor shows them (GET …/draft?from=customer) and the first save numbers it.
+        if (!reuse && rawLines.length === 0 && b.deferEmpty === true) return { deferred: true as const };
         if (rawLines.length === 0) {
           // A prefill that the line rules would refuse (an inactive SKU, a fraction of a bag) is dropped: the draft opens empty.
           const pre = parseLineInputs(await prefillLines(tx, deal.customerId));
@@ -325,13 +348,23 @@ export async function POST(request: Request) {
         }
         if (reuse) {
           if (lines.length > 0) {
-            const saved = await saveQuoteLines(tx, { quoteId: reuse.quote.id, lines, threshold: await discountThreshold(tx), actorId: user.id });
+            const saved = await saveQuoteLines(tx, { quoteId: reuse.quote.id, lines, threshold: await discountThreshold(tx), actorId: user.id, notifyApprovers: b.autosave !== true });
             return { quote: reuse.quote, priced: saved.priced, needsDiscountApproval: saved.needsDiscountApproval, reused: true };
           }
           return { quote: reuse.quote, priced: null, needsDiscountApproval: false, reused: true };
         }
       }
-      const quoteNumber = await nextQuoteNumber(tx, new Date());
+      // P2 ب4 (owner decision, 13 Nov): the screens ask with `deferEmpty` — a quotation with no line yet is NOT created
+      // (no row, no number); the editor opens unsaved (GET /api/sales/quotes/draft) and its first save creates it.
+      if (lines.length === 0 && b.deferEmpty === true) return { deferred: true as const };
+      // Abu Fahd R3: this editor session already created its draft (the autosave and the leave-save raced) → that one.
+      const known = draftKey ? await draftByKey(tx, draftKey, user.id) : null;
+      if (known) {
+        const again = await resaveKnownDraft(tx, known, lines, user.id, b.autosave !== true);
+        return { quote: again.quote, priced: again.priced, needsDiscountApproval: again.needsDiscountApproval, reused: true };
+      }
+      // Owner decision (quote-45 round): the draft is saved with its lines but takes its number only at issue.
+      const quoteNumber = null;
       const created = await tx.quote.create({
         data: {
           quoteNumber,
@@ -342,17 +375,19 @@ export async function POST(request: Request) {
           currency: QUOTE_CURRENCY,
           validUntil,
           createdById: user.id,
+          draftKey,
         },
         select: { id: true, quoteNumber: true, revision: true },
       });
 
       if (lines.length > 0) {
-        const saved = await saveQuoteLines(tx, { quoteId: created.id, lines, threshold: await discountThreshold(tx), actorId: user.id });
+        const saved = await saveQuoteLines(tx, { quoteId: created.id, lines, threshold: await discountThreshold(tx), actorId: user.id, notifyApprovers: b.autosave !== true });
         return { quote: created, priced: saved.priced, needsDiscountApproval: saved.needsDiscountApproval, reused: false };
       }
       return { quote: created, priced: null, needsDiscountApproval: false, reused: false };
     }, TX_OPTS);
 
+    if ("deferred" in result) return NextResponse.json({ quote: null, draft: true, opportunityId }, { status: 200 });
     return NextResponse.json(
       {
         quote: result.quote,
@@ -373,4 +408,62 @@ export async function POST(request: Request) {
   } catch (err) {
     return handleDomainError(err);
   }
+}
+
+/**
+ * Abu Fahd R2 (M3) / gate R3 M1: the first save of an unsaved quotation opened from a customer with no open deal. The deal
+ * (services/sales/quick-deal.ts, the same rule as the customer page's one tap: the caller's single open deal is used, one is
+ * opened only with sales › lead_convert, for the account owner when a manager acts), the quotation and its lines are
+ * written in ONE transaction: a save the line rules refuse (above 60 %, an inactive product, a line without a product or a
+ * description) rolls the deal back too — no empty open deal at 0 is left behind.
+ */
+async function firstSaveOpeningDeal(
+  user: NonNullable<Awaited<ReturnType<typeof requireQuoteWrite>>["user"]>,
+  customerId: string, rawLines: unknown[], validUntil: Date | null, draftKey: string | null, notifyApprovers: boolean,
+): Promise<Response> {
+  if (!(await customerInScope(user, customerId))) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });
+  try {
+    const lines = parseLineInputs(rawLines);
+    const result = await prisma.$transaction(async (tx) => {
+      await assertSalesAllowed(tx, customerId);
+      // Abu Fahd R3: this editor session already created its draft (and its deal) → that one, with the newer lines.
+      const known = draftKey ? await draftByKey(tx, draftKey, user.id) : null;
+      if (known) return { ...(await resaveKnownDraft(tx, known, lines, user.id, notifyApprovers)), reused: true };
+      const r = await resolveQuickDeal(tx, { id: user.id, canOpenDeal: hasSubPrivilege(user.permissions, "sales", "lead_convert"), teamView: actsForAccountOwner(user) }, customerId, "quote", new Date());
+      if (!((r.kind === "use" || r.kind === "created") && r.opportunityId)) {
+        if (r.kind === "forbidden") throw { _appCode: 403, message: "هذا العميل له مندوب آخر — اطلب من مديرك أو من مندوبه.", errorEn: "This customer belongs to another rep.", code: "NOT_ACCOUNT_OWNER" };
+        if (r.kind === "pick") throw { _appCode: 409, message: "عندك أكثر من صفقة مفتوحة مع هذا العميل — افتح عرض السعر من الصفقة.", errorEn: "You have several open deals with this customer — quote from the deal.", code: "PICK_DEAL" };
+        throw { _appCode: 403, message: "ما عندك صفقة مفتوحة مع هذا العميل، وما عندك صلاحية تفتح وحدة. كلّم مديرك.", errorEn: "You have no open deal with this customer and may not open one.", code: "DEAL_REQUIRED" };
+      }
+      const created = await tx.quote.create({
+        data: { quoteNumber: null, revision: 1, opportunityId: r.opportunityId, customerId, status: "DRAFT", currency: QUOTE_CURRENCY, validUntil, createdById: user.id, draftKey },
+        select: { id: true, quoteNumber: true, revision: true },
+      });
+      // Refused lines throw here — and the whole transaction, the deal it may have opened included, is rolled back.
+      const saved = await saveQuoteLines(tx, { quoteId: created.id, lines, threshold: await discountThreshold(tx), actorId: user.id, notifyApprovers });
+      return { quote: created, priced: saved.priced, needsDiscountApproval: saved.needsDiscountApproval, reused: false };
+    }, TX_OPTS);
+    return NextResponse.json({
+      quote: result.quote,
+      totals: result.priced ? { subtotal: result.priced.subtotal.toFixed(2), discountTotal: result.priced.discountTotal.toFixed(2), taxTotal: result.priced.taxTotal.toFixed(2), grandTotal: result.priced.grandTotal.toFixed(2), effectiveDiscountPercent: result.priced.effectiveDiscountPercent.toString() } : null,
+      needsDiscountApproval: result.needsDiscountApproval, reused: result.reused,
+    }, { status: result.reused ? 200 : 201 });
+  } catch (err) {
+    return handleDomainError(err);
+  }
+}
+
+/**
+ * Abu Fahd R3: a second create of the same editor session lands on the draft the first one made — with the newer lines
+ * (the leave-save carries what was on screen last). A draft already issued meanwhile is returned as it is.
+ */
+async function resaveKnownDraft(
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+  known: { id: string; quoteNumber: string | null; revision: number; status: string },
+  lines: ReturnType<typeof parseLineInputs>, actorId: string, notifyApprovers: boolean,
+) {
+  const quote = { id: known.id, quoteNumber: known.quoteNumber, revision: known.revision };
+  if (known.status !== "DRAFT" || lines.length === 0) return { quote, priced: null, needsDiscountApproval: false };
+  const saved = await saveQuoteLines(tx, { quoteId: known.id, lines, threshold: await discountThreshold(tx), actorId, notifyApprovers });
+  return { quote, priced: saved.priced, needsDiscountApproval: saved.needsDiscountApproval };
 }

@@ -2,17 +2,19 @@
 // D22 (owner-approved Figma 2010:2 / workflow 2024:68, 11 Nov 2026): the tax invoice page — the SAME page and editor
 // (invoices/new, _ui/editor.tsx) — opened from the «＋» menu as
 //   · ?mode=direct-sale  «بيع مباشر (فاتورة ضريبية بدون عرض سعر)»: SKU lines at the list price, every figure editable,
-//                        «الدفع» (كاش / شبكة / تحويل بنكي / آجل — D20: the receipt and the transfer number optional;
+//                        «الدفع» (نقداً / شبكة / تحويل بنكي / آجل — D20: the receipt and the transfer number optional;
 //                        only «آجل» without sales › collection_submit); «أرسل» = POST /api/sales/direct-sale (the order to
 //                        the roastery, the deal won, the invoice request to the accountant, the collection or credit);
 //   · ?mode=sample       «إرسال عيّنة»: SKU lines, one unit each, the 100 % discount pre-filled (editable), no payment;
 //                        «أرسل» = POST /api/sales/sample-send (the samples to the warehouse — a repeat this year waits for a
 //                        manager —, the deal kept open, the zero invoice's request to the accountant).
 // Everything here renders ONLY in those modes; the manual invoice and the invoice from an order are untouched.
+import { withRiyal } from "@/lib/money/riyal";
+import { ReceiptButtons } from "@/components/receipt/ReceiptButtons";
 import { effectiveDiscountBp, listValue2dp } from "@/lib/services/sales/discount-measure";
 import { creditRefusalOf, type CreditRefusal } from "@/components/credit/credit-ui";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { prepareReceipt } from "@/lib/files/receipt-prep";
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { money, useApi, useLang } from "./inv";
@@ -26,7 +28,7 @@ export const isSaleMode = (v: unknown): v is SaleMode => v === "direct-sale" || 
 export type ModeSku = ComboSku & { productId: string | null };
 type Payment = "CASH" | "CARD" | "BANK_TRANSFER" | "CREDIT";
 type Can = { approveDiscount: boolean; collect: boolean; threshold: number; max: number; taxOverride?: boolean };
-export type SampleDeal = { id: string; title: string; amount: string | null; createdAt: string; stageAr: string; stageEn: string; quotes: number; samples: number; quoteAt?: string | null };
+export type SampleDeal = { id: string; title: string; amount: string | null; createdAt: string; stageAr: string; stageEn: string; quotes: number; samples: number; quoteAt?: string | null; mine?: boolean };
 type Facts = { sampledProducts: { productId: string; at: string }[]; alert: { yearValue: string; threshold: string } | null; customerNames?: string[]; deals?: SampleDeal[]; taxOverride?: boolean };
 
 /** A new line of the mode: one unit; a sample starts at 100 % off. */
@@ -47,7 +49,7 @@ export function ModeBadge({ mode, lockTax = true, gross = 0 }: { mode: SaleMode;
           ? <>{L("الخصم 100٪ يتعبّى تلقائي في كل صنف وتقدر تغيّره — ", "The 100% discount is filled on each line and you can change it — ")}<b data-testid="sample-paid">{samplePaidText(gross, L)}</b>{L("، والعيّنة تروح للمستودع يحضّرها.", "; the sample goes to the warehouse.")}</>
           : L("الخصم 100٪ يتعبّى تلقائي في كل صنف وتقدر تغيّره — الفاتورة بصفر تروح للمحاسب، والعيّنة تروح للمستودع يحضّرها.", "The 100% discount is filled on each line and you can change it — the zero invoice goes to the accountant, the sample to the warehouse."))
         : lockTax
-          ? L("السعر والخصم تقدر تعدّلها — الضريبة 15٪ ثابتة، والمحاسب يراجع قبل ما يصدر", "You can change the price and the discount — VAT is a fixed 15%, and the accountant reviews before issue")
+          ? L("السعر والخصم تقدر تعدّلها — الضريبة 15٪، والمحاسب يراجع قبل ما يصدر", "You can change the price and the discount — VAT is 15%, and the accountant reviews before issue")
           : L("السعر والخصم والضريبة تقدر تعدّلها — المحاسب يراجع قبل ما يصدر", "You can change the price, discount and VAT — the accountant reviews before issue")}</span>
     </p>
   );
@@ -56,7 +58,7 @@ export function ModeBadge({ mode, lockTax = true, gross = 0 }: { mode: SaleMode;
 /** The SKUs (catalogue, in units, with a list price), the direct sale's abilities, and the sample facts of the customer. */
 export function useModeData(mode: SaleMode | null, customerId: string | null) {
   const products = useApi<{ id: string; skuCode: string; name: string | null; nameAr: string | null; unitOfMeasure: string; price: number; availableUnits?: number; coffee?: { id: string } | null }[]>(mode ? "/api/products" : null);
-  const options = useApi<{ can: Can; deals?: SampleDeal[]; customers?: { id: string; name: string; nameAr: string | null }[] }>(mode === "direct-sale" ? `/api/sales/direct-sale/options${customerId ? `?customerId=${encodeURIComponent(customerId)}` : ""}` : null);
+  const options = useApi<{ can: Can; deals?: SampleDeal[]; customers?: { id: string; name: string; nameAr: string | null }[]; accountOwnedByOther?: boolean }>(mode === "direct-sale" ? `/api/sales/direct-sale/options${customerId ? `?customerId=${encodeURIComponent(customerId)}` : ""}` : null);
   const facts = useApi<Facts>(mode === "sample" && customerId ? `/api/sales/sample-send?customerId=${encodeURIComponent(customerId)}` : null);
   const skus = useMemo<ModeSku[]>(() => (products.data ?? []).filter((s) => s.unitOfMeasure === "UNIT" && Number(s.price) > 0)
     .map((s) => ({ id: s.id, skuCode: s.skuCode, name: s.name, nameAr: s.nameAr, unitOfMeasure: s.unitOfMeasure, price: Number(s.price), availableUnits: s.availableUnits, productId: s.coffee?.id ?? null })), [products.data]);
@@ -64,7 +66,9 @@ export function useModeData(mode: SaleMode | null, customerId: string | null) {
   const directDeals = customerId ? options.data?.deals ?? [] : [];
   const c = customerId ? options.data?.customers?.find((x) => x.id === customerId) : undefined;
   const directNames = c ? [c.name, c.nameAr].filter((x): x is string => !!x) : [];
-  return { skus, can: options.data?.can ?? null, facts: facts.data ?? null, directDeals, directNames, error: products.error ?? options.error ?? null };
+  // P2 ب6 / UXM-20: the chosen customer's account is another rep's (the server never sends the name).
+  const accountOwnedByOther = !!customerId && !!options.data?.accountOwnedByOther;
+  return { skus, can: options.data?.can ?? null, facts: facts.data ?? null, directDeals, directNames, accountOwnedByOther, error: products.error ?? options.error ?? null };
 }
 
 /** The line a picked SKU makes (its list price; the mode's discount; one unit for a sample). */
@@ -91,13 +95,16 @@ export function PaymentSection({ can, payment, setPayment, reference, setReferen
   can: Can | null; payment: Payment | null; setPayment: (p: Payment) => void; reference: string; setReference: (v: string) => void;
   receipt: File | null; setReceipt: (f: File | null) => void; pending: boolean;
 }) {
-  const { L } = useLang();
-  const input = useRef<HTMLInputElement>(null);
+  const { L, ar } = useLang();
   const [preparing, setPreparing] = useState(false);
   const [err, setErr] = useState("");
-  const methods: Payment[] = can?.collect ? ["CASH", "CARD", "BANK_TRANSFER", "CREDIT"] : ["CREDIT"];
-  const name = (m: Payment) => (m === "CASH" ? L("كاش", "Cash") : m === "CARD" ? L("شبكة", "Card") : m === "BANK_TRANSFER" ? L("تحويل بنكي", "Bank transfer") : L("آجل", "On account"));
-  useEffect(() => { if (!can?.collect && payment !== "CREDIT") setPayment("CREDIT"); }, [can?.collect, payment, setPayment]);
+  // While the permissions load, the choice already made stays visible (not narrowed to «آجل»).
+  const methods: Payment[] = can?.collect || (!can && payment && payment !== "CREDIT") ? ["CASH", "CARD", "BANK_TRANSFER", "CREDIT"] : ["CREDIT"];
+  const name = (m: Payment) => (m === "CASH" ? L("نقداً", "Cash") : m === "CARD" ? L("شبكة", "Card") : m === "BANK_TRANSFER" ? L("تحويل بنكي", "Bank transfer") : L("آجل", "On account"));
+  // Abu Fahd R2 (bug): only once the permissions are KNOWN. While they load (`can` null — e.g. refetched for the customer a
+  // restored draft picks) nothing is forced: forcing «آجل» then overwrote a restored «تحويل بنكي» / «نقداً» and the sale
+  // went without its collection.
+  useEffect(() => { if (can && !can.collect && payment !== "CREDIT") setPayment("CREDIT"); }, [can, payment, setPayment]);
   async function choose(f: File | null) {
     setErr("");
     if (!f) return;
@@ -114,19 +121,16 @@ export function PaymentSection({ can, payment, setPayment, reference, setReferen
           <button key={m} type="button" role="radio" aria-checked={payment === m} className={`inv-pay-opt${payment === m ? " on" : ""}`} onClick={() => setPayment(m)} data-testid={`pay-${m}`}>{name(m)}</button>
         ))}
       </div>
-      {!can?.collect ? <p className="acct-hint" data-testid="pay-credit-only">{L("ما عندك صلاحية تسجيل التحصيل — البيع يمشي «آجل»، والتحصيل يسجله المحاسب أو المشرف.", "You may not record a collection — the sale goes on account; the accountant or a supervisor records the payment.")}</p> : null}
+      {can && !can.collect ? <p className="acct-hint" data-testid="pay-credit-only">{L("ما عندك صلاحية تسجيل التحصيل — البيع يمشي «آجل»، والتحصيل يسجله المحاسب أو المشرف.", "You may not record a collection — the sale goes on account; the accountant or a supervisor records the payment.")}</p> : null}
       {payment === "BANK_TRANSFER" ? (
         <div className="inv-bank" data-testid="pay-bank">
           {pending ? <p className="acct-hint">{L("الخصم يحتاج موافقة المشرف، فالتحصيل ما يتسجّل الحين — إيصال التحويل ترفعه من صفحة الصفقة بعد الموافقة.", "The discount needs your supervisor's approval, so the collection is not recorded yet — upload the transfer receipt from the deal page after the approval.")}</p> : (
             <div className="hr-field">
               <span className="hr-label">{L("إيصال التحويل", "Transfer receipt")} <small>{L("(اختياري)", "(optional)")}</small></span>
-              <input ref={input} type="file" accept="image/*,application/pdf" capture="environment" hidden data-testid="pay-receipt-input" onChange={(e) => { const f = e.target.files?.[0] ?? null; e.target.value = ""; void choose(f); }} />
               {receipt ? (
                 <span className="inv-file" data-testid="pay-receipt-file"><bdi>{receipt.name}</bdi> <button type="button" className="hr-btn is-ghost is-sm" onClick={() => setReceipt(null)}>{L("حذف", "Remove")}</button></span>
               ) : (
-                <button type="button" className="inv-drop" disabled={preparing} onClick={() => input.current?.click()} data-testid="pay-receipt-pick">
-                  <b>{preparing ? L("نجهّز الصورة…", "Preparing the photo…") : L("صوّر الإيصال أو اختر ملف", "Photograph the receipt or choose a file")}</b><small>{L("صورة أو PDF · لين 5 ميجا", "Photo or PDF · up to 5 MB")}</small>
-                </button>
+                <ReceiptButtons ar={ar} onPick={(f) => void choose(f)} disabled={preparing} testId="pay-receipt-pick" fileInputTestId="pay-receipt-input" />
               )}
             </div>
           )}
@@ -174,7 +178,7 @@ export function SampleNotes({ lines, skus, facts }: { lines: EditLine[]; skus: M
 }
 
 export type ModeDone =
-  | { mode: "direct-sale"; orderId: string; orderNumber: number; opportunityId: string | null; invoiceId: string | null; pending: boolean; held: boolean; gross: string; payment: Payment; uploadError: string; receiptUploaded: boolean; deal: { id: string; title: string; joined: boolean } | null; dealTitle: string | null }
+  | { mode: "direct-sale"; orderId: string; orderNumber: number; opportunityId: string | null; invoiceId: string | null; pending: boolean; held: boolean; gross: string; payment: Payment; uploadError: string; receiptUploaded: boolean; deal: { id: string; title: string; joined: boolean } | null; dealTitle: string | null; ownedByOther: boolean }
   | { mode: "sample"; invoiceId: string; opportunityId: string; pending: boolean; gross: string };
 
 /** «أرسل»: the direct sale or the sample send, under one request key per page; the receipt is a second request (D20). */
@@ -191,7 +195,7 @@ export async function sendMode(mode: SaleMode, body: Record<string, unknown>, re
     const up = await fetch(`/api/sales/collections/${b.payment.collectionId}/evidence`, { method: "POST", body: form }).catch(() => null);
     if (!up || !up.ok) uploadError = (up ? localizeApiError(await up.json().catch(() => ({}))) : null) ?? L("ما انرفع الإيصال — ارفعه من صفحة الصفقة.", "The receipt was not uploaded — attach it from the deal page.");
   }
-  return { ok: true, done: { mode, orderId: b.order.id, orderNumber: b.order.orderNumber, opportunityId: b.opportunityId, invoiceId: b.invoice?.id ?? null, pending: b.discountApproval === "PENDING", held: b.paymentHold === "PENDING", gross: b.totals.gross, payment: b.payment.method, uploadError, receiptUploaded: body.payment === "BANK_TRANSFER" && !!receipt && !!b.payment?.collectionId && !uploadError, deal: b.deal ?? null, dealTitle: typeof body.dealTitle === "string" ? body.dealTitle : null } };
+  return { ok: true, done: { mode, orderId: b.order.id, orderNumber: b.order.orderNumber, opportunityId: b.opportunityId, invoiceId: b.invoice?.id ?? null, pending: b.discountApproval === "PENDING", held: b.paymentHold === "PENDING", gross: b.totals.gross, payment: b.payment.method, uploadError, receiptUploaded: body.payment === "BANK_TRANSFER" && !!receipt && !!b.payment?.collectionId && !uploadError, deal: b.deal ?? null, dealTitle: typeof body.dealTitle === "string" ? body.dealTitle : null, ownedByOther: !!b.ownedByOther } };
 }
 
 export function DoneCard({ done }: { done: ModeDone }) {
@@ -226,6 +230,12 @@ export function DoneCard({ done }: { done: ModeDone }) {
         {rows.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}
         <div className="g"><dt>{L("الإجمالي شامل الضريبة · ⃁", "Total incl. VAT · SAR")}</dt><dd data-testid="invoice-mode-done-gross">{money(done.gross)}</dd></div>
       </dl>
+      {done.mode === "direct-sale" && done.ownedByOther ? (
+        <div className="inv-owner is-done" role="note" data-testid="invoice-mode-other-owner-done">
+          <b>{L("الصفقة تسجّلت باسم مالك حساب العميل", "The deal was recorded in the account owner's name")}</b>
+          <span>{L("العميل تابع لمندوب ثاني، فالصفقة والعمولة له. وصله تنبيه هو ومشرفك.", "The customer belongs to another rep, so the deal and the commission are theirs. They and your supervisor were notified.")}</span>
+        </div>
+      ) : null}
       {done.mode === "direct-sale" && done.uploadError ? <p className="acct-hint is-warn" role="alert">{done.uploadError}</p> : null}
       {/* أبو فهد B5 (D20 parity): a transfer recorded without its receipt sends the rep straight to the deal page to attach it. */}
       {done.mode === "direct-sale" && !done.pending && done.payment === "BANK_TRANSFER" && !done.receiptUploaded && done.opportunityId ? (
@@ -284,6 +294,58 @@ export function SampleDealPicker({ facts, value, onChange }: { facts: Facts | nu
           })}
         </Select></label>
       <p className="acct-hint">{L("العيّنة تنسجل في هالصفقة، والصفقة تبقى مفتوحة للمتابعة.", "The sample is recorded on this deal; the deal stays open for the follow-up.")}</p>
+    </div>
+  );
+}
+
+/** P2 ب6 / UXM-20 (approved Figma 10أ): said before «أرسل» — never the other rep's name. */
+/** `kept`: the rep chose their OWN open deal on this customer — the deal stays theirs (gate Q16); the owner is still told. */
+export function OtherOwnerNotice({ kept = false, testId = "invoice-mode-other-owner" }: { kept?: boolean; testId?: string }) {
+  const { L } = useLang();
+  return (
+    <div className="inv-owner" role="note" data-testid={testId} data-kept={kept ? "1" : "0"}>
+      <b>{kept
+        ? L("العميل تابع لمندوب ثاني — البيع على صفقتك المفتوحة", "The customer belongs to another rep — the sale goes on your open deal")
+        : L("العميل تابع لمندوب ثاني — الصفقة والعمولة تتسجّل باسمه", "The customer belongs to another rep — the deal and the commission are recorded in their name")}</b>
+      <span>{L("تقدر تكمّل البيع. مالك الحساب ومشرفك يوصلهم تنبيه.", "You can complete the sale. The account owner and your supervisor are notified.")}</span>
+    </div>
+  );
+}
+
+/**
+ * P2 ب5 (owner decision, approved Figma 8ج): «راجع قبل الإرسال» — ALWAYS between «أرسل» on the form and the sale. Nothing is
+ * sent until «أرسل» here; «ارجع عدّل» goes back to the form with everything as it was.
+ */
+export function SaleReview({ customer, lines, taxable, tax, grand, payment, receipt, otherOwner, keptOwn = false, consequence, sendLabel, sending, onSend, onBack }: {
+  customer: string; lines: { key: string; name: string; qty: string; net: string }[]; taxable: string; tax: string; grand: string;
+  payment: Payment | null; receipt: boolean; otherOwner: boolean; keptOwn?: boolean; consequence: ReactNode; sendLabel: string; sending: boolean; onSend: () => void; onBack: () => void;
+}) {
+  const { L } = useLang();
+  const pay = payment === "CASH" ? L("نقداً — تسلّمه الحين", "Cash — collected now")
+    : payment === "CARD" ? L("شبكة — تسلّمه الحين", "Card — collected now")
+    : payment === "BANK_TRANSFER" ? (receipt ? L("تحويل بنكي · الإيصال مرفق", "Bank transfer · receipt attached") : L("تحويل بنكي · بدون إيصال", "Bank transfer · no receipt"))
+    : payment === "CREDIT" ? L("آجل على حساب العميل", "On the customer's account") : "—";
+  return (
+    <div className="inv-review" data-testid="invoice-review">
+      <div className="inv-review-h">
+        <h2>{L("راجع قبل الإرسال", "Review before sending")}</h2>
+        <button type="button" className="hr-btn is-ghost inv-review-x" onClick={onBack} aria-label={L("ارجع عدّل", "Back to edit")} data-testid="invoice-review-close">✕</button>
+      </div>
+      <p className="acct-hint" data-testid="invoice-review-sub">{L("خطوة أخيرة — ما ينرسل شي لين تضغط «أرسل»", "Last step — nothing is sent until you press «Send»")}</p>
+      {otherOwner ? <OtherOwnerNotice /> : keptOwn ? <OtherOwnerNotice kept /> : null}
+      <dl className="acct-card inv-review-card">
+        <div><dt>{L("العميل", "Customer")}</dt><dd data-testid="invoice-review-customer"><bdi>{customer}</bdi></dd></div>
+        {lines.map((l) => <div key={l.key} data-testid="invoice-review-line"><dt><bdi>{l.name}</bdi> × <bdi className="hr-num">{l.qty}</bdi></dt><dd className="hr-num">{money(l.net)}</dd></div>)}
+        <div className="sep"><dt>{L("قبل الضريبة", "Before VAT")}</dt><dd className="hr-num">{withRiyal(money(taxable), L("ar", "en") as "ar" | "en")}</dd></div>
+        <div><dt>{L("الضريبة 15٪", "VAT 15%")}</dt><dd className="hr-num">{withRiyal(money(tax), L("ar", "en") as "ar" | "en")}</dd></div>
+        <div className="g"><dt>{L("الإجمالي شامل الضريبة", "Total incl. VAT")}</dt><dd className="hr-num" data-testid="invoice-review-grand">{withRiyal(money(grand), L("ar", "en") as "ar" | "en")}</dd></div>
+        <div><dt>{L("الدفع", "Payment")}</dt><dd data-testid="invoice-review-payment">{pay}</dd></div>
+      </dl>
+      <p className="acct-hint" data-testid="invoice-review-what">{consequence}</p>
+      <div className="inv-review-acts">
+        <button type="button" className="hr-btn is-primary" disabled={sending} onClick={onSend} data-testid="invoice-review-send">{sending ? L("نرسل…", "Sending…") : sendLabel}</button>
+        <button type="button" className="hr-btn" disabled={sending} onClick={onBack} data-testid="invoice-review-back">{L("ارجع عدّل", "Back to edit")}</button>
+      </div>
     </div>
   );
 }

@@ -134,3 +134,48 @@
 /* The whole number, never cut: a long name sends it to its own line inside the row. */
 .inv .inv-cust-vat { flex: 0 0 auto; max-width: 100%; white-space: nowrap; color: var(--hr-muted); font-variant-numeric: tabular-nums; }
 .inv .inv-cust-new { margin-top: 8px; }
+
+/* P2 ب5 (approved Figma 8ج): «راجع قبل الإرسال» — between «أرسل» on the form and the sale. */
+.inv .inv-review { display: grid; gap: 12px; max-width: 640px; }
+.inv .inv-review-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.inv .inv-review-h h2 { margin: 0; font-size: 20px; font-weight: 700; }
+.inv .inv-review-x { min-width: 44px; min-height: 44px; font-size: 18px; }
+.inv .inv-review-card { margin: 0; display: grid; gap: 0; }
+.inv .inv-review-card > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 8px 0; }
+.inv .inv-review-card dt { color: var(--hr-muted); min-width: 0; overflow-wrap: anywhere; }
+.inv .inv-review-card dd { margin: 0; text-align: end; }
+.inv .inv-review-card > div[data-testid="invoice-review-line"] dt { color: var(--hr-text); }
+.inv .inv-review-card > div.sep { border-top: 1px solid var(--hr-border-strong); margin-top: 4px; padding-top: 12px; }
+.inv .inv-review-card > div.g dd { font-weight: 700; }
+.inv .inv-review-acts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.inv .inv-review-acts .hr-btn { min-height: 48px; justify-content: center; }
+/* P2 ب6 / UXM-20 (approved Figma 10أ/10ب): the deal and the commission stay with the account owner. */
+.inv .inv-owner { display: grid; gap: 6px; padding: 12px 14px; border-radius: 10px; background: var(--hr-warning-tint); color: var(--hr-text); line-height: 1.7; }
+.inv .inv-owner b { color: var(--hr-warning); font-weight: 700; }
+.inv .inv-owner span { font-size: 13px; }
+.inv .inv-owner.is-done { background: var(--hr-subtle); margin-block: 12px; }
+.inv .inv-owner.is-done b { color: var(--hr-text); }
+
+/* P2 UXM-03 (approved Figma 9أ/9ب, 390×560): what «أرسل» does is said in the page; the sticky bar holds the total and «أرسل». */
+.inv .inv-mode-what { display: grid; gap: 4px; }
+.inv .inv-mode-what .acct-hint { margin: 0; }
+.inv .inv-mode-total { display: none; }
+@media (max-width: 767px) {
+  /* The item: «الصنف» on its own row, then الكمية · السعر · الخصم ٪ on one row (the VAT is fixed and said in the badge; the
+     total is the bar's). */
+  .inv .inv-lines.is-cards tr { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 8px; }
+  .inv .inv-lines.is-cards td.w-desc { grid-column: 1 / -1; }
+  .inv .inv-lines.is-cards td:nth-child(4), .inv .inv-lines.is-cards td:nth-child(7), .inv .inv-lines.is-cards td:nth-child(8) { display: none; }
+  .inv .inv-mode-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: nowrap; border-top: 1px solid var(--hr-border-strong); }
+  .inv .inv-mode-total { display: grid; gap: 0; min-width: 0; }
+  .inv .inv-mode-total b { font-size: 17px; font-weight: 700; white-space: nowrap; }
+  .inv .inv-mode-total small { font-size: 12px; color: var(--hr-muted); }
+  .inv .inv-mode-foot .acct-actions { width: auto; display: flex; gap: 8px; }
+  .inv .inv-mode-foot .acct-actions .hr-btn.is-primary { min-width: 110px; }
+  .inv .inv-mode-foot { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  .inv .inv-mode-foot .acct-actions .hr-btn:not(.is-primary) { display: none; } /* the header's back leaves (and asks) */
+}
+@media (max-width: 767px) {
+  /* UXM-03: the page has no tab bar (ownBar) — its bar sits on the bottom of the screen, not where the tab bar was. */
+  .d21-body:has(.inv-mode-foot) { padding-bottom: 0; scroll-padding-bottom: 0; }
+}

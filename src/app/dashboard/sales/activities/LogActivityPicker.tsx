@@ -498,7 +498,7 @@ function StepTwo({
         {!phone && <button type="button" className="btn" onClick={onCancel} data-testid="picker-cancel">{ar ? "إلغاء" : "Cancel"}</button>}
         {dupSaved ? <button type="button" className="btn p" onClick={() => onDone(target)} data-testid="picker-dup-ok">{ar ? "تم" : "OK"}</button> : (
         <button type="button" className="btn p" disabled={!canSave} aria-busy={busy || undefined} onClick={save} data-testid="picker-save">
-          {busy ? (ar ? "جارٍ الحفظ…" : "Saving…") : pending ? (ar ? "تحويل إلى فرصة" : "Make it an opportunity") : ar ? "حفظ" : "Save"}
+          {busy ? (ar ? "جارٍ الحفظ…" : "Saving…") : pending ? (ar ? "حوّله لفرصة" : "Make it an opportunity") : ar ? "حفظ" : "Save"}
         </button>)}
       </div>
     </>

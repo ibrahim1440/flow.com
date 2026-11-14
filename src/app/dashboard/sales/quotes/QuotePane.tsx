@@ -7,6 +7,7 @@ import { Ico } from "@/components/shell/icons";
 import { shortDate } from "@/components/d21/format";
 import { useAccountantView } from "../../accounting/_ui/qoyod-pages";
 import { useQuotesBase } from "./base";
+import { quoteKey, quoteRef } from "@/lib/services/sales/quote-label";
 
 
 /**
@@ -27,7 +28,7 @@ type Line = {
 };
 type Detail = {
   quote: {
-    id: string; quoteNumber: string; revision: number; status: string; validUntil: string | null;
+    id: string; quoteNumber: string | null; revision: number; status: string; validUntil: string | null;
     subtotal: string; discountTotal: string; taxTotal: string; grandTotal: string;
     discountRejectionNote: string | null;
     customer: { name: string; nameAr: string | null } | null;
@@ -115,7 +116,7 @@ export function QuotePane({
       <div className="pane-h">
         {q ? (
           <span className="lbl" style={{ fontWeight: 400 }}>
-            <bdi className="id">{q.quoteNumber}</bdi> {ar ? "المراجعة" : "revision"} <bdi className="n">{q.revision}</bdi>
+            <bdi className="id">{quoteRef(q.quoteNumber, ar)}</bdi> {ar ? "المراجعة" : "revision"} <bdi className="n">{q.revision}</bdi>
           </span>
         ) : <span className="lbl">{ar ? "عرض سعر" : "Quotation"}</span>}
         <span className="sp" />

@@ -1,0 +1,9 @@
+/* P2 ب9 / UXM-02 (approved Figma 7ب): the restored-draft banner. */
+.draft-banner { display: grid; gap: 8px; padding: 14px 16px; border-radius: 12px; background: var(--status-success-tint, #eaf3ee); color: var(--text-primary); margin-block-end: 12px; }
+.draft-banner > b { font-size: 15px; font-weight: 700; }
+.draft-banner > p { margin: 0; font-size: 13px; line-height: 1.7; color: var(--text-secondary, var(--text-primary)); }
+.draft-banner-acts { display: flex; gap: 10px; flex-wrap: wrap; }
+.draft-btn { appearance: none; font: inherit; font-weight: 600; font-size: 14px; min-height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--border-strong, var(--border-subtle)); background: var(--surface); color: var(--text-primary); cursor: pointer; }
+.draft-btn.p { background: var(--action-primary); border-color: var(--action-primary); color: var(--action-on-primary, #fff); }
+.draft-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.draft-leave-body { margin: 0; font-size: 14px; line-height: 24px; color: var(--text-primary); }

@@ -247,7 +247,7 @@ async function decided(tx: Tx, o: { id: string; orderNumber: number; ownerId: st
 }
 
 /**
- * Abu Fahd R2 P3: «يفك الطلب #…» — for each listed collection, the held order (PENDING / REJECTED) whose sale it pays:
+ * Abu Fahd R2 P3: «يفتح قفل الطلب #…» — for each listed collection, the held order (PENDING / REJECTED) whose sale it pays:
  * the sale's own collection, or any correction in its «نسخ وتصحيح» chain. Shown on every row of the chain, in both
  * accountant views (sales collections, سندات العملاء).
  */
