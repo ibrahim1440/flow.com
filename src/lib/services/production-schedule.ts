@@ -3,6 +3,7 @@ import { prisma, TX_OPTS } from "@/lib/db";
 import {
   createProductionOrderFromSales,
   outstandingDemandForItem,
+  outstandingDemandMany,
   productionProgressMany,
   advisoryKey,
 } from "@/lib/services/production-planning";
@@ -11,7 +12,7 @@ import {
   assertOrderStillAcceptsProduction,
   productionGateRefusal,
 } from "@/lib/services/order-operations";
-import { explodeBom, kgForUnits } from "@/lib/services/finished-products";
+import { explodeBom, explodeBomMany, kgForUnits } from "@/lib/services/finished-products";
 import { emitAutomationEvent } from "@/lib/automation/emit";
 
 type PrismaTx = Prisma.TransactionClient;
@@ -145,12 +146,15 @@ export async function autoScheduleShortfalls(orderId: string, actor: Actor): Pro
     orderBy: { id: "asc" },
   });
   let created = 0;
-  for (const line of lines) {
-    if (!line.productSku || !line.productSkuId || line.quantityUnits === null) continue;
-    if (productionGateRefusal({ preparationDecision: line.preparationDecision, order: line.order }, "schedule")) continue;
-    const demand = await outstandingDemandForItem(prisma, { id: line.id, quantityUnits: line.quantityUnits, deliveredUnits: line.deliveredUnits });
-    if (demand.outstandingUnits <= 0) continue;
-    const bom = await explodeBom(prisma, line.productSkuId, demand.outstandingUnits);
+  // R1-c: every eligible line's demand and BOM read together (they were read one line at a time, ~5 round trips each).
+  // The decision per line is unchanged; each schedule still runs in its own transaction, which re-reads what it uses.
+  const eligible = lines.filter((line) => line.productSku && line.productSkuId && line.quantityUnits !== null
+    && !productionGateRefusal({ preparationDecision: line.preparationDecision, order: line.order }, "schedule"));
+  const demands = await outstandingDemandMany(prisma, eligible.map((l) => ({ id: l.id, quantityUnits: l.quantityUnits!, deliveredUnits: l.deliveredUnits })));
+  const short = eligible.filter((l) => (demands.get(l.id)?.outstandingUnits ?? 0) > 0);
+  const boms = await explodeBomMany(prisma, short.map((l) => ({ productSkuId: l.productSkuId!, units: demands.get(l.id)!.outstandingUnits })));
+  for (const [i, line] of short.entries()) {
+    const bom = boms[i];
     if (bom.length === 0) continue;
     try {
       await prisma.$transaction(
@@ -354,26 +358,40 @@ export async function planCoverage(
   db: PrismaTx,
   item: { id: string; orderId: string },
 ): Promise<{ scheduledAll: number; scheduledFirm: number; provisionalIds: string[] }> {
+  return (await planCoverageMany(db, [item])).get(item.id)!;
+}
+
+/** R1-c: planCoverage for several lines with a fixed number of reads (the preparation review asked once per line). */
+export async function planCoverageMany(
+  db: PrismaTx,
+  items: { id: string; orderId: string }[],
+): Promise<Map<string, { scheduledAll: number; scheduledFirm: number; provisionalIds: string[] }>> {
+  const out = new Map(items.map((i) => [i.id, { scheduledAll: 0, scheduledFirm: 0, provisionalIds: [] as string[] }]));
+  if (items.length === 0) return out;
+  const orderOf = new Map(items.map((i) => [i.id, i.orderId]));
   const pos = await db.productionOrder.findMany({
-    where: { sourceOrderItemId: item.id, status: { in: ["PENDING", "IN_PRODUCTION"] } },
-    select: { id: true, status: true, targetUnits: true, targetWeightKg: true, _count: { select: { roastingBatches: true } } },
+    where: { sourceOrderItemId: { in: items.map((i) => i.id) }, status: { in: ["PENDING", "IN_PRODUCTION"] } },
+    select: { id: true, status: true, targetUnits: true, targetWeightKg: true, sourceOrderItemId: true, _count: { select: { roastingBatches: true } } },
   });
-  if (pos.length === 0) return { scheduledAll: 0, scheduledFirm: 0, provisionalIds: [] };
-  const pendingBare = pos.filter((p) => p.status === "PENDING" && p._count.roastingBatches === 0).map((p) => p.id);
-  const automatic = pendingBare.length === 0 ? [] : await db.$queryRaw<{ id: string }[]>`
-    SELECT a."metadata"->>'productionOrderId' AS id FROM "OrderActivity" a
-     WHERE a."orderId" = ${item.orderId} AND a."type" = 'PRODUCTION_ORDER_CREATED'
+  if (pos.length === 0) return out;
+  const pendingBare = pos.filter((p) => p.status === "PENDING" && p._count.roastingBatches === 0);
+  const orderIds = [...new Set(pendingBare.map((p) => orderOf.get(p.sourceOrderItemId!)!))];
+  const automatic = pendingBare.length === 0 ? [] : await db.$queryRaw<{ id: string; orderId: string }[]>`
+    SELECT a."metadata"->>'productionOrderId' AS id, a."orderId" AS "orderId" FROM "OrderActivity" a
+     WHERE a."orderId" IN (${Prisma.join(orderIds)}) AND a."type" = 'PRODUCTION_ORDER_CREATED'
        AND a."metadata"->>'automatic' = 'true'
-       AND a."metadata"->>'productionOrderId' IN (${Prisma.join(pendingBare)})`;
-  const provisional = new Set(automatic.map((r) => r.id));
+       AND a."metadata"->>'productionOrderId' IN (${Prisma.join(pendingBare.map((p) => p.id))})`;
+  // An automatic plan counts as provisional only on its own order's activity, as the one-line query required.
+  const poItem = new Map(pos.map((p) => [p.id, p.sourceOrderItemId!]));
+  const provisional = new Set(automatic.filter((r) => orderOf.get(poItem.get(r.id) ?? "") === r.orderId).map((r) => r.id));
   const progress = await productionProgressMany(db, pos);
-  let all = 0, firm = 0;
   for (const p of pos) {
+    const c = out.get(p.sourceOrderItemId!)!;
     const owed = Math.max(0, p.targetUnits - (progress.get(p.id)?.producedUnits ?? 0));
-    all += owed;
-    if (!provisional.has(p.id)) firm += owed;
+    c.scheduledAll += owed;
+    if (provisional.has(p.id)) c.provisionalIds.push(p.id); else c.scheduledFirm += owed;
   }
-  return { scheduledAll: all, scheduledFirm: firm, provisionalIds: [...provisional] };
+  return out;
 }
 
 /**

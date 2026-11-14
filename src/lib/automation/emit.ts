@@ -76,10 +76,15 @@ export function invalidateAutomationCache(): void {
   cache = null;
 }
 
-export async function emitAutomationEvent(tx: Tx, input: AutomationEventInput): Promise<void> {
+export async function emitAutomationEvent(
+  tx: Tx,
+  input: AutomationEventInput,
+  /** R1-c: facts the caller already read in this transaction, so the notification does not read them again. */
+  prefetched?: Parameters<typeof notifyFromAutomationEvent>[2],
+): Promise<void> {
   // feat/notifications: the in-app notifications of this event, in the same transaction, whether or
   // not any automation rule listens (lib/notifications/from-automation.ts; no read for other events).
-  await notifyFromAutomationEvent(tx, input);
+  await notifyFromAutomationEvent(tx, input, prefetched);
   let listened: Set<string>;
   try {
     listened = await listenedEventTypes();

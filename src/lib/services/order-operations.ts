@@ -647,6 +647,28 @@ export type LineReservationState = {
  * This is a plain read: it takes no row lock and therefore cannot affect the lock order
  * frozen in dd14506. It narrows the window; casUpdateOrderItem below closes it.
  */
+/** R1-c: readLineReservationState for several lines in one read (the preparation review read it once per line). */
+export async function readLineReservationStates(
+  tx: PrismaTx,
+  orderItemIds: string[],
+): Promise<Map<string, LineReservationState>> {
+  if (orderItemIds.length === 0) return new Map();
+  const rows = await tx.orderItem.findMany({
+    where: { id: { in: orderItemIds } },
+    select: {
+      id: true,
+      updatedAt: true,
+      quantityUnits: true,
+      deliveredUnits: true,
+      quantityKg: true,
+      deliveredQty: true,
+      preparationDecision: true,
+      order: { select: { status: true, approvalStatus: true } },
+    },
+  });
+  return new Map(rows.map((r) => [r.id, r]));
+}
+
 export async function readLineReservationState(
   tx: PrismaTx,
   orderItemId: string,

@@ -3,14 +3,14 @@ import { prisma, TX_OPTS } from "@/lib/db";
 import {
   appendOrderActivity,
   aggregatePreparationStatus,
-  readLineReservationState,
+  readLineReservationStates,
   casUpdateOrderItem,
   PREPARATION_REVIEW_ENTRY_STATUSES,
   DELIVERY_ALLOWED_STATUSES,
   completionRefusal,
   type PreparationDecision,
 } from "@/lib/services/order-operations";
-import { autoScheduleShortfalls, settleProductionOrders, planCoverage, rebalanceProvisionalPlans } from "@/lib/services/production-schedule";
+import { autoScheduleShortfalls, settleProductionOrders, planCoverageMany, rebalanceProvisionalPlans } from "@/lib/services/production-schedule";
 import {
   ALLOCATABLE_ITEM_SELECT,
   decisionFor,
@@ -186,6 +186,23 @@ export async function reviewOrderPreparation(
     },
   });
   const itemRowsById = new Map(itemRows.map((r) => [r.id, r]));
+  // R1-c: the per-line reads in one query each (a 5-line order spent ~6 round trips per line here). Same transaction,
+  // same values: the transaction-current state is still read before any ceiling is derived, and the compare-and-swap
+  // at the end still proves nothing moved underneath.
+  const freshById = await readLineReservationStates(tx, parsedItems.map((p) => p.orderItemId));
+  const autoSkuLines = auto
+    ? itemRows.filter((r) => r.quantityUnits !== null && r.productSkuId && r.productSku).map((r) => r.id)
+    : [];
+  const heldByItem = new Map<string, number>();
+  if (autoSkuLines.length > 0) {
+    const held = await tx.stockAllocation.groupBy({
+      by: ["orderItemId"],
+      where: { orderItemId: { in: autoSkuLines }, status: "RESERVED", quantityUnits: { not: null } },
+      _sum: { quantityUnits: true },
+    });
+    for (const h of held) if (h.orderItemId) heldByItem.set(h.orderItemId, h._sum.quantityUnits ?? 0);
+  }
+  const coverage = await planCoverageMany(tx, autoSkuLines.map((itemId) => ({ id: itemId, orderId: id })));
   const casTokens = new Map<string, { id: string; updatedAt: Date; deliveredUnits: number; deliveredQty: number }>();
 
   for (const p of parsedItems) {
@@ -194,7 +211,7 @@ export async function reviewOrderPreparation(
 
     // Transaction-current demand, re-read immediately before the ceiling is derived; its
     // token is what the compare-and-swap at the end proves nothing moved underneath.
-    const fresh = await readLineReservationState(tx, p.orderItemId);
+    const fresh = freshById.get(p.orderItemId) ?? null;
     if (!fresh) throw { _appCode: 404, message: `Order item ${p.orderItemId} not found.` };
     const item = { ...stale, ...fresh, productSku: stale.productSku };
     casTokens.set(item.id, {
@@ -211,11 +228,7 @@ export async function reviewOrderPreparation(
 
       if (auto) {
         // Top up or trim — never release and re-take.
-        const held = await tx.stockAllocation.aggregate({
-          where: { orderItemId: item.id, status: "RESERVED", quantityUnits: { not: null } },
-          _sum: { quantityUnits: true },
-        });
-        const heldUnits = held._sum.quantityUnits ?? 0;
+        const heldUnits = heldByItem.get(item.id) ?? 0;
         // A line holding MORE than it still needs is left exactly as it is: delivery and order
         // edits trim their own reservations, and a surplus surviving them is an anomaly the
         // completion gate reports rather than one a background recompute quietly repairs.
@@ -224,7 +237,7 @@ export async function reviewOrderPreparation(
         // Production a person raised, or with roasting behind it, keeps its share of the demand
         // (delivered + reserved + scheduled ≤ ordered, as the order edit keeps it); a provisional
         // automatic plan does not — the shelf comes first, and the plan is rebalanced after.
-        const firm = (await planCoverage(tx, { id: item.id, orderId: id })).scheduledFirm;
+        const firm = coverage.get(item.id)?.scheduledFirm ?? 0;
         const cap = Math.max(0, demandUnits - firm);
         if (heldUnits >= cap) {
           // nothing to take

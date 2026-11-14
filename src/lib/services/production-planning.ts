@@ -337,35 +337,47 @@ export async function outstandingDemandForItem(
   tx: PrismaTx,
   item: { id: string; quantityUnits: number; deliveredUnits: number },
 ): Promise<OutstandingDemand> {
-  const reserved = await tx.stockAllocation.aggregate({
-    where: { orderItemId: item.id, status: "RESERVED", quantityUnits: { not: null } },
+  return (await outstandingDemandMany(tx, [item])).get(item.id)!;
+}
+
+/** R1-c: outstandingDemandForItem for several lines with a fixed number of reads (auto-scheduling asked once per line). */
+export async function outstandingDemandMany(
+  tx: PrismaTx,
+  items: { id: string; quantityUnits: number; deliveredUnits: number }[],
+): Promise<Map<string, OutstandingDemand>> {
+  const out = new Map<string, OutstandingDemand>();
+  if (items.length === 0) return out;
+  const ids = items.map((i) => i.id);
+  const reserved = await tx.stockAllocation.groupBy({
+    by: ["orderItemId"],
+    where: { orderItemId: { in: ids }, status: "RESERVED", quantityUnits: { not: null } },
     _sum: { quantityUnits: true },
   });
-  const reservedUnits = reserved._sum.quantityUnits ?? 0;
+  const reservedBy = new Map(reserved.map((r) => [r.orderItemId, r._sum.quantityUnits ?? 0]));
 
   const openOrders = await tx.productionOrder.findMany({
-    where: { sourceOrderItemId: item.id, status: { not: "CANCELLED" } },
-    select: { id: true, targetUnits: true, targetWeightKg: true },
+    where: { sourceOrderItemId: { in: ids }, status: { not: "CANCELLED" } },
+    select: { id: true, targetUnits: true, targetWeightKg: true, sourceOrderItemId: true },
   });
-
   const progress = await productionProgressMany(tx, openOrders);
-  const scheduledUnits = openOrders.reduce(
-    (sum, po) => sum + Math.max(0, po.targetUnits - (progress.get(po.id)?.producedUnits ?? 0)),
-    0,
-  );
+  const scheduledBy = new Map<string, number>();
+  for (const po of openOrders) {
+    const k = po.sourceOrderItemId!;
+    scheduledBy.set(k, (scheduledBy.get(k) ?? 0) + Math.max(0, po.targetUnits - (progress.get(po.id)?.producedUnits ?? 0)));
+  }
 
-  const outstandingUnits = Math.max(
-    0,
-    item.quantityUnits - item.deliveredUnits - reservedUnits - scheduledUnits,
-  );
-
-  return {
-    orderedUnits: item.quantityUnits,
-    deliveredUnits: item.deliveredUnits,
-    reservedUnits,
-    scheduledUnits,
-    outstandingUnits,
-  };
+  for (const item of items) {
+    const reservedUnits = reservedBy.get(item.id) ?? 0;
+    const scheduledUnits = scheduledBy.get(item.id) ?? 0;
+    out.set(item.id, {
+      orderedUnits: item.quantityUnits,
+      deliveredUnits: item.deliveredUnits,
+      reservedUnits,
+      scheduledUnits,
+      outstandingUnits: Math.max(0, item.quantityUnits - item.deliveredUnits - reservedUnits - scheduledUnits),
+    });
+  }
+  return out;
 }
 
 export type RoastingCeiling = {

@@ -624,22 +624,33 @@ export async function explodeBom(
   productSkuId: string,
   units: number
 ): Promise<BomRequirement[]> {
-  const wanted = Math.max(0, Math.trunc(units));
+  return (await explodeBomMany(tx, [{ productSkuId, units }]))[0];
+}
 
-  const components = await tx.bomComponent.findMany({
-    where: { productSkuId },
+/**
+ * R1-c: explodeBom for several (SKU, units) pairs with a fixed number of reads — auto-scheduling exploded one line at a
+ * time. The result is in the order asked, each exactly what explodeBom returns for that pair.
+ */
+export async function explodeBomMany(
+  tx: PrismaTx,
+  wants: { productSkuId: string; units: number }[],
+): Promise<BomRequirement[][]> {
+  if (wants.length === 0) return [];
+  const all = await tx.bomComponent.findMany({
+    where: { productSkuId: { in: [...new Set(wants.map((w) => w.productSkuId))] } },
     include: {
       coffeeProduct: { select: { id: true, productNameEn: true, productNameAr: true } },
       materialItem: { select: { id: true, code: true, name: true, nameAr: true, quantityOnHand: true } },
     },
     orderBy: [{ type: "asc" }, { createdAt: "asc" }],
   });
-  if (components.length === 0) return [];
+  const bySku = new Map<string, typeof all>();
+  for (const c of all) { const l = bySku.get(c.productSkuId) ?? []; l.push(c); bySku.set(c.productSkuId, l); }
 
   // Roasted stock per coffee product, summed across every batch that can still be packed.
   const coffeeIds = [
     ...new Set(
-      components
+      all
         .filter((c) => c.type === "ROASTED_COFFEE" && c.coffeeProductId)
         .map((c) => c.coffeeProductId as string)
     ),
@@ -667,36 +678,40 @@ export async function explodeBom(
     }
   }
 
-  return components.map((c) => {
-    const required =
-      c.type === "ROASTED_COFFEE"
-        ? roundKg(c.quantityPerUnit * wanted)
-        : Number((c.quantityPerUnit * wanted).toFixed(3));
+  return wants.map(({ productSkuId, units }) => {
+    const wanted = Math.max(0, Math.trunc(units));
+    const components = bySku.get(productSkuId) ?? [];
+    return components.map((c) => {
+      const required =
+        c.type === "ROASTED_COFFEE"
+          ? roundKg(c.quantityPerUnit * wanted)
+          : Number((c.quantityPerUnit * wanted).toFixed(3));
 
-    const available =
-      c.type === "ROASTED_COFFEE"
-        ? roastedByProduct.get(c.coffeeProductId ?? "") ?? 0
-        : c.materialItem?.quantityOnHand ?? 0;
+      const available =
+        c.type === "ROASTED_COFFEE"
+          ? roastedByProduct.get(c.coffeeProductId ?? "") ?? 0
+          : c.materialItem?.quantityOnHand ?? 0;
 
-    const label =
-      c.type === "ROASTED_COFFEE"
-        ? `Roasted ${c.coffeeProduct?.productNameEn ?? "coffee"}`
-        : `${c.materialItem?.name ?? "Material"} (${c.materialItem?.code ?? "?"})`;
+      const label =
+        c.type === "ROASTED_COFFEE"
+          ? `Roasted ${c.coffeeProduct?.productNameEn ?? "coffee"}`
+          : `${c.materialItem?.name ?? "Material"} (${c.materialItem?.code ?? "?"})`;
 
-    return {
-      type: c.type,
-      label,
-      nameEn: c.type === "ROASTED_COFFEE" ? c.coffeeProduct?.productNameEn ?? null : c.materialItem?.name ?? null,
-      nameAr: c.type === "ROASTED_COFFEE" ? c.coffeeProduct?.productNameAr ?? null : c.materialItem?.nameAr ?? null,
-      code: c.type === "ROASTED_COFFEE" ? null : c.materialItem?.code ?? null,
-      coffeeProductId: c.coffeeProductId,
-      materialItemId: c.materialItemId,
-      unitOfMeasure: c.unitOfMeasure,
-      quantityPerUnit: c.quantityPerUnit,
-      quantityRequired: required,
-      quantityAvailable: available,
-      shortfall: Math.max(0, Number((required - available).toFixed(3))),
-    };
+      return {
+        type: c.type,
+        label,
+        nameEn: c.type === "ROASTED_COFFEE" ? c.coffeeProduct?.productNameEn ?? null : c.materialItem?.name ?? null,
+        nameAr: c.type === "ROASTED_COFFEE" ? c.coffeeProduct?.productNameAr ?? null : c.materialItem?.nameAr ?? null,
+        code: c.type === "ROASTED_COFFEE" ? null : c.materialItem?.code ?? null,
+        coffeeProductId: c.coffeeProductId,
+        materialItemId: c.materialItemId,
+        unitOfMeasure: c.unitOfMeasure,
+        quantityPerUnit: c.quantityPerUnit,
+        quantityRequired: required,
+        quantityAvailable: available,
+        shortfall: Math.max(0, Number((required - available).toFixed(3))),
+      };
+    });
   });
 }
 

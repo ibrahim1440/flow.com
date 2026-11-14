@@ -14,9 +14,16 @@ export const TRANSIT_SITE = "loc_transit";
 
 /** The production site's id (null only on a database without locations — never after 20261115090000). */
 export async function promiseSiteId(db: Db): Promise<string | null> {
-  const r = await db.stockLocation.findFirst({ where: { isProduction: true, isActive: true }, select: { id: true } });
-  return r?.id ?? null;
+  // R1-c: read once per TRANSACTION (a preparation review asked once per line). Only a transaction client is cached —
+  // it has no $connect (Prisma keeps $transaction on it) — so the long-lived client always reads the current site.
+  const inTx = !("$connect" in (db as object));
+  const hit = inTx ? siteCache.get(db as object) : undefined;
+  if (hit) return hit;
+  const read = db.stockLocation.findFirst({ where: { isProduction: true, isActive: true }, select: { id: true } }).then((r) => r?.id ?? null);
+  if (inTx) siteCache.set(db as object, read);
+  return read;
 }
+const siteCache = new WeakMap<object, Promise<string | null>>();
 
 /** The lot filter of the promise site ({} when no site is set). */
 export async function atPromiseSite(db: Db): Promise<Prisma.FinishedGoodsLotWhereInput> {

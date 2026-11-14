@@ -26,6 +26,8 @@ const custName = (c: { name: string; nameAr: string | null } | null | undefined)
 const minute = () => new Date().toISOString().slice(0, 16);
 const money = (v: { toString(): string } | null | undefined, cur = "SAR") => (v == null ? "" : `${Number(v.toString()).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur === "SAR" ? "⃁" : cur}`); // Abu Fahd R2 P4: the in-app sign; the e-mail adapter writes «ر.س» (lib/notify/email.ts, gate L3)
 
+/** R1-c: what orderFacts reads, when the caller already holds it (POST /api/orders, inside the order-number lock). */
+export type OrderFacts = NonNullable<Awaited<ReturnType<typeof orderFacts>>>;
 async function orderFacts(tx: Tx, orderId: string) {
   const o = await tx.order.findUnique({
     where: { id: orderId },
@@ -39,7 +41,7 @@ async function orderFacts(tx: Tx, orderId: string) {
 }
 
 /** Notify for one automation event, if it is one the catalogue covers. Never reads otherwise. */
-export async function notifyFromAutomationEvent(tx: Tx, e: Input): Promise<void> {
+export async function notifyFromAutomationEvent(tx: Tx, e: Input, prefetched?: { order?: OrderFacts }): Promise<void> {
   if (!NOTIFIED_AUTOMATION_EVENTS.has(e.eventType)) return;
   const p = (e.payload ?? {}) as Record<string, unknown>;
   const actorId = e.actorId ?? null;
@@ -47,7 +49,7 @@ export async function notifyFromAutomationEvent(tx: Tx, e: Input): Promise<void>
 
   switch (e.eventType) {
     case "order.created": {
-      const o = await orderFacts(tx, e.subjectId);
+      const o = prefetched?.order && prefetched.order.id === e.subjectId ? prefetched.order : await orderFacts(tx, e.subjectId);
       if (!o) return;
       const link = o.opportunityLinks[0];
       await notify(tx, {

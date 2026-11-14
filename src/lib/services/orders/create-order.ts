@@ -4,6 +4,7 @@ import { kgForUnits } from "@/lib/services/finished-products";
 import { CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
 import { assertSalesAllowed } from "@/lib/services/customers/credit-db";
 import { defaultBranchForActor } from "@/lib/accounting/locations";
+import type { OrderFacts } from "@/lib/notifications/from-automation";
 
 type Client = PrismaNS.TransactionClient;
 
@@ -50,6 +51,15 @@ export async function resolveOrderLines(
 ): Promise<ResolvedOrderLine[]> {
   const resolved: ResolvedOrderLine[] = [];
 
+  // R1-c: every line's SKU in ONE read (it was a findUnique + product read per line). The checks below still run line
+  // by line in the order given, so the first offending line is the one reported, exactly as before.
+  const ids = [...new Set(items.map((i) => i.productSkuId).filter((v): v is string => typeof v === "string" && v.length > 0))];
+  const skus = ids.length === 0 ? [] : await db.productSKU.findMany({
+    where: { id: { in: ids } },
+    include: { product: { select: { id: true, productNameEn: true, defaultGreenBeanId: true } } },
+  });
+  const skuById = new Map(skus.map((k) => [k.id, k]));
+
   for (const item of items) {
     // SKU-only. A sales line is a quantity of one finished product; the coffee, origin,
     // pack size, price and BOM all follow from the SKU, so none of them is asked for.
@@ -66,16 +76,13 @@ export async function resolveOrderLines(
       throw { _appCode: 400, message: "quantityUnits must be a whole number greater than zero." };
     }
 
-    const sku = await db.productSKU.findUnique({
-      where: { id: item.productSkuId },
-      include: { product: { select: { id: true, productNameEn: true, defaultGreenBeanId: true } } },
-    });
+    const sku = skuById.get(item.productSkuId);
     if (!sku) throw { _appCode: 400, message: "Product SKU not found." };
     if (!sku.isActive) {
       throw { _appCode: 400, message: `"${sku.skuCode}" is inactive and cannot be sold.` };
     }
 
-    resolved.push({
+    const line: ResolvedOrderLine = {
       // Kept populated for the dispatch, history and export screens that read it.
       beanTypeName: sku.product.productNameEn,
       // Derived from units — never supplied by the client, never a rival total.
@@ -87,10 +94,26 @@ export async function resolveOrderLines(
       remainingQty: kgForUnits(sku, units),
       productId: sku.productId,
       productSkuId: sku.id,
-    });
+    };
+    // R1-c: the catalogue price travels beside the line (never into the row) so the credit check does not re-read it.
+    linePrice.set(line, sku.price);
+    resolved.push(line);
   }
 
   return resolved;
+}
+
+/** R1-c: the SKU's catalogue price of a line resolveOrderLines produced (absent for lines built elsewhere). */
+const linePrice = new WeakMap<ResolvedOrderLine, number>();
+
+/**
+ * R1-c: what the order-created notification needs about an order createOrderWithNumber just wrote, so the caller can
+ * hand it to emitAutomationEvent instead of the notification re-reading the order inside the order-number lock.
+ * The new order has no deal link yet in that transaction; a caller that links one before emitting must not use it.
+ */
+const creationFacts = new WeakMap<object, OrderFacts>();
+export function orderCreationFacts(created: object): OrderFacts | undefined {
+  return creationFacts.get(created);
 }
 
 export type NewOrderHeader = {
@@ -189,22 +212,39 @@ export async function createOrderWithNumber(
     const { linesValue } = await import("@/lib/services/customers/exposure");
     let amount = header.credit?.amount ?? null;
     if (amount == null) {
-      const skus = await db.productSKU.findMany({ where: { id: { in: lines.map((l) => l.productSkuId) } }, select: { id: true, price: true } });
+      // R1-c: the prices resolveOrderLines already read; the SKUs are read again only for lines built elsewhere.
+      const known = lines.every((l) => linePrice.has(l));
+      const skus = known
+        ? lines.map((l) => ({ id: l.productSkuId, price: linePrice.get(l)! }))
+        : await db.productSKU.findMany({ where: { id: { in: lines.map((l) => l.productSkuId) } }, select: { id: true, price: true } });
       amount = linesValue(lines.map((l) => ({ quantityUnits: l.quantityUnits, productSku: skus.find((k: { id: string; price: number }) => k.id === l.productSkuId) ?? null })));
     }
     creditActor = header.credit?.actorId ?? header.ownerId ?? null;
     creditOverride = await assertCreditLimit(db as never, { customerId: header.customerId, amount, actorId: creditActor, kind: header.credit?.kind ?? "ORDER", quoteId: header.credit?.quoteId ?? null });
   }
 
+  // R1-c (owner 3-أ): everything that does not need the new order is read BEFORE the order-number lock — the selling
+  // location and the customer the response carries — so the lock covers only: the maximum, the two inserts, (an
+  // override's consumption) and whatever the caller writes about the order before it commits.
+  const branchId = header.branchId !== undefined ? header.branchId : await defaultBranchForActor(db, header.ownerId ?? null);
+  const customer = await db.customer.findUnique({
+    where: { id: header.customerId },
+    select: customerContact ? undefined : { ...CUSTOMER_NAME_SELECT, accountOwnerId: true },
+  }) as ({ id: string; name: string; nameAr: string | null; accountOwnerId: string | null } & Record<string, unknown>) | null;
+  if (!customer) throw { _appCode: 404, message: "Customer not found." };
+  const responseCustomer = customerContact
+    ? customer
+    : { id: customer.id, name: customer.name, nameAr: customer.nameAr };
+
   // Before reading the maximum, not after: the point is that nobody else is between the
   // read and the write.
   await db.$executeRaw`SELECT pg_advisory_xact_lock(${ORDER_NUMBER_LOCK_NAMESPACE}, 0)`;
 
   for (let attempt = 0; attempt < 5; attempt++) {
-    const lastOrder = await db.order.findFirst({ orderBy: { orderNumber: "desc" } });
+    const lastOrder = await db.order.findFirst({ orderBy: { orderNumber: "desc" }, select: { orderNumber: true } });
     const nextNumber = (lastOrder?.orderNumber || 0) + 1;
     try {
-      const created = await db.order.create({
+      const order = await db.order.create({
         data: {
           customerId: header.customerId,
           quotationNumber: header.quotationNumber ?? null,
@@ -220,19 +260,22 @@ export async function createOrderWithNumber(
           // would ever claim this order; the person who created it is who holds, resumes or
           // cancels it (the manager and the administrator may as well).
           ownerId: header.ownerId ?? null,
-          branchId: header.branchId !== undefined ? header.branchId : await defaultBranchForActor(db, header.ownerId ?? null),
+          branchId,
           ...(header.channel ? { channel: header.channel } : {}),
-          items: { create: lines },
-        },
-        include: {
-          customer: customerContact ? true : { select: CUSTOMER_NAME_SELECT },
-          items: true,
         },
       });
+      // R1-c: the lines in one INSERT … RETURNING (a nested create followed by three reads for the include before).
+      const items = await db.orderItem.createManyAndReturn({ data: lines.map((l) => ({ ...l, orderId: order.id })) });
+      const created = { ...order, customer: responseCustomer, items };
       if (creditOverride) {
         const { consumeCreditOverride } = await import("@/lib/services/customers/credit-limit");
         await consumeCreditOverride(db as never, creditOverride.overrideId, created.id, creditActor!);
       }
+      creationFacts.set(created, {
+        id: order.id, orderNumber: order.orderNumber, ownerId: order.ownerId,
+        customer: { id: customer.id, name: customer.name, nameAr: customer.nameAr, accountOwnerId: customer.accountOwnerId },
+        opportunityLinks: [],
+      });
       return created;
     } catch (e: unknown) {
       const code = e && typeof e === "object" && "code" in e ? (e as { code: string }).code : null;

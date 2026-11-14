@@ -5,7 +5,7 @@ import { handleDomainError } from "@/lib/api-error";
 import { runIdempotent } from "@/lib/idempotency";
 // One implementation of "make an order", shared with the quotation-to-order path. A
 // second copy here is exactly the shape of defect the packaging rework was spent closing.
-import { resolveOrderLines, createOrderWithNumber } from "@/lib/services/orders/create-order";
+import { resolveOrderLines, createOrderWithNumber, orderCreationFacts } from "@/lib/services/orders/create-order";
 import { emitAutomationEvent } from "@/lib/automation/emit";
 import { canSeeCustomerContact, CUSTOMER_OPERATIONS_SELECT, fullCustomer } from "@/lib/auth/customer-detail";
 import { deliveryLotsFor } from "@/lib/services/delivery-lots";
@@ -172,7 +172,8 @@ export async function POST(request: Request) {
           resolvedItems,
           canSeeCustomerContact(user.permissions),
         );
-        await emitAutomationEvent(tx, { eventType: "order.created", subjectType: "Order", subjectId: created.id, actorId: user.id });
+        // R1-c: the notification's facts are the ones just written (no deal link yet) — no re-read inside the number lock.
+        await emitAutomationEvent(tx, { eventType: "order.created", subjectType: "Order", subjectId: created.id, actorId: user.id }, { order: orderCreationFacts(created) });
         // The order does not assign the customer (accountOwnerId untouched) and opens no deal — no commission. The
         // supervisors and the admins are told once per order.
         if (access === "unassigned") await notifyUnassignedCustomerOrder(tx, { id: created.id, orderNumber: created.orderNumber, customerId: body.customerId as string }, { id: user.id, name: user.name });
