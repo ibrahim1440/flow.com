@@ -1298,6 +1298,38 @@ export const EVENTS: NotificationEventDef[] = [
     render: (f) => ({ severity: (s(f.severity) || "danger") as Severity, titleAr: s(f.titleAr), titleEn: s(f.titleEn), bodyAr: s(f.bodyAr), bodyEn: s(f.bodyEn), link: "/dashboard/settings" }),
   },
   {
+    // R1-d (owner 5-ب): a scheduled job failed (lib/cron/run.ts) — one per run.
+    key: "system.cron_failed", category: "system", severity: "danger",
+    label: { ar: "فشل تشغيل مهمة مجدولة", en: "A scheduled job failed" },
+    recipients: [{ perm: [{ module: "settings", edit: true }] }],
+    trigger: "runCronJob (lib/cron/run.ts) when the job throws or answers ≥ 500",
+    render: (f) => ({ titleAr: `فشلت المهمة المجدولة «${s(f.job)}»`, titleEn: `The scheduled job "${s(f.job)}" failed`, bodyAr: `السبب: ${s(f.error)}. ستُعاد في موعدها التالي؛ راجع سجل التشغيل إن تكرر.`, bodyEn: `Reason: ${s(f.error)}. It runs again at its next slot; check the run log if it repeats.`, link: "/dashboard/settings" }),
+  },
+  {
+    // R1-d (owner 5-ب): a job did not run on time (lib/cron/watchdog.ts) — once per job per day.
+    key: "system.cron_late", category: "system", severity: "warning",
+    label: { ar: "مهمة مجدولة لم تعمل في موعدها", en: "A scheduled job did not run on time" },
+    recipients: [{ perm: [{ module: "settings", edit: true }] }],
+    trigger: "runWatchdog (lib/cron/watchdog.ts): no successful run within the job's window",
+    render: (f) => ({ titleAr: `المهمة «${s(f.job)}» لم تعمل في موعدها`, titleEn: `"${s(f.job)}" did not run on time`, bodyAr: `آخر تشغيل ناجح قبل ${s(f.minutes)} دقيقة${f.lastOk ? "" : " (لم تنجح بعد)"}. تحقّق من جدولة GitHub ومن CRON_SECRET.`, bodyEn: `Last successful run ${s(f.minutes)} minutes ago${f.lastOk ? "" : " (never succeeded yet)"}. Check the GitHub schedule and CRON_SECRET.`, link: "/dashboard/settings" }),
+  },
+  {
+    // R1-d (owner 2-ج): any ZATCA failure in a queue run — at most once an hour.
+    key: "system.zatca_failed", category: "system", severity: "danger",
+    label: { ar: "فشل في إرسال الفوترة الإلكترونية", en: "E-invoicing (ZATCA) failure" },
+    recipients: [{ perm: [{ module: "settings", edit: true }] }],
+    trigger: "the zatca-reporting job (alertZatcaFailures, lib/cron/watchdog.ts): rejected or errored documents",
+    render: (f) => ({ titleAr: "فشل إرسال مستندات للزكاة والضريبة", titleEn: "Documents failed at ZATCA", bodyAr: `مرفوضة: ${s(f.rejected)} — أخطاء: ${s(f.failed)}. راجع طابور الفوترة الإلكترونية.`, bodyEn: `Rejected: ${s(f.rejected)} — errors: ${s(f.failed)}. Review the e-invoicing queue.`, link: "/dashboard/accounting/zatca" }),
+  },
+  {
+    // R1-d (owner 2-ج): the message send queue is backing up — at most once an hour.
+    key: "system.message_backlog", category: "system", severity: "warning",
+    label: { ar: "تراكم في طابور الرسائل", en: "Message queue backing up" },
+    recipients: [{ perm: [{ module: "settings", edit: true }] }],
+    trigger: "runWatchdog (lib/cron/watchdog.ts): more than 50 waiting, or the oldest older than 2 hours",
+    render: (f) => ({ titleAr: "رسائل متراكمة لم تُرسل", titleEn: "Messages are piling up", bodyAr: `بالانتظار: ${s(f.waiting)} — أقدمها منذ ${s(f.oldestMinutes)} دقيقة.`, bodyEn: `Waiting: ${s(f.waiting)} — the oldest for ${s(f.oldestMinutes)} minutes.`, link: "/dashboard/automation/messages" }),
+  },
+  {
     key: "system.storage_recovered", category: "system", severity: "success",
     label: { ar: "تم إصلاح تخزين ملفات العملاء", en: "Customer file storage recovered" },
     recipients: [{ perm: [{ module: "settings", edit: true }] }],

@@ -1,5 +1,4 @@
-import { NextResponse } from "@/lib/api-response";
-import { cronAuthorized } from "@/lib/cron/auth";
+import { runCronJob } from "@/lib/cron/run";
 import { runWorkspaceJobs } from "@/lib/workspace/server/reminders";
 import { notifyStaleBuckets } from "@/lib/services/station/roast-v2";
 
@@ -14,15 +13,16 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function GET(request: Request) {
-  const auth = cronAuthorized(request.headers);
-  if (!auth.ok) return NextResponse.json({ error: "غير مصرّح", errorEn: "Unauthorized" }, { status: 401 });
-  try {
-    const summary = await runWorkspaceJobs("cron");
-    // «محطة التحميص v2»: buckets left in staging over 72 h (once per bucket); never fails the workspace run.
-    const staging = await notifyStaleBuckets().catch((e) => { console.error("[workspace] stale buckets failed:", (e as Error)?.name ?? "error"); return null; });
-    return NextResponse.json({ ok: true, ...summary, ...(staging ? { stagingStale: staging } : {}) });
-  } catch (e) {
-    console.error("[workspace] cron run failed:", (e as Error)?.name ?? "error");
-    return NextResponse.json({ ok: false, error: "تعذّر تشغيل مهام مساحة العمل", errorEn: "Workspace jobs could not run" }, { status: 500 });
-  }
+  // R1-d: authorised, locked per job, recorded in CronRun, a failure alerted (lib/cron/run.ts).
+  return runCronJob(request, "workspace", async () => {
+    try {
+      const summary = await runWorkspaceJobs("cron");
+      // «محطة التحميص v2»: buckets left in staging over 72 h (once per bucket); never fails the workspace run.
+      const staging = await notifyStaleBuckets().catch((e) => { console.error("[workspace] stale buckets failed:", (e as Error)?.name ?? "error"); return null; });
+      return { body: { ok: true, ...summary, ...(staging ? { stagingStale: staging } : {}) } };
+    } catch (e) {
+      console.error("[workspace] cron run failed:", (e as Error)?.name ?? "error");
+      return { status: 500, body: { ok: false, error: "تعذّر تشغيل مهام مساحة العمل", errorEn: "Workspace jobs could not run" } };
+    }
+  });
 }

@@ -1,5 +1,5 @@
-import { NextResponse } from "@/lib/api-response";
-import { cronAuthorized } from "@/lib/cron/auth";
+import { runCronJob } from "@/lib/cron/run";
+import { alertZatcaFailures } from "@/lib/cron/watchdog";
 import { certificateAlerts, processQueue } from "@/lib/zatca/pipeline";
 
 /**
@@ -12,14 +12,17 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function GET(request: Request) {
-  const auth = cronAuthorized(request.headers);
-  if (!auth.ok) return NextResponse.json({ error: "غير مصرّح", errorEn: "Unauthorized" }, { status: 401 });
-  try {
-    const r = await processQueue({ budgetMs: 45_000 });
-    const certAlerts = await certificateAlerts();
-    return NextResponse.json({ ok: true, due: r.due, processed: r.processed, cleared: r.cleared, reported: r.reported, rejected: r.rejected, retry: r.retry, error: r.error, certAlerts });
-  } catch (e) {
-    console.error("[zatca] cron run failed:", (e as Error)?.name ?? "error");
-    return NextResponse.json({ ok: false, error: "تعذّر تشغيل طابور الفوترة الإلكترونية", errorEn: "The e-invoicing queue could not run" }, { status: 500 });
-  }
+  // R1-d: authorised, locked per job, recorded in CronRun, a failure alerted (lib/cron/run.ts).
+  return runCronJob(request, "zatca-reporting", async () => {
+    try {
+      const r = await processQueue({ budgetMs: 45_000 });
+      const certAlerts = await certificateAlerts();
+      // R1-d (owner 2-ج): any rejected or errored document raises «system.zatca_failed» (at most once an hour).
+      const zatcaAlert = await alertZatcaFailures({ rejected: r.rejected, error: r.error }).catch(() => 0);
+      return { body: { ok: true, due: r.due, processed: r.processed, cleared: r.cleared, reported: r.reported, rejected: r.rejected, retry: r.retry, error: r.error, certAlerts, zatcaAlert } };
+    } catch (e) {
+      console.error("[zatca] cron run failed:", (e as Error)?.name ?? "error");
+      return { status: 500, body: { ok: false, error: "تعذّر تشغيل طابور الفوترة الإلكترونية", errorEn: "The e-invoicing queue could not run" } };
+    }
+  });
 }

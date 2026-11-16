@@ -1,5 +1,4 @@
-import { NextResponse } from "@/lib/api-response";
-import { cronAuthorized } from "@/lib/cron/auth";
+import { runCronJob } from "@/lib/cron/run";
 import { runMarketingJobs } from "@/lib/marketing/server/jobs";
 
 /**
@@ -11,13 +10,14 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function GET(request: Request) {
-  const auth = cronAuthorized(request.headers);
-  if (!auth.ok) return NextResponse.json({ error: "غير مصرّح", errorEn: "Unauthorized" }, { status: 401 });
-  try {
-    const results = await runMarketingJobs("cron");
-    return NextResponse.json({ ok: true, results: results.map((r) => ({ job: r.job, status: r.status })) });
-  } catch (e) {
-    console.error("[marketing] cron run failed:", (e as Error)?.name ?? "error");
-    return NextResponse.json({ ok: false, error: "تعذّر تشغيل مهام التسويق", errorEn: "Marketing jobs could not run" }, { status: 500 });
-  }
+  // R1-d: authorised, locked per job, recorded in CronRun, a failure alerted (lib/cron/run.ts).
+  return runCronJob(request, "marketing", async () => {
+    try {
+      const results = await runMarketingJobs("cron");
+      return { body: { ok: true, results: results.map((r) => ({ job: r.job, status: r.status })) } };
+    } catch (e) {
+      console.error("[marketing] cron run failed:", (e as Error)?.name ?? "error");
+      return { status: 500, body: { ok: false, error: "تعذّر تشغيل مهام التسويق", errorEn: "Marketing jobs could not run" } };
+    }
+  });
 }

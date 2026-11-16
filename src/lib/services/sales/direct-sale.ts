@@ -45,6 +45,7 @@ import { assertSalesAllowed } from "@/lib/services/customers/credit-db";
 import { customerInScope } from "./customer-access";
 import { customersScopedToOwner, ownedCustomerWhere, seesAllSales } from "./scope";
 import { hasTerms, parseHeader, priceTerms, termsApproval, type SaleTerms } from "./direct-sale-terms";
+import { withOrderNumberSlot } from "@/lib/services/orders/number-slot";
 
 type Tx = Prisma.TransactionClient;
 type Db = Tx | typeof prisma;
@@ -439,7 +440,8 @@ export async function createDirectSale(
     throw refuse(403, "COLLECTION_FORBIDDEN", "ما عندك صلاحية تسجيل تحصيل — اختر «آجل».", "You may not record a collection — choose on account.");
   }
 
-  const result = await prisma.$transaction(async (tx) => {
+  // R1-c gate: the order-number transaction waits for a slot BEFORE it takes a pooled connection (number-slot.ts).
+  const result = await withOrderNumberSlot(() => prisma.$transaction(async (tx) => {
     await setAuditContext(tx, ctx);
     // Two taps with one key queue here; the second finds the first sale's audit row below and replays it.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${DIRECT_SALE_LOCK_NAMESPACE}, hashtext(${key}))`;
@@ -512,7 +514,7 @@ export async function createDirectSale(
       ownedByOther: await dealOwnedByOther(tx, done.opportunityId, actor.id),
       totals: { net: done.priced.net, tax: done.priced.tax, gross: done.priced.gross, discountPercent: done.priced.discountPercent }, payment: { method, collectionId: done.collectionId },
     } satisfies DirectSaleResult;
-  }, TX_OPTS);
+  }, TX_OPTS));
 
   // Preparation, as for every order — but not while the sale waits for its discount approval (it is not a sale yet).
   if (!result.replayed && result.discountApproval !== "PENDING" && !result.paymentHold) {

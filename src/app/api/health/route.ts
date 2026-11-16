@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { cronHealth } from "@/lib/cron/health";
 
 /**
  * GET /api/health — liveness for an external uptime checker.
@@ -12,7 +13,7 @@ import { prisma } from "@/lib/db";
  * An uptime monitor holds no session, and a check that needs a login proves only that the
  * login flow works for the one account whose credentials the monitor is carrying around.
  * The trade is that this endpoint is world-readable, so it says as little as it possibly
- * can: two states, no host, no database name, no version, no counts, no error text. A
+ * can: two states (and the scheduled jobs' one word), no host, no database name, no version, no counts, no error text. A
  * caller learns exactly what a caller could learn anyway by timing an ordinary page.
  *
  * ── Bounded, read-only, no transaction ─────────────────────────────────────
@@ -43,7 +44,11 @@ export async function GET() {
     });
 
     await Promise.race([probe, timeout]);
-    return NextResponse.json({ status: "ok" }, { status: 200, headers: NO_STORE });
+    // R1-d gate L3: one more word — whether the hourly watchdog has succeeded in the last 3 hours (lib/cron/health.ts).
+    // The status code stays about the site and its database (a monitor on this URL alerts on 503 only); the scheduled
+    // jobs have their own URL, /api/health/cron, which answers 503 when they are stale.
+    const cron = await Promise.race([cronHealth(), timeout.catch(() => "unknown" as const)]);
+    return NextResponse.json({ status: "ok", cron }, { status: 200, headers: NO_STORE });
   } catch (err) {
     // Logged with detail for whoever is on the other end of the alert; the response carries
     // none of it. A connection error can contain the host, the user and occasionally the

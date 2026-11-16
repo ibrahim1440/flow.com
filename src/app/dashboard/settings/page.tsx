@@ -25,6 +25,7 @@ import { routeAllowed } from "@/lib/nav/registry";
 import { useD21Phone, usePhone } from "@/components/shell/page-context";
 import { Sec, SettingsFrame, useViewer } from "../_components/tools-ui";
 import "./_parts/sections.css";
+import { SentryTestPanel } from "./_parts/sentry-test";
 
 export default function SettingsPage() {
   const { t } = useI18n();
@@ -376,6 +377,8 @@ export default function SettingsPage() {
               {shown("tagline") ? <div className="tl-mpanel">{taglineForm()}</div> : null}
               {row("cupping", t("cuppingPolicyTitle"), L("إغلاق جلسات التذوق", "Closing cupping sessions"), { testId: "row-cupping" })}
               {shown("cupping") ? <div className="tl-mpanel">{cuppingForm()}</div> : null}
+              {row("monitoring", L("المراقبة", "Monitoring"), L("خطأ تجريبي إلى Sentry", "A test error to Sentry"), { testId: "row-monitoring" })}
+              {shown("monitoring") ? <div className="tl-mpanel"><SentryTestPanel /></div> : null}
               {row("tools", L("أدوات الإدارة", "Administration tools"), L("إعادة الضبط · بيئة تدريب فقط", "Resets · training environment only"), { danger: true, testId: "row-tools" })}
               {shown("tools") ? <div className="tl-mpanel">{toolsBody()}</div> : null}
             </nav>
@@ -416,6 +419,11 @@ export default function SettingsPage() {
               {/* Cupping close policy (E6, code addition) */}
               <Sec title={t("cuppingPolicyTitle")} caption={t("cuppingPolicyDesc")} testId="cupping-policy">
                 {cuppingForm()}
+              </Sec>
+
+              {/* R1-d: the owner's check that errors reach Sentry with personal data removed */}
+              <Sec title={L("المراقبة", "Monitoring")} caption={L("تأكد إن الأخطاء توصل Sentry بدون بيانات شخصية", "Check that errors reach Sentry with no personal data")} testId="monitoring-section">
+                <SentryTestPanel />
               </Sec>
 
               {/* Administration tools (danger) */}

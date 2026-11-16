@@ -3,6 +3,7 @@
 import { RIYAL, withRiyal } from "@/lib/money/riyal";
 import { BACKGROUND_HEADERS } from "@/lib/auth/session-policy";
 import { localizeApiError } from "@/lib/i18n/api-errors";
+import { fetchKeyedWrite } from "@/lib/request-key";
 import { Select as HqSelect } from "@/components/ui/Select";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
@@ -968,7 +969,11 @@ export async function api<T = Record<string, unknown>>(
   url: string,
   init?: { method?: string; body?: unknown; background?: boolean },
 ): Promise<{ ok: boolean; status: number; data: T & { error?: string } }> {
-  const res = await fetch(url, {
+  // R1-c gate: a write answered 425 (the same request is in progress, or ORDER_NUMBER_BUSY — nothing was written) is sent
+  // again as is, after its Retry-After (lib/request-key.ts) — a sale or a quotation's conversion never shows «أعد المحاولة»
+  // for a moment of load. A read is fetched once.
+  const send = (init?.method ?? "GET") === "GET" ? fetch : fetchKeyedWrite;
+  const res = await send(url, {
     method: init?.method ?? "GET",
     // `background`: the page polls by itself — it never extends the session (idle sign-out, owner 9 Nov).
     headers: { ...(init?.body === undefined ? {} : { "Content-Type": "application/json" }), ...(init?.background ? BACKGROUND_HEADERS : {}) },

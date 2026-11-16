@@ -6,6 +6,7 @@ import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { seesAllSales, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
 import { createOrderFromQuote, prepareConvertedOrder } from "@/lib/services/sales/quote-to-order";
+import { withOrderNumberSlot } from "@/lib/services/orders/number-slot";
 import { emitAutomationEvent } from "@/lib/automation/emit";
 import { replayOnKeyRace } from "@/lib/idempotency";
 
@@ -73,12 +74,13 @@ async function convert(request: Request, id: string, user: { id: string; name: s
     if (!visible) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });
 
     // R1-b: two simultaneous submissions of one key — the slower one replays the first (never a 409).
-    const result = await replayOnKeyRace(() => prisma.$transaction(
+    // R1-c gate: the transaction waits for an order-number slot before it takes a pooled connection (number-slot.ts).
+    const result = await replayOnKeyRace(() => withOrderNumberSlot(() => prisma.$transaction(
       async (tx) => {
         const created = await createOrderFromQuote(tx, {
           quoteId: id,
           actorId: user.id,
-          requestKey: typeof b.requestKey === "string" ? b.requestKey : null,
+          // R1-d2 gate: no caller key — the quotation is the key (quote-to-order.ts). A body's requestKey is ignored.
           notes: typeof b.notes === "string" ? b.notes : null,
         });
         if (!created.replayed) {
@@ -87,7 +89,7 @@ async function convert(request: Request, id: string, user: { id: string; name: s
         return created;
       },
       TX_OPTS,
-    ), ["requestKey"]);
+    )), ["requestKey"]);
     // Quote → order triggers preparation (handoff §6.8), after the order committed.
     await prepareConvertedOrder(result, { id: user.id, name: user.name });
 

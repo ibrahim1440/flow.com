@@ -1,5 +1,5 @@
-import { NextResponse } from "@/lib/api-response";
-import { timingSafeEqual } from "node:crypto";
+import { cronAuthorized } from "@/lib/cron/auth";
+import { runCronJob, runLockedJob } from "@/lib/cron/run";
 import { requireSub } from "@/lib/auth-server";
 import { runAutomationDispatch } from "@/lib/automation/dispatcher";
 
@@ -13,23 +13,18 @@ import { runAutomationDispatch } from "@/lib/automation/dispatcher";
  */
 export const maxDuration = 60;
 
-function cronAuthorized(request: Request): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret || secret.length < 16) return false;
-  const header = request.headers.get("authorization") ?? "";
-  const expected = Buffer.from(`Bearer ${secret}`);
-  const given = Buffer.from(header);
-  return given.length === expected.length && timingSafeEqual(given, expected);
-}
-
 async function handle(request: Request) {
-  const byCron = cronAuthorized(request);
-  if (!byCron) {
-    const { error } = await requireSub("automation", "manage_messages");
-    if (error) return error;
+  // R1-d: the scheduler (GitHub every hour, Vercel daily as the backup) goes through runCronJob — CRON_SECRET only
+  // (lib/cron/auth.ts), one run at a time, recorded in CronRun, a failure alerted. A person from the message log keeps
+  // the smaller budget and the same lock (below).
+  if (cronAuthorized(request.headers).ok) {
+    return runCronJob(request, "dispatch", async () => ({ body: { ...(await runAutomationDispatch({ budgetMs: 45_000, maxSends: 20 })) } }));
   }
-  const report = await runAutomationDispatch({ budgetMs: byCron ? 45_000 : 20_000, maxSends: byCron ? 20 : 10 });
-  return NextResponse.json(report);
+  const { error } = await requireSub("automation", "manage_messages");
+  if (error) return error;
+  // R1-d gate L1: the person's run takes the same per-job lock (recorded trigger "manual"); while a scheduled run is going
+  // on it is SKIPPED — 200 { ok, skipped: "already-running" } — instead of a second dispatcher in parallel.
+  return runLockedJob("dispatch", "manual", async () => ({ body: { ...(await runAutomationDispatch({ budgetMs: 20_000, maxSends: 10 })) } }));
 }
 
 export const GET = handle;

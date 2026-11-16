@@ -40,7 +40,7 @@ import path from "path";
  *     with URL.createObjectURL (src/lib/export.ts:426, history/page.tsx:183).
  *   - 'unsafe-inline' for styles — React sets element styles directly and Next injects
  *     <style> during hydration.
- * No WebSocket, no third-party script, no other external origin is used by the browser:
+ * No WebSocket, no third-party script, no other external origin is used by the browser (but Sentry's ingest, L8):
  * the translation API is called server-side only.
  */
 const CSP_REPORT_ONLY = [
@@ -56,7 +56,9 @@ const CSP_REPORT_ONLY = [
   "img-src 'self' data: blob:",
   // https://vercel.com/api/blob: customer files over 4 MB are uploaded by the browser straight to
   // the private Vercel Blob store (feat/blob-client-upload, @vercel/blob/client uploadPresigned).
-  "connect-src 'self' blob: https://vercel.com",
+  // R1-d gate L8: the browser's Sentry SDK (instrumentation-client.ts) posts its events to the project's ingest host —
+  // https://o<org>.ingest[.us|.de].sentry.io — when NEXT_PUBLIC_SENTRY_DSN is set.
+  "connect-src 'self' blob: https://vercel.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.ingest.de.sentry.io",
 ].join("; ");
 
 /** Enforced now, because none of it can break a page that is already working. */

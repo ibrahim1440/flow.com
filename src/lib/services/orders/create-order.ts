@@ -5,6 +5,7 @@ import { CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
 import { assertSalesAllowed } from "@/lib/services/customers/credit-db";
 import { defaultBranchForActor } from "@/lib/accounting/locations";
 import type { OrderFacts } from "@/lib/notifications/from-automation";
+import { ORDER_LOCK_WAIT_MS, lockBackoffMs, orderNumberBusy } from "./number-slot";
 
 type Client = PrismaNS.TransactionClient;
 
@@ -238,7 +239,19 @@ export async function createOrderWithNumber(
 
   // Before reading the maximum, not after: the point is that nobody else is between the
   // read and the write.
-  await db.$executeRaw`SELECT pg_advisory_xact_lock(${ORDER_NUMBER_LOCK_NAMESPACE}, 0)`;
+  //
+  // R1-c gate: taken WITHOUT an unbounded wait — try, back off briefly, try again, and after ORDER_LOCK_WAIT_MS give up
+  // with 425 ORDER_NUMBER_BUSY (the transaction rolls back, nothing is written, the screen sends again with its key). A
+  // waiter used to hold its pooled connection for as long as the queue took (number-slot.ts). Uncontended it is the same
+  // one statement as before; the holder still keeps the lock to the end of its transaction (decision 19 = أ).
+  const lockDeadline = Date.now() + ORDER_LOCK_WAIT_MS;
+  for (let attempt = 0; ; attempt++) {
+    const [{ got }] = await db.$queryRaw<{ got: boolean }[]>`SELECT pg_try_advisory_xact_lock(${ORDER_NUMBER_LOCK_NAMESPACE}, 0) AS got`;
+    if (got) break;
+    const wait = lockBackoffMs(attempt);
+    if (Date.now() + wait > lockDeadline) throw orderNumberBusy();
+    await new Promise((r) => setTimeout(r, wait));
+  }
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const lastOrder = await db.order.findFirst({ orderBy: { orderNumber: "desc" }, select: { orderNumber: true } });

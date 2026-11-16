@@ -145,9 +145,15 @@ export function createRequestKeyHolder(): RequestKeyHolder {
 /**
  * R1-b gate M1: send a keyed write, and while the server answers 425 «الطلب قيد المعالجة» (the same key is being written
  * by another request right now) wait for its Retry-After and send the SAME request again — same key — until the first
- * one's answer can be replayed. Any other answer is returned as is. Bounded (~10 s), so a stuck server still surfaces.
+ * one's answer can be replayed. Any other answer is returned as is.
+ *
+ * R1-c gate: also 425 ORDER_NUMBER_BUSY (many orders at once; nothing was written — lib/services/orders/number-slot.ts):
+ * the same request again is safe because every writer of an order number is idempotent on what it sends — POST /api/orders
+ * on its Idempotency-Key, «بيع مباشر» on its body's requestKey, a quotation's conversion on the quotation. Bounded at
+ * 60 s from the first send (the server already holds one attempt up to ~20 s in its queue), so a stuck server surfaces.
  */
-export async function fetchKeyedWrite(input: RequestInfo | URL, init?: RequestInit, maxWaitMs = 10_000): Promise<Response> {
+export const KEYED_WRITE_MAX_WAIT_MS = 60_000;
+export async function fetchKeyedWrite(input: RequestInfo | URL, init?: RequestInit, maxWaitMs = KEYED_WRITE_MAX_WAIT_MS): Promise<Response> {
   const started = Date.now();
   for (;;) {
     const res = await fetch(input, init);

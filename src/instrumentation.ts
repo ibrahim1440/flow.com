@@ -23,4 +23,20 @@ export async function register() {
 
   const { assertServerEnv } = await import("./lib/server-env");
   assertServerEnv(process.env);
+
+  // R1-d (owner 2-أ): error tracking — Sentry's free plan, only when SENTRY_DSN is set (none locally, in CI or tests),
+  // every event and breadcrumb scrubbed of personal data first (lib/observability/scrub.ts). No tracing, no source-map
+  // upload (no build plugin, no auth token).
+  if (process.env.SENTRY_DSN) {
+    const Sentry = await import("@sentry/nextjs");
+    const { sentryOptions } = await import("./lib/observability/scrub");
+    Sentry.init(sentryOptions(process.env.SENTRY_DSN, process.env.VERCEL_ENV) as Parameters<typeof Sentry.init>[0]);
+  }
+}
+
+/** R1-d: errors thrown while rendering or in a route reach Sentry (when it is on). */
+export async function onRequestError(...args: unknown[]) {
+  if (!process.env.SENTRY_DSN || process.env.NEXT_RUNTIME !== "nodejs") return;
+  const Sentry = await import("@sentry/nextjs");
+  (Sentry.captureRequestError as (...a: unknown[]) => void)(...args);
 }

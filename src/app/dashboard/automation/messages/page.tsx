@@ -45,7 +45,7 @@ type Row = {
   createdAt: string;
 };
 
-type Report = { eventsProcessed: number; messagesQueued: number; sent: number; sendFailures: number; sendingPaused: string | null; emailsQueued?: number; emailsSent?: number };
+type Report = { skipped?: string; eventsProcessed: number; messagesQueued: number; sent: number; sendFailures: number; sendingPaused: string | null; emailsQueued?: number; emailsSent?: number };
 
 export default function AutomationMessagesPage() {
   const lang = useLang();
@@ -96,6 +96,8 @@ export default function AutomationMessagesPage() {
     setBusy(false);
     if (!r.ok) return setError(r.data.error ?? "");
     const d = r.data;
+    // R1-d gate L1: a scheduled run was going on at that moment — this one did not run a second dispatcher.
+    if (d.skipped) { setInfo(ar ? "فيه تشغيل مجدول شغّال الحين — ما شغّلنا ثاني. حدّث الصفحة بعد دقيقة." : "A scheduled run is going on now — not run twice. Refresh in a minute."); return reload(); }
     setInfo(
       (ar
         ? `عولج ${d.eventsProcessed} حدث، وأضيفت ${d.messagesQueued + (d.emailsQueued ?? 0)} رسالة، وانرسل ${d.sent} واتساب و${d.emailsSent ?? 0} إيميل`

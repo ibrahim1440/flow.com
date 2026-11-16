@@ -79,6 +79,7 @@
     "@prisma/adapter-libsql": "^7.8.0",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "@sentry/nextjs": "11.12.0",
     "@tanstack/react-table": "^8.21.3",
     "@vercel/blob": "2.8.2",
     "@xmldom/xmldom": "0.9.12",

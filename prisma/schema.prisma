@@ -10794,3 +10794,22 @@ model IdempotencyRequest {
   @@unique([actorId, scope, key])
   @@index([createdAt])
 }
+
+/// R1-d (20261231180000_cron_runs): one row per run of a scheduled job. The partial unique index "CronRun_one_running_key"
+/// (job WHERE status = 'RUNNING', SQL only) is the per-job lock; lib/cron/run.ts writes it.
+model CronRun {
+  id         String    @id @default(cuid())
+  /// dispatch | zatca-reporting | marketing | commission-credit-clawback | watchdog | the daily jobs (CHECK)
+  job        String
+  /// github | vercel | manual (CHECK)
+  trigger    String
+  /// RUNNING | OK | FAILED | SKIPPED (CHECK)
+  status     String    @default("RUNNING")
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  /// Counts only — never a name, a phone or a document.
+  summary    Json?
+  error      String?
+
+  @@index([job, startedAt])
+}

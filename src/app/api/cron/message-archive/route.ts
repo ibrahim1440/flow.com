@@ -1,5 +1,4 @@
-import { NextResponse } from "@/lib/api-response";
-import { cronAuthorized } from "@/lib/cron/auth";
+import { runCronJob } from "@/lib/cron/run";
 import { archiveOldMessages, messageArchiveEnabled } from "@/lib/automation/message-archive";
 
 /**
@@ -13,15 +12,16 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function GET(request: Request) {
-  const auth = cronAuthorized(request.headers);
-  if (!auth.ok || auth.via !== "secret") return NextResponse.json({ error: "غير مصرّح", errorEn: "Unauthorized" }, { status: 401 });
-  // Off unless MESSAGE_ARCHIVE_ENABLED=true (fix round 1): the first run moves live WhatsApp bodies — the owner's step.
-  if (!messageArchiveEnabled()) return NextResponse.json({ ok: true, skipped: "disabled" });
-  try {
-    const r = await archiveOldMessages();
-    return NextResponse.json({ ok: true, ...r });
-  } catch (e) {
-    console.error("[message-archive] run failed:", (e as Error)?.name ?? "error");
-    return NextResponse.json({ ok: false, error: "تعذّر نقل الرسائل للأرشيف", errorEn: "The message archive run failed" }, { status: 500 });
-  }
+  // R1-d: authorised, locked per job, recorded in CronRun, a failure alerted (lib/cron/run.ts).
+  return runCronJob(request, "message-archive", async () => {
+    // Off unless MESSAGE_ARCHIVE_ENABLED=true (fix round 1): the first run moves live WhatsApp bodies — the owner's step.
+    if (!messageArchiveEnabled()) return { body: { ok: true, skipped: "disabled" } };
+    try {
+      const r = await archiveOldMessages();
+      return { body: { ok: true, ...r } };
+    } catch (e) {
+      console.error("[message-archive] run failed:", (e as Error)?.name ?? "error");
+      return { status: 500, body: { ok: false, error: "تعذّر نقل الرسائل للأرشيف", errorEn: "The message archive run failed" } };
+    }
+  });
 }

@@ -6,6 +6,7 @@ import { runIdempotent } from "@/lib/idempotency";
 // One implementation of "make an order", shared with the quotation-to-order path. A
 // second copy here is exactly the shape of defect the packaging rework was spent closing.
 import { resolveOrderLines, createOrderWithNumber, orderCreationFacts } from "@/lib/services/orders/create-order";
+import { withOrderNumberSlot } from "@/lib/services/orders/number-slot";
 import { emitAutomationEvent } from "@/lib/automation/emit";
 import { canSeeCustomerContact, CUSTOMER_OPERATIONS_SELECT, fullCustomer } from "@/lib/auth/customer-detail";
 import { deliveryLotsFor } from "@/lib/services/delivery-lots";
@@ -16,7 +17,7 @@ import { parseBranchId } from "@/lib/accounting/locations";
 import { orderVisibilityWhere, seesAllSales } from "@/lib/services/sales/scope";
 import { linkDirectOrderDeal } from "@/lib/services/sales/direct-order-deal";
 import { orderCustomerAccess } from "@/lib/services/sales/customer-access";
-import { notifyUnassignedCustomerOrder } from "@/lib/services/orders/unassigned-order";
+import { notifyUnassignedCustomerOrder, unassignedNoticeFacts } from "@/lib/services/orders/unassigned-order";
 
 export async function GET(request: Request) {
   // Production and Dispatch workers need to read orders to see what to roast / deliver
@@ -155,7 +156,11 @@ export async function POST(request: Request) {
     //
     // R1-b (owner 1-أ/1-ب): ONE order per submission — the Idempotency-Key row is written first in this same transaction
     // (lib/idempotency.ts); a double click, a retry after a lost answer or simultaneous submits get the first order back.
-    const outcome = await runIdempotent(request, { scope: "orders.create", actorId: user.id, intent: body }, async (tx) => {
+    // R1-c gate: an unassigned customer's notice reads its facts here, before the transaction — only its write is under the lock.
+    const unassignedFacts = access === "unassigned" ? await unassignedNoticeFacts(prisma, body.customerId as string) : undefined;
+    // R1-c gate: waits for an order-number slot BEFORE the transaction takes a pooled connection (number-slot.ts) — twenty
+    // simultaneous creators no longer hold the whole pool while they queue for the order-number lock.
+    const outcome = await withOrderNumberSlot(() => runIdempotent(request, { scope: "orders.create", actorId: user.id, intent: body }, async (tx) => {
         const created = await createOrderWithNumber(
           tx,
           {
@@ -176,9 +181,9 @@ export async function POST(request: Request) {
         await emitAutomationEvent(tx, { eventType: "order.created", subjectType: "Order", subjectId: created.id, actorId: user.id }, { order: orderCreationFacts(created) });
         // The order does not assign the customer (accountOwnerId untouched) and opens no deal — no commission. The
         // supervisors and the admins are told once per order.
-        if (access === "unassigned") await notifyUnassignedCustomerOrder(tx, { id: created.id, orderNumber: created.orderNumber, customerId: body.customerId as string }, { id: user.id, name: user.name });
+        if (access === "unassigned") await notifyUnassignedCustomerOrder(tx, { id: created.id, orderNumber: created.orderNumber, customerId: body.customerId as string }, { id: user.id, name: user.name }, unassignedFacts);
         return { status: 201, body: created };
-    });
+    }));
     if ("done" in outcome) return outcome.done;
     const order = outcome.fresh.body as Awaited<ReturnType<typeof createOrderWithNumber>>;
 

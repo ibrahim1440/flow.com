@@ -17,7 +17,7 @@ type Tx = PrismaNS.TransactionClient;
  * would notice until a warehouse count disagreed.
  *
  * ── Idempotency ──
- * `OpportunityOrder.requestKey` is unique, and the default key is derived from the quote.
+ * `OpportunityOrder.requestKey` is unique, and the key is derived from the quote (always — R1-d2 gate: never a caller's key).
  * A double-clicked "Create order" therefore produces one order and a second response that
  * reports the first, rather than two orders for one agreement. The unique index is the
  * arbiter; the row lock in front of it only decides who waits.
@@ -60,11 +60,13 @@ export async function createOrderFromQuote(
   input: {
     quoteId: string;
     actorId: string;
-    requestKey?: string | null;
     notes?: string | null;
   },
 ): Promise<ConversionResult> {
-  const requestKey = input.requestKey?.trim() || quoteRequestKey(input.quoteId);
+  // R1-d2 gate: the key is ALWAYS the quotation's own — a key from the caller is not accepted any more. It used to be
+  // (`input.requestKey || quoteRequestKey`), so the same accepted quotation sent twice with two different keys raised two
+  // orders. One quotation, one order.
+  const requestKey = quoteRequestKey(input.quoteId);
 
   // Serialise on the quote, so two clicks queue instead of racing towards the unique index.
   const locked = await tx.$queryRaw<{ id: string; status: string }[]>`
@@ -73,8 +75,9 @@ export async function createOrderFromQuote(
   if (!locked[0]) throw { _appCode: 404, message: "Quotation not found." };
 
   // Behind the lock, with nothing cheaper in front of it.
-  const existing = await tx.opportunityOrder.findUnique({
-    where: { requestKey },
+  // By the quotation's key, or by the quotation itself — a link written earlier under a caller's own key still counts.
+  const existing = await tx.opportunityOrder.findFirst({
+    where: { OR: [{ requestKey }, { quoteId: input.quoteId }] },
     select: {
       id: true,
       isFirstOrder: true,

@@ -17,6 +17,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { prepareReceipt } from "@/lib/files/receipt-prep";
 import { localizeApiError } from "@/lib/i18n/api-errors";
+import { fetchKeyedWrite } from "@/lib/request-key";
 import { money, useApi, useLang } from "./inv";
 import { emptyLine, type EditLine } from "./editor";
 import type { ComboSku } from "../../quotes/[id]/ProductCombo";
@@ -183,7 +184,8 @@ export type ModeDone =
 
 /** «أرسل»: the direct sale or the sample send, under one request key per page; the receipt is a second request (D20). */
 export async function sendMode(mode: SaleMode, body: Record<string, unknown>, receipt: File | null, L: (a: string, e: string) => string): Promise<{ ok: true; done: ModeDone } | { ok: false; error: string; credit?: CreditRefusal | null }> {
-  const res = await fetch(mode === "sample" ? "/api/sales/sample-send" : "/api/sales/direct-sale", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
+  // R1-c gate: a 425 (ORDER_NUMBER_BUSY — nothing written) is sent again with the same body and requestKey (fetchKeyedWrite).
+  const res = await fetchKeyedWrite(mode === "sample" ? "/api/sales/sample-send" : "/api/sales/direct-sale", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
   if (!res) return { ok: false, error: L("تعذّر الاتصال.", "Could not connect.") };
   const b = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: localizeApiError(b) ?? b.error ?? L("ما انرسل — جرّب مرة ثانية.", "Not sent — try again."), credit: creditRefusalOf(b) };

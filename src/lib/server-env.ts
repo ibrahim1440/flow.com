@@ -71,7 +71,20 @@ export function evaluateServerEnv(
   const zatca = evaluateZatcaKey(env);
   if (!zatca.ok) problems.push(zatca.reason);
 
+  // R1-d (owner 5-ب): the scheduler's secret is mandatory in Production — without it no scheduled job can run (the old
+  // user-agent fallback is gone) — and anywhere it is set it must be at least 32 characters.
+  const cron = evaluateCronSecret(env);
+  if (!cron.ok) problems.push(cron.reason);
+
   return problems;
+}
+
+/** R1-d: CRON_SECRET — required (≥ 32 characters) when VERCEL_ENV is "production"; elsewhere optional, but never short. */
+export function evaluateCronSecret(env: Record<string, string | undefined> = process.env): { ok: true } | { ok: false; reason: string } {
+  const v = env.CRON_SECRET;
+  if (v !== undefined && v !== "" && v.length < 32) return { ok: false, reason: "CRON_SECRET is set but shorter than 32 characters (generate one with: openssl rand -base64 48)." };
+  if (env.VERCEL_ENV === "production" && !v) return { ok: false, reason: "CRON_SECRET is not set: Production requires it (≥ 32 characters) for the scheduled jobs — see docs/ops/CRON-AND-MONITORING.md." };
+  return { ok: true };
 }
 
 /**

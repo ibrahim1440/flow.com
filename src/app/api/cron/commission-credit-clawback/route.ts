@@ -1,5 +1,4 @@
-import { NextResponse } from "@/lib/api-response";
-import { cronAuthorized } from "@/lib/cron/auth";
+import { runCronJob } from "@/lib/cron/run";
 import { runYearEndCreditClawback } from "@/lib/services/commissions/credit-clawback";
 import { lastEndedRiyadhYear } from "@/lib/services/commissions/credit-clawback-rule";
 
@@ -22,17 +21,18 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function GET(request: Request) {
-  const auth = cronAuthorized(request.headers);
-  if (!auth.ok || auth.via !== "secret") return NextResponse.json({ error: "غير مصرّح", errorEn: "Unauthorized" }, { status: 401 });
-  const param = new URL(request.url).searchParams.get("year");
-  const year = param ? Number(param) : lastEndedRiyadhYear(new Date());
-  try {
-    const r = await runYearEndCreditClawback({ year, actorId: null });
-    return NextResponse.json({ ok: true, year: r.year, creditNotes: r.creditNotes, outcomes: r.outcomes, linesWritten: r.entries.length, linesAlreadyDone: r.alreadyLines });
-  } catch (e) {
-    const x = e as { _appCode?: number; message?: string };
-    if (typeof x?._appCode === "number" && typeof x.message === "string") return NextResponse.json({ error: x.message }, { status: x._appCode });
-    console.error("[commission-credit-clawback] cron run failed:", (e as Error)?.name ?? "error");
-    return NextResponse.json({ ok: false, error: "تعذّر تشغيل استرداد عمولة الإشعارات الدائنة", errorEn: "The credit-note commission clawback could not run" }, { status: 500 });
-  }
+  // R1-d: authorised, locked per job, recorded in CronRun, a failure alerted (lib/cron/run.ts).
+  return runCronJob(request, "commission-credit-clawback", async () => {
+    const param = new URL(request.url).searchParams.get("year");
+    const year = param ? Number(param) : lastEndedRiyadhYear(new Date());
+    try {
+      const r = await runYearEndCreditClawback({ year, actorId: null });
+      return { body: { ok: true, year: r.year, creditNotes: r.creditNotes, outcomes: r.outcomes, linesWritten: r.entries.length, linesAlreadyDone: r.alreadyLines } };
+    } catch (e) {
+      const x = e as { _appCode?: number; message?: string };
+      if (typeof x?._appCode === "number" && typeof x.message === "string") return { status: x._appCode, body: { error: x.message } };
+      console.error("[commission-credit-clawback] cron run failed:", (e as Error)?.name ?? "error");
+      return { status: 500, body: { ok: false, error: "تعذّر تشغيل استرداد عمولة الإشعارات الدائنة", errorEn: "The credit-note commission clawback could not run" } };
+    }
+  });
 }
