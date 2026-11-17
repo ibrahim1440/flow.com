@@ -10,38 +10,41 @@ datasource db {
 model Employee {
   creditOverridesRequested CreditLimitOverride[] @relation("CreditOverrideRequester")
   creditOverridesDecided   CreditLimitOverride[] @relation("CreditOverrideDecider")
-  id                String         @id @default(cuid())
-  name              String
-  username          String?        @unique
+  mktMessagesReviewed      MktMessage[]          @relation("MktMessageReviewer")
+  waMessagesReviewed       WhatsAppMessage[]     @relation("WaMessageReviewer")
+  emailMessagesReviewed    EmailMessage[]        @relation("EmailMessageReviewer")
+  id                       String                @id @default(cuid())
+  name                     String
+  username                 String?               @unique
   /// Secure Version B: bcrypt(pinVerifierInput(pin)), where pinVerifierInput is
   /// base64(HMAC-SHA384(PIN_LOOKUP_SECRET, "pin:verify:v1:" + pin)). bcrypt is over the keyed
   /// derivation, never the raw PIN, so a stolen row cannot be brute-forced offline without the
   /// application secret and the raw PIN never verifies directly.
-  pin               String
+  pin                      String
   /// HMAC-SHA256(PIN_LOOKUP_SECRET, "pin:lookup:v1:" + pin), base64. The login selector:
   /// unforgeable and unsearchable without the application secret, so a database copy no longer
   /// yields working PINs. Selector only — bcrypt on `pin` remains the proof. Nullable until
   /// every PIN has been reissued.
-  pinLookup         String?        @unique
-  password          String?
-  role              String // admin, inventory, roasting, qc, dispatch, custom
-  permissions       String         @default("{}")
-  defaultRoute      String         @default("/dashboard")
+  pinLookup                String?               @unique
+  password                 String?
+  role                     String // admin, inventory, roasting, qc, dispatch, custom
+  permissions              String                @default("{}")
+  defaultRoute             String                @default("/dashboard")
   /// «صفحتي الرئيسية» (20261206110000_sales_call_await_home): the sales person's own home — "my-day" | "classic";
   /// NULL = «يومي». Never written over `defaultRoute`, which the administrator owns.
-  homePreference    String?
-  active            Boolean        @default(true)
-  phoneNumber       String?
-  preferredLanguage String         @default("ar") // "ar" | "en"
+  homePreference           String?
+  active                   Boolean               @default(true)
+  phoneNumber              String?
+  preferredLanguage        String                @default("ar") // "ar" | "en"
   /// The language automation WhatsApp messages reach this employee in: "ar" | "en" (CHECK), chosen on
   /// «خدماتي». NULL = «حسب إعداد النظام» (AutomationSettings.employeeMessageLang, else Arabic).
   /// Migration 20261110090000_i18n_preferences (additive).
-  whatsappLanguage  String?
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
-  qcRecords         QcRecord[]
-  cuppingScores     CuppingScore[]
-  ownedOrders       Order[]        @relation("OrderOwner") // Order Operations S0 (additive)
+  whatsappLanguage         String?
+  createdAt                DateTime              @default(now())
+  updatedAt                DateTime              @updatedAt
+  qcRecords                QcRecord[]
+  cuppingScores            CuppingScore[]
+  ownedOrders              Order[]               @relation("OrderOwner") // Order Operations S0 (additive)
 
   // Sales CRM & commissions (additive). Relation fields only — no columns are added to
   // this table, so the deployed build reads it unchanged.
@@ -249,16 +252,16 @@ model AuthRecoveryCode {
 
 model Customer {
   creditLimitOverrides CreditLimitOverride[]
-  id               String                    @id @default(cuid())
-  name             String
-  nameAr           String?
-  phone            String?
-  email            String?
-  address          String?
-  createdAt        DateTime                  @default(now())
-  updatedAt        DateTime                  @updatedAt
-  orders           Order[]
-  roastPreferences CustomerRoastPreference[]
+  id                   String                    @id @default(cuid())
+  name                 String
+  nameAr               String?
+  phone                String?
+  email                String?
+  address              String?
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+  orders               Order[]
+  roastPreferences     CustomerRoastPreference[]
 
   // Sales CRM (additive, relation fields only).
   leadConversions  LeadConversion[]
@@ -592,8 +595,8 @@ model Order {
   // Sales CRM (additive, relation fields only).
   opportunityLinks OpportunityOrder[]
   collectionEvents CollectionEvent[]
-  salesCollections SalesCollection[] @relation("CollectionOrder")
-  holdTopUps       SalesCollection[] @relation("CollectionHoldOrder")
+  salesCollections SalesCollection[]  @relation("CollectionOrder")
+  holdTopUps       SalesCollection[]  @relation("CollectionHoldOrder")
 
   /// «الموقع» (20261125090000_location_dimension): the location (FinBranch) — NULL «غير محدد».
   branchId                 String?
@@ -5505,6 +5508,23 @@ model WhatsAppMessage {
   updatedAt         DateTime              @updatedAt
   sendAttempts      WhatsAppSendAttempt[]
 
+  /// R1-e gate: may have been delivered — the answer to a send was lost (set by the sender / the SENDING recovery).
+  deliveryDoubt     Boolean          @default(false)
+  /// R1-e review UX: «تسجيل نتيجة التحقق» on a doubtful message — DELIVERED | NOT_DELIVERED | UNCERTAIN (CHECK); all four
+  /// set together. A person's review, kept apart from `status` (the provider's), which a review never changes.
+  reviewOutcome     String?
+  reviewedById      String?
+  reviewedBy        Employee?        @relation("WaMessageReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+  reviewedAt        DateTime?
+  reviewNote        String?
+  /// A resend after «لم تصل» is a NEW message pointing at the original — one per original (UNIQUE; guard trigger).
+  resendOfMessageId String?          @unique
+  resendOf          WhatsAppMessage? @relation("WaMessageResend", fields: [resendOfMessageId], references: [id], onDelete: Restrict)
+  resend            WhatsAppMessage? @relation("WaMessageResend")
+  /// The first send attempt (the claim, QUEUED → SENDING) and when the doubt was recorded — the timeline.
+  sendingStartedAt  DateTime?
+  interruptedAt     DateTime?
+
   @@index([status, scheduledAt])
   @@index([createdAt])
   @@index([subjectType, subjectId])
@@ -9185,6 +9205,23 @@ model MktMessage {
   createdAt    DateTime              @default(now())
   updatedAt    DateTime              @updatedAt
 
+  /// R1-e gate: may have been delivered — the answer to a send was lost (set by the sender / the SENDING recovery).
+  deliveryDoubt     Boolean     @default(false)
+  /// R1-e review UX: «تسجيل نتيجة التحقق» on a doubtful message — DELIVERED | NOT_DELIVERED | UNCERTAIN (CHECK); all four
+  /// set together. A person's review, kept apart from `status` (the provider's), which a review never changes.
+  reviewOutcome     String?
+  reviewedById      String?
+  reviewedBy        Employee?   @relation("MktMessageReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+  reviewedAt        DateTime?
+  reviewNote        String?
+  /// A resend after «لم تصل» is a NEW message pointing at the original — one per original (UNIQUE; guard trigger).
+  resendOfMessageId String?     @unique
+  resendOf          MktMessage? @relation("MktMessageResend", fields: [resendOfMessageId], references: [id], onDelete: Restrict)
+  resend            MktMessage? @relation("MktMessageResend")
+  /// The first send attempt (the claim, QUEUED → SENDING) and when the doubt was recorded — the timeline.
+  sendingStartedAt  DateTime?
+  interruptedAt     DateTime?
+
   @@index([status, scheduledAt])
   @@index([phone, createdAt])
   @@index([campaignId])
@@ -10310,6 +10347,23 @@ model EmailMessage {
   updatedAt         DateTime           @updatedAt
   sendAttempts      EmailSendAttempt[]
 
+  /// R1-e gate: may have been delivered — the answer to a send was lost (set by the sender / the SENDING recovery).
+  deliveryDoubt     Boolean       @default(false)
+  /// R1-e review UX: «تسجيل نتيجة التحقق» on a doubtful message — DELIVERED | NOT_DELIVERED | UNCERTAIN (CHECK); all four
+  /// set together. A person's review, kept apart from `status` (the provider's), which a review never changes.
+  reviewOutcome     String?
+  reviewedById      String?
+  reviewedBy        Employee?     @relation("EmailMessageReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+  reviewedAt        DateTime?
+  reviewNote        String?
+  /// A resend after «لم تصل» is a NEW message pointing at the original — one per original (UNIQUE; guard trigger).
+  resendOfMessageId String?       @unique
+  resendOf          EmailMessage? @relation("EmailMessageResend", fields: [resendOfMessageId], references: [id], onDelete: Restrict)
+  resend            EmailMessage? @relation("EmailMessageResend")
+  /// The first send attempt (the claim, QUEUED → SENDING) and when the doubt was recorded — the timeline.
+  sendingStartedAt  DateTime?
+  interruptedAt     DateTime?
+
   @@index([status, scheduledAt])
   @@index([subjectType, subjectId])
   @@index([customerId, createdAt])
@@ -10798,18 +10852,25 @@ model IdempotencyRequest {
 /// R1-d (20261231180000_cron_runs): one row per run of a scheduled job. The partial unique index "CronRun_one_running_key"
 /// (job WHERE status = 'RUNNING', SQL only) is the per-job lock; lib/cron/run.ts writes it.
 model CronRun {
-  id         String    @id @default(cuid())
+  id                 String    @id @default(cuid())
   /// dispatch | zatca-reporting | marketing | commission-credit-clawback | watchdog | the daily jobs (CHECK)
-  job        String
+  job                String
   /// github | vercel | manual (CHECK)
-  trigger    String
+  trigger            String
   /// RUNNING | OK | FAILED | SKIPPED (CHECK)
-  status     String    @default("RUNNING")
-  startedAt  DateTime  @default(now())
-  finishedAt DateTime?
+  status             String    @default("RUNNING")
+  startedAt          DateTime  @default(now())
+  finishedAt         DateTime?
   /// Counts only — never a name, a phone or a document.
-  summary    Json?
-  error      String?
+  summary            Json?
+  error              String?
+  /// R1-e: the job's period (UTC hour "2030-03-10T10" / Riyadh day "2030-03-10"; NULL = no period). The partial UNIQUE
+  /// (job, slotKey) WHERE status IN (RUNNING, OK) is the once-per-period decision (migration 20261231190000_cron_slots).
+  slotKey            String?
+  /// R1-e: the GitHub Actions run that called (run_id / run_attempt), and who started it (cron-job.org, schedule …).
+  externalRunId      String?
+  externalRunAttempt Int?
+  source             String?
 
   @@index([job, startedAt])
 }

@@ -109,7 +109,9 @@ export async function sendTemplate(args: { to: string; template: string; languag
     const json = (await res.json().catch(() => null)) as { messages?: { id: string }[]; error?: { message?: string; code?: number } } | null;
     if (res.ok && json?.messages?.[0]?.id) return { ok: true, providerId: json.messages[0].id };
     const msg = json?.error?.message?.slice(0, 300) ?? `HTTP ${res.status}`;
-    return { ok: false, detail: msg, transient: res.status === 429 || res.status >= 500, definite: true };
+    // R1-e (reviewer High on 18ea87b0): only a 4xx is a definite refusal. A 5xx — or a 2xx without a message id — on
+    // this POST may have been accepted (Meta takes no idempotency key), so it is a doubt: FAILED, alerted, not resent.
+    return { ok: false, detail: msg, transient: res.status === 429 || res.status >= 500, definite: !res.ok && res.status < 500 };
   } catch (e) {
     const timeout = e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
     return { ok: false, detail: timeout ? "WhatsApp did not answer in time." : "WhatsApp could not be reached.", transient: true, definite: false };

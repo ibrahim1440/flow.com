@@ -134,7 +134,7 @@ async function discountItems(actor: WsActor): Promise<ApprovalItem[]> {
       id: true, quoteNumber: true, revision: true, status: true, subtotal: true, discountTotal: true, grandTotal: true, currency: true, createdAt: true, updatedAt: true, createdById: true,
       discountApprovedById: true, discountApprovedPercent: true, discountRejectedAt: true, approvalRequired: true, approvalBasisPercent: true,
       customer: { select: { name: true } }, opportunity: { select: { title: true, owner: { select: { name: true } } } },
-      lines: { select: { quantity: true, unitPrice: true, discountPercent: true, taxRatePercent: true } },
+      lines: { select: { quantity: true, unitPrice: true, discountPercent: true, taxRatePercent: true, productSku: { select: { isActive: true, price: true } } } },
     },
   });
   const creators = new Map((await prisma.employee.findMany({ where: { id: { in: [...new Set(drafts.map((d) => d.createdById).filter((x): x is string => !!x))] } }, select: { id: true, name: true } })).map((p) => [p.id, p.name]));
@@ -149,14 +149,22 @@ async function discountItems(actor: WsActor): Promise<ApprovalItem[]> {
     // its old figure until it is saved again (the decision re-computes it either way).
     const pct = (q.approvalBasisPercent ? new Prisma.Decimal(q.approvalBasisPercent.toString()) : priced.effectiveDiscountPercent).toDecimalPlaces(2).toString();
     const grand = priced.grandTotal.toFixed(2);
+    // Owner decision (R1-e review UX): a custom line (no SKU, or a SKU at price 0 — discount-rules.ts) is the reason the
+    // quotation waits, and it enters the computed discount as 0. The title says so, and «أعلى خصم محسوب» is the figure of
+    // the priced lines only (= approvalBasisPercent / maxEffective) — never a custom line's typed discount. The rules and
+    // decide.expected are unchanged.
+    const customLines = q.lines.filter((l) => !l.productSku || Number(l.productSku.price) <= 0).length;
+    const pricedLines = q.lines.length - customLines;
     out.push({
       key: `DISCOUNT:${q.id}`, type: "DISCOUNT", id: q.id,
       // An unnumbered draft (owner decision, quote-45 round): «مسودة» — the subject (customer / deal) and the date say which.
-      title: `خصم ${pct}% · عرض ${quoteRef(q.quoteNumber, true)}`, titleEn: `Discount ${pct}% · quotation ${quoteRef(q.quoteNumber, false)}`, requester: q.createdById ? creators.get(q.createdById) ?? null : null, subject: q.customer?.name ?? q.opportunity.title,
+      title: customLines > 0 ? `بند بدون سعر قائمة · عرض ${quoteRef(q.quoteNumber, true)}` : `خصم ${pct}% · عرض ${quoteRef(q.quoteNumber, true)}`,
+      titleEn: customLines > 0 ? `Line without a list price · quotation ${quoteRef(q.quoteNumber, false)}` : `Discount ${pct}% · quotation ${quoteRef(q.quoteNumber, false)}`, requester: q.createdById ? creators.get(q.createdById) ?? null : null, subject: q.customer?.name ?? q.opportunity.title,
       createdAt: iso(q.updatedAt),
       facts: {
         quoteNumber: q.quoteNumber, revision: q.revision, customer: q.customer?.name ?? null, deal: q.opportunity.title, dealOwner: q.opportunity.owner?.name ?? null,
         discountPercent: pct, thresholdPercent: threshold.toString(), subtotal: priced.subtotal.toFixed(2), discountTotal: priced.discountTotal.toFixed(2), grandTotal: grand, currency: q.currency,
+        customLines, pricedLines,
       },
       warnings: [],
       decide: { url: `/api/sales/quotes/${encodeURIComponent(q.id)}/discount-approval`, rejectNeedsReason: true, expected: { effectiveDiscountPercent: pct, grandTotal: grand }, stepUp: true },

@@ -41,7 +41,8 @@ export async function graph<T>(method: "GET" | "POST", path: string, token: stri
     const json = (await res.json().catch(() => null)) as { error?: { message?: string; code?: number; is_transient?: boolean } } | null;
     if (!res.ok || json?.error) {
       const e = json?.error;
-      return { ok: false, status: res.status, detail: scrub(e?.message ?? `Graph API HTTP ${res.status}`), definite: true, transient: !!e?.is_transient || res.status === 429 || res.status >= 500, code: e?.code };
+      // R1-e: a 5xx to a POST is doubt (Meta may have applied it): not «definite», so never retried on its own.
+      return { ok: false, status: res.status, detail: scrub(e?.message ?? `Graph API HTTP ${res.status}`), definite: method === "GET" || res.status < 500, transient: !!e?.is_transient || res.status === 429 || res.status >= 500, code: e?.code };
     }
     return { ok: true, data: json as T };
   } catch (err) {

@@ -1,4 +1,5 @@
 import "server-only";
+import { RETRY_GATE_SELECT, retryGate } from "./resend-rules";
 
 /**
  * The e-mail channel's database half (batch 25): planning rows for an event, and the sender loop.
@@ -32,6 +33,11 @@ import { getEvent } from "./catalog";
 type Db = Prisma.TransactionClient | typeof prisma;
 
 const BACKOFF_MINUTES = [1, 5, 15, 60];
+/** R1-e gate: how long after its first attempt a doubtful e-mail may still be retried (Resend keeps an idempotency key 24 h). */
+/** Resend keeps an idempotency key 24 h. R1-e gate M2: no longer a retry window — a doubtful e-mail is never re-queued
+ *  (retryGate); kept for the dispatcher's own notes and the tests that show the old exception is gone. */
+export const EMAIL_DOUBT_RETRY_WINDOW_MS = 24 * 3_600_000;
+
 export const MAX_EMAIL_ATTEMPTS = 5;
 /** Resend's default limit is about 2 requests a second: one every 600 ms, and a handful per run. */
 const PAUSE_BETWEEN_EMAILS_MS = 600;
@@ -60,10 +66,12 @@ export async function suppressionLookup(db: Db, emails: (string | null | undefin
 
 /** A message in flight when its process died: failed, with that said; only a person retries it. */
 export async function recoverInterruptedEmails() {
-  await prisma.emailMessage.updateMany({
+  const r = await prisma.emailMessage.updateMany({
     where: { status: "SENDING", lockedAt: { lt: new Date(Date.now() - STUCK_SEND_MS) } },
-    data: { status: "FAILED", lockedAt: null, statusNote: EMAIL_NOTES.interrupted },
+    data: { status: "FAILED", lockedAt: null, statusNote: EMAIL_NOTES.interrupted, deliveryDoubt: true, interruptedAt: new Date() },
   });
+  // R1-e: never resent on its own — a person reviews it; the Settings editors are told.
+  if (r.count > 0) await (await import("@/lib/cron/watchdog")).alertSendInterrupted("email", r.count).catch(() => undefined);
 }
 
 export type EmailSendReport = { emailsSent: number; emailFailures: number; emailPaused: string | null };
@@ -200,7 +208,7 @@ export async function sendDueEmails(report: EmailSendReport, deadline: number, m
   }
 
   const claimed = await prisma.$queryRaw<Claimed[]>`
-    UPDATE "EmailMessage" SET status = 'SENDING', "lockedAt" = now(), "updatedAt" = now()
+    UPDATE "EmailMessage" SET status = 'SENDING', "lockedAt" = now(), "updatedAt" = now(), "sendingStartedAt" = coalesce("sendingStartedAt", now())
     WHERE id IN (
       SELECT id FROM "EmailMessage"
       WHERE status = 'QUEUED' AND "scheduledAt" <= now() AND ("nextAttemptAt" IS NULL OR "nextAttemptAt" <= now())
@@ -308,7 +316,9 @@ export async function sendDueEmails(report: EmailSendReport, deadline: number, m
     const note = result.httpStatus === null ? `${EMAIL_NOTES.interrupted} (${result.error ?? "no answer"})` : result.error ?? "Send failed.";
     await done(msg.id, transient && !exhausted
       ? { status: "QUEUED", toEmail, intendedEmail, attempts: attemptNo, httpStatus: result.httpStatus, nextAttemptAt: new Date(Date.now() + BACKOFF_MINUTES[attemptNo - 1] * 60_000), statusNote: note }
-      : { status: "FAILED", toEmail, intendedEmail, attempts: attemptNo, httpStatus: result.httpStatus, nextAttemptAt: null, statusNote: exhausted && transient ? `Gave up after ${attemptNo} attempts: ${note}` : note });
+      : { status: "FAILED", toEmail, intendedEmail, attempts: attemptNo, httpStatus: result.httpStatus, nextAttemptAt: null, statusNote: exhausted && transient ? `Gave up after ${attemptNo} attempts: ${note}` : note,
+          // no answer at all: Resend may have accepted it — «may have been delivered»
+          ...(result.httpStatus === null ? { deliveryDoubt: true, interruptedAt: new Date() } : {}) });
 
     // A rejected key, an unconfigured provider, a rate limit or a dead network fail every message alike: stop.
     if (result.status === "NOT_CONFIGURED" || result.httpStatus === null || result.httpStatus === 401 || result.httpStatus === 403 || result.httpStatus === 429) {
@@ -326,11 +336,15 @@ async function releaseUnsent(rows: Claimed[]) {
 
 /** Retry a failed e-mail, or cancel a queued one (automation › manage_messages). A bounce or complaint is never retried. */
 export async function actOnEmail(tx: Prisma.TransactionClient, id: string, action: "retry" | "cancel", actorName: string) {
-  const msg = await tx.emailMessage.findUnique({ where: { id }, select: { status: true, toEmail: true, intendedEmail: true, bodyArchivedAt: true } });
+  const msg = await tx.emailMessage.findUnique({ where: { id }, select: { ...RETRY_GATE_SELECT, status: true, toEmail: true, intendedEmail: true, bodyArchivedAt: true } });
   if (!msg) throw { _appCode: 404, message: "Message not found." };
   if (action === "retry") {
     if (msg.bodyArchivedAt) throw { _appCode: 409, message: "نص هذه الرسالة انتقل للأرشيف (أقدم من 180 يوم)، فما تنعاد.", errorEn: EMAIL_NOTES.archived, code: "ARCHIVED" };
     if (msg.status !== "FAILED") throw { _appCode: 409, message: "Only a failed message can be retried." };
+    // R1-e gate H1/M2 (orchestrator, on be2f425a — replaces the earlier «doubtful e-mail within 24 h» exception): a row
+    // that may have been delivered is never re-queued, whatever the provider key would do — «لم تصل» first, then the
+    // resend path (a new message); any other FAILED row only inside its type's window, its content still true.
+    await retryGate(tx, "email", msg);
     const r = await tx.emailMessage.updateMany({
       where: { id, status: "FAILED" },
       data: { status: "QUEUED", attempts: 0, nextAttemptAt: null, lockedAt: null, scheduledAt: new Date(), statusNote: `Retried by ${actorName}.` },

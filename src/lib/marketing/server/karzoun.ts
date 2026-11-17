@@ -46,7 +46,8 @@ async function gql<T>(cfg: KarzounConfig, query: string, variables: Record<strin
     const json = (await res.json().catch(() => null)) as { data?: T; errors?: { message?: string }[] } | null;
     if (!res.ok || !json || json.errors?.length || json.data == null) {
       const msg = json?.errors?.[0]?.message?.slice(0, 300) ?? `HTTP ${res.status}`;
-      return { ok: false, detail: `كرزون: ${msg}`, transient: res.status === 429 || res.status >= 500, definite: true };
+      // R1-e: a 5xx to the send mutation is doubt (it may have gone out): not «definite», so never retried on its own.
+      return { ok: false, detail: `كرزون: ${msg}`, transient: res.status === 429 || res.status >= 500, definite: res.status < 500 };
     }
     return { ok: true, data: json.data };
   } catch (e) {

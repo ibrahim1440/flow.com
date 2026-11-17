@@ -123,14 +123,18 @@ export async function runAutomationDispatch(opts: DispatchOptions): Promise<Disp
  * and only a person decides whether to retry it.
  */
 async function recoverInterruptedSends() {
-  await prisma.whatsAppMessage.updateMany({
+  const r = await prisma.whatsAppMessage.updateMany({
     where: { status: "SENDING", lockedAt: { lt: new Date(Date.now() - STUCK_SEND_MS) } },
     data: {
       status: "FAILED",
       lockedAt: null,
       statusNote: "Interrupted while sending: it may or may not have been delivered. Retry only if you are sure it was not.",
+      deliveryDoubt: true,
+      interruptedAt: new Date(),
     },
   });
+  // R1-e: never resent on its own — a person reviews it; the Settings editors are told.
+  if (r.count > 0) await (await import("@/lib/cron/watchdog")).alertSendInterrupted("whatsapp", r.count).catch(() => undefined);
 }
 
 // ─── 2. Time-based events ──────────────────────────────────────────────────────
@@ -449,7 +453,7 @@ async function sendDueMessages(report: DispatchReport, deadline: number, maxSend
   }
 
   const claimed = await prisma.$queryRaw<Claimed[]>`
-    UPDATE "WhatsAppMessage" SET status = 'SENDING', "lockedAt" = now(), "updatedAt" = now()
+    UPDATE "WhatsAppMessage" SET status = 'SENDING', "lockedAt" = now(), "updatedAt" = now(), "sendingStartedAt" = coalesce("sendingStartedAt", now())
     WHERE id IN (
       SELECT id FROM "WhatsAppMessage"
       WHERE status = 'QUEUED' AND "scheduledAt" <= now() AND ("nextAttemptAt" IS NULL OR "nextAttemptAt" <= now())
@@ -518,6 +522,18 @@ async function sendDueMessages(report: DispatchReport, deadline: number, maxSend
     }
 
     report.sendFailures++;
+    // R1-e: the request went out and no answer came back — the server may have sent it. Never again on its own (at most
+    // once): FAILED for a person to review, and the Settings editors are told. (A failure before sending is retried.)
+    if (result.ambiguous) {
+      await prisma.whatsAppMessage.update({
+        where: { id: msg.id },
+        data: { status: "FAILED", phone, intendedPhone, attempts: attemptNo, lockedAt: null, nextAttemptAt: null, statusNote: `Interrupted while sending: ${result.error} It may or may not have been delivered. Retry only if you are sure it was not.`, deliveryDoubt: true, interruptedAt: new Date() },
+      });
+      await (await import("@/lib/cron/watchdog")).alertSendInterrupted("whatsapp", 1).catch(() => undefined);
+      report.sendingPaused = result.error;
+      await releaseUnsent(claimed.slice(i + 1));
+      return;
+    }
     const exhausted = attemptNo >= MAX_SEND_ATTEMPTS;
     const final = !result.transient || exhausted;
     await prisma.whatsAppMessage.update({

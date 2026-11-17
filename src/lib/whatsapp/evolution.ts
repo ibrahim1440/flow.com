@@ -52,9 +52,18 @@ export type CallFailure = {
   error: string;
   /** Worth trying again later: unreachable, timed out, rate-limited, a server error, or a rejected key. */
   transient: boolean;
+  /**
+   * R1-e (owner decision 25 = أ): a SEND whose request went out but whose answer never came back (timed out, the
+   * connection dropped) — the server may have accepted it. It must never be sent again on its own (at most once).
+   * False for a GET, and for a failure before the request reached the server (refused, unknown host).
+   */
+  ambiguous?: boolean;
 };
 
-const TIMEOUT_MS = 15_000;
+/** The call's time limit; WHATSAPP_TIMEOUT_MS overrides it (tests). */
+const timeoutMs = () => { const v = Number(process.env.WHATSAPP_TIMEOUT_MS); return Number.isFinite(v) && v >= 100 ? v : 15_000; };
+/** Failures that happen before the request reaches the server: nothing was sent, so a retry is safe. */
+const BEFORE_SENDING = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH", "UND_ERR_CONNECT_TIMEOUT"]);
 
 function isTransient(status: number | null): boolean {
   return status === null || status === 401 || status === 403 || status === 408 || status === 425 || status === 429 || status >= 500;
@@ -91,18 +100,23 @@ async function call(
       headers: { apikey: apiKey, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
       body: body === undefined ? undefined : JSON.stringify(body),
       cache: "no-store",
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs()),
     });
     const parsed = await res.json().catch(() => null);
-    if (!res.ok) return { ok: false, status: res.status, error: describe(parsed, res.status), transient: isTransient(res.status) };
+    // R1-e: a 5xx to a SEND is doubt — the server may have sent it before failing (Evolution gives no guarantee and takes
+    // no idempotency key): never retried on its own. 429 and the 4xx are explicit refusals of the request: nothing sent.
+    if (!res.ok) return { ok: false, status: res.status, error: describe(parsed, res.status), transient: isTransient(res.status), ambiguous: method === "POST" && res.status >= 500 };
     return { ok: true, status: res.status, body: parsed };
   } catch (err) {
     const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+    const code = String((err as { cause?: { code?: unknown } })?.cause?.code ?? "");
+    const ambiguous = method === "POST" && !BEFORE_SENDING.has(code);
     return {
       ok: false,
       status: null,
-      error: timedOut ? "The WhatsApp server did not answer in time." : "The WhatsApp server could not be reached.",
+      error: timedOut ? "The WhatsApp server did not answer in time." : ambiguous ? "The connection to the WhatsApp server dropped before it answered." : "The WhatsApp server could not be reached.",
       transient: true,
+      ambiguous,
     };
   }
 }

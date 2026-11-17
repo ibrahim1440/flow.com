@@ -65,12 +65,17 @@ export async function sendActivation(employeeId: string, actorId: string, purpos
       subjectType: "Employee", subjectId: e.id, recipientKind: "employee", recipientName: e.name, phone: phone.phone,
       body: `[${purpose === "INVITE" ? "رابط تفعيل الحساب" : "رابط إعادة تعيين كلمة المرور"} لـ ${e.username} — الرابط لا يُحفظ في السجل]`,
       status: r.ok ? "SENT" : "FAILED", statusNote: r.ok ? null : r.error, attempts: 1, sentAt: r.ok ? new Date() : null,
+      // R1-e: no answer after the request went out — it may have arrived (with a link now revoked): reviewable, never resent.
+      ...(!r.ok && r.ambiguous ? { deliveryDoubt: true, interruptedAt: new Date() } : {}),
       providerMessageId: r.ok ? r.messageId : null, createdById: actorId,
       sendAttempts: { create: { attemptNo: 1, ok: r.ok, httpStatus: r.ok ? 200 : r.status, error: r.ok ? null : r.error, durationMs: Date.now() - started } },
     },
   });
   if (!r.ok) {
     await prisma.accountActivation.update({ where: { id: issued.id }, data: { revokedAt: new Date() } });
+    // R1-e: a request that went out with no answer (dropped / timed out / 5xx) may have arrived. The link is revoked
+    // either way, so a message that did arrive carries a dead link and a new send gives the only valid one.
+    if (r.ambiguous) return no("انقطع الإرسال — قد تكون الرسالة وصلت، لكن رابطها أُلغي. أرسل رابطًا جديدًا أو استخدم كلمة مرور مؤقتة.", r.error);
     return no("ما قدر الواتساب يوصل الرسالة — جرّب بعد شوي أو استخدم كلمة مرور مؤقتة.", r.error);
   }
   await prisma.hrAuditLog.create({ data: { action: purpose === "INVITE" ? "ACTIVATION_LINK_SENT" : "RESET_LINK_SENT", entityType: "Employee", entityId: e.id, after: { phone: maskPhone(phone.phone), expiresAt: issued.expiresAt.toISOString() }, actorId } });

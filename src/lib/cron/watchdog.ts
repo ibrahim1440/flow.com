@@ -4,7 +4,7 @@
 // Alerts go to the people who hold Settings at edit, at most once per job per day (late) / once per hour (backlog).
 // It also removes the expired idempotency keys (R1-b L1: idempotency_purge, 7 days).
 import { prisma } from "@/lib/db";
-import { LATE_AFTER_MS, BACKLOG_MAX, BACKLOG_AGE_MS, MIN, type CronJob } from "@/lib/cron/jobs";
+import { LATE_AFTER_MS, BACKLOG_MAX, BACKLOG_AGE_MS, MIN, tokenExpiryOf, type CronJob } from "@/lib/cron/jobs";
 export { LATE_AFTER_MS, BACKLOG_MAX, BACKLOG_AGE_MS } from "@/lib/cron/jobs";
 
 
@@ -47,6 +47,18 @@ export async function messageBacklog(now = new Date()): Promise<{ waiting: numbe
   return { waiting: wa + em, oldestMinutes: oldest ? Math.max(0, Math.round((now.getTime() - oldest.getTime()) / MIN)) : 0 };
 }
 
+/**
+ * R1-e (owner decision 25 = أ): the dispatch token of the external hourly trigger expires (a fine-grained GitHub token,
+ * one year). CRON_DISPATCH_TOKEN_EXPIRES_AT (an ISO date) says when: from 14 days before, and after it has passed, the
+ * Settings editors get «system.cron_token_expiring» once a day; unset (or not a date), once a day too.
+ */
+export async function alertTokenExpiry(now = new Date(), env: Record<string, string | undefined> = process.env) {
+  const t = tokenExpiryOf(env.CRON_DISPATCH_TOKEN_EXPIRES_AT, now);
+  if (t.state === "ok") return { token: t.state, tokenAlert: 0 };
+  const tokenAlert = await raise("system.cron_token_expiring", `token:${t.state}:${now.toISOString().slice(0, 10)}`, { state: t.state, expiresAt: t.expiresAt, daysLeft: t.daysLeft });
+  return { token: t.state, tokenAlert };
+}
+
 export async function runWatchdog(now = new Date()) {
   const late = await lateJobs(now);
   const day = now.toISOString().slice(0, 10);
@@ -61,7 +73,18 @@ export async function runWatchdog(now = new Date()) {
   }
   const { purgeExpiredIdempotencyKeys } = await import("@/lib/idempotency");
   const purgedKeys = await purgeExpiredIdempotencyKeys();
-  return { ok: true, late: late.map((l) => l.job), lateAlerts, backlog, backlogAlert, purgedKeys };
+  const token = await alertTokenExpiry(now);
+  return { ok: true, late: late.map((l) => l.job), lateAlerts, backlog, backlogAlert, purgedKeys, ...token };
+}
+
+/**
+ * R1-e (owner decision 25 = أ): a send that was in flight when its process died — it may or may not have reached the
+ * provider — is never sent again on its own (at most once): it is marked for review (FAILED / MANUAL_REQUIRED with the
+ * reason) and the Settings editors are told, at most once per channel per hour.
+ */
+export async function alertSendInterrupted(channel: "whatsapp" | "email" | "marketing" | "publishing", count: number, now = new Date()) {
+  if (count <= 0) return 0;
+  return raise("system.send_interrupted", `${channel}:${now.toISOString().slice(0, 13)}`, { channel, count });
 }
 
 /** Owner 2-ج: any ZATCA failure in a queue run (rejected or errored documents) — at most one alert per hour. */

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { NeedsReviewBanner, ReviewChips, ReviewFlow, ReviewTable, type ActionResult, type Outcome, type ReviewMessage, type TableRow } from "@/components/messages/review-ui";
 import { useLang, PageHeader, Spinner, Button, Banner, Sec, Chip, StatusChip, useLoad, useMkt, usePageTitle, api, fmt, fmtDate, RangePicker, useRange, MESSAGE_STATUS, Modal, Field, TextInput, Select, TextArea, Alert, SearchField, specLabel } from "../_components/ui";
 import { CART_LIMITS } from "@/lib/marketing/messaging-rules";
 
@@ -228,26 +229,73 @@ function Consent() {
   );
 }
 
+type MktRow = {
+  id: string; phone: string; status: string; statusNote: string | null; preview: string; category: string; scheduledAt: string; sentAt: string | null;
+  createdAt: string; updatedAt: string; attempts: number; campaign: { name: string } | null; enrollmentId: string | null;
+  deliveryDoubt: boolean; reviewOutcome: Outcome | null; reviewNote: string | null; reviewedAt: string | null; reviewedBy: { id: string; name: string } | null;
+  resendOfMessageId: string | null; resend: { id: string; status: string } | null; resentBy: { name: string | null; at: string } | null; sendingStartedAt: string | null; interruptedAt: string | null;
+  resendWindow: { from: string; until: string; open: boolean };
+};
+type MktList = { rows: MktRow[]; total: number; perPage: number; counts: Record<string, number>; needsReview: number; pending: number; resent: number };
+
+/**
+ * «سجل الرسائل» — R1-e (owner-approved Figma a 2057:18 with b–h): the provider's delivery status and the manual review
+ * in two columns; an interrupted campaign message is reviewed («تسجيل نتيجة التحقق») and resent only after «لم تصل»,
+ * within 24 hours of its first send attempt (b2 / h4 after that). Processing is messaging_manage only (the owner and the
+ * marketing manager); the server enforces every rule again.
+ */
 function Log() {
-  const { can } = useMkt();
+  const { can, user } = useMkt();
   const lang = useLang();
   const L = (ar: string, en: string) => (lang === "ar" ? ar : en);
   const [status, setStatus] = useState("");
+  const [review, setReview] = useState("");
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
-  const { data, error, reload } = useLoad<{ rows: { id: string; phone: string; status: string; statusNote: string | null; preview: string; category: string; scheduledAt: string; sentAt: string | null; campaign: { name: string } | null; enrollmentId: string | null }[]; total: number; perPage: number; counts: Record<string, number> }>(`/api/marketing/whatsapp/messages?status=${status}&q=${encodeURIComponent(q)}&page=${page}`);
+  const [opened, setOpened] = useState<(TableRow & { raw: MktRow }) | null>(null);
+  const { data, error, reload } = useLoad<MktList>(`/api/marketing/whatsapp/messages?status=${status}&review=${review}&q=${encodeURIComponent(q)}&page=${page}`);
+  const manage = can("messaging_manage");
   async function cancel(id: string) {
     await api(`/api/marketing/whatsapp/messages/${id}`, { method: "DELETE" });
     reload();
   }
+  const items: (TableRow & { raw: MktRow })[] = (data?.rows ?? []).map((m) => ({
+    raw: m, id: m.id, channel: "whatsapp", address: `+${m.phone}`,
+    source: `${m.resendOfMessageId ? L("إعادة إرسال", "Resend") : m.enrollmentId ? L("رحلة آلية", "Automated journey") : m.campaign?.name ?? L("رسالة تسويقية", "Marketing message")} · ${m.category === "MARKETING" ? L("تسويقية", "Marketing") : L("خدمية", "Utility")}`,
+    body: m.preview, status: m.status, statusNote: m.statusNote, deliveryDoubt: m.deliveryDoubt, reviewOutcome: m.reviewOutcome, reviewNote: m.reviewNote,
+    reviewedBy: m.reviewedBy, reviewedAt: m.reviewedAt, resend: m.resend, resentBy: m.resentBy, resendOfMessageId: m.resendOfMessageId, scheduledAt: m.scheduledAt,
+    sendingStartedAt: m.sendingStartedAt, interruptedAt: m.interruptedAt, attempts: m.attempts, createdAt: m.createdAt, updatedAt: m.updatedAt,
+    resendWindow: m.resendWindow, canProcess: manage, noResend: null,
+  }));
+  // The open message: its row as reloaded, or (when a filter dropped it after a review) as it was opened.
+  const open = opened ? items.find((i) => i.id === opened.id) ?? opened : null;
+  const reviewCall = (m: ReviewMessage, outcome: Outcome, note: string) => api(`/api/marketing/whatsapp/messages/${m.id}/review`, { method: "POST", body: { outcome, note } }) as Promise<ActionResult>;
+  const resendCall = async (m: ReviewMessage) => {
+    const r = await api<{ message?: { id: string } }>(`/api/marketing/whatsapp/messages/${m.id}/resend`, { method: "POST", body: { confirm: true } });
+    return { ...r, data: { ...r.data, resendId: r.data.message?.id } } as ActionResult & { data: { resendId?: string } };
+  };
+  const first = data && data.total ? (page - 1) * data.perPage + 1 : 0;
+  const last = data ? Math.min(data.total, page * data.perPage) : 0;
   return (
     <>
-      <div className="mkt-toolbar"><SearchField value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder={L("رقم الجوال", "Mobile number")} label={L("بحث", "Search")} /><div className="mkt-seg">{["", ...Object.keys(MESSAGE_STATUS)].map((s) => <button key={s} type="button" aria-pressed={status === s} onClick={() => { setStatus(s); setPage(1); }}>{s ? `${specLabel(MESSAGE_STATUS, s, lang)} (${data?.counts[s] ?? 0})` : L("الكل", "All")}</button>)}</div></div>
+      <NeedsReviewBanner count={data?.needsReview ?? 0} lang={lang} onShow={() => { setReview("needed"); setPage(1); }} />
+      <div className="mr-toolbar">
+        <SearchField value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder={L("بحث برقم الجوال", "Search a mobile number")} label={L("بحث", "Search")} />
+        <ReviewChips lang={lang} value={review} onChange={(v) => { setReview(v); setPage(1); }} counts={{ needed: data?.needsReview ?? 0, pending: data?.pending ?? 0, resent: data?.resent ?? 0 }} />
+      </div>
+      <div className="mr-toolbar">
+        <span className="mr-lbl">{L("حالة التسليم (من المزوّد):", "Delivery status (provider):")}</span>
+        <div className="mr-seg" role="group" aria-label={L("الحالة", "Status")}>{["", ...Object.keys(MESSAGE_STATUS)].map((s) => <button key={s} type="button" aria-pressed={status === s} onClick={() => { setStatus(s); setPage(1); }} data-testid={`mkt-status-${s || "all"}`}><span>{s ? specLabel(MESSAGE_STATUS, s, lang) : L("الكل", "All")}</span><span className="mr-num">{s ? data?.counts[s] ?? 0 : Object.values(data?.counts ?? {}).reduce((a, b) => a + b, 0)}</span></button>)}</div>
+      </div>
       <Banner>{error}</Banner>
-      {!data ? <Spinner /> : data.rows.length === 0 ? <p className="mkt-muted">{L("لا رسائل.", "No messages.")}</p> : <div className="mkt-list">{data.rows.map((m) => (
-        <div key={m.id} className="mkt-item"><div style={{ minWidth: 0 }}><div className="t"><bdi>+{m.phone}</bdi> · {m.enrollmentId ? L("رحلة آلية", "Automated journey") : m.campaign?.name ?? "—"} · {m.category === "MARKETING" ? L("تسويقية", "Marketing") : L("خدمية", "Utility")}</div><p className="mkt-pre">{m.preview}</p><div className="s">{L("مجدولة", "Scheduled")} {fmtDate(m.scheduledAt, true)}{m.sentAt ? L(` · أُرسلت ${fmtDate(m.sentAt, true)}`, ` · sent ${fmtDate(m.sentAt, true)}`) : ""}{m.statusNote ? ` · ${m.statusNote}` : ""}</div></div><div className="mkt-toolbar"><StatusChip map={MESSAGE_STATUS} value={m.status} />{m.status === "QUEUED" && can("messaging_manage") ? <Button variant="secondary" onClick={() => cancel(m.id)}>{L("إلغاء", "Cancel")}</Button> : null}</div></div>
-      ))}</div>}
+      {!data ? <Spinner /> : data.rows.length === 0 ? <p className="mkt-muted">{review || status || q ? L("لا رسالة تطابق البحث أو المرشّحات.", "No message matches the search or filters.") : L("لا رسائل.", "No messages.")}</p> : (
+        <ReviewTable rows={items} lang={lang} onOpen={(m) => setOpened(m)} selectedId={opened?.id ?? null} label={L("سجل الرسائل", "Message log")} testId="mkt-messages-table"
+          addressHeader={L("الجوال والمصدر", "Mobile and source")}
+          extraAction={(m) => m.raw.status === "QUEUED" && manage ? <Button variant="secondary" onClick={() => cancel(m.id)}>{L("إلغاء", "Cancel")}</Button> : null} />
+      )}
+      {data ? <div className="mr-legend"><span className="mr-micro">{L("الرسالة المنقطعة غير المراجَعة لا تُحسب «أُرسلت» في لوحة القياس ولا في التقارير.", "An interrupted, unreviewed message is not counted as sent on the board or in reports.")}</span><span className="mr-micro mr-num">{L(`عرض ${first}–${last} من ${data.total}`, `Showing ${first}–${last} of ${data.total}`)}</span></div> : null}
       {data && data.total > data.perPage ? <div className="mkt-toolbar"><Button variant="secondary" disabled={page === 1} onClick={() => setPage(page - 1)}>{L("السابق", "Previous")}</Button><span>{page} / {Math.ceil(data.total / data.perPage)}</span><Button variant="secondary" disabled={page * data.perPage >= data.total} onClick={() => setPage(page + 1)}>{L("التالي", "Next")}</Button></div> : null}
+      <ReviewFlow open={open} lang={lang} reviewer={user?.name ?? ""} marketing onClose={() => setOpened(null)} onChanged={reload} review={reviewCall} resend={resendCall} />
     </>
   );
 }

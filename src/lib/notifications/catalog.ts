@@ -1322,6 +1322,31 @@ export const EVENTS: NotificationEventDef[] = [
     render: (f) => ({ titleAr: "فشل إرسال مستندات للزكاة والضريبة", titleEn: "Documents failed at ZATCA", bodyAr: `مرفوضة: ${s(f.rejected)} — أخطاء: ${s(f.failed)}. راجع طابور الفوترة الإلكترونية.`, bodyEn: `Rejected: ${s(f.rejected)} — errors: ${s(f.failed)}. Review the e-invoicing queue.`, link: "/dashboard/accounting/zatca" }),
   },
   {
+    // R1-e (owner decision 25 = أ): a send cut off mid-call (WhatsApp, e-mail, a marketing message or post) is never
+    // repeated on its own — it waits for a person; at most once per channel per hour.
+    key: "system.send_interrupted", category: "system", severity: "warning",
+    label: { ar: "إرسال انقطع ويحتاج مراجعة", en: "An interrupted send needs review" },
+    recipients: [{ perm: [{ module: "settings", edit: true }] }],
+    trigger: "the dispatcher / marketing sender / publisher (alertSendInterrupted, lib/cron/watchdog.ts): an item left SENDING / RUNNING",
+    render: (f) => {
+      const ch = ({ whatsapp: ["واتساب", "WhatsApp"], email: ["الإيميل", "e-mail"], marketing: ["رسائل التسويق", "marketing messages"], publishing: ["النشر", "posts"] } as Record<string, [string, string]>)[String(f.channel)] ?? [s(f.channel), s(f.channel)];
+      return { titleAr: `إرسال انقطع (${ch[0]}) ويحتاج مراجعة`, titleEn: `Interrupted ${ch[1]} need review`, bodyAr: `${s(f.count)} لم يُعرف إن وصلت؛ لا تُعاد تلقائياً. راجعها وأعد إرسال ما لم يصل فقط.`, bodyEn: `${s(f.count)} may or may not have gone out; they are not resent automatically. Review them and resend only what did not arrive.`, link: f.channel === "publishing" || f.channel === "marketing" ? "/dashboard/marketing" : "/dashboard/automation/messages" };
+    },
+  },
+  {
+    // R1-e (owner decision 25 = أ): the token the external hourly trigger uses to start the GitHub workflow expires, has
+    // expired, or its date is not set (CRON_DISPATCH_TOKEN_EXPIRES_AT) — once a day while it lasts.
+    key: "system.cron_token_expiring", category: "system", severity: "warning",
+    label: { ar: "رمز الجدولة قارب على الانتهاء", en: "The scheduler token is expiring" },
+    recipients: [{ perm: [{ module: "settings", edit: true }] }],
+    trigger: "runWatchdog (lib/cron/watchdog.ts alertTokenExpiry): 14 days or less left, expired, or the date not set",
+    render: (f) => f.state === "unset"
+      ? { titleAr: "تاريخ انتهاء رمز الجدولة غير مضبوط", titleEn: "The scheduler token's expiry date is not set", bodyAr: "اضبط CRON_DISPATCH_TOKEN_EXPIRES_AT في Vercel بتاريخ انتهاء رمز GitHub الذي يستخدمه cron-job.org.", bodyEn: "Set CRON_DISPATCH_TOKEN_EXPIRES_AT in Vercel to the expiry date of the GitHub token cron-job.org uses.", link: "/dashboard/settings" }
+      : f.state === "expired"
+        ? { titleAr: "انتهى رمز الجدولة", titleEn: "The scheduler token has expired", bodyAr: `انتهى في ${s(f.expiresAt)}؛ التشغيل كل ساعة متوقف ويعمل الاحتياط فقط. أنشئ رمزًا جديدًا وحدّث cron-job.org والتاريخ.`, bodyEn: `It expired on ${s(f.expiresAt)}; the hourly trigger has stopped and only the fallback runs. Create a new token, update cron-job.org and the date.`, link: "/dashboard/settings" }
+        : { titleAr: `رمز الجدولة ينتهي بعد ${s(f.daysLeft)} يوم`, titleEn: `The scheduler token expires in ${s(f.daysLeft)} days`, bodyAr: `ينتهي في ${s(f.expiresAt)}. أنشئ رمزًا جديدًا وحدّث cron-job.org وCRON_DISPATCH_TOKEN_EXPIRES_AT قبل ذلك.`, bodyEn: `It expires on ${s(f.expiresAt)}. Create a new token and update cron-job.org and CRON_DISPATCH_TOKEN_EXPIRES_AT before then.`, link: "/dashboard/settings" },
+  },
+  {
     // R1-d (owner 2-ج): the message send queue is backing up — at most once an hour.
     key: "system.message_backlog", category: "system", severity: "warning",
     label: { ar: "تراكم في طابور الرسائل", en: "Message queue backing up" },

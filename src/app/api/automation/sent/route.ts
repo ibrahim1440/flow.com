@@ -30,7 +30,8 @@ export async function GET(request: Request) {
   const subjectId = (url.searchParams.get("subjectId") ?? "").slice(0, 64);
   if ((subjectType !== "Order" && subjectType !== "Quote") || !subjectId) return NextResponse.json({ error: "طلب غير صالح.", errorEn: "subjectType must be Order or Quote." }, { status: 400 });
   if (subjectType === "Order") {
-    if (!(await orderInScope(user, subjectId))) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    // R1-e (owner decisions 0–6): an order's messages belong to the orders department — the orders module as well.
+    if (!hasModuleAccess(user.permissions as Permissions, "orders") || !(await orderInScope(user, subjectId))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   } else {
     // Fix round 3 (gate D4): the quotation's own rule (api/sales/quotes/[id]) — its deal's owner, or quotesSeeAll.
     if (!(await quoteVisible(user, subjectId))) return NextResponse.json({ error: "Not found" }, { status: 404 });

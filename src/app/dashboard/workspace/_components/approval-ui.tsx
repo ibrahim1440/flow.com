@@ -48,7 +48,13 @@ function Facts({ item }: { item: ApprovalItem }) {
       rows.push([L("الصفقة", "Deal"), `${n(f.deal)}${f.dealOwner ? ` · ${f.dealOwner}` : ""}`]);
       rows.push([L("عرض السعر", "Quotation"), `${f.quoteNumber ? n(f.quoteNumber) : L("مسودة (بدون رقم — يأخذ رقمه عند الإصدار)", "Draft (numbered at issue)")}${Number(f.revision) > 1 ? ` · ${L("مراجعة", "rev.")} ${f.revision}` : ""}`]);
     }
-    rows.push([L("الخصم المطلوب", "Requested discount"), <b key="d" className="hr-num">{n(f.discountPercent)}%</b>]);
+    // R1-e (owner decision 5): on a quotation the figure is «أعلى خصم محسوب» — the priced lines' discount against the
+    // list only; a line without a list price is the reason it waits (it counts as 0 there). The rules are unchanged.
+    const quoteFacts = typeof f.customLines === "number";
+    if (quoteFacts && Number(f.customLines) > 0) {
+      rows.push([L("سبب الانتظار", "Why it waits"), <span key="why" data-testid="approval-custom-lines">{Number(f.customLines) === 1 ? L("بند بدون سعر قائمة — يحتاج موافقة، ولا يدخل في الخصم المحسوب", "A line without a list price — needs approval and is not part of the computed discount") : L(`${f.customLines} بنود بدون سعر قائمة — تحتاج موافقة، ولا تدخل في الخصم المحسوب`, `${f.customLines} lines without a list price — need approval and are not part of the computed discount`)}</span>]);
+    }
+    rows.push([quoteFacts ? L("أعلى خصم محسوب", "Highest computed discount") : L("الخصم المطلوب", "Requested discount"), <span key="d" data-testid="approval-discount"><b className="hr-num">{n(f.discountPercent)}%</b>{quoteFacts ? <span className="stk-sub">{Number(f.pricedLines) > 0 ? L(" · من البنود ذات سعر القائمة فقط", " · from the lines with a list price only") : L(" · لا بنود بسعر قائمة", " · no line with a list price")}</span> : null}</span>]);
     rows.push([L("الحد المسموح", "Allowed without approval"), <span key="t" className="hr-num">{n(f.thresholdPercent)}%</span>]);
     rows.push([L("قبل الخصم", "Before discount"), <span key="s" className="hr-num">{money(f.subtotal)} {cur}</span>]);
     rows.push([L("قيمة الخصم", "Discount"), <span key="x" className="hr-num">{money(f.discountTotal)} {cur}</span>]);

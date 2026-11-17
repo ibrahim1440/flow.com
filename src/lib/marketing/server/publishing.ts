@@ -32,8 +32,33 @@ const MAX_ATTEMPTS = 4;
 
 export type PublishReport = { duePosts: number; jobsRun: number; published: number; manual: number; failed: number; skipped: string | null };
 
+/** R1-e: a publish job RUNNING longer than this was cut off mid-call (the platform call is seconds). */
+export const PUBLISH_STUCK_MS = 10 * 60_000;
+
+/**
+ * R1-e (owner decision 25 = أ): a publish job left RUNNING was cut off while calling the platform — the post may or may
+ * not be live. It is never published again on its own: MANUAL_REQUIRED with that said (a person checks the page), and
+ * the Settings editors are told.
+ */
+export async function recoverInterruptedPublishing(now = new Date()): Promise<number> {
+  const stuck = await prisma.mktPublishJob.findMany({ where: { status: "RUNNING", lockedAt: { lt: new Date(now.getTime() - PUBLISH_STUCK_MS) } }, select: { id: true, variantId: true } });
+  const why = "انقطع النشر أثناءه — قد يكون نُشر؛ لا يُعاد تلقائياً. تحقّق من الصفحة ثم انشر يدوياً إن لزم.";
+  let n = 0;
+  for (const j of stuck) {
+    await prisma.$transaction(async (tx) => {
+      const moved = await tx.mktPublishJob.updateMany({ where: { id: j.id, status: "RUNNING" }, data: { status: "MANUAL_REQUIRED", lastError: why, lockedAt: null } });
+      if (moved.count === 0) return;
+      n++;
+      await tx.mktPostVariant.update({ where: { id: j.variantId }, data: { status: "MANUAL_REQUIRED", lastError: why } });
+    }, TX_OPTS);
+  }
+  if (n > 0) await (await import("@/lib/cron/watchdog")).alertSendInterrupted("publishing", n, now).catch(() => undefined);
+  return n;
+}
+
 export async function runPublisher(now = new Date(), fetchImpl: typeof fetch = fetch): Promise<PublishReport> {
   const report: PublishReport = { duePosts: 0, jobsRun: 0, published: 0, manual: 0, failed: 0, skipped: null };
+  await recoverInterruptedPublishing(now);
   const settings = await loadSettings();
   if (killed(settings, "publishing")) return { ...report, skipped: "KILL_SWITCH" };
 

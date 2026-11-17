@@ -8,6 +8,7 @@ import { approvalRequired, killed, loadSettings } from "./settings";
 import { fetchTemplates, sendMode, sendTemplate } from "./whatsapp-cloud";
 import { parseWebhook, isOptOutText } from "../wa-webhook";
 import { karzounOptOut } from "../karzoun-rules";
+import { rootMessageId } from "@/lib/automation/resend-root";
 import { sha256 } from "./crypto";
 import { publicBaseUrl } from "./connections";
 import { normalizePhoneForWhatsApp } from "@/lib/automation/phone";
@@ -216,16 +217,22 @@ export async function enrollCart(tx: Prisma.TransactionClient, cart: { id: strin
   });
 }
 
-async function guardsNow(now: Date, phone: string | null) {
+/** The send guards at `now` (exported for the caps tests). */
+export async function guardsNow(now: Date, phone: string | null) {
   const s = await loadSettings();
   const dayStart = localDayStart(now, s.timezone);
-  const [sentToday, week] = await Promise.all([
+  // R1-e (owner decision): a message that may have been delivered counts toward the daily and the 7-day caps, unless a
+  // person recorded «لم تصل» — otherwise a resend of one that did arrive could push a customer over the limit.
+  const doubtCounts: Prisma.MktMessageWhereInput = { deliveryDoubt: true, OR: [{ reviewOutcome: null }, { reviewOutcome: { not: "NOT_DELIVERED" } }] };
+  const [sentToday, doubtToday, week] = await Promise.all([
     prisma.mktMessage.count({ where: { sentAt: { gte: dayStart }, status: { in: ["SENT", "DELIVERED", "READ"] } } }),
-    phone ? prisma.mktMessage.count({ where: { phone, category: "MARKETING", status: { in: ["SENT", "DELIVERED", "READ", "SENDING"] }, createdAt: { gte: new Date(now.getTime() - 7 * 86_400_000) } } }) : Promise.resolve(0),
+    prisma.mktMessage.count({ where: { ...doubtCounts, sentAt: null, interruptedAt: { gte: dayStart } } }),
+    phone ? prisma.mktMessage.count({ where: { phone, category: "MARKETING", createdAt: { gte: new Date(now.getTime() - 7 * 86_400_000) },
+      OR: [{ status: { in: ["SENT", "DELIVERED", "READ", "SENDING"] } }, { status: "FAILED", ...doubtCounts }] } }) : Promise.resolve(0),
   ]);
   return {
     settings: s,
-    guards: { killed: killed(s, "messaging"), timezone: s.timezone, quietStart: s.quietHoursStart, quietEnd: s.quietHoursEnd, sentToday, maxPerDay: s.maxMessagesPerDay, marketingThisWeekForPhone: week, maxPerCustomerPerWeek: s.maxMarketingPerCustomerPerWeek },
+    guards: { killed: killed(s, "messaging"), timezone: s.timezone, quietStart: s.quietHoursStart, quietEnd: s.quietHoursEnd, sentToday: sentToday + doubtToday, maxPerDay: s.maxMessagesPerDay, marketingThisWeekForPhone: week, maxPerCustomerPerWeek: s.maxMarketingPerCustomerPerWeek },
   };
 }
 
@@ -424,9 +431,27 @@ async function enqueueCampaign(tx: Prisma.TransactionClient, campaignId: string,
 export type SendReport = { considered: number; sent: number; skipped: number; failed: number; deferred: number; mode: string };
 
 /** Sends due QUEUED messages. Consent, kill switch, quiet hours and caps are checked again at send time. */
+/** R1-e: how long a message may stay SENDING before it counts as interrupted (the provider call is seconds). */
+export const MKT_STUCK_SEND_MS = 5 * 60_000;
+
+/**
+ * R1-e (owner decision 25 = أ): a message left SENDING was in flight when its process died — it may or may not have
+ * reached the phone. It is never sent again on its own (at most once): FAILED with that said, a person decides, and
+ * the Settings editors are told.
+ */
+export async function recoverInterruptedMarketing(now = new Date()): Promise<number> {
+  const r = await prisma.mktMessage.updateMany({
+    where: { status: "SENDING", updatedAt: { lt: new Date(now.getTime() - MKT_STUCK_SEND_MS) } },
+    data: { status: "FAILED", failedAt: now, statusNote: "انقطع الإرسال أثناءه — قد تكون وصلت؛ لا تُعاد تلقائياً. راجعها قبل إعادة الإرسال.", deliveryDoubt: true, interruptedAt: now },
+  });
+  if (r.count > 0) await (await import("@/lib/cron/watchdog")).alertSendInterrupted("marketing", r.count, now).catch(() => undefined);
+  return r.count;
+}
+
 export async function runSender(now = new Date(), fetchImpl: typeof fetch = fetch): Promise<SendReport> {
   const mode = sendMode();
   const rep: SendReport = { considered: 0, sent: 0, skipped: 0, failed: 0, deferred: 0, mode: mode.mode };
+  await recoverInterruptedMarketing(now);
   const due = await prisma.mktMessage.findMany({ where: { status: "QUEUED", scheduledAt: { lte: now } }, orderBy: { scheduledAt: "asc" }, take: 50 });
   const templates = new Map((await prisma.mktWaTemplate.findMany()).map((t) => [t.id, t]));
   for (const m of due) {
@@ -457,7 +482,7 @@ export async function runSender(now = new Date(), fetchImpl: typeof fetch = fetc
       rep.skipped++;
       continue;
     }
-    const claimed = await prisma.mktMessage.updateMany({ where: { id: m.id, status: "QUEUED" }, data: { status: "SENDING", attempts: { increment: 1 } } });
+    const claimed = await prisma.mktMessage.updateMany({ where: { id: m.id, status: "QUEUED" }, data: { status: "SENDING", attempts: { increment: 1 }, ...(m.sendingStartedAt ? {} : { sendingStartedAt: now }) } });
     if (claimed.count === 0) continue;
     const to = mode.mode === "TEST" ? mode.phone : m.phone;
     const r = await sendTemplate({ to, template: tpl!.name, language: tpl!.language, body: tpl!.body, bodyParams: (m.variables as string[]) ?? [] }, fetchImpl);
@@ -471,9 +496,11 @@ export async function runSender(now = new Date(), fetchImpl: typeof fetch = fetc
       const retry = r.definite && r.transient && m.attempts + 1 < 4;
       await prisma.mktMessage.update({
         where: { id: m.id },
-        data: retry ? { status: "QUEUED", scheduledAt: new Date(Date.now() + 5 * 60_000 * (m.attempts + 1)), statusNote: r.detail } : { status: "FAILED", failedAt: new Date(), statusNote: r.definite ? r.detail : `${r.detail} — قد تكون وصلت؛ لا تُعاد تلقائياً.` },
+        data: retry ? { status: "QUEUED", scheduledAt: new Date(Date.now() + 5 * 60_000 * (m.attempts + 1)), statusNote: r.detail } : { status: "FAILED", failedAt: new Date(), statusNote: r.definite ? r.detail : `${r.detail} — قد تكون وصلت؛ لا تُعاد تلقائياً.`, deliveryDoubt: !r.definite, ...(r.definite ? {} : { interruptedAt: new Date() }) },
       });
       rep.failed++;
+      // A doubt (no answer, a dropped connection, a 5xx): raised like a message recovered from SENDING.
+      if (!r.definite) await (await import("@/lib/cron/watchdog")).alertSendInterrupted("marketing", 1, now).catch(() => undefined);
     }
   }
   return rep;
@@ -509,20 +536,140 @@ export async function applyCloudWebhook(payload: unknown) {
   return { updated, optOuts };
 }
 
-export async function listMessages(q: { status?: string | null; search?: string | null; page: number }) {
-  const where: Prisma.MktMessageWhereInput = { ...(q.status ? { status: q.status } : {}), ...(q.search ? { phone: { contains: q.search.replace(/\D/g, "") } } : {}) };
-  const [rows, total, counts] = await Promise.all([
-    prisma.mktMessage.findMany({ where, orderBy: { createdAt: "desc" }, skip: (q.page - 1) * 50, take: 50, include: { campaign: { select: { id: true, name: true } } } }),
+/** «تحتاج مراجعة»: a doubtful FAILED message not reviewed yet, or reviewed «تعذّر التأكد» (still open). */
+export const NEEDS_REVIEW: Prisma.MktMessageWhereInput = { status: "FAILED", deliveryDoubt: true, OR: [{ reviewOutcome: null }, { reviewOutcome: "UNCERTAIN" }], resend: { is: null } };
+/** «معلّقة»: reviewed «تعذّر التأكد» — open, never resendable. */
+export const PENDING_REVIEW: Prisma.MktMessageWhereInput = { status: "FAILED", deliveryDoubt: true, reviewOutcome: "UNCERTAIN" };
+/** «أُعيد إرسالها»: an original resent after «لم تصل». */
+export const RESENT: Prisma.MktMessageWhereInput = { resend: { isNot: null } };
+
+export async function listMessages(q: { status?: string | null; search?: string | null; review?: string | null; page: number }, now = new Date()) {
+  const review = q.review === "needed" ? NEEDS_REVIEW : q.review === "pending" ? PENDING_REVIEW : q.review === "resent" ? RESENT : {};
+  const where: Prisma.MktMessageWhereInput = { ...review, ...(q.status ? { status: q.status } : {}), ...(q.search ? { phone: { contains: q.search.replace(/\D/g, "") } } : {}) };
+  const [rows, total, counts, needsReview, pending, resent] = await Promise.all([
+    prisma.mktMessage.findMany({
+      where, orderBy: { createdAt: "desc" }, skip: (q.page - 1) * 50, take: 50,
+      include: { campaign: { select: { id: true, name: true } }, reviewedBy: { select: { id: true, name: true } }, resend: { select: { id: true, status: true, createdAt: true } } },
+    }),
     prisma.mktMessage.count({ where }),
     prisma.mktMessage.groupBy({ by: ["status"], _count: { _all: true } }),
+    prisma.mktMessage.count({ where: NEEDS_REVIEW }),
+    prisma.mktMessage.count({ where: PENDING_REVIEW }),
+    prisma.mktMessage.count({ where: RESENT }),
   ]);
-  return { rows, total, perPage: 50, counts: Object.fromEntries(counts.map((c) => [c.status, c._count._all])) };
+  // «أعاد إرسالها: الاسم · الوقت» — the name from the audit row (message.resent on the original), the time from the resend.
+  const resentIds = rows.filter((r) => r.resend).map((r) => r.id);
+  const resenders = resentIds.length
+    ? new Map((await prisma.mktAuditLog.findMany({ where: { action: "message.resent", entityType: "MktMessage", entityId: { in: resentIds } }, select: { entityId: true, actorName: true } })).map((a) => [a.entityId, a.actorName]))
+    : new Map<string | null, string | null>();
+  // R1-e gate M1: a resend's window is its ROOT original's (a resend of a resend never restarts it).
+  const roots = new Map<string, { sendingStartedAt: Date | null; scheduledAt: Date | null; createdAt: Date }>();
+  for (const r of rows) if (r.resendOfMessageId) { const root = await mktRootTimes(prisma, r.id); if (root) roots.set(r.id, root); }
+  return {
+    rows: rows.map((r) => ({ ...r, resendWindow: resendWindowOf(roots.get(r.id) ?? r, now), resentBy: r.resend ? { name: resenders.get(r.id) ?? null, at: r.resend.createdAt } : null })),
+    total, perPage: 50, counts: Object.fromEntries(counts.map((c) => [c.status, c._count._all])), needsReview, pending, resent,
+  };
 }
 
 export async function cancelMessage(id: string, actor: Actor) {
   if (!can(actor, "messaging_manage")) throw denied();
   const r = await prisma.mktMessage.updateMany({ where: { id, status: "QUEUED" }, data: { status: "CANCELLED", statusNote: `ألغاها ${actor.name}` } });
   if (r.count === 0) throw new MktError("الرسالة ليست في قائمة الانتظار.", "Message is not queued.", 409);
+}
+
+// ── «تسجيل نتيجة التحقق» on a campaign message that may have been delivered (R1-e, owner-approved design) ─────────────
+// One processing experience with the automation log: the review never changes `status` (the provider's); a resend is a
+// NEW message linked to the original, allowed only after «لم تصل» (with a note and confirm: true) — «تعذّر التأكد» never.
+// The database holds the same rules (20261231200000_message_review: message_review_guard).
+
+export const REVIEW_OUTCOMES = ["DELIVERED", "NOT_DELIVERED", "UNCERTAIN"] as const;
+export type ReviewOutcome = (typeof REVIEW_OUTCOMES)[number];
+
+/**
+ * The 24-hour window of a campaign resend (owner decision): it starts at the original's FIRST send attempt
+ * (sendingStartedAt); a row from before that column existed falls back to scheduledAt, then createdAt. After it a late
+ * marketing message is not sent — the sender itself cancels anything more than 24 h late.
+ */
+export const MKT_RESEND_WINDOW_MS = 24 * 3_600_000;
+/** The root original's times (gate M1) — null when the chain is broken. */
+async function mktRootTimes(db: Pick<Prisma.TransactionClient, "$queryRawUnsafe" | "mktMessage">, id: string) {
+  const rootId = await rootMessageId(db, "MktMessage", id);
+  return rootId ? db.mktMessage.findUnique({ where: { id: rootId }, select: { sendingStartedAt: true, scheduledAt: true, createdAt: true } }) : null;
+}
+
+export function resendWindowOf(m: { sendingStartedAt: Date | null; scheduledAt: Date | null; createdAt: Date }, now = new Date()) {
+  const from = m.sendingStartedAt ?? m.scheduledAt ?? m.createdAt;
+  const until = new Date(from.getTime() + MKT_RESEND_WINDOW_MS);
+  return { from: from.toISOString(), until: until.toISOString(), open: now.getTime() < until.getTime(), basis: m.sendingStartedAt ? "sendingStartedAt" : m.scheduledAt ? "scheduledAt" : "createdAt" };
+}
+
+const riyadhTime = (d: Date) => new Intl.DateTimeFormat("ar-SA-u-nu-latn", { timeZone: "Asia/Riyadh", dateStyle: "short", timeStyle: "short" }).format(d);
+
+export async function reviewMessage(id: string, body: Record<string, unknown>, actor: Actor) {
+  if (!can(actor, "messaging_manage")) throw denied();
+  const outcome = oneOf(body.outcome, REVIEW_OUTCOMES, "نتيجة التحقق");
+  const note = str(body.note, "ملاحظة التحقق", { required: true, max: 1000 })!;
+  return prisma.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM "MktMessage" WHERE id = ${id} FOR UPDATE`;
+    if (!rows[0]) throw notFound();
+    const m = await tx.mktMessage.findUniqueOrThrow({ where: { id }, select: { status: true, deliveryDoubt: true, reviewOutcome: true, reviewNote: true, resend: { select: { id: true } } } });
+    if (m.status !== "FAILED" || !m.deliveryDoubt) throw new MktError("نتيجة التحقق تُسجَّل لرسالة انقطع إرسالها فقط.", "A review is recorded only for a message whose send was interrupted.", 409, "NOT_IN_DOUBT");
+    if (m.resend) throw new MktError("أُعيد إرسال هذه الرسالة؛ نتيجة مراجعتها لا تتغيّر.", "This message was resent; its review cannot change.", 409, "REVIEW_FROZEN");
+    // «وصلت» closes it and «لم تصل» leads to the resend: both are final. Only «تعذّر التأكد» stays open to a later review —
+    // so a second reviewer who opened the same message gets 409, not a silent overwrite.
+    if (m.reviewOutcome === "DELIVERED" || m.reviewOutcome === "NOT_DELIVERED") {
+      throw new MktError("سُجّلت نتيجة التحقق لهذه الرسالة من قبل. حدّث الصفحة.", "A review was already recorded for this message. Reload.", 409, "ALREADY_REVIEWED");
+    }
+    const row = await tx.mktMessage.update({
+      where: { id },
+      data: { reviewOutcome: outcome, reviewNote: note, reviewedById: actor.id, reviewedAt: new Date() },
+      select: { id: true, status: true, reviewOutcome: true, reviewNote: true, reviewedById: true, reviewedAt: true },
+    });
+    await audit(tx, userActor(actor), "message.review_recorded", "MktMessage", id, { before: { reviewOutcome: m.reviewOutcome }, after: { reviewOutcome: outcome, reviewNote: note }, note });
+    return row;
+  }, TX_OPTS);
+}
+
+/**
+ * «إعادة الإرسال بعد المراجعة»: only after «لم تصل», with confirm: true, within the 24-hour window. A NEW message linked
+ * to the original goes through the normal sender (consent, quiet hours, caps, send mode checked again at send time).
+ * One resend per original (UNIQUE): a second or concurrent call — usually someone else first — answers 409 ALREADY_RESENT.
+ */
+export async function resendAfterReview(id: string, body: Record<string, unknown>, actor: Actor, now = new Date()) {
+  if (!can(actor, "messaging_manage")) throw denied();
+  if (body.confirm !== true) throw new MktError("أكّد إعادة الإرسال أولاً.", "Confirm the resend first.", 400, "RESEND_CONFIRM");
+  return prisma.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM "MktMessage" WHERE id = ${id} FOR UPDATE`;
+    if (!rows[0]) throw notFound();
+    const o = await tx.mktMessage.findUniqueOrThrow({ where: { id } });
+    const existing = await tx.mktMessage.findUnique({ where: { resendOfMessageId: id } });
+    if (existing) throw new MktError("أُعيد إرسال هذه الرسالة من قبل.", "This message was already resent.", 409, "ALREADY_RESENT");
+    if (o.status !== "FAILED" || !o.deliveryDoubt || o.reviewOutcome !== "NOT_DELIVERED") {
+      throw new MktError("لا تُعاد الرسالة إلا بعد تسجيل نتيجة التحقق «لم تصل».", "A message is resent only after a «not delivered» review.", 409, "RESEND_NOT_ALLOWED");
+    }
+    // R1-e gate M1: measured from the ROOT original (the database trigger checks the same).
+    const root = o.resendOfMessageId ? await mktRootTimes(tx, o.id) : o;
+    if (!root) throw new MktError("لا نجد الرسالة الأصلية لهذه السلسلة، فلا نستطيع إثبات مهلة الإعادة.", "The chain's original message is not found; the resend window cannot be proven.", 409, "WINDOW_UNPROVABLE");
+    const w = resendWindowOf(root, now);
+    if (!w.open) {
+      const t = riyadhTime(new Date(w.from));
+      throw new MktError(
+        `انتهت مهلة الإعادة: مرّت أكثر من ٢٤ ساعة على أول محاولة إرسال (${t})، والرسالة التسويقية المتأخرة لا تُرسل.`,
+        `The resend window has closed: more than 24 hours have passed since the first send attempt (${w.from}); a late marketing message is not sent.`,
+        409, "RESEND_TOO_LATE",
+      );
+    }
+    const message = await tx.mktMessage.create({
+      data: {
+        channel: o.channel, phone: o.phone, enrollmentId: o.enrollmentId, campaignId: o.campaignId, templateId: o.templateId,
+        category: o.category, preview: o.preview, variables: o.variables as Prisma.InputJsonValue,
+        dedupeKey: `${o.dedupeKey}:resend`, status: "QUEUED", scheduledAt: now, resendOfMessageId: o.id,
+        statusNote: `إعادة إرسال بعد المراجعة (${actor.name})`,
+      },
+    });
+    await audit(tx, userActor(actor), "message.resent", "MktMessage", o.id, { after: { originalId: o.id, newMessageId: message.id } });
+    return message;
+  }, TX_OPTS);
 }
 
 /**

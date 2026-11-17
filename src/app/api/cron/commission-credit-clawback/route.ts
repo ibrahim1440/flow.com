@@ -12,10 +12,9 @@ import { lastEndedRiyadhYear } from "@/lib/services/commissions/credit-clawback-
  * each (credit note, person) is written once, and a year that has not ended is refused. Answers counts only
  * (no names, no amounts).
  *
- * TODO(scheduler): NOT in vercel.json `crons` yet — the orchestrator decides. A daily call during the first
- * days of January is enough and harmless (idempotent), e.g. `{ "path": "/api/cron/commission-credit-clawback",
- * "schedule": "20 1 1-7 1 *" }` (01:20 UTC = 04:20 Riyadh, 1–7 January). Until then it is run by calling this
- * route with the secret.
+ * Scheduled (R1-e): every hourly workflow run calls it; it is due from 06:00 Riyadh and runs at most once per Riyadh day
+ * (lib/cron/jobs.ts DUE_FROM_RIYADH_HOUR / CRON_SLOT). Outside the first days after a year ends it finds nothing new to
+ * write and answers zero counts. vercel.json keeps a daily backup at 03:15 UTC (06:15 Riyadh).
  */
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;

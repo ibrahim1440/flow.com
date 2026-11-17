@@ -54,6 +54,8 @@ next-env.d.ts
 
 # Browser UAT artifacts — traces, screenshots and the HTML report are produced per run
 /test-results/
+# scripts/e2e/serve.sh: the Resend mock log and the env file for the Playwright shell
+/.e2e-run/
 /playwright-report/
 /tests/e2e/support/catalog.json
 

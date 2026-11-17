@@ -6,9 +6,10 @@ import { accountingQuoteReminders } from "@/lib/services/sales/accounting-quote-
 import { prisma } from "@/lib/db";
 
 /**
- * The daily document-expiry check (feat/hr-expiry-email), called by Vercel Cron once a day at 03:00 UTC
- * (06:00 Asia/Riyadh — vercel.json `crons`). Protected by lib/cron/auth.ts (CRON_SECRET, or the Vercel
- * Cron user agent on Vercel when no secret is set). Answers counts only. Idempotent: a second call the
+ * The daily document-expiry check (feat/hr-expiry-email), due from 06:00 Riyadh (R1-e: the hourly workflow calls it; the first call at or after
+ * that hour runs, once per Riyadh day — lib/cron/jobs.ts); Vercel Cron at 03:00 UTC is the backup
+ * (06:00 Asia/Riyadh — vercel.json `crons`). Protected by lib/cron/auth.ts (the CRON_SECRET bearer only).
+ * Answers counts only. Idempotent: a second call the
  * same day notifies nobody again. Then e-mails what it wrote (when a provider is configured).
  * The same run is available to HR from HR settings («تشغيل الآن»: POST /api/hr/document-expiry/run).
  */

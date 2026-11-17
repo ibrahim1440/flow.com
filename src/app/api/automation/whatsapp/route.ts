@@ -139,6 +139,7 @@ export async function POST(request: Request) {
       body: text,
       status: result.ok ? "SENT" : "FAILED",
       statusNote: result.ok ? "Test message." : result.error,
+      ...(!result.ok && result.ambiguous ? { deliveryDoubt: true, interruptedAt: new Date() } : {}),
       attempts: 1,
       sentAt: result.ok ? new Date() : null,
       providerMessageId: result.ok ? result.messageId : null,
