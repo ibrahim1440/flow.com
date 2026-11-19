@@ -15,7 +15,7 @@ import { LoginLangContext, LoginTaglineContext } from "./lang-context";
 import { taglineLines } from "@/lib/login-tagline";
 import { applyDocumentLang, toggleAriaLabel, writeLangCookie } from "@/lib/i18n/language-switch";
 import { RiyalFont } from "@/components/fonts/RiyalFont";
-import { clearAllDrafts } from "@/lib/drafts/local-draft";
+import { clearAllDrafts, endSignOut } from "@/lib/drafts/local-draft";
 import { arCount, AR_MINUTES, AR_SECONDS } from "@/lib/i18n/ar-count";
 
 // Owner security decision (16 Oct, Option A). Three ways in:
@@ -112,7 +112,8 @@ export default function LoginClient() {
   const [note, setNote] = useState<Note | null>(null);
   // P2 gate B1: the sign-in page is where every sign-out ends (the menu, idle, expiry, a session revoked elsewhere): no
   // unsaved draft of the previous person survives on this device.
-  useEffect(() => { clearAllDrafts(); }, []);
+  // And the next session's leave guards work again (R2 gate High: a sign-out reached by a client-side move keeps the module).
+  useEffect(() => { clearAllDrafts(); endSignOut(); }, []);
   // P2 SEC-09: the seconds left of a server-held wait (re-read every second while one runs).
   const [nowTick, setNowTick] = useState(() => Date.now());
   const holdLeft = note?.until ? Math.max(0, Math.ceil((note.until - nowTick) / 1000)) : 0;

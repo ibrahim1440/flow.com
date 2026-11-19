@@ -9,6 +9,7 @@ import { hasModuleAccess, hasSubPrivilege, type Permissions } from "@/lib/auth-s
 import { freshEnough, REAUTH_EN } from "@/lib/auth/step-up";
 import { CONCURRENT_UPDATE_MESSAGE, CONCURRENT_UPDATE_RETRY, concurrencyFailureOf } from "./db-errors";
 import { isSimpleMode } from "@/lib/simple-mode";
+import { dbGuardText } from "@/lib/db-guard-text";
 
 export type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -188,7 +189,8 @@ export const TX = { timeout: 30_000, maxWait: 10_000, isolationLevel: Prisma.Tra
 /** Translate a database guard (trigger / check / unique) into a 409 the UI can show. */
 export function mapDbError(err: unknown): never {
   const e = err as { code?: string; message?: string; meta?: { code?: string; message?: string } };
-  const msg = String(e?.meta?.message ?? e?.message ?? "");
+  // R2-deps gate: the guard's own text (Prisma 7.10 wraps it in «Message: `…`») — lib/db-guard-text.ts.
+  const msg = dbGuardText(err);
   // The commission payout freeze (docs/hr/COMMISSION-PAYOUT-FREEZE.md): the payment that would settle a
   // reserved commission period is refused whole. Same English text as the database, so it reads the same.
   if (/Commission payout recording is frozen at the database/.test(msg)) {

@@ -53,6 +53,24 @@ export function clearDraft(user: string | null | undefined, name: string, s?: St
   try { st.removeItem(draftKey(user, name)); } catch { /* ignore */ }
 }
 
+/**
+ * R2 gate: the page is leaving for a sign-out by a FULL page load (the idle guard, the shell's sign-out buttons, a station
+ * sign-out), so the «leave this page?» guards (LeaveGuard, useUnsavedGuard) stay silent: an idle sign-out on a shared device
+ * must leave the screen, not stop on the browser's leave prompt with the form still showing.
+ *
+ * Set only by beginSignOut(), right before such a load (which ends this module's state). NOT by clearAllDrafts: that also
+ * runs on the sign-in page and in the menu's sign-out (a client-side move to /login), and a flag left on there silenced the
+ * guards for the whole next session (R2 gate, High). Reset by endSignOut() on the sign-in page and when a page comes back
+ * from the back/forward cache.
+ */
+let signingOut = false;
+export function isSigningOut(): boolean { return signingOut; }
+export function beginSignOut(): void { signingOut = true; }
+export function endSignOut(): void { signingOut = false; }
+if (typeof window !== "undefined") {
+  window.addEventListener("pageshow", (e) => { if ((e as PageTransitionEvent).persisted) signingOut = false; });
+}
+
 /** Sign-out (any path): every draft of this device goes — every user's, and the pre-R1 unkeyed ones. */
 export function clearAllDrafts(s?: Store | null): void {
   const st = store(s);

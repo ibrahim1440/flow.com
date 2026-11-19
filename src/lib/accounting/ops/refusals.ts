@@ -1,6 +1,7 @@
 // Accounting A3 — the refusals of the operational posting, the cost sub-ledger and AP: Arabic first, English, a
 // stable code and an HTTP status (the same AccountingError the A1 core throws, so every route answers it alike).
 import { AccountingError } from "../errors";
+import { unwrapDbMessage } from "../../db-guard-text";
 
 type R = { status: number; en: string; ar: string };
 
@@ -139,7 +140,8 @@ export function opsRefuse(code: OpsRefusalCode, detail?: string, detailAr?: stri
 }
 
 /** The A3 database guards ("COST_MOVE_IMMUTABLE: …", "AP_INVOICE_POSTED: …"), as coded refusals. */
-export function opsDbRefusal(message: string): AccountingError | null {
+export function opsDbRefusal(raw: string): AccountingError | null {
+  const message = unwrapDbMessage(raw);
   if (/COST_MOVE_(IMMUTABLE|PENDING)/.test(message)) return opsRefuse("COST_MOVE_IMMUTABLE");
   if (/AP_INVOICE_PAID/.test(message)) return opsRefuse("INVOICE_PAID");
   if (/AP_CLAIM_KEPT/.test(message)) return opsRefuse("CLAIM_SETTLED");

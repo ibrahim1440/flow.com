@@ -15,6 +15,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { ipHashOf } from "@/lib/accounting/ops/purchase-activity";
 import type { AuditContext } from "@/lib/accounting/audit";
+import { dbGuardText } from "@/lib/db-guard-text";
 import {
   LOCATION_TYPES, QTY_EPSILON, covers, defaultLocationRefusal, holdsStockRefusal, inactiveRefusal, isLocationType, locationDbRefusal, normalizeLocationCode,
   pickProductionLocation, productionRefusal, shortRefusal, transferLink, inTransitRefusal, isTransitLocation, workSiteOf, type LocationRow, type StockItemKind,
@@ -309,7 +310,7 @@ async function guarded<T>(run: () => Promise<T>): Promise<T> {
   try {
     return await run();
   } catch (e) {
-    const r = locationDbRefusal(e instanceof Error ? e.message : String((e as { message?: string })?.message ?? ""));
+    const r = locationDbRefusal(dbGuardText(e));
     if (r) throw fail(r.status, r.code, r.error, r.errorEn, r.locationId ? { locationId: r.locationId, transferHref: r.code === "STOCK_LOCATION_HOLDS_STOCK" ? transferLink({ from: r.locationId }) : null } : undefined);
     throw e;
   }

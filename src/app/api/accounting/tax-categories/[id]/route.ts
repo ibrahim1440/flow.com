@@ -6,6 +6,7 @@ import { acctError } from "@/lib/accounting/http";
 import { auditFromRequest, setAuditContext } from "@/lib/accounting/audit";
 import { opsDbRefusal, opsRefuse } from "@/lib/accounting/ops/refusals";
 import { PURCHASE_TAX_CODES } from "@/lib/purchases/tax-codes";
+import { dbGuardText } from "@/lib/db-guard-text";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -132,7 +133,7 @@ export async function PATCH(request: Request, { params }: Params) {
     });
     return NextResponse.json(taxCategory);
   } catch (err) {
-    const frozen = opsDbRefusal(String((err as Error)?.message ?? ""));
+    const frozen = opsDbRefusal(dbGuardText(err));
     if (frozen) return acctError(frozen);
     return handlePrismaError(err);
   }

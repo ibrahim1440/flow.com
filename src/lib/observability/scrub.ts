@@ -7,8 +7,9 @@ const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 // L7: bounded to an IBAN's own shape so it never swallows the word after it — either unbroken (2 letters, 2 check digits,
 // 11–30 letters/digits: SA0380000000608010167519) or printed in groups of four separated by single spaces
 // (SA03 8000 0000 6080 1016 7519, GB82 WEST 1234 …) — the first group may be a bank code in letters, every later group
-// holds a digit (so a following word such as «phone» or «code» is never taken for one).
-const IBAN = /\b[A-Z]{2}\d{2}(?:[A-Z0-9]{11,30}|(?: [A-Z0-9]{4})(?: (?=[A-Z0-9]{0,3}\d)[A-Z0-9]{4}){1,6}(?: (?=[A-Z0-9]{0,2}\d)[A-Z0-9]{1,3})?)\b/gi;
+// holds a digit — or is a group of letters followed by a full group holding a digit (Malta: … 2345 MTLC AST0 01S) — so a
+// following word such as «phone» or «code» is never taken for one.
+const IBAN = /\b[A-Z]{2}\d{2}(?:[A-Z0-9]{11,30}|(?: [A-Z0-9]{4})(?: (?:(?=[A-Z0-9]{0,3}\d)[A-Z0-9]{4}|[A-Z]{4}(?= (?=[A-Z0-9]{0,3}\d)[A-Z0-9]{4}\b))){1,6}(?: (?=[A-Z0-9]{0,2}\d)[A-Z0-9]{1,3})?)\b/gi;
 /** A URL's query string inside free text (a breadcrumb's message: «GET /api/x?customer=…»). */
 const QUERY = /((?:https?:\/\/|\/)[^\s?#"']*)\?[^\s"'#]*/g;
 const PHONE = /(?:\+|00)?9665\d{8}\b|\b05\d{8}\b/g;
@@ -65,7 +66,7 @@ export type ScrubbableEvent = {
 /**
  * A guest link's secret in a path (production check): /guest-qc/<batch>/<token>, /api/guest-qc/<batch>/<token>,
  * /guest-cupping/session/<token>, /api/public/cupping/session/<token> — and any path segment of 20+ base64url
- * characters (a token in a route this list does not know yet) — read «[token]». Applied to request.url and
+ * characters holding a digit (a token in a route this list does not know yet) — read «[token]». Applied to request.url and
  * contexts.nextjs.request_path only.
  */
 const TOKEN_ROUTE = [/^(\/(?:api\/)?guest-qc\/[^/]+\/)[^/]+/, /^(\/(?:guest-cupping|api\/public\/cupping)\/session\/)[^/]+/];
@@ -74,7 +75,9 @@ export function scrubPath(value: string): string {
   const m = /^(https?:\/\/[^/]+)?(.*)$/.exec(noQuery)!;
   let path = m[2] || "";
   for (const r of TOKEN_ROUTE) path = path.replace(r, "$1[token]");
-  path = path.split("/").map((seg) => (/^[A-Za-z0-9_-]{20,}$/.test(seg) ? "[token]" : seg)).join("/");
+  // A long segment is a token only when it holds a digit: the application's own long route names (commission-credit-
+  // clawback, reconciliation-notes, …) have none; ids (cuid) and random tokens do.
+  path = path.split("/").map((seg) => (/^(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{20,}$/.test(seg) ? "[token]" : seg)).join("/");
   return scrubText((m[1] ?? "") + path);
 }
 

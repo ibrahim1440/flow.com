@@ -13,6 +13,7 @@ import { HrError, type HrActor } from "./core";
 import { localDay } from "./dates";
 import { activePolicyFor } from "./services/policy";
 import { toArabic } from "./messages-ar";
+import { dbGuardText } from "@/lib/db-guard-text";
 
 type RouteCtx = { params: Promise<Record<string, string>> };
 export type HrArgs = { actor: HrActor; request: Request; params: Record<string, string>; query: URLSearchParams; now: Date; today: Date };
@@ -24,7 +25,8 @@ function refusal(message: string, status: number, code: string | null) {
 
 export function hrErrorResponse(err: unknown) {
   if (err instanceof HrError) return refusal(err.message, err.status, err.code ?? null);
-  const msg = err instanceof Error ? err.message : String((err as { message?: string })?.message ?? "");
+  // R2-deps gate: the guard's own text, never Prisma's wrapper (lib/db-guard-text.ts).
+  const msg = dbGuardText(err);
   const m = /HR: ([^\n"]+)/.exec(msg);
   if (m) return refusal(m[1].trim(), 409, "DB_GUARD");
   return handlePrismaError(err);

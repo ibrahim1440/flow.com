@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { D21Dialog } from "@/components/ui/Dialog";
-import { clearDraft, loadDraft, saveDraft } from "@/lib/drafts/local-draft";
+import { clearDraft, isSigningOut, loadDraft, saveDraft } from "@/lib/drafts/local-draft";
 import "./drafts.css";
 
 export const LEAVE_TEXT = {
@@ -84,7 +84,8 @@ export function useLeaveGuard({ ar, dirty, onLeave }: { ar: boolean; dirty: bool
   useEffect(() => { live.current = dirty; }, [dirty]);
   useEffect(() => {
     if (!dirty) return;
-    const unload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    // Not while signing out (isSigningOut): the sign-out must leave the page without the browser's leave prompt.
+    const unload = (e: BeforeUnloadEvent) => { if (isSigningOut()) return; e.preventDefault(); e.returnValue = ""; };
     // Capture phase: before next/link's own handler navigates.
     const click = (e: MouseEvent) => {
       if (!live.current || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;

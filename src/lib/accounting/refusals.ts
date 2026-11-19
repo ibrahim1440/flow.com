@@ -3,6 +3,7 @@
 // `errorEn`, `code`). The database's own "LEDGER: …" refusals (triggers of 20261102090000_accounting_core) are
 // mapped here too (ledgerDbRefusal), so a guard firing is a 409 with a code, never a 500. Pure.
 import { AccountingError } from "./errors";
+import { unwrapDbMessage } from "../db-guard-text";
 
 type R = { status: number; en: string; ar: string };
 
@@ -123,7 +124,8 @@ const DB: [RegExp, RefusalCode, string][] = [
   [/LEDGER: /, "LEDGER_DB", ""],
 ];
 
-export function ledgerDbRefusal(message: string): AccountingError | null {
+export function ledgerDbRefusal(raw: string): AccountingError | null {
+  const message = unwrapDbMessage(raw);
   if (!/LEDGER: /.test(message) || /LEDGER: manual journals are disabled/.test(message)) return null;
   const hit = DB.find(([re]) => re.test(message));
   if (!hit) return null;

@@ -5,6 +5,7 @@ import { MANUAL_JOURNALS_DISABLED, MANUAL_JOURNALS_DISABLED_AR, MANUAL_JOURNALS_
 import { ledgerDbRefusal } from "@/lib/accounting/refusals";
 import { AccountingError, accountingErrorJson } from "@/lib/accounting/errors";
 import { opsDbRefusal } from "@/lib/accounting/ops/refusals";
+import { dbGuardText } from "@/lib/db-guard-text";
 
 /**
  * A refusal the domain raised deliberately, mapped to the status it asked for.
@@ -47,7 +48,8 @@ export function handlePrismaError(err: unknown): NextResponse {
   }
   // Phase 1 payroll lock (independent review F7): a refusal by the database's payroll guards is a
   // refusal, never a crash — 409 with its code, whatever route the write came through.
-  const msg = err instanceof Error ? err.message : "";
+  // R2-deps gate: every guard below reads the guard's own text, never Prisma 7.10's «Message: `…`» wrapper.
+  const msg = dbGuardText(err);
   if (/HR: payroll is locked \(live payroll is off\)/.test(msg)) {
     return NextResponse.json({ error: "الرواتب مقفلة: لم يُفعَّل تشغيل الرواتب الفعلي بعد، لذلك رُفض هذا الإجراء.", errorEn: "Payroll is locked: live payroll has not been switched on, so this action is refused.", code: "PAYROLL_LOCKED" }, { status: 409 });
   }

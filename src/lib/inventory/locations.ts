@@ -3,6 +3,7 @@
 // (phase 1) says WHAT it is. Valuation stays company-wide — the moving-average cost ledger is per item, never per
 // location, and a transfer between locations is a cost-ledger TRANSFER with no journal entry (same company, same
 // inventory account; council roles 01 / 02).
+import { unwrapDbMessage } from "../db-guard-text";
 
 export const LOCATION_TYPES = ["ROASTERY", "WAREHOUSE", "CAFE", "BRANCH", "OTHER"] as const;
 export type LocationType = (typeof LOCATION_TYPES)[number];
@@ -161,7 +162,8 @@ export function inactiveRefusal(name: string, locationId?: string): LocationRefu
 }
 
 /** The bilingual refusal of a database stock-location guard (stock_balance_sync / _guard, stock_location_guard), or null. */
-export function locationDbRefusal(message: string): LocationRefusal | null {
+export function locationDbRefusal(raw: string): LocationRefusal | null {
+  const message = unwrapDbMessage(raw); // R2-deps gate: never Prisma 7.10's «Message: `…`» wrapper
   const t = /STOCK_LOCATION_IN_TRANSIT\|([^|\n]*)\|([^|\n]*)\|([^\n"]*)/.exec(message);
   if (t) return inTransitRefusal(t[2], t[3].trim(), t[1]);
   const m = /(STOCK_LOCATION_SHORT|STOCK_LOCATION_INACTIVE|STOCK_LOCATION_HOLDS_STOCK|STOCK_LOCATION_DEFAULT|STOCK_LOCATION_PRODUCTION)\|([^|\n]*)\|([^|\n]*)(?:\|([^|\n]*)\|([^|\n]*)\|([^|\n]*)\|([^|\s]*))?/.exec(message);

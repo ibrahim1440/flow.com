@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { createContext, useContext, useEffect, useRef, useSyncExternalStore } from "react";
 import type { D21IconName } from "./icons";
 
@@ -138,7 +138,6 @@ export function SectionPages({ className = "" }: { className?: string }) {
  */
 export function useCreateRequest(kind: string, open: () => void, enabled = true) {
   const params = useSearchParams();
-  const router = useRouter();
   const pathname = usePathname();
   const search = params.toString();
   const asked = params.get("new") === kind;
@@ -155,8 +154,10 @@ export function useCreateRequest(kind: string, open: () => void, enabled = true)
     const q = new URLSearchParams(search);
     q.delete("new");
     const rest = q.toString();
-    router.replace(rest ? `${pathname}?${rest}` : pathname, { scroll: false });
-  }, [asked, enabled, search, pathname, router]);
+    // R2 gate: the address drops `new` at once (history.replaceState, which the App Router follows — useSearchParams
+    // updates). router.replace commits later, in a transition: a reload in between opened the form again.
+    window.history.replaceState(null, "", (rest ? `${pathname}?${rest}` : pathname) + window.location.hash);
+  }, [asked, enabled, search, pathname]);
 }
 
 /** Starts a shell «جديد» menu action by its id (creates.ts), e.g. "sales.sample.new" — opens «لأي عميل؟» first. */

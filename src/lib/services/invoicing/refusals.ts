@@ -4,6 +4,7 @@
 import { NextResponse } from "@/lib/api-response";
 import { AccountingError, accountingErrorJson } from "@/lib/accounting/errors";
 import { acctError } from "@/lib/accounting/http";
+import { dbGuardText, unwrapDbMessage } from "@/lib/db-guard-text";
 
 type R = { status: number; en: string; ar: string };
 
@@ -61,7 +62,8 @@ const DB: [RegExp, InvRefusalCode][] = [
   [/SINV: /, "INVOICE_DB"],
 ];
 
-export function sinvDbRefusal(message: string): AccountingError | null {
+export function sinvDbRefusal(raw: string): AccountingError | null {
+  const message = unwrapDbMessage(raw);
   if (!/SINV: |FA_SALE: /.test(message)) return null;
   const hit = DB.find(([re]) => re.test(message))!;
   const line = (/(SINV|FA_SALE): [^\n"]*/.exec(message)?.[0] ?? "").slice(0, 300);
@@ -76,7 +78,8 @@ export function invError(err: unknown): NextResponse {
     return NextResponse.json({ error: e.message ?? e.errorAr, errorAr: e.errorAr ?? e.message, errorEn: e.errorEn, code: e.code, ...(e.credit ? { credit: e.credit } : {}) }, { status: e._appCode });
   }
   if (err instanceof AccountingError) return NextResponse.json({ ...accountingErrorJson(err), ...(err as AccountingError & { extra?: object }).extra }, { status: err.status });
-  const msg = err instanceof Error ? `${err.message} ${JSON.stringify((err as { cause?: unknown }).cause ?? "")}` : String(err);
+  // R2-deps gate: the guard's own text (lib/db-guard-text.ts), the error's or its cause's.
+  const msg = dbGuardText(err) || dbGuardText((err as { cause?: unknown })?.cause);
   const db = sinvDbRefusal(msg);
   if (db) return NextResponse.json(accountingErrorJson(db), { status: db.status });
   return acctError(err);

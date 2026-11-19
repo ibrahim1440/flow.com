@@ -56,7 +56,7 @@
     "db:local:stop": "node scripts/finance/local-postgres.mjs stop",
     "db:local:status": "node scripts/finance/local-postgres.mjs status",
     "test:hr:unit": "tsx --import ./tests/support/simple-mode-off.mjs --test tests/hr/unit/*.test.ts",
-    "test:hr:db": "tsx --env-file=.env.test --import ./tests/support/simple-mode-off.mjs --test --test-concurrency=1 --test-force-exit tests/hr/integration/*.test.ts",
+    "test:hr:db": "tsx --env-file=.env.test --import ./tests/support/server-only-stub.mjs --import ./tests/support/simple-mode-off.mjs --test --test-concurrency=1 --test-force-exit tests/hr/integration/*.test.ts",
     "test:hr:http": "node scripts/hr/run-http-suites.mjs",
     "test:hr:shell": "node --test tests/hr/visual/shell.test.mjs",
     "hr:fixture": "tsx --env-file=.env scripts/hr/seed-preview-fixture.ts",
@@ -78,12 +78,12 @@
   "dependencies": {
     "@anthropic-ai/sdk": "0.133.0",
     "@libsql/client": "^0.17.3",
-    "@prisma/adapter-libsql": "^7.8.0",
-    "@prisma/adapter-pg": "^7.8.0",
-    "@prisma/client": "^7.8.0",
+    "@prisma/adapter-libsql": "^7.10.1",
+    "@prisma/adapter-pg": "^7.10.1",
+    "@prisma/client": "^7.10.1",
     "@sentry/nextjs": "11.12.0",
     "@tanstack/react-table": "^8.21.3",
-    "@vercel/blob": "2.8.2",
+    "@vercel/blob": "2.9.0",
     "@xmldom/xmldom": "0.9.12",
     "@zxing/browser": "0.2.1",
     "@zxing/library": "0.23.0",
@@ -102,15 +102,14 @@
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
     "lucide-react": "^1.14.0",
-    "next": "16.2.4",
-    "prisma": "^7.8.0",
+    "next": "16.4.6",
+    "prisma": "^7.10.1",
     "qrcode.react": "^4.2.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-hot-toast": "^2.6.0",
     "recharts": "^3.8.1",
-    "tailwind-merge": "^3.5.0",
-    "xlsx": "^0.18.5"
+    "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
@@ -123,9 +122,20 @@
     "@types/react-dom": "^19",
     "dotenv": "^16.4.7",
     "eslint": "^9",
-    "eslint-config-next": "16.2.4",
+    "eslint-config-next": "16.4.6",
     "tailwindcss": "^4",
-    "tsx": "^4.21.0",
+    "tsx": "^4.23.15",
     "typescript": "^5"
+  },
+  "overrides": {
+    "@vercel/oidc": {
+      "@vercel/cli-config": "0.4.0"
+    },
+    "exceljs": {
+      "uuid": "11.1.1"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^11.0.8"
+    }
   }
 }

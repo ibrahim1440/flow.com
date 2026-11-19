@@ -14,6 +14,7 @@ import "@/components/d21/reference.css";
 import "../station.css";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { beginSignOut } from "@/lib/drafts/local-draft";
 import { StationCtx, clearStationDrafts, loginUrl, type StationInfo, type StationUser } from "./context";
 import { LanguageProvider } from "@/lib/i18n/context";
 import { useLanguageSwitcher } from "@/lib/i18n/use-language-switcher";
@@ -147,6 +148,7 @@ export function StationShell({ children }: { children: ReactNode }) {
     clearStationDrafts();
     if (phase.p === "personal") {
       try { await fetch("/api/auth/me", { method: "DELETE" }); } catch { /* the cookie is cleared server-side when reachable */ }
+      beginSignOut(); // a full load to the sign-in page: no «leave this page?» prompt on the way (lib/drafts/local-draft.ts)
       window.location.replace(loginUrl(reason));
       return;
     }

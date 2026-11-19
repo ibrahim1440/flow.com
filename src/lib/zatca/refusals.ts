@@ -3,6 +3,7 @@
 import { NextResponse } from "@/lib/api-response";
 import { AccountingError, accountingErrorJson } from "@/lib/accounting/errors";
 import { acctError } from "@/lib/accounting/http";
+import { dbGuardText, unwrapDbMessage } from "@/lib/db-guard-text";
 
 type R = { status: number; en: string; ar: string };
 
@@ -36,7 +37,8 @@ export function refuseZatca(code: ZatcaRefusalCode, detail?: string, detailAr?: 
   return e;
 }
 
-export function zatcaDbRefusal(message: string): AccountingError | null {
+export function zatcaDbRefusal(raw: string): AccountingError | null {
+  const message = unwrapDbMessage(raw);
   const m = /(ZATCA|NUMBERING): [^\n"]*/.exec(message);
   if (!m) return null;
   return refuseZatca(m[1] === "NUMBERING" ? "NUMBERING_IN_USE" : "ZATCA_DB", `(${m[0].slice(0, 300)})`);
@@ -44,7 +46,8 @@ export function zatcaDbRefusal(message: string): AccountingError | null {
 
 export function zatcaError(err: unknown): NextResponse {
   if (err instanceof AccountingError) return NextResponse.json({ ...accountingErrorJson(err), ...(err as AccountingError & { extra?: object }).extra }, { status: err.status });
-  const msg = err instanceof Error ? `${err.message} ${JSON.stringify((err as { cause?: unknown }).cause ?? "")}` : String(err);
+  // R2-deps gate: the guard's own text (lib/db-guard-text.ts), the error's or its cause's.
+  const msg = dbGuardText(err) || dbGuardText((err as { cause?: unknown })?.cause);
   const db = zatcaDbRefusal(msg);
   if (db) return NextResponse.json(accountingErrorJson(db), { status: db.status });
   if (err instanceof Error && err.name === "ZatcaKeyMissing") return zatcaError(refuseZatca("KEY_NOT_CONFIGURED"));

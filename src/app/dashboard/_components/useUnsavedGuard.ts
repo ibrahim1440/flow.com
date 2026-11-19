@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { isSigningOut } from "@/lib/drafts/local-draft";
 
 /**
  * Stop a navigation from throwing away unsaved work without saying so.
@@ -28,6 +29,8 @@ export function useUnsavedGuard(enabled: boolean, message?: string) {
     if (!enabled) return;
 
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      // R2 gate: a sign-out (idle or the user's) leaves without the browser's prompt (lib/drafts/local-draft.ts isSigningOut).
+      if (isSigningOut()) return;
       e.preventDefault();
       // Assigning returnValue is what actually triggers the prompt in several browsers.
       e.returnValue = "";
