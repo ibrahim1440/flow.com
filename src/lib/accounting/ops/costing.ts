@@ -31,6 +31,46 @@ export function unitCost(value: MoneyInput | Decimal, qty: Decimal): Decimal {
 }
 
 export type Holder = { qty: Decimal; value: Decimal };
+
+// ─── Cost state (accounting review 2026-11, fix B) ───────────────────────────────────────────────────────────────
+// A holder's value says how much cost it carries, not whether that cost is COMPLETE: a finished lot can hold the
+// packaging materials' cost while the coffee's cost is missing. So completeness is a state of its own:
+//   KNOWN            every quantity in the holder came in with its cost
+//   ZERO_DOCUMENTED  the cost is zero and a person said so (the owner's opening valuation at 0)
+//   UNKNOWN          some quantity came in with no cost (stock created with no price, a receipt with no price, or
+//                    an output made from an UNKNOWN input) — the average is not a cost, whatever its value
+export const COST_STATES = ["KNOWN", "ZERO_DOCUMENTED", "UNKNOWN"] as const;
+export type CostState = (typeof COST_STATES)[number];
+
+/** The state a quantity comes IN with: what the caller states, else a zero value with a quantity is UNKNOWN. */
+export function stateOfReceipt(q: Decimal, value: Decimal, stated?: CostState | null): CostState {
+  if (stated) return stated;
+  return q.gt(0) && value.isZero() ? "UNKNOWN" : "KNOWN";
+}
+
+/** A holder after a receipt: an empty holder takes the receipt's state; UNKNOWN on either side stays UNKNOWN (the
+ *  average is contaminated); two documented zeros stay a documented zero; otherwise KNOWN. */
+export function stateAfterReceipt(onHand: Decimal, current: CostState, incoming: CostState): CostState {
+  if (onHand.lte(0)) return incoming;
+  if (current === "UNKNOWN" || incoming === "UNKNOWN") return "UNKNOWN";
+  if (current === "ZERO_DOCUMENTED" && incoming === "ZERO_DOCUMENTED") return "ZERO_DOCUMENTED";
+  return "KNOWN";
+}
+
+/** The state of an OUTPUT made from several inputs (a roast from green lots, a finished lot from roasted coffee and
+ *  materials): UNKNOWN if any input is; a documented zero only if every input is; otherwise KNOWN. */
+export function stateOfOutput(inputs: (CostState | null | undefined)[]): CostState {
+  const known = inputs.filter((x): x is CostState => !!x);
+  if (known.some((x) => x === "UNKNOWN")) return "UNKNOWN";
+  if (known.length > 0 && known.every((x) => x === "ZERO_DOCUMENTED")) return "ZERO_DOCUMENTED";
+  return "KNOWN";
+}
+
+/** The movement kinds that always consume or expense stock at the holder's average — refused from an UNKNOWN holder
+ *  once the ledger posts. Not here: RETURN (a reversal), ADJUSTMENT (a count correction) and TRANSFER_OUT — a move
+ *  between sites leaves and re-enters the SAME holder at the same value; the one transfer that does consume (a blend:
+ *  roasted coffee into another roast) says so itself (costOut `consumes`). */
+export const CONSUMING_KINDS: readonly string[] = ["ISSUE", "WRITE_OFF"];
 export type Applied = { qty: Decimal; value: Decimal; unitCost: Decimal; after: Holder & { avgCost: Decimal } };
 
 /** A receipt of `q` at a total value `v` (≥ 0). */

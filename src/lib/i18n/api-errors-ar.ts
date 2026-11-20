@@ -779,6 +779,7 @@ export const API_ERROR_TEMPLATES_AR: ReadonlyArray<readonly [string, string]> = 
   ["\"${sku.skuCode}\" is sold in units, so this dispatch needs quantityUnits, not quantityKg.", "«{0}» يُباع بالوحدات، لذا يُسجَّل التسليم بعدد الوحدات لا بالكيلوغرام."],
   ["\"${sku.skuCode}\" is sold in units, so this line needs a quantityUnits.", "«{0}» يُباع بالوحدات، لذا يحتاج السطر عدد الوحدات."],
   ["${IDEMPOTENCY_HEADER} is required. A dispatch must carry a key so a retry can be recognised instead of shipping the goods twice.", "مفتاح الطلب مطلوب: يحمل كل تسليم مفتاحًا حتى تُعرف إعادة المحاولة ولا تُشحن البضاعة مرتين."],
+  ["${IDEMPOTENCY_HEADER} is required to pack: one key per packaging operation, the same key when the same operation is sent again.", "مفتاح التكرار (Idempotency-Key) مطلوب للتعبئة: مفتاح واحد لكل عملية تعبئة، ونفس المفتاح عند إعادة إرسال العملية نفسها."],
   ["${IDEMPOTENCY_HEADER} may contain only letters, digits, and the characters . _ : -", "مفتاح الطلب يحتوي أحرفًا وأرقامًا والرموز . _ : - فقط."],
   ["${IDEMPOTENCY_HEADER} must be at most ${KEY_MAX_LENGTH} characters.", "مفتاح الطلب أطول من {1} حرف."],
   ["${e.name} is inactive and cannot be credited a share.", "{0} موقوف ولا تُنسب له حصة."],

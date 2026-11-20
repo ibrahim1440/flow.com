@@ -158,6 +158,8 @@ export function RoastSheet({ mode, products, beans, canChangeGreen, isAdmin, onC
     && !(mode.kind === "order" && mode.line.livePos.length > 1 && !poChoice)
     && !overNominal && !notOperator && (!(outsideRange || needAck) || ack);
 
+  const UNCONFIRMED = () => L("تعذّر تأكيد نتيجة العملية. أعد المحاولة للتحقق؛ لن تُسجَّل العملية مرتين.", "The outcome of the operation could not be confirmed. Try again to check; it will not be recorded twice.");
+
   async function save(withSurplus = false) {
     if (!ready || busy) return;
     setBusy(true); setError(""); setShort(null);
@@ -179,7 +181,17 @@ export function RoastSheet({ mode, products, beans, canChangeGreen, isAdmin, onC
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (isConclusiveResponse(res.status)) keyRef.current = null;
+      // The outcome is not decided (5xx, 408 / 425 / 429): the batch may have been recorded. The key is kept, so
+      // the next attempt is the same operation — the server answers with the batch already recorded, never a second.
+      if (!isConclusiveResponse(res.status)) { setError(UNCONFIRMED()); return; }
+      // The same key with other figures (edited after an unconfirmed attempt): the key is KEPT, so a second batch
+      // cannot be recorded by changing the form — the first attempt is confirmed with its own figures, or the sheet
+      // is closed and the batch list checked.
+      if (res.status === 422 && data?.code === "IDEMPOTENCY_MISMATCH") {
+        setError(L("محاولة سابقة بقيم مختلفة لم تتأكد نتيجتها. أعد القيم كما كانت ثم أعد المحاولة للتحقق، أو أغلق الورقة وراجع سجل الدفعات؛ لن تُسجَّل العملية مرتين.", "An earlier attempt with other figures is unconfirmed. Restore the figures and try again to check, or close the sheet and look at the batch list; the operation will not be recorded twice."));
+        return;
+      }
+      keyRef.current = null;
       if (!res.ok) {
         if (res.status === 422 && data?.code === "ACK_REQUIRED") { setNeedAck(true); setAck(false); setError(localizeApiError(data, lang) ?? ""); return; }
         if (res.status === 422 && isAdmin) { setSurplus({ message: localizeApiError(data, lang) ?? "", reason: surplus?.reason ?? "" }); return; }
@@ -194,7 +206,8 @@ export function RoastSheet({ mode, products, beans, canChangeGreen, isAdmin, onC
         (fallback ? L(` · البن من ${data.greenBean?.serialNumber ?? ""} (الأقدم من نفس البن)`, ` · green from ${data.greenBean?.serialNumber ?? ""} (oldest of the same bean)`) : ""),
       );
     } catch {
-      setError(L("تعذّر الاتصال. لم يُسجَّل شيء؛ أعد المحاولة.", "Network error. Nothing was recorded; try again."));
+      // No answer at all: the request may have reached the server. Never «nothing was recorded» here.
+      setError(UNCONFIRMED());
     } finally {
       setBusy(false);
     }

@@ -133,7 +133,7 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   const key = readRequestKey(request);
-  if (!key.ok) return NextResponse.json({ error: key.message }, { status: 400 });
+  if (!key.ok) return NextResponse.json({ error: key.message, errorAr: key.ar, ...(key.code ? { code: key.code } : {}) }, { status: 400 });
 
   const intentLines: PackIntentLine[] = lines.map((l) => {
     if (l.kind === "pack") {

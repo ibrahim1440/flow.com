@@ -13,7 +13,8 @@ import { setAuditContext, type AuditContext } from "../audit";
 import { checkDimensions, checkLineAccount, loadAccounts, type NormalLine } from "../posting-engine";
 import { openingDeferrals } from "../deferrals";
 import { qty4, unitCost } from "./costing";
-import { costSet, lockHolder, type CostKind, type InventoryRole } from "./cost-ledger";
+import { costSet, costStateOf, lockHolder, type CostKind, type InventoryRole } from "./cost-ledger";
+import type { CostState } from "./costing";
 import { opsRefuse } from "./refusals";
 import { apAging, openReceipts } from "./ap";
 import { apNotInBooks, claimsNotInBooks } from "./supplier-claims";
@@ -54,6 +55,13 @@ export async function valuation(opts: { includeZero?: boolean } = {}) {
   const items = await prisma.costItem.findMany({ where: opts.includeZero ? {} : { OR: [{ qty: { gt: 0 } }, { value: { gt: 0 } }] }, orderBy: [{ role: "asc" }, { kind: "asc" }] });
   const ents = await entities(items);
   const byRole = new Map<string, { value: Decimal; count: number }>();
+  // A roast / finished lot written before the cost state existed: its state is traced from its movements (a value
+  // above zero does not make its cost complete).
+  const traced = new Map<string, { state: CostState; gap: string | null }>();
+  for (const i of items) {
+    if (i.costState || !new Decimal(i.qty).gt(0) || (i.kind !== "ROASTED_BATCH" && i.kind !== "FG_LOT")) continue;
+    traced.set(i.id, await costStateOf(prisma as unknown as Prisma.TransactionClient, { id: i.id, kind: i.kind as CostKind, entityId: i.entityId, qty: new Decimal(i.qty), value: new Decimal(i.value), costState: null, costGap: null }));
+  }
   const rows = items.map((i) => {
     const e = ents.get(`${i.kind}:${i.entityId}`);
     const r = byRole.get(i.role) ?? { value: ZERO, count: 0 };
@@ -63,7 +71,8 @@ export async function valuation(opts: { includeZero?: boolean } = {}) {
       id: i.id, kind: i.kind, entityId: i.entityId, role: i.role, label: e?.label ?? "(محذوف)", sub: e?.sub ?? null, unit: e?.unit ?? "", exists: !!e,
       qty: new Decimal(i.qty).toFixed(), opsQty: e?.opsQty ? e.opsQty.toFixed() : null, avgCost: new Decimal(i.avgCost).toFixed(4), value: f2(i.value),
       lastInCost: i.lastInCost ? new Decimal(i.lastInCost).toFixed(4) : null, drift: drift && !drift.abs().lt("0.001") ? drift.toFixed() : null,
-      uncosted: new Decimal(i.qty).gt(0) && new Decimal(i.value).isZero(),
+      uncosted: i.costState === "UNKNOWN" || traced.get(i.id)?.state === "UNKNOWN" || (!i.costState && new Decimal(i.qty).gt(0) && new Decimal(i.value).isZero()),
+      costState: i.costState ?? traced.get(i.id)?.state ?? null, costGap: i.costGap ?? traced.get(i.id)?.gap ?? null,
     };
   });
   const total = rows.reduce((s, r) => s.plus(r.value), ZERO);
@@ -151,21 +160,33 @@ export async function batchCosts(fromText: string | null, toText: string | null)
   const end = new Date(to.getTime() + 86_400_000 + 3 * 3600_000);
   const start = new Date(from.getTime() - 3 * 3600_000);
   const batches = await prisma.roastingBatch.findMany({ where: { isBlend: false, date: { gte: start, lt: end } }, orderBy: { date: "desc" }, take: 500, select: { id: true, batchNumber: true, date: true, greenBeanQuantity: true, roastedBeanQuantity: true, status: true, product: { select: { productNameEn: true, productNameAr: true } }, greenBean: { select: { serialNumber: true } } } });
-  const moves = await prisma.costMove.findMany({ where: { sourceType: "ROAST_BATCH", sourceId: { in: batches.map((b) => b.id) }, sourceEvent: { in: ["GREEN_ISSUED", "COMPLETED"] } }, select: { sourceId: true, sourceEvent: true, value: true, glState: true, journalEntryId: true } });
-  const holders = await prisma.costItem.findMany({ where: { kind: "ROASTED_BATCH", entityId: { in: batches.map((b) => b.id) } }, select: { entityId: true, qty: true, value: true } });
+  const moves = await prisma.costMove.findMany({ where: { sourceType: "ROAST_BATCH", sourceId: { in: batches.map((b) => b.id) }, sourceEvent: { in: ["GREEN_ISSUED", "COMPLETED", "CANCELLED"] } }, select: { sourceId: true, sourceEvent: true, qty: true, value: true, glState: true, journalEntryId: true, costItem: { select: { kind: true } } } });
+  const holders = await prisma.costItem.findMany({ where: { kind: "ROASTED_BATCH", entityId: { in: batches.map((b) => b.id) } }, select: { id: true, kind: true, entityId: true, qty: true, value: true, costState: true, costGap: true } });
+  const stateOf = new Map<string, string>();
+  for (const h of holders) stateOf.set(h.entityId, (await costStateOf(prisma as unknown as Prisma.TransactionClient, { id: h.id, kind: "ROASTED_BATCH", entityId: h.entityId, qty: new Decimal(h.qty), value: new Decimal(h.value), costState: h.costState as CostState | null, costGap: h.costGap })).state);
   const hOf = new Map(holders.map((h) => [h.entityId, h]));
   let tg = ZERO, tr = ZERO, tAb = ZERO, gkg = ZERO, rkg = ZERO;
   const rows = batches.map((b) => {
-    const g = moves.find((m) => m.sourceId === b.id && m.sourceEvent === "GREEN_ISSUED");
+    // EVERY green issue of the batch: a lot roasted from several green lots (roasting station v2: one movement per
+    // bucket) costs the sum of them. Taking the first movement only understated such a batch (accounting review
+    // 2026-11, fix C: 240.00 shown for a batch that cost 480.00, and a false «abnormal loss» of −240.00).
+    const issues = moves.filter((m) => m.sourceId === b.id && m.sourceEvent === "GREEN_ISSUED");
     const c = moves.find((m) => m.sourceId === b.id && m.sourceEvent === "COMPLETED");
-    const greenCost = g ? new Decimal(g.value).abs() : null;
+    const greenCost = issues.length ? issues.reduce((s, m) => s.plus(new Decimal(m.value).abs()), ZERO) : null;
     const roastedCost = c ? new Decimal(c.value) : null;
     const abnormal = greenCost && roastedCost ? greenCost.minus(roastedCost) : null;
     const gk = qty4(b.greenBeanQuantity), rk = qty4(b.roastedBeanQuantity);
     const lossKg = gk.minus(rk);
-    if (greenCost) { tg = tg.plus(greenCost); gkg = gkg.plus(gk); }
-    if (roastedCost) { tr = tr.plus(roastedCost); rkg = rkg.plus(rk); }
-    if (abnormal) tAb = tAb.plus(abnormal);
+    // A batch reversed in the cost ledger (CANCELLED: the green went back to its lots) is shown with what came back
+    // and counts for nothing in the totals.
+    const back = moves.filter((m) => m.sourceId === b.id && m.sourceEvent === "CANCELLED");
+    const cancelled = back.length > 0;
+    const greenReturned = back.filter((m) => m.costItem.kind === "GREEN_BEAN" && new Decimal(m.qty).gt(0)).reduce((s, m) => s.plus(m.value), ZERO);
+    if (!cancelled) {
+      if (greenCost) { tg = tg.plus(greenCost); gkg = gkg.plus(gk); }
+      if (roastedCost) { tr = tr.plus(roastedCost); rkg = rkg.plus(rk); }
+      if (abnormal) tAb = tAb.plus(abnormal);
+    }
     const h = hOf.get(b.id);
     return {
       id: b.id, batchNumber: b.batchNumber, date: dayText(riyadhDay(b.date)), status: b.status, product: b.product ? (b.product.productNameAr ?? b.product.productNameEn) : null, greenLot: b.greenBean?.serialNumber ?? null,
@@ -174,7 +195,9 @@ export async function batchCosts(fromText: string | null, toText: string | null)
       roastedCost: roastedCost ? f2(roastedCost) : null, abnormalCost: abnormal ? f2(abnormal) : null, normalLossCost: greenCost && roastedCost && gk.gt(0) ? f2(roundMoney(greenCost.times(Decimal.max(lossKg, ZERO)).dividedBy(gk)).minus(abnormal ?? ZERO)) : null,
       roastedUnitCost: roastedCost && rk.gt(0) ? unitCost(roastedCost, rk).toFixed(4) : null,
       remainingKg: h ? new Decimal(h.qty).toFixed() : null, remainingValue: h ? f2(h.value) : null,
-      posted: g?.glState === "POSTED", journalEntryId: c?.journalEntryId ?? null,
+      greenComponents: issues.length, cancelled, greenReturned: cancelled ? f2(greenReturned) : null,
+      costState: stateOf.get(b.id) ?? null,
+      posted: issues.length > 0 && issues.every((m) => m.glState === "POSTED"), journalEntryId: c?.journalEntryId ?? null,
     };
   });
   return {
@@ -332,7 +355,14 @@ export async function applyOpening(ctx: AuditContext) {
     const seen = new Set<string>();
     for (const r of preview.rows) {
       const h = await lockHolder(tx, r.kind, r.entityId, r.role);
-      await costSet(tx, { holder: h, src: src(r.kind, r.entityId), kind: "OPENING", qty: new Decimal(r.qty), value: new Decimal(r.value), actor: ctx.actorId, day, reason: `تقييم افتتاحي (${r.source})` });
+      // What the valuation says about the cost: the owner's own figure is KNOWN (a documented zero at 0); the moving
+      // average keeps whatever the holder already was (an UNKNOWN average is not laundered by re-stating it); the last
+      // receipt / purchase price is a stated cost; no cost at all is UNKNOWN.
+      const value = new Decimal(r.value);
+      const state = r.source === "OWNER" ? (value.isZero() ? "ZERO_DOCUMENTED" as const : "KNOWN" as const)
+        : r.source === "MOVING_AVG" ? (await costStateOf(tx, h)).state
+        : r.source === "NONE" ? "UNKNOWN" as const : "KNOWN" as const;
+      await costSet(tx, { holder: h, src: src(r.kind, r.entityId), kind: "OPENING", qty: new Decimal(r.qty), value, state, gap: state === "UNKNOWN" ? "لا تكلفة في التقييم الافتتاحي" : null, actor: ctx.actorId, day, reason: `تقييم افتتاحي (${r.source})` });
       seen.add(`${r.kind}:${r.entityId}`);
     }
     const stale = await tx.costItem.findMany({ where: { OR: [{ qty: { gt: 0 } }, { value: { gt: 0 } }] }, select: { kind: true, entityId: true } });

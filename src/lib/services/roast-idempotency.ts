@@ -7,9 +7,10 @@ import { createHash } from "node:crypto";
  * the commit succeeded and the answer was lost recorded a second batch: green drawn twice, two
  * batch numbers, two QC tasks. With an Idempotency-Key the retry finds the first batch instead.
  *
- * Unlike dispatch, the key is OPTIONAL here: the roast POST has callers (scripts, the regression
- * harness, older screens) that send none, and they keep recording exactly as before. Both screens
- * shipped with this change (the ERP roast sheet and the roasting station) always send one.
+ * This reader reports a missing key as `key: null`; whether that is acceptable is the route's decision.
+ * POST /api/roasting-batches REQUIRES one (400 IDEMPOTENCY_KEY_REQUIRED) since the accounting review of
+ * 2026-11: both screens (the ERP roast sheet and the roasting station) always sent one, and the callers
+ * that did not (scripts, the regression harness) now get one from tests/support/idempotency-key.mjs.
  *
  * The same key grammar as packaging and dispatch (one dialect in the codebase).
  */
@@ -60,6 +61,11 @@ export function roastIntent(body: Record<string, unknown>): (string | number | n
 export function roastIntentHash(body: Record<string, unknown>): string {
   return createHash("sha256").update(JSON.stringify(roastIntent(body))).digest("hex");
 }
+
+export const ROAST_KEY_REQUIRED =
+  "An Idempotency-Key header is required to record a roast: one key per roast, the same key when the same roast is sent again.";
+export const ROAST_KEY_REQUIRED_AR =
+  "مفتاح التكرار (Idempotency-Key) مطلوب لتسجيل الدفعة: مفتاح واحد لكل دفعة، ونفس المفتاح عند إعادة إرسال الدفعة نفسها.";
 
 export const ROAST_IDEMPOTENCY_MISMATCH =
   "This Idempotency-Key has already been used for a different roast. Use a new key for a new roast, or resend the original request unchanged.";

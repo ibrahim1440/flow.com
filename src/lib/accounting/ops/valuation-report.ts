@@ -74,7 +74,7 @@ export async function valuationReport(filters: ValuationFilters = {}) {
       categoryId, rootId: parentOf.get(categoryId) ?? categoryId, categoryName: catName.get(categoryId)?.nameAr ?? null, categoryNameEn: catName.get(categoryId)?.nameEn ?? null,
       label: e?.label ?? "(محذوف)", sub: e?.sub ?? null, unit: e?.unit ?? "", exists: !!e,
       qty: new Decimal(i.qty).toFixed(), opsQty: e?.opsQty ? e.opsQty.toFixed() : null, avgCost: new Decimal(i.avgCost).toFixed(4), value: f2(i.value),
-      uncosted: new Decimal(i.qty).gt(0) && new Decimal(i.value).isZero(), drift: drift && !drift.abs().lt("0.001") ? drift.toFixed() : null,
+      uncosted: i.costState === "UNKNOWN" || (!i.costState && new Decimal(i.qty).gt(0) && new Decimal(i.value).isZero()), costState: i.costState ?? null, costGap: i.costGap ?? null, drift: drift && !drift.abs().lt("0.001") ? drift.toFixed() : null,
       sites,
       // Council F1: ledger qty − Σ site qty of a multi-site item (a quantity to count, never money).
       siteQtyDiff: MULTI_SITE.has(i.kind) ? siteQtyDifference(i, balOf.get(`${i.kind}:${i.entityId}`) ?? []) : null,
@@ -110,7 +110,7 @@ export async function valuationReport(filters: ValuationFilters = {}) {
         id: holderId ?? `nc:${x.kind}:${x.entityId}`, kind: x.kind, entityId: x.entityId, role, account: acc ? { code: acc.code, name: acc.name, nameEn: acc.nameEn } : null,
         categoryId, rootId: parentOf.get(categoryId) ?? categoryId, categoryName: catName.get(categoryId)?.nameAr ?? null, categoryNameEn: catName.get(categoryId)?.nameEn ?? null,
         label: e?.label ?? "(محذوف)", sub: e?.sub ?? null, unit: e?.unit ?? "", exists: !!e,
-        qty: "0", opsQty: e?.opsQty ? e.opsQty.toFixed() : null, avgCost: "0.0000", value: "0.00", uncosted: true, drift: null, sites, siteQtyDiff: null, noLedger: true, splitFrom: null,
+        qty: "0", opsQty: e?.opsQty ? e.opsQty.toFixed() : null, avgCost: "0.0000", value: "0.00", uncosted: true, costState: null, costGap: null, drift: null, sites, siteQtyDiff: null, noLedger: true, splitFrom: null,
         shown: location ? { qty: here?.qty ?? "0.0000", value: "0.00", estimate: true } : { qty: x.sites.reduce((a, t) => a.plus(qty4(t.qty)), ZERO).toFixed(), value: "0.00", estimate: false },
         itemHref: holderHref(x.kind, { labelCode: e?.labelCode ?? null, entityId: x.entityId, categoryId }),
         movementsHref: holderId ? `/dashboard/accounting/inventory?item=${encodeURIComponent(holderId)}` : null,

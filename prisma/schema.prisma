@@ -7987,6 +7987,11 @@ model CostItem {
   avgCost    Decimal    @default(0) @db.Decimal(18, 6)
   /// The unit cost of the last receipt (the "last known cost" the opening valuation proposes).
   lastInCost Decimal?   @db.Decimal(18, 6)
+  /// KNOWN | ZERO_DOCUMENTED | UNKNOWN — whether the cost is COMPLETE (not whether the value is > 0). NULL: a holder
+  /// written before 20261231220000_cost_state; its state is derived on read from its movements, never back-filled.
+  costState  String?
+  /// What is missing when UNKNOWN (the source with no cost), for the refusal message and the valuation report.
+  costGap    String?
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
   moves      CostMove[]

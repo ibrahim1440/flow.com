@@ -477,7 +477,7 @@ export async function postInvoiceTx(tx: Tx, id: string, ctx: AuditContext) {
         const h = holderOf(l.stockKind as string, l.stockItemId as string);
         const cost = net.plus(nonRecoverable);
         const want = l.quantity ? varianceOnHand(cost, new Decimal(l.quantity), h.qty) : cost;
-        const r = await costRevalue(tx, { holder: h, src: { module: "purchasing", type: "SUPPLIER_INVOICE", id, event: "POSTED" }, lineKey: `${l.lineNo}`, kind: "REVALUATION", delta: want, actor: ctx.actorId, reason: `تكلفة فاتورة ${inv.number}` });
+        const r = await costRevalue(tx, { holder: h, src: { module: "purchasing", type: "SUPPLIER_INVOICE", id, event: "POSTED" }, lineKey: `${l.lineNo}`, kind: "REVALUATION", delta: want, completesCost: true, actor: ctx.actorId, reason: `تكلفة فاتورة ${inv.number}` });
         if (r.id) moveIds.push(r.id);
         capitalized = r.value;
         const dims = { item: { type: l.stockKind === "GREEN_BEAN" ? "GREEN_BEAN" as const : "MATERIAL" as const, id: l.stockItemId as string } };

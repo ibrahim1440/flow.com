@@ -9,7 +9,7 @@ import { reverseEntry, type PostingDims } from "../posting-engine";
 import { toBusinessDay } from "../dates";
 import { LOSS_WARN_POINTS } from "@/lib/station/shared";
 import { Decimal, ZERO, roundMoney } from "../money";
-import { qty4, roastCost, split } from "./costing";
+import { qty4, roastCost, split, stateOfOutput, type CostState } from "./costing";
 import { costIn, costOut, costReturnOut, deferPosting, lockHolder, lockHolders, postAndResolve, resolveNone, side, type CostKind, type HolderRow, type MoveResult, type Src } from "./cost-ledger";
 
 type Tx = Prisma.TransactionClient;
@@ -18,6 +18,11 @@ const greenDim = (id: string): PostingDims => ({ item: { type: "GREEN_BEAN", id 
 const materialDim = (id: string): PostingDims => ({ item: { type: "MATERIAL", id } });
 const productDim = (id: string | null | undefined): PostingDims | undefined => (id ? { item: { type: "COFFEE_PRODUCT", id } } : undefined);
 const skuDim = (skuId: string | null | undefined, productId?: string | null): PostingDims | undefined => (skuId ? { item: { type: "PRODUCT_SKU", id: skuId } } : productDim(productId));
+/** What an output inherits from the movements that fed it: UNKNOWN if any input was, and which ones. */
+const inherited = (outs: { sourceState?: CostState | null; sourceGap?: string | null }[]) => {
+  const state = stateOfOutput(outs.map((o) => o.sourceState));
+  return { state, gap: state === "UNKNOWN" ? [...new Set(outs.filter((o) => o.sourceState === "UNKNOWN").map((o) => o.sourceGap).filter(Boolean))].join(" · ").slice(0, 480) || null : null };
+};
 const short = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 16);
 
 /**
@@ -166,17 +171,19 @@ export async function onRoastLot(tx: Tx, a: { batchId: string; batchNumber: stri
   const roasted = holders.get(`ROASTED_BATCH:${a.batchId}`) as HolderRow;
   const issueSrc: Src = { module: "production", type: "ROAST_BATCH", id: a.batchId, event: "GREEN_ISSUED" };
   const doneSrc: Src = { module: "production", type: "ROAST_BATCH", id: a.batchId, event: "COMPLETED" };
-  const outs: { id: string; value: Decimal; greenBeanId: string; role: string }[] = [];
+  const outs: { id: string; value: Decimal; greenBeanId: string; role: string; sourceState?: CostState | null; sourceGap?: string | null }[] = [];
   let greenKg = ZERO, greenValue = ZERO;
   for (const c of a.components) {
     const green = holders.get(`GREEN_BEAN:${c.greenBeanId}`) as HolderRow;
     const out = await costOut(tx, { holder: green, src: issueSrc, lineKey: c.lineKey, kind: "ISSUE", qty: kg(c.kg), actor: a.actor, inventoryMovementId: c.movementId });
-    outs.push({ id: out.id, value: out.value, greenBeanId: c.greenBeanId, role: green.role });
+    outs.push({ id: out.id, value: out.value, greenBeanId: c.greenBeanId, role: green.role, sourceState: out.sourceState, sourceGap: out.sourceGap });
     greenKg = greenKg.plus(kg(c.kg)); // the weighed green (as before: the roast's loss is measured on what was charged)
     greenValue = greenValue.plus(out.value);
   }
   const c = roastCost(greenKg, kg(a.roastedKg), greenValue, await abnormalThreshold(tx, a.productId));
-  const inn = await costIn(tx, { holder: roasted, src: doneSrc, kind: "RECEIPT", qty: c.roastedKg, value: c.roastedCost, actor: a.actor, reason: c.abnormalCost.gt(0) ? `فاقد غير طبيعي ${c.abnormalLossKg.toFixed(3)} كغ` : null });
+  // The roast's cost is as complete as the green it was made from (never judged by its value).
+  const from = inherited(outs);
+  const inn = await costIn(tx, { holder: roasted, src: doneSrc, kind: "RECEIPT", qty: c.roastedKg, value: c.roastedCost, state: from.state, gap: from.gap, actor: a.actor, reason: c.abnormalCost.gt(0) ? `فاقد غير طبيعي ${c.abnormalLossKg.toFixed(3)} كغ` : null });
   const pDim = productDim(a.productId);
   await postAndResolve(tx, outs.map((o) => o.id), {
     source: issueSrc, memo: `صرف بن أخضر للتحميص · دفعة ${a.batchNumber}`, createdBy: a.actor,
@@ -309,12 +316,14 @@ export async function onBlend(tx: Tx, a: { blendBatchId: string; consumed: { sou
   const src: Src = { module: "production", type: "BLEND", id: a.blendBatchId, event: "BLENDED" };
   const holders = await lockHolders(tx, [...a.consumed.map((c) => ({ kind: "ROASTED_BATCH" as CostKind, entityId: c.sourceId })), { kind: "ROASTED_BATCH", entityId: a.blendBatchId }]);
   const ids: string[] = [];
+  const fed: MoveResult[] = [];
   let value = ZERO, qty = ZERO;
   for (const c of a.consumed) {
-    const out = await costOut(tx, { holder: holders.get(`ROASTED_BATCH:${c.sourceId}`) as HolderRow, src, kind: "TRANSFER_OUT", qty: kg(c.taken), closeOut: c.after <= 0.0005, actor: a.actor });
-    ids.push(out.id); value = value.plus(out.value); qty = qty.plus(out.qty);
+    const out = await costOut(tx, { holder: holders.get(`ROASTED_BATCH:${c.sourceId}`) as HolderRow, src, kind: "TRANSFER_OUT", consumes: true, qty: kg(c.taken), closeOut: c.after <= 0.0005, actor: a.actor });
+    ids.push(out.id); fed.push(out); value = value.plus(out.value); qty = qty.plus(out.qty);
   }
-  const inn = await costIn(tx, { holder: holders.get(`ROASTED_BATCH:${a.blendBatchId}`) as HolderRow, src, kind: "TRANSFER_IN", qty: kg(a.consumed.reduce((s, c) => s + c.taken, 0)), value, actor: a.actor });
+  const from = inherited(fed);
+  const inn = await costIn(tx, { holder: holders.get(`ROASTED_BATCH:${a.blendBatchId}`) as HolderRow, src, kind: "TRANSFER_IN", qty: kg(a.consumed.reduce((s, c) => s + c.taken, 0)), value, state: from.state, gap: from.gap, actor: a.actor });
   await resolveNone(tx, [...ids, inn.id]);
   return { value };
 }
@@ -341,9 +350,10 @@ export async function onPackaging(tx: Tx, a: {
   const pDim = productDim(a.productId);
   const lines = [];
   let packedValue = ZERO, lossValue = ZERO;
+  let coffeeFed: MoveResult | null = null;
   if (a.packedGrams > 0) {
     const out = await costOut(tx, { holder: roasted, src, kind: "ISSUE", lineKey: "packed", qty: kg(a.packedGrams / 1000), closeOut: a.batchEmpty && a.lossGrams <= 0, actor: a.actor });
-    ids.push(out.id); packedValue = out.value;
+    ids.push(out.id); packedValue = out.value; coffeeFed = out;
   }
   if (a.lossGrams > 0) {
     const loss = await costOut(tx, { holder: roasted, src, kind: "WRITE_OFF", lineKey: "loss", qty: kg(a.lossGrams / 1000), closeOut: a.batchEmpty, actor: a.actor, reason: "فاقد تعبئة مُعلن" });
@@ -353,10 +363,11 @@ export async function onPackaging(tx: Tx, a: {
   lines.push(side(roasted.role, packedValue.plus(lossValue).negated(), pDim));
   // Materials: each at its average; the value per unit then follows the lines that used it.
   const matUnit = new Map<string, { value: Decimal; qty: Decimal }>();
+  const matFed = new Map<string, MoveResult>();
   for (const m of a.materials) {
     const h = holders.get(`MATERIAL:${m.materialItemId}`) as HolderRow;
     const out = await costOut(tx, { holder: h, src, kind: "ISSUE", lineKey: m.materialItemId, qty: kg(m.qty), actor: a.actor });
-    ids.push(out.id);
+    ids.push(out.id); matFed.set(m.materialItemId, out);
     matUnit.set(m.materialItemId, { value: out.value, qty: kg(m.qty) });
     lines.push(side(h.role, out.value.negated(), materialDim(m.materialItemId)));
   }
@@ -375,7 +386,11 @@ export async function onPackaging(tx: Tx, a: {
     let v = coffeeParts[i] ?? ZERO;
     for (const parts of matParts.values()) v = v.plus(parts[i] ?? ZERO);
     const h = holders.get(`FG_LOT:${l.lotId}`) as HolderRow;
-    const inn = await costIn(tx, { holder: h, src, kind: "RECEIPT", lineKey: `${i}`, qty: kg(l.grams / 1000), value: v, actor: a.actor });
+    // The lot's cost is as complete as the coffee and the materials that went into it — a lot that holds its
+    // materials' cost and no coffee cost has a value above zero and an UNKNOWN cost.
+    const fed = [...(coffeeFed ? [coffeeFed] : []), ...[...matFed].filter(([matId]) => (matParts.get(matId)?.[i] ?? ZERO).gt(0) || matFed.get(matId)?.sourceState === "UNKNOWN").map(([, mv]) => mv)];
+    const from = inherited(fed);
+    const inn = await costIn(tx, { holder: h, src, kind: "RECEIPT", lineKey: `${i}`, qty: kg(l.grams / 1000), value: v, state: from.state, gap: from.gap, actor: a.actor });
     ids.push(inn.id);
     lines.push(side(h.role, v, skuDim(l.skuId, l.productId ?? a.productId)));
   }

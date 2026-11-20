@@ -27,7 +27,7 @@ import { otherCoffeeCheck } from "@/lib/services/scan-lookup";
 import { autoPrepareAfterBatches } from "@/lib/services/orders/preparation";
 import { roastQueue } from "@/lib/services/roast-queue";
 import { checkRoasterForRoast, logRoasterControls, type RoasterCheckResult } from "@/lib/services/roaster-controls";
-import { readRoastRequestKey, roastIntentHash, isRoastKeyConflict, ROAST_IDEMPOTENCY_MISMATCH, ROAST_IDEMPOTENCY_MISMATCH_AR } from "@/lib/services/roast-idempotency";
+import { readRoastRequestKey, roastIntentHash, isRoastKeyConflict, ROAST_IDEMPOTENCY_MISMATCH, ROAST_IDEMPOTENCY_MISMATCH_AR, ROAST_KEY_REQUIRED, ROAST_KEY_REQUIRED_AR } from "@/lib/services/roast-idempotency";
 import { completeStationClaim } from "@/lib/services/station/claims";
 import { linkBatchToSlot, ScheduleError } from "@/lib/services/schedule/schedule-db";
 import { scheduleError } from "@/lib/services/schedule/http";
@@ -221,12 +221,13 @@ export async function POST(request: Request) {
   if (error) return error;
 
   // ── Idempotency (Workstations W1, D8; the Delivery.requestKey pattern) ─────────────────
-  // Optional, so every caller that predates it records exactly as before. With a key, a retry of
-  // the same roast answers with the batch already recorded (200, replayed) instead of a second
-  // batch; the same key carrying a different roast is a 422.
+  // REQUIRED (accounting review 2026-11: a roast without a key was recorded twice on a repeated click — green drawn
+  // twice, two batches, two entries). With the key, a retry of the same roast answers with the batch already recorded
+  // (200, replayed) instead of a second batch; the same key carrying a different roast is a 422.
   const keyRead = readRoastRequestKey(request);
   if (!keyRead.ok) return NextResponse.json({ error: keyRead.message, errorEn: keyRead.en }, { status: 400 });
-  const requestKey = keyRead.key;
+  if (!keyRead.key) return NextResponse.json({ error: ROAST_KEY_REQUIRED_AR, errorEn: ROAST_KEY_REQUIRED, code: "IDEMPOTENCY_KEY_REQUIRED" }, { status: 400 });
+  const requestKey: string = keyRead.key;
 
   const data = await request.json().catch(() => ({}));
   const { productId, greenBeanQuantity, roastedBeanQuantity, roastProfile, productionOrderId, surplusOverride, surplusReason } = data;
@@ -244,11 +245,11 @@ export async function POST(request: Request) {
   }
   const scheduledSlotId: string | null = typeof data.scheduledSlotId === "string" && data.scheduledSlotId ? data.scheduledSlotId : null;
   const lossReason: string | null = typeof data.lossReason === "string" && data.lossReason.trim() ? data.lossReason.trim().slice(0, 200) : null;
-  const intentHash = requestKey ? roastIntentHash(data) : null;
+  const intentHash = roastIntentHash(data);
 
   if (requestKey) {
     // Fast replay probe; the advisory lock and the unique index below are the real control.
-    const done = await replayOf(requestKey, intentHash!);
+    const done = await replayOf(requestKey, intentHash);
     if (done) return done;
   }
 
@@ -886,7 +887,7 @@ export async function POST(request: Request) {
   } catch (err: unknown) {
     // Another request with this key committed first: answer with its batch.
     if (requestKey && (err instanceof ReplayFound || isRoastKeyConflict(err))) {
-      const done = await replayOf(requestKey, intentHash!);
+      const done = await replayOf(requestKey, intentHash);
       if (done) return done;
       return NextResponse.json({ error: "تعذّر تأكيد هذه الدفعة. أعد المحاولة بالطلب نفسه.", errorEn: "This roast could not be confirmed. Please retry with the same request." }, { status: 503 });
     }

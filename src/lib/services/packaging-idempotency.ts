@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 // Type-only: Prisma is referenced solely in type positions here. Written as `import type`
 // so the module carries no runtime dependency on the generated client, which is what lets
 // harness-selftest import and exercise the real key validator with no build step and no
@@ -29,36 +29,40 @@ const KEY_MAX_LENGTH = 200;
 const KEY_PATTERN = /^[A-Za-z0-9._:-]+$/;
 
 export type RequestKey =
-  | { ok: true; key: string; clientSupplied: boolean }
-  | { ok: false; message: string };
+  | { ok: true; key: string }
+  | { ok: false; message: string; ar: string; code?: "IDEMPOTENCY_KEY_REQUIRED" };
 
 /**
- * Read and validate the Idempotency-Key header.
+ * Read and validate the Idempotency-Key header. The key is REQUIRED.
  *
- * TRANSITIONAL: a caller that sends no key still gets an operation row, under a
- * server-generated key. That preserves the audit identity of every packaging operation from
- * this wave onwards, but it does NOT protect that caller from double submission — a retry
- * arrives without the original key and so cannot be recognised. Only a client-supplied key
- * buys retry protection, which is why `clientSupplied` is reported rather than hidden.
+ * Until the accounting review of 2026-11 a caller that sent no key got a server-generated one: the operation was
+ * recorded, but a repeated click or a retry after a lost answer could not be recognised and packed the coffee a
+ * second time (materials drawn twice, two finished lots, two entries). Nothing in the payload tells a retry from a
+ * genuine second partial pack, so the only safe answer to a missing key is to refuse before anything is written.
  */
 export function readRequestKey(request: Request): RequestKey {
   const raw = request.headers.get(IDEMPOTENCY_HEADER);
 
   if (raw === null || raw.trim() === "") {
-    return { ok: true, key: `srv-${randomUUID()}`, clientSupplied: false };
+    return {
+      ok: false, code: "IDEMPOTENCY_KEY_REQUIRED",
+      message: `${IDEMPOTENCY_HEADER} is required to pack: one key per packaging operation, the same key when the same operation is sent again.`,
+      ar: "مفتاح التكرار (Idempotency-Key) مطلوب للتعبئة: مفتاح واحد لكل عملية تعبئة، ونفس المفتاح عند إعادة إرسال العملية نفسها.",
+    };
   }
 
   const key = raw.trim();
   if (key.length > KEY_MAX_LENGTH) {
-    return { ok: false, message: `${IDEMPOTENCY_HEADER} must be at most ${KEY_MAX_LENGTH} characters.` };
+    return { ok: false, message: `${IDEMPOTENCY_HEADER} must be at most ${KEY_MAX_LENGTH} characters.`, ar: `مفتاح التكرار أطول من ${KEY_MAX_LENGTH} حرفًا.` };
   }
   if (!KEY_PATTERN.test(key)) {
     return {
       ok: false,
       message: `${IDEMPOTENCY_HEADER} may contain only letters, digits, and the characters . _ : -`,
+      ar: "مفتاح التكرار يقبل الحروف اللاتينية والأرقام و . _ : - فقط.",
     };
   }
-  return { ok: true, key, clientSupplied: true };
+  return { ok: true, key };
 }
 
 /** The normalised intent of a kilogram pack — exactly the client-controlled inputs. */

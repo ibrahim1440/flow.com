@@ -59,6 +59,8 @@ export const OPS_REFUSALS = {
   OPENING_ALREADY_POSTED: { status: 409, en: "The opening balances are posted: the opening inventory valuation is final.", ar: "رُحّلت الأرصدة الافتتاحية؛ تقييم المخزون الافتتاحي نهائي." },
   THRESHOLD_INVALID: { status: 400, en: "The abnormal-loss threshold is a percentage from 0 to 99.99, or empty (every loss is normal).", ar: "حد الفاقد غير الطبيعي نسبة من 0 إلى 99.99، أو فارغ (كل الفاقد طبيعي)." },
   COST_UNIT_INVALID: { status: 400, en: "A unit cost is a decimal ≥ 0 with at most 6 decimals.", ar: "تكلفة الوحدة رقم عشري ≥ 0 بست خانات عشرية كحد أقصى." },
+  // Accounting review 2026-11 (fix B): stock whose cost is not known is not consumed, sold or written off. No override.
+  COST_UNKNOWN: { status: 409, en: "This stock has no complete cost, so nothing was recorded.", ar: "تكلفة هذا المخزون غير مكتملة، فلم يُسجَّل شيء." },
   COST_MOVE_IMMUTABLE: { status: 409, en: "The cost sub-ledger is append-only.", ar: "سجل التكلفة لا يُعدَّل ولا يُحذف." },
   AP_INVOICE_POSTED: { status: 409, en: "A posted supplier invoice is frozen.", ar: "فاتورة المورد المرحّلة مجمّدة." },
   // Review L-3: the commission payable is kept per employee (party = the HR record), so the ledger refuses an accrual
