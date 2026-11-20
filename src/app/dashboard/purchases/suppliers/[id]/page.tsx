@@ -10,6 +10,7 @@
 //   GET /api/accounting/ap/statement?supplierId  its statement from the books (the accounting module only)
 // Nothing here writes; the actions link to the screens that already do them.
 import Link from "next/link";
+import { SOURCE_DOC, plain, sourceDocHref } from "@/lib/accounting/source-links";
 import { use, useMemo, useState } from "react";
 import { OpsLoading, OpsRoot, PageHeader, Notice } from "@/components/ops/ui";
 import { Section, ListFooter, ListPageSize, usePaging, useTerm } from "@/components/chrome";
@@ -24,7 +25,7 @@ import type { SupplierRow } from "../../_parts/suppliers";
 import type { Claim } from "../../_parts/claims";
 
 type Payment = { id: string; number: string; paymentDate: string; amount: string; method: string; reference: string | null; status: string; journalEntryId: string | null; invoices: string[]; allocated?: string };
-type Statement = { supplier: { name: string }; from: string; to: string; opening: string; closing: string; lines: { entryId: string; date: string; ref: string; description: string | null; debit: string; credit: string; balance: string }[] };
+type Statement = { supplier: { name: string }; from: string; to: string; opening: string; closing: string; lines: { entryId: string; date: string; ref: string; description: string | null; sourceType?: string | null; sourceId?: string | null; docNo?: string | null; debit: string; credit: string; balance: string }[] };
 type Tab = "invoices" | "claims" | "payments" | "statement";
 const METHOD: Record<string, [string, string]> = { BANK_TRANSFER: ["تحويل بنكي", "Bank transfer"], CASH: ["نقدًا", "Cash"], CHEQUE: ["شيك", "Cheque"] };
 const cents = (v: string | number | null | undefined) => Math.round(Number(v ?? 0) * 100);
@@ -173,7 +174,7 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
                       <thead><tr><th>{L("التاريخ", "Date")}</th><th>{L("المستند", "Document")}</th><th className="hr-hide-compact">{L("البيان", "Description")}</th><th className="num">{L("مدين", "Debit")}</th><th className="num">{L("دائن", "Credit")}</th><th className="num">{L("الرصيد", "Balance")}</th></tr></thead>
                       <tbody>
                         <tr className="is-header"><td className="hr-num">{st.data.from}</td><td /><td className="hr-hide-compact">{L("رصيد أول المدة", "Opening balance")}</td><td /><td /><td className="num hr-num">{money(st.data.opening)}</td></tr>
-                        {st.data.lines.map((l, i) => <tr key={i}><td className="hr-num">{l.date}</td><td><Link className="acct-code" href={`/dashboard/accounting/journals/${l.entryId}`}>{l.ref}</Link></td><td className="hr-hide-compact">{l.description}</td><td className="num hr-num">{money(l.debit, true)}</td><td className="num hr-num">{money(l.credit, true)}</td><td className="num hr-num">{money(l.balance)}</td></tr>)}
+                        {st.data.lines.map((l, i) => <tr key={i}><td className="hr-num">{l.date}</td><td data-testid="st-doc">{l.sourceType && sourceDocHref(l.sourceType, l.sourceId) ? <Link href={sourceDocHref(l.sourceType, l.sourceId)!}>{`${plain(SOURCE_DOC, l.sourceType, L("ar", "en"))}${l.docNo ? ` ${l.docNo}` : ""}`}</Link> : l.sourceType ? `${plain(SOURCE_DOC, l.sourceType, L("ar", "en"))}${l.docNo ? ` ${l.docNo}` : ""}` : null}{" "}<Link className="acct-code" title={L("القيد في السجل الداخلي", "The entry in the internal record")} href={`/dashboard/accounting/journals/${l.entryId}`}>{l.sourceType ? L("تفاصيل", "details") : l.ref}</Link></td><td className="hr-hide-compact">{l.description}</td><td className="num hr-num">{money(l.debit, true)}</td><td className="num hr-num">{money(l.credit, true)}</td><td className="num hr-num">{money(l.balance)}</td></tr>)}
                         <tr className="is-total"><td className="hr-num">{st.data.to}</td><td /><td className="hr-hide-compact">{L("الرصيد الختامي", "Closing balance")}</td><td /><td /><td className="num hr-num">{money(st.data.closing)}</td></tr>
                       </tbody>
                     </table>

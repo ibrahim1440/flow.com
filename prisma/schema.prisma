@@ -616,6 +616,10 @@ model Order {
   /// «القناة» (20261224090000_station_orders_board): SALES | DIRECT_SALE | STORE | CAFE | BACK_OFFICE (CHECK). NULL on
   /// orders created before it: readers derive the source (lib/station/board.ts `orderSource`).
   channel                  String?
+  /// The sales activity the order belongs to (ROASTERY_B2B | WEBSITE | CAFE, CHECK). It decides the revenue and
+  /// cost-of-sales accounts (SalesAccountRule). NULL on every order older than 20261231230000_product_accounts —
+  /// never guessed from the channel.
+  salesActivity            String?
 
   @@index([createdAt])
   @@index([customerId, createdAt])
@@ -682,6 +686,8 @@ model OrderItem {
   @@index([productSkuId])
   /// «يومي» (20261206090000_sales_myday): the lines of a set of orders.
   @@index([orderId])
+  /// The decision that this line's cost of sales uses a general account (20261231230000_product_accounts).
+  costAccountDecision CostAccountDecision?
 }
 
 model RoastingBatch {
@@ -1501,8 +1507,57 @@ model CatalogCategory {
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
   products      CoffeeProduct[]
+  /// Sales account rules (20261231230000_product_accounts) that name this category within a sales activity.
+  salesAccountRules SalesAccountRule[]
+  /// Sales invoice lines classified under this category directly (a line that is not a SKU of the system).
+  salesInvoiceLines SalesInvoiceLine[]
 
   @@index([isActive, sortOrder])
+}
+
+/// The recorded decision (20261231230000_product_accounts) that the cost of sales of ONE order line posts to a general
+/// account although no rule of its SKU or category gives one in the order's activity: who, when, why, and the
+/// activity it was made for (it holds only while the order keeps that activity). Audited by the database.
+model CostAccountDecision {
+  id          String    @id @default(cuid())
+  tenantId    String    @default("hiqbah")
+  orderItemId String    @unique
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  /// ROASTERY_B2B | WEBSITE | CAFE (CHECK)
+  activity    String
+  decidedBy   String
+  decidedAt   DateTime  @default(now())
+  reason      String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+/// Which revenue and cost-of-sales account a sale posts to (20261231230000_product_accounts) — by SALES ACTIVITY and
+/// product category, because the same SKU is sold by the roastery, the web shop and the café. Looked up when an entry
+/// is posted, most specific first, each of the two accounts on its own:
+///   1. (activity, SKU)   2. (activity, the product's category)   3. (activity)   4. the general posting role.
+/// A rule names a category OR a SKU OR neither (the activity's default), never both (CHECK); one rule per scope
+/// (unique index). Changing a rule changes no posted line. Changes are audited by the database.
+model SalesAccountRule {
+  id               String           @id @default(cuid())
+  tenantId         String           @default("hiqbah")
+  /// ROASTERY_B2B | WEBSITE | CAFE (CHECK)
+  activity         String
+  categoryId       String?
+  category         CatalogCategory? @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  productSkuId     String?
+  productSku       ProductSKU?      @relation(fields: [productSkuId], references: [id], onDelete: Restrict)
+  revenueAccountId String?
+  revenueAccount   Account?         @relation("SalesRuleRevenue", fields: [revenueAccountId], references: [id], onDelete: Restrict)
+  cogsAccountId    String?
+  cogsAccount      Account?         @relation("SalesRuleCogs", fields: [cogsAccountId], references: [id], onDelete: Restrict)
+  updatedBy        String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@index([activity])
+  @@index([categoryId])
+  @@index([productSkuId])
 }
 
 // ─── Procurement ─────────────────────────────────────────────────────────────
@@ -2319,6 +2374,8 @@ model ProductSKU {
   // Sales CRM (additive, relation fields only).
   quoteLines      QuoteLine[]
   sampleShipments SampleShipment[]
+  /// Sales account rules (20261231230000_product_accounts) that name this SKU within a sales activity.
+  salesAccountRules SalesAccountRule[]
 
   @@index([isActive])
   @@index([category, isActive])
@@ -2856,6 +2913,10 @@ model AccountingSettings {
 model Account {
   id             String      @id @default(cuid())
   code           String      @unique
+  /// The accountant's own number for this account (his chart of accounts), kept apart from `code`: `code` is the
+  /// identity the ledger guard freezes once the account has posted lines; this is a reference shown on statements
+  /// and exports and can be set or changed at any time. Unique when present (20261231230000_product_accounts).
+  referenceCode  String?
   nameAr         String?
   nameEn         String
   parentId       String?
@@ -2894,6 +2955,8 @@ model Account {
   /// (src/lib/accounting/statements.ts → reportGroupOf).
   reportGroup               String?
   /// «الأصول الثابتة» (20261121090000_fixed_assets): the categories / assets / documents that name this account.
+  salesRuleRevenue          SalesAccountRule[]    @relation("SalesRuleRevenue")
+  salesRuleCogs             SalesAccountRule[]    @relation("SalesRuleCogs")
   faCategoryCost            FixedAssetCategory[]  @relation("FaCategoryCost")
   faCategoryAccum           FixedAssetCategory[]  @relation("FaCategoryAccum")
   faCategoryExpense         FixedAssetCategory[]  @relation("FaCategoryExpense")
@@ -2917,6 +2980,7 @@ model Account {
   @@index([parentId])
   @@index([isActive])
   @@index([controlType])
+  @@index([referenceCode])
 }
 
 model TaxCategory {
@@ -3089,11 +3153,24 @@ model JournalEntryLine {
   /// COFFEE_PRODUCT | PRODUCT_SKU | GREEN_BEAN | MATERIAL (with itemId).
   itemType     String?
   itemId       String?
+  /// Snapshots taken when the line was posted (20261231230000_product_accounts); never recomputed afterwards. On
+  /// revenue, returns and cost-of-sales lines only:
+  ///   salesActivity  the sales activity of the document (ROASTERY_B2B | WEBSITE | CAFE), NULL when it names none;
+  ///   accountBasis   how the account was chosen — ACTIVITY_SKU | ACTIVITY_CATEGORY | ACTIVITY (a sales account rule), ACTIVITY_DECISION | ROLE_DECISION (the general account by a recorded decision)
+  ///                  or ROLE (the general posting role);
+  ///   channel        the sales channel recorded on the document, kept for reports. It never decides an account.
+  salesActivity  String?
+  /// The sales category the line was posted under (the line's own, else its SKU's product's) — a snapshot, no relation.
+  salesCategoryId String?
+  channel        String?
+  accountBasis   String?
 
   @@index([journalEntryId])
   @@index([accountId])
   @@index([accountId, journalEntryId])
   @@index([partyType, partyId])
+  @@index([channel])
+  @@index([salesActivity])
 }
 
 /// A Gregorian fiscal year and its twelve monthly periods (src/lib/accounting/fiscal-years.ts).
@@ -7814,6 +7891,9 @@ model SalesInvoice {
   /// The sales channel the document came from (e.g. SALLA, WEBSITE, CAFE), with the order reference there:
   /// one document per (channel, external order) — a second request for the same order returns the first.
   channel            String?
+  /// The sales activity (ROASTERY_B2B | WEBSITE | CAFE, CHECK): the invoice's own, else its order's when it is posted.
+  /// NULL on older documents — never guessed.
+  salesActivity      String?
   externalOrderRef   String?
   // ── «طلب فاتورة ضريبية» (20261126090000_invoice_requests): Sales requests, the accountant issues. A DRAFT is in the
   // accountant's queue while requestedAt is set (CHECK: only on a DRAFT, with its requester). Cleared at issue / cancel /
@@ -7877,6 +7957,18 @@ model SalesInvoiceLine {
   orderItemId           String?
   deliveryId            String?
   productSkuId          String?
+  /// The line's SALES CATEGORY (20261231230000_product_accounts), for a line that is not a SKU of the system (a café
+  /// drink, a sweet, a retail item) or to override the SKU's own: what the sales account rules of the document's
+  /// activity look up. NULL = the category of the SKU's product, if any.
+  salesCategoryId       String?
+  salesCategory         CatalogCategory?     @relation(fields: [salesCategoryId], references: [id], onDelete: Restrict)
+  /// A recorded decision that this line posts to the general account although no category rule gives it one: who,
+  /// when and why — all three or none (CHECK). Set only on a draft; lost when the draft's lines are rewritten.
+  generalAccountBy      String?
+  generalAccountAt      DateTime?
+  generalAccountReason  String?
+  /// The sales activity the decision was made for: under another activity it no longer holds.
+  generalAccountActivity String?
   /// A note's line: the original invoice line it credits / debits (a credit is capped by it).
   originalLineId        String?
   originalLine          SalesInvoiceLine?    @relation("NoteLines", fields: [originalLineId], references: [id], onDelete: Restrict)
@@ -7917,6 +8009,7 @@ model SalesInvoiceLine {
   @@index([orderItemId])
   @@index([originalLineId])
   @@index([fixedAssetId])
+  @@index([salesCategoryId])
 }
 
 /// One gapless counter per (tenant, series), advanced by the database inside the issue transaction.

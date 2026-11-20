@@ -1,6 +1,7 @@
 // Sales invoicing A2 — the documents: drafts (manual, from an order, from a delivery), issue, cancel, credit and
 // debit notes. Every write runs in one transaction with its ledger entry (./postings) and its audit context; the
 // database re-checks the lifecycle, the numbering, the E-10 totals and the caps (20261103090000_sales_invoicing).
+import { usableSalesActivity } from "@/lib/accounting/sales-account-rules";
 import { assertDraftCovered, checkDraftEdit } from "./draft-control";
 import type { Permissions } from "@/lib/auth-shared";
 import type { Prisma } from "@/generated/prisma/client";
@@ -18,7 +19,7 @@ import {
   EXEMPTION_REASONS,
 } from "./pricing";
 import { readInvoiceSettings, sellerSnapshot } from "./settings";
-import { postDocumentIssued } from "./postings";
+import { postDocumentIssued, unmappedRevenueLines } from "./postings";
 import { refuseInv, refuseWith } from "./refusals";
 import { signAtIssue, type SignedAtIssue } from "@/lib/zatca/pipeline";
 import { defaultInvoiceBranch, orderBranchId, parseBranchId, sharedBranch } from "@/lib/accounting/locations";
@@ -189,6 +190,7 @@ function lineRows(lines: CleanLine[]) {
     priced,
     rows: lines.map((l, i) => ({
       position: i + 1, orderItemId: l.orderItemId, deliveryId: l.deliveryId, productSkuId: l.productSkuId, originalLineId: l.originalLineId,
+      salesCategoryId: l.salesCategoryId ?? null,
       description: l.description, descriptionEn: l.descriptionEn, skuCode: l.skuCode, quantity: l.quantity.toFixed(3), unit: l.unit,
       unitPrice: l.unitPrice.toFixed(2), discountPercent: l.discountPercent.toFixed(2), discountAmount: priced.lines[i].discountAmount.toFixed(2),
       taxCategory: l.taxCategory, taxRatePercent: l.taxRatePercent.toFixed(2), exemptionReasonCode: l.exemptionReasonCode, exemptionReason: l.exemptionReason,
@@ -214,6 +216,8 @@ export type DraftInput = {
   canSellAssets?: boolean;
   /** A4: an external order source (e.g. SALLA): one document per (channel, external order reference). */
   channel?: string | null; externalOrderRef?: string | null;
+  /** The sales activity of an invoice with NO order (an order's invoice takes its order's): ROASTERY_B2B | WEBSITE | CAFE; absent = not recorded. */
+  salesActivity?: unknown;
   /** «الموقع» (WP-B): the selling location (FinBranch id); absent = the order's, else the requester's (never the delivery's site). */
   branchId?: unknown;
 };
@@ -249,6 +253,8 @@ export async function createDraft(input: DraftInput, ctx: AuditContext) {
   const { lines, problems } = parseLines(input.lines);
   if (problems.length) throw refuseWith("LINES_INVALID", { problems });
   assertAssetLinesAllowed(lines, !!input.canSellAssets);
+  // «نشاط البيع»: one that is not activated is refused HERE, before anything is written (an order's invoice has none of its own).
+  if (!input.orderId) usableSalesActivity(input.salesActivity);
   return prisma.$transaction(async (tx) => {
     await setAuditContext(tx, ctx);
     return insertDraft(tx, input, lines, ext, ctx);
@@ -319,6 +325,7 @@ async function insertDraft(tx: Tx, input: DraftInput, lines: CleanLine[], ext: {
     throw refuseInv("BAD_INPUT", "Lines name order lines: give the order.", "البنود مرتبطة بطلب؛ حدّد الطلب.");
   }
   await assertNotOverInvoiced(tx, lines, input.orderId ?? null);
+  await assertSalesCategories(tx, lines);
   const settings = await readInvoiceSettings(tx);
   const { priced, rows } = lineRows(lines);
   const given = await parseBranchId(tx, input.branchId);
@@ -336,6 +343,7 @@ async function insertDraft(tx: Tx, input: DraftInput, lines: CleanLine[], ext: {
       paymentTermsDays: termsOf(input.paymentTermsDays, customer.paymentTermsDays ?? settings.defaultTermsDays),
       notes: notesOf(input.notes), source: input.source ?? (input.orderId ? "ORDER" : "MANUAL"), requestKey: input.requestKey ?? null,
       channel: ext?.channel ?? null, externalOrderRef: ext?.externalOrderRef ?? null,
+      salesActivity: input.orderId ? null : usableSalesActivity(input.salesActivity) ?? null,
       createdById: ctx.actorId, ...totalsData(priced),
     },
     select: { id: true },
@@ -492,14 +500,50 @@ export async function draftOnDelivery(deliveryId: string, actorId: string): Prom
  * «بيع أصل ثابت» (WP-F): the sale-line columns of a stored row (kept outside lineRows / toClean on purpose: an ITEM line
  * takes the database defaults; a credit / debit note's lines are ITEM_ONLY).
  */
+type ReviewedLine = { productSkuId: string | null; orderItemId: string | null; originalLineId: string | null; description: string; salesCategoryId: string | null; generalAccountBy: string | null; generalAccountAt: Date | null; generalAccountReason: string | null; generalAccountActivity: string | null };
+const NO_DECISION = { generalAccountBy: null, generalAccountAt: null, generalAccountReason: null, generalAccountActivity: null };
+const lineIdentity = (l: { productSkuId: string | null; orderItemId: string | null; originalLineId: string | null; description: string }) =>
+  `${l.productSkuId ?? ""}|${l.orderItemId ?? ""}|${l.originalLineId ?? ""}|${l.productSkuId ? "" : l.description.trim()}`;
+
+/**
+ * A draft's lines are rewritten on every save; what the review put on them is carried over to the SAME line. A line is
+ * the same when its SKU (or, with no SKU, its description), its order line and its original line are unchanged — a new
+ * price, quantity, discount or tax does not make it another line. Its category is kept unless the request names one;
+ * its recorded decision is kept only while the category is unchanged too. A changed line starts with neither: it is
+ * looked up again, and decided again if it must be. (A change of the document's activity voids a decision by itself:
+ * the decision names the activity it was made for.)
+ */
+function carryReview(before: ReviewedLine[], lines: CleanLine[]): { lines: CleanLine[]; decisions: typeof NO_DECISION[] } {
+  const pool = new Map<string, ReviewedLine[]>();
+  for (const b of before) pool.set(lineIdentity(b), [...(pool.get(lineIdentity(b)) ?? []), b]);
+  const decisions: typeof NO_DECISION[] = [];
+  const out = lines.map((l) => {
+    const same = pool.get(lineIdentity(l))?.shift();
+    const salesCategoryId = l.salesCategoryId !== undefined ? l.salesCategoryId : same?.salesCategoryId ?? null;
+    const keep = !!same?.generalAccountAt && (same.salesCategoryId ?? null) === (salesCategoryId ?? null);
+    decisions.push(keep ? { generalAccountBy: same!.generalAccountBy, generalAccountAt: same!.generalAccountAt, generalAccountReason: same!.generalAccountReason, generalAccountActivity: same!.generalAccountActivity } as typeof NO_DECISION : NO_DECISION);
+    return { ...l, salesCategoryId };
+  });
+  return { lines: out, decisions };
+}
+
+/** A line's sales category must be a category that exists (the foreign key would say so with a raw database error). */
+async function assertSalesCategories(tx: Tx, lines: CleanLine[]) {
+  const ids = [...new Set(lines.map((l) => l.salesCategoryId).filter((x): x is string => !!x))];
+  if (!ids.length) return;
+  const found = await tx.catalogCategory.count({ where: { id: { in: ids } } });
+  if (found !== ids.length) throw refuseInv("BAD_INPUT", "(salesCategoryId: a sales category that does not exist)", "(تصنيف المبيعات المختار غير موجود)");
+}
+
 function saleColumns(l: CleanLine | undefined) {
   return l?.kind === "FIXED_ASSET_SALE" ? { kind: "FIXED_ASSET_SALE", fixedAssetId: l.fixedAssetId ?? null, disposalKind: l.disposalKind ?? "SALE" } : {};
 }
 
 /** A stored line back into the editor's shape. */
-export function toClean(l: { description: string; descriptionEn: string | null; productSkuId: string | null; orderItemId: string | null; deliveryId: string | null; originalLineId: string | null; skuCode: string | null; quantity: { toString(): string }; unit: string; unitPrice: { toString(): string }; discountPercent: { toString(): string }; taxCategory: string; taxRatePercent: { toString(): string }; exemptionReasonCode: string | null; exemptionReason: string | null }): CleanLine {
+export function toClean(l: { description: string; descriptionEn: string | null; productSkuId: string | null; orderItemId: string | null; deliveryId: string | null; originalLineId: string | null; skuCode: string | null; quantity: { toString(): string }; unit: string; unitPrice: { toString(): string }; discountPercent: { toString(): string }; taxCategory: string; taxRatePercent: { toString(): string }; exemptionReasonCode: string | null; exemptionReason: string | null; salesCategoryId?: string | null }): CleanLine {
   return {
     description: l.description, descriptionEn: l.descriptionEn, productSkuId: l.productSkuId, orderItemId: l.orderItemId, deliveryId: l.deliveryId, originalLineId: l.originalLineId,
+    salesCategoryId: l.salesCategoryId ?? null,
     skuCode: l.skuCode, quantity: D(l.quantity), unit: l.unit === "KG" ? "KG" : "UNIT", unitPrice: D(l.unitPrice), discountPercent: D(l.discountPercent),
     taxCategory: l.taxCategory as CleanLine["taxCategory"], taxRatePercent: D(l.taxRatePercent), exemptionReasonCode: l.exemptionReasonCode, exemptionReason: l.exemptionReason,
     // A copy (a credit note's line, the issue re-check) is priced from the stored NET; the typed gross stays on the original.
@@ -513,7 +557,7 @@ export async function lockDocument(tx: Tx, id: string) {
   return rows[0];
 }
 
-export type DraftPatch = { family?: unknown; lines?: unknown; buyer?: unknown; supplyDate?: unknown; supplyEndDate?: unknown; paymentTermsDays?: unknown; notes?: unknown; reasonCode?: unknown; reason?: unknown; branchId?: unknown };
+export type DraftPatch = { family?: unknown; lines?: unknown; buyer?: unknown; supplyDate?: unknown; supplyEndDate?: unknown; paymentTermsDays?: unknown; notes?: unknown; reasonCode?: unknown; reason?: unknown; branchId?: unknown; /** The sales activity of an invoice with NO order (an order's invoice takes its order's). */ salesActivity?: unknown };
 
 /** Who is saving (the route passes the actor's abilities): an issuer may correct a requested draft (compliance only). */
 export type DraftEditor = { canIssue: boolean; canSellAssets?: boolean; actor?: { id: string; permissions: Permissions | Record<string, unknown> | null } };
@@ -552,6 +596,8 @@ export async function updateDraft(id: string, patch: DraftPatch, ctx: AuditConte
     if (patch.supplyEndDate !== undefined) data.supplyEndDate = dateOf(asDay(patch.supplyEndDate));
     if (patch.paymentTermsDays !== undefined) data.paymentTermsDays = termsOf(patch.paymentTermsDays, doc.paymentTermsDays ?? 30);
     if (patch.notes !== undefined) data.notes = notesOf(patch.notes);
+    // Another activity: the lines are looked up under it, and a decision made for the old one no longer holds.
+    if (patch.salesActivity !== undefined && doc.kind === "INVOICE" && !doc.orderId) data.salesActivity = usableSalesActivity(patch.salesActivity, { current: doc.salesActivity }) ?? null;
     // «الموقع»: editable while a draft (frozen at issue — sinv_invoice_guard).
     const assetBranch = parsed && doc.kind === "INVOICE" ? await assetSaleBranch(tx, parsed.lines) : null;
     const branchId = assetBranch ?? (await parseBranchId(tx, patch.branchId));
@@ -584,9 +630,12 @@ export async function updateDraft(id: string, patch: DraftPatch, ctx: AuditConte
         if (!doc.orderId && lines.some((l) => l.orderItemId)) throw refuseInv("BAD_INPUT", "Lines name order lines of no order.", "بنود مرتبطة بطلب غير محدد.");
         await assertNotOverInvoiced(tx, lines, doc.orderId, doc.id);
       }
+      const carried = carryReview(doc.lines, lines);
+      lines = carried.lines;
       const { priced, rows } = lineRows(lines);
+      await assertSalesCategories(tx, lines);
       await tx.salesInvoiceLine.deleteMany({ where: { invoiceId: id } });
-      if (rows.length) await tx.salesInvoiceLine.createMany({ data: rows.map((r, i) => ({ ...r, ...saleColumns(lines[i]), invoiceId: id })) });
+      if (rows.length) await tx.salesInvoiceLine.createMany({ data: rows.map((r, i) => ({ ...r, ...saleColumns(lines[i]), ...carried.decisions[i], invoiceId: id })) });
       Object.assign(data, totalsData(priced));
     }
     const after = await tx.salesInvoice.update({ where: { id }, data, include: { lines: { orderBy: LINE_ORDER } } });
@@ -628,8 +677,10 @@ export async function retaxDraftIn(tx: Tx, id: string, coverOf: (ls: RetaxLine[]
     return { ...c, taxCategory: t.taxCategory as CleanLine["taxCategory"], taxRatePercent: D(t.taxRatePercent), exemptionReasonCode: t.taxCategory === "S" ? null : t.exemptionReasonCode ?? null, exemptionReason: t.taxCategory === "S" ? null : (reason?.ar ?? t.exemptionReasonCode ?? null) };
   });
   const { priced, rows } = lineRows(lines);
+  // The same lines with another tax: what the review put on each (its category, its decision) stays on it.
+  const kept = doc.lines.map((l) => ({ generalAccountBy: l.generalAccountBy, generalAccountAt: l.generalAccountAt, generalAccountReason: l.generalAccountReason, generalAccountActivity: l.generalAccountActivity }));
   await tx.salesInvoiceLine.deleteMany({ where: { invoiceId: id } });
-  if (rows.length) await tx.salesInvoiceLine.createMany({ data: rows.map((r, i) => ({ ...r, ...saleColumns(lines[i]), invoiceId: id })) });
+  if (rows.length) await tx.salesInvoiceLine.createMany({ data: rows.map((r, i) => ({ ...r, ...saleColumns(lines[i]), ...kept[i], invoiceId: id })) });
   await tx.salesInvoice.update({ where: { id }, data: totalsData(priced) });
   return { id };
 }
@@ -829,6 +880,12 @@ export async function issueDocument(id: string, ctx: AuditContext, now: Date = n
     const settings = await readInvoiceSettings(tx);
     const series = seriesFor(doc.kind as InvoiceKind, { invoice: settings.invoicePrefix, creditNote: settings.creditNotePrefix, debitNote: settings.debitNotePrefix });
     const acct = await getSettings(tx);
+    // A document posted under a sales activity is not issued while a revenue line has no account by a rule of its
+    // SKU or category: it is shown for review — classified, or sent to the general account by a recorded decision.
+    if (acct.accountingActive && doc.kind !== "CREDIT_NOTE") {
+      const unmapped = await unmappedRevenueLines(tx, id);
+      if (unmapped.length) throw refuseWith("NOT_READY", { problems: unmapped.map((u) => ({ code: "SALES_LINE_UNMAPPED", ar: `البند ${u.position}: لا قاعدة حساب لهذا البند في نشاط البيع (${u.reasonAr}). صنّف البند، أو يسجّل صاحب صلاحية ربط الحسابات قرار استخدام الحساب العام.`, en: `Line ${u.position}: no account rule covers this line in the sales activity (${u.reasonEn}). Classify the line, or have the account-mapping duty record the decision to use the general account.` })) });
+    }
     // «بيع أصل ثابت» (WP-F): a sale line's net posts to FA_DISPOSAL_CLEARING (not revenue); a credit note on one reverses it.
     const originals = doc.kind !== "INVOICE" ? await tx.salesInvoiceLine.findMany({ where: { id: { in: doc.lines.map((l) => l.originalLineId).filter((x): x is string => !!x) } }, select: { id: true, kind: true } }) : [];
     const clearing = doc.lines.map((l) => l.kind === "FIXED_ASSET_SALE" || originals.some((o) => o.id === l.originalLineId && o.kind === "FIXED_ASSET_SALE"));
@@ -861,7 +918,7 @@ export async function issueDocument(id: string, ctx: AuditContext, now: Date = n
       : await postDocumentIssued(tx, {
       id, kind: doc.kind as InvoiceKind, number: issued.number!, customerId: issued.customerId, issueDate: dayOf(issued.issueDate)!, branchId,
       grandTotal: D(issued.grandTotal), taxTotal: D(issued.taxTotal),
-      lines: lines.map((l, i) => ({ lineNet: new Decimal(rows[i].lineNet), productSkuId: l.productSkuId, description: l.description, clearing: clearing[i] })),
+      lines: lines.map((l, i) => ({ lineNet: new Decimal(rows[i].lineNet), productSkuId: l.productSkuId, description: l.description, clearing: clearing[i], salesCategoryId: doc.lines[i]?.salesCategoryId ?? null, decidedFor: doc.lines[i]?.generalAccountAt ? doc.lines[i]?.generalAccountActivity ?? null : null })),
     }, ctx.actorId);
     if (doc.kind === "CREDIT_NOTE" && doc.originalInvoiceId) {
       // The credit first settles what the original still owes; any excess stays as the customer's credit. The original

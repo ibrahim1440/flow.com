@@ -7,10 +7,12 @@ import { createHash } from "node:crypto";
 import type { Prisma } from "@/generated/prisma/client";
 import { reverseEntry, type PostingDims } from "../posting-engine";
 import { toBusinessDay } from "../dates";
+import { isSalesActivity, resolveSalesAccounts } from "../sales-account-rules";
+import { opsRefuse } from "./refusals";
 import { LOSS_WARN_POINTS } from "@/lib/station/shared";
 import { Decimal, ZERO, roundMoney } from "../money";
 import { qty4, roastCost, split, stateOfOutput, type CostState } from "./costing";
-import { costIn, costOut, costReturnOut, deferPosting, lockHolder, lockHolders, postAndResolve, resolveNone, side, type CostKind, type HolderRow, type MoveResult, type Src } from "./cost-ledger";
+import { accountSide, costIn, costOut, costReturnOut, deferPosting, lockHolder, lockHolders, postAndResolve, postingLive, resolveNone, side, type CostKind, type HolderRow, type MoveResult, type Src } from "./cost-ledger";
 
 type Tx = Prisma.TransactionClient;
 const kg = (n: number | Decimal) => qty4(n);
@@ -406,9 +408,21 @@ export async function onPackaging(tx: Tx, a: {
  */
 export async function onDelivery(tx: Tx, a: { deliveryId: string; lines: { lotId: string; kg: number; emptied: boolean; units?: number; unitsBefore?: number }[]; actor: string }) {
   if (!a.lines.length) return { status: "none" as const };
-  const d = await tx.delivery.findUnique({ where: { id: a.deliveryId }, select: { orderItem: { select: { order: { select: { customerId: true, orderNumber: true, branchId: true } } } } } });
+  const d = await tx.delivery.findUnique({ where: { id: a.deliveryId }, select: { orderItemId: true, orderItem: { select: { order: { select: { customerId: true, orderNumber: true, branchId: true, channel: true, salesActivity: true } } } } } });
   const lots = await tx.finishedGoodsLot.findMany({ where: { id: { in: a.lines.map((l) => l.lotId) } }, select: { id: true, productSkuId: true, productId: true } });
   const lotOf = new Map(lots.map((l) => [l.id, l]));
+  // The order's sales activity, its rules and the channel are read HERE, once, and written on the cost-of-sales line:
+  // the posted line is the record of what was used (a later change of a rule changes no delivery already posted).
+  const orderActivity = d?.orderItem.order.salesActivity ?? null;
+  const salesActivity = isSalesActivity(orderActivity) ? orderActivity : null;
+  const accounts = await resolveSalesAccounts(tx, { activity: salesActivity, skuIds: lots.map((l) => l.productSkuId), productIds: lots.map((l) => l.productId) });
+  // A cost that no rule of the lot's SKU or category covers is not passed to a general account on its own: only by the
+  // recorded decision for this order line, made for the activity the order has now.
+  const costDecision = d && salesActivity ? await tx.costAccountDecision.findUnique({ where: { orderItemId: d.orderItemId }, select: { activity: true } }) : null;
+  const decided = !!costDecision && costDecision.activity === salesActivity;
+  const live = await postingLive(tx, new Date());
+  const orderChannel = d?.orderItem.order.channel ?? null;
+  const channel = orderChannel && /^[A-Z0-9_]{1,20}$/.test(orderChannel) ? orderChannel : null;
   const src: Src = { module: "inventory", type: "DELIVERY", id: a.deliveryId, event: "COGS" };
   const holders = await lockHolders(tx, a.lines.map((l) => ({ kind: "FG_LOT" as CostKind, entityId: l.lotId })));
   const customerId = d?.orderItem.order.customerId ?? null;
@@ -423,7 +437,15 @@ export async function onDelivery(tx: Tx, a: { deliveryId: string; lines: { lotId
     ids.push(out.id);
     const lot = lotOf.get(l.lotId);
     const item = skuDim(lot?.productSkuId, lot?.productId);
-    lines.push(side("COGS", out.value, { ...(item ?? {}), ...(customerId ? { party: { type: "CUSTOMER" as const, id: customerId } } : {}) }));
+    const ruling = lot?.productSkuId ? accounts.sku(lot.productSkuId) : accounts.product(lot?.productId);
+    const own = ruling.cogs;
+    if (live && ruling.cogsUnmapped && !decided && out.value.greaterThan(0)) {
+      throw opsRefuse("COGS_ACCOUNT_UNMAPPED", `(order ${d?.orderItem.order.orderNumber ?? ""}, activity ${salesActivity}: add a rule for the product's category or SKU, or have the account-mapping duty record the decision to use the general account for this order line)`, `(الطلب ${d?.orderItem.order.orderNumber ?? ""}: أضف قاعدة لتصنيف الصنف أو للصنف في هذا النشاط، أو يسجّل صاحب صلاحية ربط الحسابات قرار استخدام الحساب العام لهذا البند)`);
+    }
+    const cogsDims = { ...(item ?? {}), ...(customerId ? { party: { type: "CUSTOMER" as const, id: customerId } } : {}), ...(channel ? { channel } : {}), ...(salesActivity ? { salesActivity } : {}) };
+    const cogs = own ? accountSide(own.accountId, out.value, cogsDims, "تكلفة المبيعات") : side("COGS", out.value, cogsDims);
+    const byDecision = decided && ruling.cogsUnmapped;
+    lines.push(cogs ? { ...cogs, accountBasis: own ? (byDecision ? "ACTIVITY_DECISION" as const : own.basis) : byDecision ? "ROLE_DECISION" as const : "ROLE" as const, ...(ruling.categoryId ? { salesCategoryId: ruling.categoryId } : {}) } : null);
     lines.push(side(h.role, out.value.negated(), item));
   }
   // «الموقع» (Q-F4): the COGS takes the SELLING location — the order's — so revenue and its cost sit in the same column;

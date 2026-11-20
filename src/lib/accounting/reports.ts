@@ -9,6 +9,7 @@ import { dayText, parseBusinessDay } from "./dates";
 import { refuse } from "./refusals";
 import { postingRef } from "./posting-engine";
 import { sourceDocHref } from "./source-links";
+import { sourceDocNumbers, sourceKey } from "./source-doc-numbers";
 import type { BranchFilter } from "./locations";
 
 const POSTED = Prisma.sql`j."status" IN ('POSTED', 'REVERSED')`;
@@ -110,6 +111,9 @@ export async function generalLedger(accountId: string, from: Date, to: Date, pag
       FROM "JournalEntryLine" l JOIN "JournalEntry" j ON j."id" = l."journalEntryId"
      WHERE l."accountId" IN ${ids} AND ${POSTED} AND j."entryDate" >= ${from} AND j."entryDate" <= ${to}`;
   const closing = opening.plus(tot.d).minus(tot.c);
+  // The statement reads by DOCUMENT: each line carries its source document's own number; the journal reference stays
+  // on the line (`ref`) for the detail view, and the journal itself is untouched.
+  const docNos = await sourceDocNumbers(rows);
   return {
     account: { ...account, type: String(account.type) },
     from: dayText(from), to: dayText(to),
@@ -119,7 +123,7 @@ export async function generalLedger(accountId: string, from: Date, to: Date, pag
     total: rows.length ? Number(rows[0].total) : 0, limit, offset,
     lines: rows.map((r) => ({
       entryId: r.entryId, ref: postingRef(r) ?? `#${r.entryNo}`, entryDate: dayText(r.entryDate), type: r.type, status: r.status, memo: r.memo,
-      sourceModule: r.sourceModule, sourceType: r.sourceType, sourceId: r.sourceId, lineId: r.lineId, accountCode: r.accountCode,
+      sourceModule: r.sourceModule, sourceType: r.sourceType, sourceId: r.sourceId, docNo: docNos.get(sourceKey(r)) ?? null, lineId: r.lineId, accountCode: r.accountCode,
       debit: new Decimal(r.debit).toFixed(2), credit: new Decimal(r.credit).toFixed(2), lineMemo: r.lineMemo, partyType: r.partyType, partyId: r.partyId,
       balance: fix2(opening.plus(r.run).times(sign)),
     })),

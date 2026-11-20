@@ -368,8 +368,9 @@ export default function OrdersPage() {
     approvalStatus: string;
     /** «القناة»: "" = not chosen (derived: a rep's deal, else the back office), or the web store / the café. */
     channel: string;
+    salesActivity: string;
     items: { productSkuId: string; quantityUnits: number }[];
-  }>({ customerId: "", quotationNumber: "", approvalStatus: "Pending", channel: "", items: [{ productSkuId: "", quantityUnits: 0 }] });
+  }>({ customerId: "", quotationNumber: "", approvalStatus: "Pending", channel: "", salesActivity: "", items: [{ productSkuId: "", quantityUnits: 0 }] });
   // «طلب مباشر»: the deal the order joins when the customer has several open deals ("" = the newest, the server's default).
   const [dealChoice, setDealChoice] = useState("");
   const [showNewCustomer, setShowNewCustomer] = useState(false);
@@ -380,8 +381,11 @@ export default function OrdersPage() {
     items: { id?: string; beanTypeName: string; quantityKg: number; greenBeanId: string; productId: string; productSkuId: string }[];
   }>({ quotationNumber: "", approvalStatus: "", paymentStatus: "", vatInvoiceStatus: "", notes: "", items: [] });
 
+  // «نشاط البيع»: only the activities activated for this deployment are offered; with none, the field is not shown.
+  const [salesActivities, setSalesActivities] = useState<string[]>([]);
   useEffect(() => {
     loadData();
+    fetch("/api/orders/sales-activities").then((r) => (r.ok ? r.json() : null)).then((d) => setSalesActivities(Array.isArray(d?.activities) ? d.activities : [])).catch(() => setSalesActivities([]));
   }, []);
 
   async function loadData() {
@@ -489,7 +493,7 @@ export default function OrdersPage() {
       }
       setShowForm(false);
       setDealChoice("");
-      setForm({ customerId: "", quotationNumber: "", approvalStatus: "Pending", channel: "", items: [{ productSkuId: "", quantityUnits: 0 }] });
+      setForm({ customerId: "", quotationNumber: "", approvalStatus: "Pending", channel: "", salesActivity: "", items: [{ productSkuId: "", quantityUnits: 0 }] });
       setPreview(null);
       loadData();
     } catch {
@@ -771,6 +775,15 @@ export default function OrdersPage() {
                   {FORM_CHANNELS.map((c) => <option key={c} value={c}>{CHANNEL_LABEL[c][lang === "ar" ? "ar" : "en"]}</option>)}
                 </Select>
               </div>
+              {salesActivities.length > 0 && <div>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1" htmlFor="order-sales-activity">{lang === "ar" ? "نشاط البيع (لحسابات الإيراد والتكلفة)" : "Sales activity (revenue and cost accounts)"}</label>
+                <Select id="order-sales-activity" value={form.salesActivity} onChange={(e) => setForm({ ...form, salesActivity: e.target.value })} data-testid="order-sales-activity">
+                  <option value="">{lang === "ar" ? "غير محدد (الحسابات العامة)" : "Not set (general accounts)"}</option>
+                  {salesActivities.includes("ROASTERY_B2B") && <option value="ROASTERY_B2B">{lang === "ar" ? "المحمصة — جملة" : "Roastery — B2B"}</option>}
+                  {salesActivities.includes("WEBSITE") && <option value="WEBSITE">{lang === "ar" ? "الموقع الإلكتروني" : "Website"}</option>}
+                  {salesActivities.includes("CAFE") && <option value="CAFE">{lang === "ar" ? "الكافيه" : "Café"}</option>}
+                </Select>
+              </div>}
               {(() => {
                 // Section 8: one search box, then a quantity. No bean picker, no product
                 // picker, no SKU field — the SKU is the line.

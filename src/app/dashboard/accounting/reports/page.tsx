@@ -4,7 +4,7 @@
 // ACC-85 cash flow, and the auditor's SoD exceptions): any range, posted entries only. A trial balance or statement row
 // opens that account's ledger for the same range (kept in the URL); the ledger opens the entry, the entry its source.
 import Link from "next/link";
-import { Suspense, useMemo } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { OpsLoading } from "@/components/ops/ui";
 import { Select } from "@/components/ui/Select";
@@ -13,15 +13,16 @@ import { AcctShell, money, todayRiyadh, useApi, useLang, type Setup } from "../_
 import { BalanceSheet, CashFlow, IncomeByLocation, IncomeStatement } from "../_ui/statements";
 import { LocationFilter, branchesQuery } from "../_ui/locations";
 import { SodExceptions } from "../_ui/close";
+import { DeliveryInvoiceGaps } from "../_ui/gaps";
 import { DateRange, FilterCard, useFilters, useTerm } from "@/components/chrome";
 import { useAccountantView } from "../_ui/qoyod-pages";
 
-type View = "tb" | "ledger" | "income" | "balance" | "cashflow" | "sod";
-const VIEWS: View[] = ["tb", "ledger", "income", "balance", "cashflow", "sod"];
+type View = "tb" | "ledger" | "income" | "balance" | "cashflow" | "sod" | "gaps";
+const VIEWS: View[] = ["tb", "ledger", "income", "balance", "cashflow", "sod", "gaps"];
 
 type Tb = { from: string; to: string; balanced: boolean; rows: { accountId: string; code: string; nameAr: string | null; nameEn: string; openingDebit: string; openingCredit: string; periodDebit: string; periodCredit: string; closingDebit: string; closingCredit: string }[]; totals: Record<string, string> };
 type Gl = { account: { id: string; code: string; nameAr: string | null; nameEn: string; normalBalance: string; controlType: string | null }; from: string; to: string; opening: string; closing: string; periodDebit: string; periodCredit: string; total: number;
-  lines: { entryId: string; ref: string; entryDate: string; memo: string | null; lineMemo: string | null; sourceModule?: string | null; sourceType: string | null; sourceId: string | null; debit: string; credit: string; balance: string; partyType: string | null; partyId: string | null }[] };
+  lines: { entryId: string; ref: string; entryDate: string; memo: string | null; lineMemo: string | null; sourceModule?: string | null; sourceType: string | null; sourceId: string | null; docNo?: string | null; debit: string; credit: string; balance: string; partyType: string | null; partyId: string | null }[] };
 type Acc = { id: string; code: string; nameAr: string | null; nameEn: string };
 
 function Reports() {
@@ -45,6 +46,7 @@ function Reports() {
     for (const [k, v] of Object.entries(patch)) { if (v === null || v === "") p.delete(k); else p.set(k, v); }
     router.replace(`${path}?${p}`);
   };
+  const [showEntry, setShowEntry] = useState(false);
   const setup = useApi<Setup>("/api/accounting/setup");
   const tb = useApi<Tb>(view === "tb" ? `/api/accounting/trial-balance?from=${from}&to=${to}${zero ? "&includeZero=1" : ""}${bq ? `&${bq}` : ""}` : null);
   const gl = useApi<Gl>(view === "ledger" && accountId ? `/api/accounting/ledger?accountId=${encodeURIComponent(accountId)}&from=${from}&to=${to}` : null);
@@ -83,6 +85,7 @@ function Reports() {
           <button type="button" aria-pressed={view === "income"} onClick={() => go({ view: "income" })} data-testid="view-income">{L("قائمة الدخل", "Income statement")}</button>
           <button type="button" aria-pressed={view === "balance"} onClick={() => go({ view: "balance" })} data-testid="view-balance">{L("المركز المالي", "Balance sheet")}</button>
           <button type="button" aria-pressed={view === "cashflow"} onClick={() => go({ view: "cashflow" })} data-testid="view-cashflow">{L("التدفقات النقدية", "Cash flow")}</button>
+          <button type="button" aria-pressed={view === "gaps"} onClick={() => go({ view: "gaps" })} data-testid="view-gaps">{L("مفوتر غير مسلّم / مسلّم غير مفوتر", "Invoiced not delivered / delivered not invoiced")}</button>
           <button type="button" aria-pressed={view === "sod"} onClick={() => go({ view: "sod" })} data-testid="view-sod">{L("استثناءات فصل المهام", "SoD exceptions")}</button>
         </div>
       </div>
@@ -108,7 +111,7 @@ function Reports() {
           <label className="hr-field"><span className="hr-label">{L("مقارنة بـ", "Compare with")}</span><input type="date" className="hr-input" value={compareAsOf === "none" ? "" : compareAsOf} onChange={(e) => go({ compareAsOf: e.target.value || "none" })} data-testid="bs-compare" /></label>
         </div>
       ) : null}
-      {view === "tb" || view === "ledger" || view === "sod" || ((view === "income" || view === "cashflow") && kind === "custom") ? (
+      {view === "tb" || view === "ledger" || view === "sod" || view === "gaps" || ((view === "income" || view === "cashflow") && kind === "custom") ? (
       <div className="acct-row">
         {qoyod ? (
           <FilterCard onApply={() => rf.draft.from && rf.draft.to && go({ from: rf.draft.from, to: rf.draft.to })} onReset={() => { rf.setDraft({ from: yearStart, to: todayRiyadh() }); go({ from: null, to: null }); }} testId="report-filter">
@@ -136,7 +139,7 @@ function Reports() {
         </div>
       ) : null}
       {view === "income" ? (byLocation ? <IncomeByLocation query={stQuery} /> : <IncomeStatement query={stQuery} />) : view === "balance" ? <BalanceSheet query={stQuery} /> : view === "cashflow" ? <CashFlow query={stQuery} /> : null}
-      {view === "sod" ? <SodExceptions from={from} to={to} /> : view !== "tb" && view !== "ledger" ? null : view === "tb" ? (
+      {view === "gaps" ? <DeliveryInvoiceGaps asOf={to} /> : view === "sod" ? <SodExceptions from={from} to={to} /> : view !== "tb" && view !== "ledger" ? null : view === "tb" ? (
         tb.error ? <p role="alert" className="hr-err">{tb.error}</p> : !tb.data ? <OpsLoading /> : (
           <>
             <p className={`acct-balanced ${tb.data.balanced ? "is-ok" : "is-bad"}`} data-testid="tb-balanced">
@@ -171,21 +174,27 @@ function Reports() {
       ) : !accountId ? <p className="acct-hint">{L("اختر الحساب (المخزون، البنك، الأصول…) لعرض كشف حسابه: الرصيد الافتتاحي، الحركات، والرصيد بعد كل حركة.", "Choose the account (inventory, bank, assets…) to see its statement: opening balance, movements and the running balance.")}</p> : gl.error ? <p role="alert" className="hr-err">{gl.error}</p> : !gl.data ? <OpsLoading /> : (
         <>
           <p className="acct-hint"><Link href={`${path}?from=${from}&to=${to}`}>→ {L(`رجوع إلى ميزان المراجعة · ${from} – ${to}`, `Back to the trial balance · ${from} – ${to}`)}</Link> · {gl.data.account.normalBalance === "CREDIT" ? L("دائن بطبيعته", "Credit-normal") : L("مدين بطبيعته", "Debit-normal")}{gl.data.account.controlType ? L(" · حساب مراقبة", " · control account") : ""}</p>
+          <label className="acct-hint" style={{ display: "inline-flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={showEntry} onChange={(e) => setShowEntry(e.target.checked)} data-testid="gl-show-entry" />{L("إظهار رقم القيد (تفاصيل السجل الداخلي)", "Show the journal reference (internal record details)")}</label>
           <div className="hr-tablewrap">
             <table className="hr-table is-dense" data-testid="gl-table">
-              <thead><tr><th>{L("التاريخ", "Date")}</th><th>{L("القيد", "Entry")}</th><th>{L("الوصف", "Description")}</th><th className="acct-hide-m">{L("المصدر", "Source")}</th><th className="num">{L("مدين", "Debit")}</th><th className="num">{L("دائن", "Credit")}</th><th className="num">{L("الرصيد", "Balance")}</th></tr></thead>
+              <thead><tr><th>{L("التاريخ", "Date")}</th><th>{L("المستند", "Document")}</th><th>{L("الوصف", "Description")}</th>{showEntry ? <th data-testid="gl-entry-col">{L("القيد", "Entry")}</th> : null}<th className="num">{L("مدين", "Debit")}</th><th className="num">{L("دائن", "Credit")}</th><th className="num">{L("الرصيد", "Balance")}</th></tr></thead>
               <tbody>
-                <tr className="is-header"><td className="hr-num">{gl.data.from}</td><td /><td>{L("رصيد أول المدة", "Opening balance")}</td><td className="acct-hide-m" /><td /><td /><td className="num hr-num" data-testid="gl-opening">{money(gl.data.opening)}</td></tr>
+                <tr className="is-header"><td className="hr-num">{gl.data.from}</td><td /><td>{L("رصيد أول المدة", "Opening balance")}</td>{showEntry ? <td /> : null}<td /><td /><td className="num hr-num" data-testid="gl-opening">{money(gl.data.opening)}</td></tr>
                 {gl.data.lines.map((l, i) => (
                   <tr key={`${l.entryId}-${i}`}>
                     <td className="hr-num">{l.entryDate}</td>
-                    <td><Link className="acct-code" href={`/dashboard/accounting/journals/${l.entryId}`}>{l.ref}</Link></td>
+                    <td data-testid="gl-doc" title={l.sourceType ? `${l.sourceType} · ${l.sourceId}` : undefined}>{(() => {
+                      // The document the movement came from, by its own number. A manual journal IS its document.
+                      const href = l.sourceType ? sourceDocHref(l.sourceType, l.sourceId, {}, l.sourceModule) : `/dashboard/accounting/journals/${l.entryId}`;
+                      const label = l.sourceType ? `${plain(SOURCE_DOC, l.sourceType, lang)}${l.docNo ? ` ${l.docNo}` : ""}` : `${L("قيد يومية", "Journal")} ${l.ref}`;
+                      return href ? <Link href={href}>{label}</Link> : label;
+                    })()}</td>
                     <td>{l.lineMemo ?? l.memo ?? "—"}</td>
-                    <td className="acct-hide-m" title={l.sourceType ? `${l.sourceType} · ${l.sourceId}` : undefined}>{l.sourceType ? (sourceDocHref(l.sourceType, l.sourceId, {}, l.sourceModule) ? <Link href={sourceDocHref(l.sourceType, l.sourceId, {}, l.sourceModule)!}>{plain(SOURCE_DOC, l.sourceType, lang)}</Link> : plain(SOURCE_DOC, l.sourceType, lang)) : "—"}</td>
+                    {showEntry ? <td><Link className="acct-code" href={`/dashboard/accounting/journals/${l.entryId}`}>{l.ref}</Link></td> : null}
                     <td className="num hr-num">{money(l.debit, true)}</td><td className="num hr-num">{money(l.credit, true)}</td><td className="num hr-num">{money(l.balance)}</td>
                   </tr>
                 ))}
-                <tr className="is-total"><td className="hr-num">{gl.data.to}</td><td /><td>{L("الرصيد الختامي", "Closing balance")}</td><td className="acct-hide-m" /><td className="num hr-num">{money(gl.data.periodDebit)}</td><td className="num hr-num">{money(gl.data.periodCredit)}</td><td className="num hr-num" data-testid="gl-closing">{money(gl.data.closing)}</td></tr>
+                <tr className="is-total"><td className="hr-num">{gl.data.to}</td><td /><td>{L("الرصيد الختامي", "Closing balance")}</td>{showEntry ? <td /> : null}<td className="num hr-num">{money(gl.data.periodDebit)}</td><td className="num hr-num">{money(gl.data.periodCredit)}</td><td className="num hr-num" data-testid="gl-closing">{money(gl.data.closing)}</td></tr>
               </tbody>
             </table>
           </div>

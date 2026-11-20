@@ -119,3 +119,4 @@
   .acct .hr-table td .acct-sub.acct-hide-m { display: none; }
   .acct .hr-table tr.is-child td:first-child { padding-inline-start: 16px; }
 }
+.acct .acct-h3 { font-size: 14px; font-weight: 600; margin: 14px 0 4px; }

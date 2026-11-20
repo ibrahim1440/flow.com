@@ -181,6 +181,8 @@ export type LineProblem = { index: number; code: string; ar: string; en: string 
 /** A line as the editor sends it. Amounts as decimal strings. */
 export type RawLine = {
   description?: unknown; descriptionEn?: unknown; productSkuId?: unknown; orderItemId?: unknown; deliveryId?: unknown; originalLineId?: unknown;
+  /** The line's sales category (a CatalogCategory id) — for a line that is not a SKU, or to override the SKU's own. */
+  salesCategoryId?: unknown;
   skuCode?: unknown; quantity?: unknown; unit?: unknown; unitPrice?: unknown; discountPercent?: unknown;
   taxCategory?: unknown; taxRatePercent?: unknown; exemptionReasonCode?: unknown; exemptionReason?: unknown;
   /** «شامل؟»: the price is typed VAT-inclusive (`unitPriceGross`); `unitPrice` is then derived, never read. */
@@ -193,7 +195,7 @@ export type LineKind = "ITEM" | "FIXED_ASSET_SALE";
 
 export type CleanLine = InvoiceLineInput & {
   description: string; descriptionEn: string | null; productSkuId: string | null; orderItemId: string | null; deliveryId: string | null;
-  originalLineId: string | null; skuCode: string | null; unit: "UNIT" | "KG"; exemptionReasonCode: string | null; exemptionReason: string | null;
+  originalLineId: string | null; skuCode: string | null; unit: "UNIT" | "KG"; salesCategoryId?: string | null; exemptionReasonCode: string | null; exemptionReason: string | null;
   /** «شامل؟» — the gross unit price as typed (audit); unitPrice is the net derived from it. */
   priceIncludesVat: boolean; enteredGrossUnitPrice: Decimal | null;
   /** Absent = ITEM. A FIXED_ASSET_SALE line sells one asset (quantity 1, no SKU / order line / delivery). */
@@ -256,7 +258,7 @@ export function parseLines(raw: unknown, opts: { forIssue?: boolean } = {}): { l
     lines.push({
       description, descriptionEn: txt(r.descriptionEn, 300) || null,
       productSkuId: idOrNull(r.productSkuId), orderItemId: idOrNull(r.orderItemId), deliveryId: idOrNull(r.deliveryId), originalLineId: idOrNull(r.originalLineId),
-      skuCode: txt(r.skuCode, 60) || null,
+      skuCode: txt(r.skuCode, 60) || null, salesCategoryId: faSale ? null : r.salesCategoryId === undefined ? undefined : idOrNull(r.salesCategoryId),
       quantity: quantity ?? new Decimal(0), unitPrice: unitPrice ?? new Decimal(0), discountPercent: discountPercent ?? new Decimal(0),
       taxCategory, taxRatePercent: rate ?? new Decimal(0), exemptionReasonCode: taxCategory === "S" ? null : exemptionReasonCode,
       exemptionReason: taxCategory === "S" ? null : exemptionReason, unit,

@@ -287,20 +287,20 @@ export function side(role: string, amount: Decimal, dims?: PostingDims, descript
 
 /** Merge lines of the same role (or account), side and dimensions, and drop nothing-lines (a contra pair on one account nets off). */
 export function netLines(lines: (PostingLineInput | null)[]): PostingLineInput[] {
-  const m = new Map<string, { role?: string; accountId?: string; amount: Decimal; dims?: PostingDims; description?: string | null }>();
+  const m = new Map<string, { role?: string; accountId?: string; amount: Decimal; dims?: PostingDims; description?: string | null; accountBasis?: PostingLineInput["accountBasis"]; salesCategoryId?: string | null }>();
   for (const l of lines) {
     if (!l || (!l.role && !l.accountId)) continue;
     const amt = l.debit ? new Decimal(String(l.debit)) : new Decimal(String(l.credit)).negated();
-    const k = `${l.role ?? ""}|${l.accountId ?? ""}|${JSON.stringify(l.dims ?? {})}`;
+    const k = `${l.role ?? ""}|${l.accountId ?? ""}|${l.accountBasis ?? ""}|${l.salesCategoryId ?? ""}|${JSON.stringify(l.dims ?? {})}`;
     const cur = m.get(k);
     if (cur) cur.amount = cur.amount.plus(amt);
-    else m.set(k, { role: l.role ?? undefined, accountId: l.accountId ?? undefined, amount: amt, dims: l.dims, description: l.description });
+    else m.set(k, { role: l.role ?? undefined, accountId: l.accountId ?? undefined, amount: amt, dims: l.dims, description: l.description, accountBasis: l.accountBasis ?? undefined, salesCategoryId: l.salesCategoryId ?? undefined });
   }
   const out: PostingLineInput[] = [];
   for (const x of m.values()) {
     const a = roundMoney(x.amount);
     if (a.isZero()) continue;
-    out.push({ ...(x.role ? { role: x.role } : { accountId: x.accountId }), ...(a.isNegative() ? { credit: a.abs().toFixed(2) } : { debit: a.toFixed(2) }), ...(x.dims ? { dims: x.dims } : {}), ...(x.description ? { description: x.description } : {}) });
+    out.push({ ...(x.role ? { role: x.role } : { accountId: x.accountId }), ...(a.isNegative() ? { credit: a.abs().toFixed(2) } : { debit: a.toFixed(2) }), ...(x.dims ? { dims: x.dims } : {}), ...(x.description ? { description: x.description } : {}), ...(x.accountBasis ? { accountBasis: x.accountBasis } : {}), ...(x.salesCategoryId ? { salesCategoryId: x.salesCategoryId } : {}) });
   }
   return out;
 }

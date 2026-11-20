@@ -128,6 +128,7 @@ export async function POST(request: Request) {
       supplyEndDate: body.supplyEndDate, paymentTermsDays: body.paymentTermsDays, notes: body.notes, requestKey,
       // A4: an invoice for an order of an external source (e.g. the Salla web shop, later): idempotent per order.
       channel: body.channel as string | null | undefined, externalOrderRef: body.externalOrderRef as string | null | undefined,
+      salesActivity: body.salesActivity,
       // «الموقع» (WP-B): absent = the order's / the requester's default.
       branchId: body.branchId,
       canSellAssets: canSellAssets(user.permissions),

@@ -13,6 +13,8 @@ import { deliveryLotsFor } from "@/lib/services/delivery-lots";
 import { autoPrepareOrder } from "@/lib/services/orders/preparation";
 import { orderPipelines } from "@/lib/services/orders/pipeline";
 import { isFormChannel } from "@/lib/station/board";
+import { usableSalesActivity } from "@/lib/accounting/sales-account-rules";
+import { AccountingError, accountingErrorJson } from "@/lib/accounting/errors";
 import { parseBranchId } from "@/lib/accounting/locations";
 import { orderVisibilityWhere, seesAllSales } from "@/lib/services/sales/scope";
 import { linkDirectOrderDeal } from "@/lib/services/sales/direct-order-deal";
@@ -107,6 +109,13 @@ export async function POST(request: Request) {
     if (!body.customerId || typeof body.customerId !== "string") {
       return NextResponse.json({ error: "customerId is required" }, { status: 400 });
     }
+    // «نشاط البيع»: an activity that is not one of the three, or is not activated, is refused here — before the order
+    // number slot, before any write. It is never dropped in silence and never turned into «no activity».
+    let salesActivity: ReturnType<typeof usableSalesActivity>;
+    try { salesActivity = usableSalesActivity(body.salesActivity); } catch (e) {
+      if (e instanceof AccountingError) return NextResponse.json(accountingErrorJson(e), { status: e.status });
+      throw e;
+    }
     if (!Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: "An order must have at least one line." }, { status: 400 });
     }
@@ -173,6 +182,8 @@ export async function POST(request: Request) {
             ...(branchId !== undefined ? { branchId } : {}),
             // «القناة»: the web store or the café when the form says so; otherwise not recorded (derived).
             ...(isFormChannel(body.channel) ? { channel: body.channel } : {}),
+            // «نشاط البيع»: recorded only when the request names it — never derived from the channel.
+            ...(salesActivity ? { salesActivity } : {}),
           },
           resolvedItems,
           canSeeCustomerContact(user.permissions),

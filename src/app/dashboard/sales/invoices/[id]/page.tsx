@@ -21,7 +21,7 @@ import { Banner, IssueConfirm, RequestHistory, ReturnDialog, SplitButton, fmtAt,
 import { RETURN_REASON_LABEL, type ReturnReason } from "@/lib/services/invoicing/request-math";
 import { QoyodPanel } from "../_ui/qoyod-panel";
 
-type Line = { id: string; description: string; skuCode: string | null; quantity: string; unit: "UNIT" | "KG"; unitPrice: string; discountPercent: string; discountAmount: string; taxCategory: "S" | "Z" | "E" | "O"; taxRatePercent: string; exemptionReasonCode: string | null; exemptionReason: string | null; lineNet: string; lineTax: string; lineTotal: string; orderItemId: string | null; productSkuId: string | null; originalLineId: string | null; deliveryId: string | null;
+type Line = { id: string; salesCategoryId?: string | null; description: string; skuCode: string | null; quantity: string; unit: "UNIT" | "KG"; unitPrice: string; discountPercent: string; discountAmount: string; taxCategory: "S" | "Z" | "E" | "O"; taxRatePercent: string; exemptionReasonCode: string | null; exemptionReason: string | null; lineNet: string; lineTax: string; lineTotal: string; orderItemId: string | null; productSkuId: string | null; originalLineId: string | null; deliveryId: string | null;
   kind?: "ITEM" | "FIXED_ASSET_SALE"; fixedAssetId?: string | null; disposalKind?: "SALE" | "SCRAP" | null;
   priceIncludesVat?: boolean; unitPriceGross?: string | null; roundingDifference?: string | null };
 type Doc = {
@@ -54,7 +54,7 @@ const DIFF_FIELD: Record<string, [string, string]> = {
 };
 const pctField = (f: string) => f === "discountPercent" || f === "taxRatePercent";
 
-const toEdit = (l: Line): EditLine => ({ description: l.description, quantity: l.quantity, unit: l.unit, unitPrice: l.unitPrice, discountPercent: l.discountPercent, taxCategory: l.taxCategory, taxRatePercent: l.taxRatePercent, exemptionReasonCode: l.exemptionReasonCode, orderItemId: l.orderItemId, productSkuId: l.productSkuId, skuCode: l.skuCode, originalLineId: l.originalLineId, deliveryId: l.deliveryId, kind: l.kind, fixedAssetId: l.fixedAssetId, disposalKind: l.disposalKind, ...(l.priceIncludesVat ? { priceIncludesVat: true, unitPriceGross: l.unitPriceGross ?? null } : {}) });
+const toEdit = (l: Line): EditLine => ({ description: l.description, salesCategoryId: l.salesCategoryId ?? null, quantity: l.quantity, unit: l.unit, unitPrice: l.unitPrice, discountPercent: l.discountPercent, taxCategory: l.taxCategory, taxRatePercent: l.taxRatePercent, exemptionReasonCode: l.exemptionReasonCode, orderItemId: l.orderItemId, productSkuId: l.productSkuId, skuCode: l.skuCode, originalLineId: l.originalLineId, deliveryId: l.deliveryId, kind: l.kind, fixedAssetId: l.fixedAssetId, disposalKind: l.disposalKind, ...(l.priceIncludesVat ? { priceIncludesVat: true, unitPriceGross: l.unitPriceGross ?? null } : {}) });
 
 export default function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -62,6 +62,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const qoyodView = useAccountantView();
   const router = useRouter();
   const doc = useApi<Doc>(`/api/sales/invoices/${id}`);
+  const salesCategories = useApi<{ categories: { id: string; nameAr: string }[] }>("/api/sales/invoices/sales-categories");
   const search = useSearchParams();
   const series = useApi<{ invoicePrefix: string; creditNotePrefix: string; debitNotePrefix: string }>("/api/sales/invoices/settings");
   const w = useWrite();
@@ -293,7 +294,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           </div>
           <div className="acct-card">
             <h2>{L("البنود", "Lines")}</h2>
-            <LinesEditor lines={lines} onChange={setLines} lockItems={d.kind === "CREDIT_NOTE"} lockCommercial={requested} sellAssets={!isNote && !!d.can.sellAssets} inclusive={qoyod && !isNote} lockTax={!!d.control} />
+            <LinesEditor lines={lines} onChange={setLines} categories={d.kind === "INVOICE" ? salesCategories.data?.categories : undefined} lockItems={d.kind === "CREDIT_NOTE"} lockCommercial={requested} sellAssets={!isNote && !!d.can.sellAssets} inclusive={qoyod && !isNote} lockTax={!!d.control} />
             <div className="inv-grid2">
               <label className="hr-field"><span className="hr-label">{L("ملاحظات للعميل", "Notes to the customer")}</span><textarea className="hr-input" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
               <Totals lines={lines} />

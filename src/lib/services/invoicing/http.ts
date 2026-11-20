@@ -43,6 +43,8 @@ export function documentJson(doc: LoadedDocument, extra: { open?: Decimal | null
     zatca: { icv: doc.zatcaIcv?.toString() ?? null, status: doc.zatcaStatus, hash: doc.zatcaInvoiceHash, qr: doc.zatcaQr, ref: doc.zatcaXmlRef },
     lines: doc.lines.map((l) => ({
       id: l.id, position: l.position, orderItemId: l.orderItemId, deliveryId: l.deliveryId, productSkuId: l.productSkuId, originalLineId: l.originalLineId,
+      // The line's own sales category and its recorded general-account decision (the editor sends the category back as it is).
+      salesCategoryId: l.salesCategoryId, generalAccountAt: l.generalAccountAt, generalAccountReason: l.generalAccountReason, generalAccountActivity: l.generalAccountActivity,
       description: l.description, descriptionEn: l.descriptionEn, skuCode: l.skuCode, quantity: D(l.quantity).toString(), unit: l.unit,
       unitPrice: m2(l.unitPrice), discountPercent: D(l.discountPercent).toString(), discountAmount: m2(l.discountAmount),
       taxCategory: l.taxCategory, taxRatePercent: D(l.taxRatePercent).toString(), exemptionReasonCode: l.exemptionReasonCode, exemptionReason: l.exemptionReason,

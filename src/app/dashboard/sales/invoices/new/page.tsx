@@ -204,6 +204,7 @@ function Manual({ initialQ, mode = null, initialCustomerId, opportunityId }: { i
   // أبو فهد B6: the manual invoice's own questions (who may issue, the series) — not asked in the D22 modes, whose rep may
   // hold invoices_create without invoices_view (two 403s in the console for nothing).
   const abilities = useApi<{ can: { create: boolean; issue: boolean; sellAssets?: boolean } }>(mode ? null : "/api/sales/invoices?take=1");
+  const salesCategories = useApi<{ categories: { id: string; nameAr: string }[] }>("/api/sales/invoices/sales-categories");
   const series = useApi<{ invoicePrefix: string }>(mode ? null : "/api/sales/invoices/settings");
   const can = abilities.data?.can ?? { create: false, issue: false };
   const totals = useTotals(lines);
@@ -436,7 +437,7 @@ function Manual({ initialQ, mode = null, initialCustomerId, opportunityId }: { i
               <LinesEditor lines={lines} onChange={setLines} sellAssets={false} qoyod={qoyod} newLine={modeLine(mode)}
                 sku={{ skus: md.skus, ar: isAr, oneUnit: mode === "sample", lockTax, quietProblems: simple && !tried, onPick: (i, sk) => setLines(lines.map((l, j) => (j === i ? lineForSku(mode, l, md.skus.find((x) => x.id === sk?.id) ?? null, isAr) : l))) }} />
             ) : (
-            <LinesEditor lines={lines} onChange={setLines} sellAssets={!!abilities.data?.can.sellAssets} qoyod={qoyod} />
+            <LinesEditor lines={lines} onChange={setLines} sellAssets={!!abilities.data?.can.sellAssets} qoyod={qoyod} categories={salesCategories.data?.categories} />
             )}
             {mode === "direct-sale" && md.can ? (
               <p className={`acct-hint${needsApproval ? " is-warn" : ""}`} data-testid="mode-discount-note" data-pending={needsApproval ? "1" : "0"}>

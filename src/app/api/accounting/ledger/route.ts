@@ -19,8 +19,8 @@ export async function GET(request: Request) {
     const csv = qp(request, "format") === "csv";
     const gl = await generalLedger(accountId, from, to, csv ? { limit: 2000 } : { limit: Number(qp(request, "limit")) || 500, offset: Number(qp(request, "offset")) || 0 });
     if (csv) {
-      const head = "date,entry,memo,source_type,source_id,debit,credit,balance";
-      const rows = [["", "", "Opening balance", "", "", "", "", gl.opening].join(","), ...gl.lines.map((l) => [l.entryDate, l.ref, l.lineMemo ?? l.memo, l.sourceType, l.sourceId, l.debit, l.credit, l.balance].map(csvCell).join(",")), ["", "", "Closing balance", "", "", gl.periodDebit, gl.periodCredit, gl.closing].join(",")];
+      const head = "date,document_type,document_no,memo,entry,source_id,debit,credit,balance";
+      const rows = [["", "", "", "Opening balance", "", "", "", "", gl.opening].join(","), ...gl.lines.map((l) => [l.entryDate, l.sourceType, l.docNo, l.lineMemo ?? l.memo, l.ref, l.sourceId, l.debit, l.credit, l.balance].map(csvCell).join(",")), ["", "", "", "Closing balance", "", "", gl.periodDebit, gl.periodCredit, gl.closing].join(",")];
       return new NextResponse("﻿" + [head, ...rows].join("\n"), { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="ledger-${gl.account.code}-${gl.from}-${gl.to}.csv"` } });
     }
     return NextResponse.json(gl);

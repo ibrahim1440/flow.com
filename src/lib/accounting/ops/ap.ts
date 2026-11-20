@@ -17,6 +17,7 @@
 //       Dr AP (party) / Cr BANK (CASH for a cash payment)         — `purchasing · SUPPLIER_PAYMENT · PAID`
 // The documents are the operational sub-ledger (open items, aging); the GL AP control by party is the books
 // (statement); the reconciliation compares the two.
+import { sourceDocNumbers, sourceKey } from "@/lib/accounting/source-doc-numbers";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { isSimpleMode } from "@/lib/simple-mode";
@@ -806,10 +807,11 @@ export async function supplierStatement(supplierId: string, fromText: string | n
      WHERE l."accountId" = ${role.accountId} AND l."partyType" = 'SUPPLIER' AND l."partyId" = ${supplierId}
        AND e."status" IN ('POSTED', 'REVERSED') AND e."entryDate" >= ${from} AND e."entryDate" <= ${to}
      ORDER BY e."entryDate", e."postingYear", e."postingSeq", l."lineNo"`;
+  const docNos = await sourceDocNumbers(rows);
   let bal = opening;
   const lines = rows.map((r) => {
     bal = bal.plus(r.credit).minus(r.debit);
-    return { entryId: r.entryId, date: dayText(r.entryDate), ref: r.postingYear ? `JE-${r.postingYear}-${String(r.postingSeq).padStart(6, "0")}` : "—", description: r.description, sourceType: r.sourceType, sourceId: r.sourceId, debit: new Decimal(r.debit).toFixed(2), credit: new Decimal(r.credit).toFixed(2), balance: bal.toFixed(2) };
+    return { entryId: r.entryId, date: dayText(r.entryDate), docNo: docNos.get(sourceKey(r)) ?? null, ref: r.postingYear ? `JE-${r.postingYear}-${String(r.postingSeq).padStart(6, "0")}` : "—", description: r.description, sourceType: r.sourceType, sourceId: r.sourceId, debit: new Decimal(r.debit).toFixed(2), credit: new Decimal(r.credit).toFixed(2), balance: bal.toFixed(2) };
   });
   return { supplier, from: dayText(from), to: dayText(to), opening: opening.toFixed(2), closing: bal.toFixed(2), lines };
 }

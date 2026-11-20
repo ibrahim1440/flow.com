@@ -64,6 +64,14 @@ export function accountFields(body: Input, mode: "create" | "update") {
     if (body.parentId !== null && typeof body.parentId !== "string") throw refuse("BAD_INPUT", "parentId is an account id or null.");
     out.parentId = body.parentId;
   }
+  // The accountant's own number of the account — a reference beside `code` (which is the system's identity of the
+  // account and is frozen once it has posted lines). It decides nothing, and several system accounts may carry the same number
+  // (the system keeps apart what the accountant's chart shows as one line).
+  if (body.referenceCode !== undefined) {
+    if (body.referenceCode === null || body.referenceCode === "") out.referenceCode = null;
+    else if (typeof body.referenceCode !== "string" || !/^[0-9A-Za-z._-]{1,20}$/.test(body.referenceCode.trim())) throw refuse("BAD_INPUT", "referenceCode: letters, digits, dot, dash or underscore (≤ 20).");
+    else out.referenceCode = body.referenceCode.trim();
+  }
   const q = text(body.qoyodAccountId, "qoyodAccountId", 64);
   if (q !== undefined) out.qoyodAccountId = q;
   // Accounting A5: the statement line (null = inferred from the chart; ./statements.ts reportGroupOf).
@@ -97,7 +105,7 @@ export async function updateAccount(id: string, body: Input, ctx: AuditContext) 
   if (!Object.keys(data).length) throw refuse("BAD_INPUT", "No field to change.");
   return prisma.$transaction(async (tx) => {
     await setAuditContext(tx, ctx);
-    const cur = await tx.account.findUnique({ where: { id }, select: { id: true, code: true, type: true, normalBalance: true, _count: { select: { journalEntryLines: true, roles: true, children: true } } } });
+    const cur = await tx.account.findUnique({ where: { id }, select: { id: true, code: true, type: true, normalBalance: true, _count: { select: { journalEntryLines: true, roles: true, children: true, salesRuleRevenue: true, salesRuleCogs: true } } } });
     if (!cur) throw refuse("NOT_FOUND");
     const used = cur._count.journalEntryLines > 0;
     if (used && ((data.code && data.code !== cur.code) || (data.type && data.type !== String(cur.type)) || (data.normalBalance && data.normalBalance !== cur.normalBalance))) throw refuse("ACCOUNT_LOCKED");
@@ -105,6 +113,8 @@ export async function updateAccount(id: string, body: Input, ctx: AuditContext) 
     if (data.parentId !== undefined) await checkParent(tx, data.parentId as string | null, (data.type as string) ?? String(cur.type), id);
     // A mapped role keeps pointing at a postable account.
     if (cur._count.roles > 0 && (data.isActive === false || data.allowPosting === false)) throw refuse("ACCOUNT_IN_USE", "(a posting role)");
+    // A sales account rule keeps pointing at a postable account of the type it was checked against.
+    if (cur._count.salesRuleRevenue + cur._count.salesRuleCogs > 0 && (data.isActive === false || data.allowPosting === false || (data.type && data.type !== String(cur.type)) || (data.controlType !== undefined && data.controlType !== null))) throw refuse("ACCOUNT_IN_USE", "(a sales account rule)");
     // An account with sub-accounts is a header: it never becomes postable.
     if (cur._count.children > 0 && data.allowPosting === true) throw refuse("PARENT_INVALID", "(it has sub-accounts)");
     return tx.account.update({ where: { id }, data: { ...(data as Prisma.AccountUncheckedUpdateInput), updatedBy: ctx.actorId } });
@@ -115,10 +125,10 @@ export async function updateAccount(id: string, body: Input, ctx: AuditContext) 
 export async function deleteAccount(id: string, ctx: AuditContext) {
   return prisma.$transaction(async (tx) => {
     await setAuditContext(tx, ctx);
-    const cur = await tx.account.findUnique({ where: { id }, select: { _count: { select: { journalEntryLines: true, roles: true, children: true, openingLines: true, hrAccountMaps: true } } } });
+    const cur = await tx.account.findUnique({ where: { id }, select: { _count: { select: { journalEntryLines: true, roles: true, children: true, openingLines: true, hrAccountMaps: true, salesRuleRevenue: true, salesRuleCogs: true } } } });
     if (!cur) throw refuse("NOT_FOUND");
     const c = cur._count;
-    if (c.journalEntryLines || c.roles || c.children || c.openingLines || c.hrAccountMaps) throw refuse("ACCOUNT_IN_USE");
+    if (c.journalEntryLines || c.roles || c.children || c.openingLines || c.hrAccountMaps || c.salesRuleRevenue || c.salesRuleCogs) throw refuse("ACCOUNT_IN_USE");
     await tx.account.delete({ where: { id } });
     return { id, deleted: true };
   }, TX_OPTS);

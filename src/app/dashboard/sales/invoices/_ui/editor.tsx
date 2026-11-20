@@ -15,6 +15,8 @@ export type EditLine = {
   description: string; descriptionEn?: string | null; quantity: string; unit: "UNIT" | "KG"; unitPrice: string; discountPercent: string;
   taxCategory: "S" | "Z" | "E" | "O"; taxRatePercent: string; exemptionReasonCode?: string | null;
   orderItemId?: string | null; productSkuId?: string | null; skuCode?: string | null; originalLineId?: string | null; deliveryId?: string | null;
+  /** The line's own sales category (a line that is not a SKU of the system): what the sales account rules look up. */
+  salesCategoryId?: string | null;
   /** The editor's own cap (what is left to invoice / credit on the source line), when there is one. */
   max?: string | null;
   /** «بيع أصل ثابت» (BATCH 22 WP-F): the asset sold and the disposal it will make; `rett`: land / buildings (RETT reminder). */
@@ -82,7 +84,9 @@ export function Totals({ lines, qoyod = false }: { lines: EditLine[]; qoyod?: bo
  * الضريبة · القيمة» and «إضافة المزيد» with its Shift+A shortcut. Display only: the same lines and totals engine.
  * `inclusive` (WP-K, default = `qoyod`): the «شامل؟» column — the price typed VAT-inclusive, the net derived on the server.
  */
-export function LinesEditor({ lines, onChange, lockItems, lockCommercial, sellAssets, testId = "draft-lines", qoyod = false, inclusive = qoyod, sku, newLine = emptyLine, lockTax: lockTaxAll }: { lines: EditLine[]; onChange: (lines: EditLine[]) => void; lockItems?: boolean; lockCommercial?: boolean; sellAssets?: boolean; testId?: string; qoyod?: boolean; inclusive?: boolean;
+export function LinesEditor({ lines, onChange, lockItems, lockCommercial, sellAssets, testId = "draft-lines", qoyod = false, inclusive = qoyod, sku, newLine = emptyLine, lockTax: lockTaxAll, categories }: { lines: EditLine[]; onChange: (lines: EditLine[]) => void; lockItems?: boolean; lockCommercial?: boolean; sellAssets?: boolean; testId?: string; qoyod?: boolean; inclusive?: boolean;
+  /** The sales categories a line that is not a SKU may carry (absent: the field is not shown). */
+  categories?: { id: string; nameAr: string }[];
   /** P0 C5: a direct sale's / sample's draft — VAT fixed (a change is «طلب تغيير الضريبة», approved by a second person). */
   lockTax?: boolean;
   /** D22 «بيع مباشر» / «إرسال عيّنة» (owner-approved 2010:2): each line is a SKU picked from the list (ProductCombo), in units;
@@ -124,6 +128,14 @@ export function LinesEditor({ lines, onChange, lockItems, lockCommercial, sellAs
                 <input className="hr-input" value={l.description} disabled={lockItems} onChange={(e) => set(i, { description: e.target.value })} aria-label={L("الوصف", "Description")} data-testid={`line-desc-${i}`} />
                 )}
                 {l.skuCode ? <span className="inv-sub acct-code">{l.skuCode}</span> : null}
+                {categories?.length && !l.productSkuId && l.kind !== "FIXED_ASSET_SALE" ? (
+                  <span className="inv-sub" data-testid={`line-category-${i}`}>
+                    <Select value={l.salesCategoryId ?? ""} disabled={lockItems} onChange={(e) => set(i, { salesCategoryId: e.target.value || null })} aria-label={L(`تصنيف المبيعات للبند ${i + 1}`, `Sales category of line ${i + 1}`)}>
+                      <option value="">{L("تصنيف المبيعات: بلا تصنيف", "Sales category: none")}</option>
+                      {categories.map((c) => <option key={c.id} value={c.id}>{c.nameAr}</option>)}
+                    </Select>
+                  </span>
+                ) : null}
                 {l.max ? <span className="inv-sub">{L("المتبقي", "Left")} <bdi className="hr-num">{l.max}</bdi></span> : null}
                 {l.kind === "FIXED_ASSET_SALE" ? (
                   <span className="inv-sub" data-testid={`line-asset-${i}`}>

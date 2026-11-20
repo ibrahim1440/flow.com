@@ -9,7 +9,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { OpsLoading, Btn, Notice } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
 import { Select } from "@/components/ui/Select";
-import { LEGACY_AP_TAB } from "@/lib/accounting/source-links";
+import { LEGACY_AP_TAB, SOURCE_DOC, plain, sourceDocHref } from "@/lib/accounting/source-links";
 import { AcctShell, Msg, money, todayRiyadh, useApi, useLang, useWrite, type Setup } from "../_ui/shell";
 import { InvoiceList, type InvoiceRow } from "../_ui/ap";
 import { DateRange, FilterCard, Section, ListFooter, ListPageSize, useFilters, usePaging, useTerm } from "@/components/chrome";
@@ -20,7 +20,7 @@ import { allocateOldestFirst } from "@/lib/purchases/allocation";
 
 
 type Aging = { asOf: string; total: string; buckets: Record<string, string>; counts: Record<string, number>; suppliers: { supplierId: string; name: string; buckets: Record<string, string>; total: string; openClaim?: string }[]; openClaims?: string; gl: { balance: string; difference: string } | null };
-type Statement = { supplier: { name: string }; from: string; to: string; opening: string; closing: string; lines: { entryId: string; date: string; ref: string; description: string | null; sourceType: string | null; debit: string; credit: string; balance: string }[] };
+type Statement = { supplier: { name: string }; from: string; to: string; opening: string; closing: string; lines: { entryId: string; date: string; ref: string; description: string | null; sourceType: string | null; sourceId?: string | null; docNo?: string | null; debit: string; credit: string; balance: string }[] };
 type Payment = { id: string; number: string; supplierName: string; paymentDate: string; amount: string; method: string; reference: string | null; status: string; journalEntryId: string | null; invoices: string[]; allocated?: string; supplierId: string; branchId?: string | null };
 type Supplier = { id: string; name: string; vatNumber?: string | null; openingOutstanding?: string };
 type List = { rows: InvoiceRow[]; can: { ap: boolean } };
@@ -111,7 +111,7 @@ function AgingView({ asOf, supplierId, go }: { asOf: string; supplierId: string;
               <thead><tr><th>{L("التاريخ", "Date")}</th><th>{L("المستند", "Document")}</th><th className="acct-hide-m">{L("البيان", "Description")}</th><th className="num">{L("مدين", "Debit")}</th><th className="num">{L("دائن", "Credit")}</th><th className="num">{L("الرصيد", "Balance")}</th></tr></thead>
               <tbody>
                 <tr className="is-header"><td className="hr-num">{st.data.from}</td><td /><td className="acct-hide-m">{L("رصيد أول المدة", "Opening balance")}</td><td /><td /><td className="num hr-num">{money(st.data.opening)}</td></tr>
-                {st.data.lines.map((l, i) => <tr key={i}><td className="hr-num">{l.date}</td><td><Link className="acct-code" href={`/dashboard/accounting/journals/${l.entryId}`}>{l.ref}</Link></td><td className="acct-hide-m">{l.description}</td><td className="num hr-num">{money(l.debit, true)}</td><td className="num hr-num">{money(l.credit, true)}</td><td className="num hr-num">{money(l.balance)}</td></tr>)}
+                {st.data.lines.map((l, i) => <tr key={i}><td className="hr-num">{l.date}</td><td data-testid="st-doc">{l.sourceType && sourceDocHref(l.sourceType, l.sourceId) ? <Link href={sourceDocHref(l.sourceType, l.sourceId)!}>{`${plain(SOURCE_DOC, l.sourceType, L("ar", "en"))}${l.docNo ? ` ${l.docNo}` : ""}`}</Link> : l.sourceType ? `${plain(SOURCE_DOC, l.sourceType, L("ar", "en"))}${l.docNo ? ` ${l.docNo}` : ""}` : null}{" "}<Link className="acct-code" title={L("القيد في السجل الداخلي", "The entry in the internal record")} href={`/dashboard/accounting/journals/${l.entryId}`}>{l.sourceType ? L("تفاصيل", "details") : l.ref}</Link></td><td className="acct-hide-m">{l.description}</td><td className="num hr-num">{money(l.debit, true)}</td><td className="num hr-num">{money(l.credit, true)}</td><td className="num hr-num">{money(l.balance)}</td></tr>)}
                 <tr className="is-total"><td className="hr-num">{st.data.to}</td><td /><td className="acct-hide-m">{L("الرصيد الختامي", "Closing balance")}</td><td /><td /><td className="num hr-num">{money(st.data.closing)}</td></tr>
               </tbody>
             </table>

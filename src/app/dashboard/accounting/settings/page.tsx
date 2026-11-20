@@ -4,6 +4,7 @@
 // checklist; step-up), and «ربط الحسابات» — every system posting role mapped to an account of the chart.
 // Later phases post only by these roles. A5: «فصل المهام» — the SoD setting (self-approval, the approver posting),
 // one policy for A1 journals, A2 notes and A3 supplier invoices; every use is listed in the SoD exceptions report.
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { OpsLoading, Btn, Field } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
@@ -84,6 +85,7 @@ export default function SettingsPage() {
           <section className="acct-card" data-testid="acct-roles">
             <div className="acct-foot" style={{ borderTop: 0, paddingTop: 0 }}>
               <h2>{L("ربط الحسابات", "Account mapping")}</h2>
+              <p className="acct-hint"><Link href="/dashboard/accounting/sales-account-rules" data-testid="to-sales-account-rules">{L("قواعد حسابات المبيعات: حساب الإيراد وتكلفة المبيعات حسب نشاط البيع ثم التصنيف أو الصنف ←", "Sales account rules: the revenue and cost-of-sales account by sales activity, then category or SKU →")}</Link></p>
               {can ? <Btn variant="primary" disabled={!changed.length} busy={w.busy === "roles"} onClick={saveRoles} data-testid="roles-save">{L(`حفظ الربط${changed.length ? ` (${changed.length})` : ""}`, `Save mapping${changed.length ? ` (${changed.length})` : ""}`)}</Btn> : null}
             </div>
             <p className="acct-hint">{L("لكل بند حساب واحد يُرحَّل عليه تلقائيًا (مثل «البن الأخضر» أو «الذمم الدائنة»). تغيير الحساب لا يغيّر أي قيد مرحّل، ويُسجَّل. الرمز التقني للبند يظهر عند الوقوف عليه.", "Each item has one account it posts to automatically (such as «Green coffee» or «Accounts payable»). Changing it never changes a posted entry, and is recorded. The item's technical key shows on hover or focus.")}</p>

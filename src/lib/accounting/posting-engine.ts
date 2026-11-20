@@ -43,7 +43,17 @@ export type PostingDims = {
   costCenterId?: string | null;
   party?: { type: PartyType; id: string } | null;
   item?: { type: ItemType; id: string } | null;
+  /** The sales channel of the document, snapshotted on the line (A-Z, 0-9, _; ≤ 20). */
+  channel?: string | null;
+  /** The sales activity of the document (ROASTERY_B2B | WEBSITE | CAFE), snapshotted on the line. */
+  salesActivity?: string | null;
 };
+
+/** How a sales line's account was chosen: a sales account rule (the activity's SKU, category or default rule) or the general role. */
+export type AccountBasis = "ACTIVITY_SKU" | "ACTIVITY_CATEGORY" | "ACTIVITY" | "ROLE" | "ACTIVITY_DECISION" | "ROLE_DECISION";
+const ACCOUNT_BASES: readonly string[] = ["ACTIVITY_SKU", "ACTIVITY_CATEGORY", "ACTIVITY", "ROLE", "ACTIVITY_DECISION", "ROLE_DECISION"];
+const SALES_ACTIVITIES: readonly string[] = ["ROASTERY_B2B", "WEBSITE", "CAFE"];
+const CHANNEL_RE = /^[A-Z0-9_]{1,20}$/;
 
 export type PostingLineInput = {
   /** A posting role (src/lib/accounting/roles.ts) — what later phases use. */
@@ -54,6 +64,10 @@ export type PostingLineInput = {
   credit?: MoneyInput | null;
   description?: string | null;
   dims?: PostingDims;
+  /** Snapshotted on the line with its account: how the account was chosen (sales lines only). */
+  accountBasis?: AccountBasis | null;
+  /** Snapshotted on the line: the sales category it was posted under (sales lines only). */
+  salesCategoryId?: string | null;
 };
 
 export type PostEntryInput = {
@@ -90,6 +104,11 @@ export type NormalLine = {
   credit: Decimal;
   description: string | null;
   dims: { branchId: string | null; costCenterId: string | null; partyType: PartyType | null; partyId: string | null; itemType: ItemType | null; itemId: string | null };
+  /** Snapshots (outside `dims`, so a line without them hashes exactly as it did before they existed). */
+  channel?: string | null;
+  salesActivity?: string | null;
+  salesCategoryId?: string | null;
+  accountBasis?: string | null;
 };
 
 const KEY_RE = /^[A-Za-z0-9:_\-./]{3,200}$/;
@@ -139,6 +158,13 @@ export function normaliseLines(lines: PostingLineInput[], defaultBranchId: strin
     const item = dims.item ?? null;
     if (party && (!PARTY_TYPES.includes(party.type) || typeof party.id !== "string" || !party.id)) throw refuse("BAD_INPUT", `Line ${i + 1}: party.`);
     if (item && (!ITEM_TYPES.includes(item.type) || typeof item.id !== "string" || !item.id)) throw refuse("BAD_INPUT", `Line ${i + 1}: item.`);
+    const channel = str(dims.channel, 20);
+    if (channel && !CHANNEL_RE.test(channel)) throw refuse("BAD_INPUT", `Line ${i + 1}: channel.`);
+    const activity = str(dims.salesActivity, 20);
+    if (activity && !SALES_ACTIVITIES.includes(activity)) throw refuse("BAD_INPUT", `Line ${i + 1}: salesActivity.`);
+    const category = str(l.salesCategoryId, 64);
+    const basis = l.accountBasis ?? null;
+    if (basis && !ACCOUNT_BASES.includes(basis)) throw refuse("BAD_INPUT", `Line ${i + 1}: accountBasis.`);
     let dr: Decimal, cr: Decimal;
     try { dr = roundMoney(d); cr = roundMoney(c); } catch (e) { if (e instanceof MoneyError) throw refuse("AMOUNT", `Line ${i + 1}: ${e.message}`); throw e; }
     if (dr.isZero() && cr.isZero()) throw refuse("AMOUNT", `Line ${i + 1} rounds to zero.`);
@@ -149,6 +175,7 @@ export function normaliseLines(lines: PostingLineInput[], defaultBranchId: strin
       credit: cr,
       description: str(l.description, 500),
       dims: { branchId: str(dims.branchId, 64) ?? fallbackBranch, costCenterId: str(dims.costCenterId, 64), partyType: party?.type ?? null, partyId: party?.id ?? null, itemType: item?.type ?? null, itemId: item?.id ?? null },
+      ...(channel ? { channel } : {}), ...(activity ? { salesActivity: activity } : {}), ...(category ? { salesCategoryId: category } : {}), ...(basis ? { accountBasis: basis } : {}),
     };
   });
   if (!rawD.equals(rawC)) throw refuse("UNBALANCED", `(debit ${rawD.toFixed()} ≠ credit ${rawC.toFixed()})`);
@@ -170,7 +197,7 @@ export function normaliseLines(lines: PostingLineInput[], defaultBranchId: strin
 
 /** sha256 of the normalised content (date + lines): what a retry must match. */
 export function payloadHash(date: Date, lines: NormalLine[]): string {
-  const canon = JSON.stringify({ date: dayText(date), lines: lines.map((l) => [l.role, l.accountId, l.debit.toFixed(2), l.credit.toFixed(2), l.description, l.dims]) });
+  const canon = JSON.stringify({ date: dayText(date), lines: lines.map((l) => [l.role, l.accountId, l.debit.toFixed(2), l.credit.toFixed(2), l.description, l.dims, ...(l.channel || l.accountBasis || l.salesActivity || l.salesCategoryId ? [{ channel: l.channel ?? null, accountBasis: l.accountBasis ?? null, salesActivity: l.salesActivity ?? null, ...(l.salesCategoryId ? { salesCategoryId: l.salesCategoryId } : {}) }] : [])]) });
   return createHash("sha256").update(canon).digest("hex");
 }
 
@@ -363,6 +390,10 @@ export async function postEntry(tx: Tx, input: PostEntryInput): Promise<PostEntr
           partyId: l.dims.partyId,
           itemType: l.dims.itemType,
           itemId: l.dims.itemId,
+          channel: l.channel ?? null,
+          salesActivity: l.salesActivity ?? null,
+          salesCategoryId: l.salesCategoryId ?? null,
+          accountBasis: l.accountBasis ?? null,
         })),
       },
     },
@@ -405,12 +436,12 @@ export async function reverseEntry(tx: Tx, input: ReverseEntryInput): Promise<{ 
       entryDate: period.day, fiscalPeriodId: period.id, type: "REVERSAL", status: "POSTED",
       sourceModule: original.sourceModule, sourceDocumentId: original.sourceDocumentId,
       sourceType: original.sourceType, sourceId: original.sourceId, sourceEvent: `${original.sourceEvent ?? "EVENT"}.REVERSED`.slice(0, 120),
-      idempotencyKey: key, payloadHash: payloadHash(period.day, lines.map((l) => ({ role: null, accountId: l.accountId, debit: l.debit, credit: l.credit, description: l.description, dims: { branchId: l.branchId, costCenterId: l.costCenterId, partyType: l.partyType as PartyType | null, partyId: l.partyId, itemType: l.itemType as ItemType | null, itemId: l.itemId } }))),
+      idempotencyKey: key, payloadHash: payloadHash(period.day, lines.map((l) => ({ role: null, accountId: l.accountId, debit: l.debit, credit: l.credit, description: l.description, dims: { branchId: l.branchId, costCenterId: l.costCenterId, partyType: l.partyType as PartyType | null, partyId: l.partyId, itemType: l.itemType as ItemType | null, itemId: l.itemId }, channel: l.channel, salesActivity: l.salesActivity, salesCategoryId: l.salesCategoryId, accountBasis: l.accountBasis }))),
       reversesEntryId: original.id, reversalReason: reason,
       description: (() => { const ref = original.postingYear ? `JE-${original.postingYear}-${String(original.postingSeq).padStart(6, "0")}` : `#${original.entryNo}`; return `عكس القيد ${ref}: ${reason}`.slice(0, 500); })(),
       totalDebit: original.totalCredit, totalCredit: original.totalDebit,
       createdBy: input.actorId, approvedAt: now, approvedBy: input.actorId, postedAt: now, postedBy: input.actorId,
-      lines: { create: lines.map((l, i) => ({ lineNo: i + 1, accountId: l.accountId, debit: l.debit, credit: l.credit, description: l.description ? `Reversal: ${l.description}`.slice(0, 500) : "Reversal", branchId: l.branchId, costCenterId: l.costCenterId, partyType: l.partyType, partyId: l.partyId, itemType: l.itemType, itemId: l.itemId })) },
+      lines: { create: lines.map((l, i) => ({ lineNo: i + 1, accountId: l.accountId, debit: l.debit, credit: l.credit, description: l.description ? `Reversal: ${l.description}`.slice(0, 500) : "Reversal", branchId: l.branchId, costCenterId: l.costCenterId, partyType: l.partyType, partyId: l.partyId, itemType: l.itemType, itemId: l.itemId, channel: l.channel, salesActivity: l.salesActivity, salesCategoryId: l.salesCategoryId, accountBasis: l.accountBasis })) },
     },
     select: { id: true },
   });

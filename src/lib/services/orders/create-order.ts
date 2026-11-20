@@ -132,6 +132,8 @@ export type NewOrderHeader = {
   branchId?: string | null;
   /** «القناة» (20261224090000): where the order came from, set by the flow that creates it; absent = not recorded (derived). */
   channel?: OrderChannel | null;
+  /** The sales activity (ROASTERY_B2B | WEBSITE | CAFE) the order's revenue and cost of sales are posted under; absent = not recorded (the general accounts). */
+  salesActivity?: string | null;
   /**
    * P1 ERR-02: the credit-limit check (customers/credit-limit.ts) — the order's value with VAT and who asks (an approved
    * override of theirs is consumed by this order). Absent: the lines at the catalogue price, the owner asking. "SKIP": the
@@ -275,6 +277,7 @@ export async function createOrderWithNumber(
           ownerId: header.ownerId ?? null,
           branchId,
           ...(header.channel ? { channel: header.channel } : {}),
+          ...(header.salesActivity ? { salesActivity: header.salesActivity } : {}),
         },
       });
       // R1-c: the lines in one INSERT … RETURNING (a nested create followed by three reads for the include before).
